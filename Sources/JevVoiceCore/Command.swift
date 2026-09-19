@@ -46,7 +46,7 @@ public enum SystemAction: String, CaseIterable, Codable {
 }
 
 public struct Decision {
-    public let clause: String
+    public var clause: String
     public var action: Action
     public var actionProbabilities: [String: Double]
     public var targetApp: String?
@@ -59,6 +59,8 @@ public struct Decision {
     public var confidence: Double
     public var latencyMs: Double
     public var model: String
+    public var searchSite: SearchSite?
+    public var planExplanation: String?
 
     public init(
         clause: String,
@@ -73,7 +75,9 @@ public struct Decision {
         percent: Int? = nil,
         confidence: Double = 0,
         latencyMs: Double = 0,
-        model: String = ""
+        model: String = "",
+        searchSite: SearchSite? = nil,
+        planExplanation: String? = nil
     ) {
         self.clause = clause
         self.action = action
@@ -88,5 +92,7 @@ public struct Decision {
         self.confidence = confidence
         self.latencyMs = latencyMs
         self.model = model
+        self.searchSite = searchSite
+        self.planExplanation = planExplanation
     }
 }

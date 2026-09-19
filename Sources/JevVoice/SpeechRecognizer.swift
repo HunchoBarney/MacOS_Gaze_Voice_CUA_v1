@@ -51,8 +51,9 @@ final class SpeechRecognizer: ObservableObject {
         }
         self.recognizer = recognizer
 
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
+        let request = try Self.makeRecognitionRequest(
+            supportsOnDeviceRecognition: recognizer.supportsOnDeviceRecognition
+        )
         self.request = request
 
         // A fresh engine picks up the current default input device and the
@@ -105,6 +106,19 @@ final class SpeechRecognizer: ObservableObject {
 
     func stop() {
         stop(fireCallback: true)
+    }
+
+    static func makeRecognitionRequest(supportsOnDeviceRecognition: Bool) throws -> SFSpeechAudioBufferRecognitionRequest {
+        guard supportsOnDeviceRecognition else {
+            throw NSError(
+                domain: "JevVoice.Speech", code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "On-device speech recognition is unavailable for this language on this Mac. Audio will not be sent for online recognition."]
+            )
+        }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = true
+        return request
     }
 
     private func stop(fireCallback: Bool, error: Error? = nil) {

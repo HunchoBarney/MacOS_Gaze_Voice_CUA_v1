@@ -5,6 +5,8 @@ enum InstalledApps {
         URL(fileURLWithPath: "/Applications"),
         URL(fileURLWithPath: "/System/Applications"),
         URL(fileURLWithPath: "/System/Applications/Utilities"),
+        // Safari's /Applications alias may be hidden from directory enumeration.
+        URL(fileURLWithPath: "/System/Cryptexes/App/System/Applications"),
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications"),
     ]
 

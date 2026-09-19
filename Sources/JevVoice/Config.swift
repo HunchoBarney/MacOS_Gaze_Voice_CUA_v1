@@ -1,28 +1,68 @@
 import Foundation
+import Combine
 
 final class Config: ObservableObject {
     static let shared = Config()
 
-    @Published var apiKey: String {
-        didSet { UserDefaults.standard.set(apiKey, forKey: "typesafeAPIKey") }
-    }
+    private let defaults: UserDefaults
+    private let keyStore: APIKeyStore
+    @Published private(set) var apiKeyError: String?
+
+    @Published private(set) var apiKey: String
 
     @Published var confidenceThreshold: Double {
-        didSet { UserDefaults.standard.set(confidenceThreshold, forKey: "confidenceThreshold") }
+        didSet { defaults.set(confidenceThreshold, forKey: "confidenceThreshold") }
     }
 
     @Published var autoExecute: Bool {
-        didSet { UserDefaults.standard.set(autoExecute, forKey: "autoExecute") }
+        didSet { defaults.set(autoExecute, forKey: "autoExecute") }
     }
 
-    private init() {
-        let defaults = UserDefaults.standard
-        self.apiKey = defaults.string(forKey: "typesafeAPIKey")
-            ?? ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"]
-            ?? ""
+    init(
+        defaults: UserDefaults = .standard,
+        keyStore: APIKeyStore = KeychainAPIKeyStore(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        self.defaults = defaults
+        self.keyStore = keyStore
+        self.apiKey = environment["TYPESAFE_API_KEY"] ?? ""
         self.confidenceThreshold = defaults.object(forKey: "confidenceThreshold") == nil
             ? 0.7
             : defaults.double(forKey: "confidenceThreshold")
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
+
+        do {
+            if let stored = try keyStore.read() {
+                apiKey = stored
+                defaults.removeObject(forKey: "typesafeAPIKey")
+            } else if let legacy = defaults.string(forKey: "typesafeAPIKey"), !legacy.isEmpty {
+                apiKey = legacy
+                // Keep the old value until the durable Keychain write succeeds.
+                try keyStore.save(legacy)
+                defaults.removeObject(forKey: "typesafeAPIKey")
+            } else {
+                defaults.removeObject(forKey: "typesafeAPIKey")
+            }
+        } catch {
+            apiKeyError = "Could not load or migrate the API key in Keychain: \(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
+    func saveAPIKey(_ value: String) -> Bool {
+        do {
+            if value.isEmpty {
+                try keyStore.delete()
+            } else {
+                try keyStore.save(value)
+            }
+            apiKey = value
+            defaults.removeObject(forKey: "typesafeAPIKey")
+            apiKeyError = nil
+            return true
+        } catch {
+            apiKeyError = "Could not save the API key in Keychain: \(error.localizedDescription)"
+            return false
+        }
     }
 }

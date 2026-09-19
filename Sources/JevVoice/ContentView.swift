@@ -170,6 +170,12 @@ struct DecisionCard: View {
                     .foregroundStyle(.secondary)
             }
             ProbabilityBars(probabilities: decision.actionProbabilities)
+            if let explanation = decision.planExplanation {
+                Text(explanation).font(.caption).foregroundStyle(.secondary)
+            }
+            if let site = decision.searchSite {
+                Text("Search in \(site.rawValue)").font(.caption)
+            }
             if let target = decision.targetApp {
                 Text("→ \(target)")
                     .font(.caption)

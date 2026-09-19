@@ -17,6 +17,8 @@ enum ExecutorError: Error, LocalizedError {
 }
 
 enum Executor {
+    @MainActor private static var isDictating = false
+
     @MainActor
     static func execute(_ decision: Decision) async throws -> String {
         switch decision.action {
@@ -42,13 +44,21 @@ enum Executor {
             return try await open(url, browser: decision.targetApp)
         case .webSearch:
             guard let query = decision.query else { throw ExecutorError.missingSlot("query") }
-            var components = URLComponents(string: "https://www.google.com/search")!
-            components.queryItems = [URLQueryItem(name: "q", value: query)]
-            guard let url = components.url else { throw ExecutorError.missingSlot("query") }
+            let url = (decision.searchSite ?? .google).searchURL(query: query)
             return try await open(url, browser: decision.targetApp)
         case .dictate:
             guard let text = decision.text else { throw ExecutorError.missingSlot("text") }
-            return dictate(text)
+            if let app = decision.targetApp {
+                _ = try await switchApp(named: app)
+                let deadline = Date().addingTimeInterval(2)
+                while NSWorkspace.shared.frontmostApplication?.processIdentifier != runningApp(named: app)?.processIdentifier {
+                    guard Date() < deadline else {
+                        throw ExecutorError.controlFailed("Could not focus \(app) for dictation")
+                    }
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                }
+            }
+            return try await dictate(text)
         case .system:
             return try runSystem(decision.systemAction ?? .none, percent: decision.percent)
         case .none:
@@ -126,12 +136,25 @@ enum Executor {
             )
             return "Opened \(url.host ?? url.absoluteString) in \(browser)"
         }
-        NSWorkspace.shared.open(url)
+        guard NSWorkspace.shared.open(url) else {
+            throw ExecutorError.controlFailed("Could not open \(url.host ?? url.absoluteString) in the default browser")
+        }
         return "Opened \(url.host ?? url.absoluteString)"
     }
 
-    private static func dictate(_ text: String) -> String {
-        let pasteboard = NSPasteboard.general
+    @MainActor
+    static func dictate(
+        _ text: String,
+        pasteboard: NSPasteboard = .general,
+        sendPaste: () throws -> Void = postPasteShortcut
+    ) async throws -> String {
+        try Task.checkCancellation()
+        guard !isDictating else {
+            throw ExecutorError.controlFailed("Another dictation is still being pasted")
+        }
+        isDictating = true
+        defer { isDictating = false }
+
         let saved: [NSPasteboardItem] = (pasteboard.pasteboardItems ?? []).map { item in
             let copy = NSPasteboardItem()
             for type in item.types {
@@ -140,28 +163,48 @@ enum Executor {
             return copy
         }
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let written = pasteboard.setString(text, forType: .string)
         let ourChangeCount = pasteboard.changeCount
-
-        let source = CGEventSource(stateID: .hidSystemState)
-        let vDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
-        let vUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
-        vDown?.flags = .maskCommand
-        vUp?.flags = .maskCommand
-        vDown?.post(tap: .cghidEventTap)
-        vUp?.post(tap: .cghidEventTap)
-
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-            DispatchQueue.main.async {
-                guard pasteboard.changeCount == ourChangeCount else { return }
+        defer {
+            // Do not overwrite a clipboard change made by the user or another app.
+            if pasteboard.changeCount == ourChangeCount {
                 pasteboard.clearContents()
                 if !saved.isEmpty { pasteboard.writeObjects(saved) }
             }
         }
+        guard written else { throw ExecutorError.controlFailed("Could not prepare dictation for paste") }
+        try sendPaste()
+        // Once Cmd+V is posted, cancellation must not restore the old clipboard
+        // before the target consumes that queued event. Finish the bounded handoff
+        // before cleaning up, advancing the sequence, or propagating cancellation.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                continuation.resume()
+            }
+        }
+        try Task.checkCancellation()
         return "Typed \"\(text)\""
     }
 
-    private static func runSystem(_ action: SystemAction, percent: Int?) throws -> String {
+    private static func postPasteShortcut() throws {
+        guard AXIsProcessTrusted() else {
+            throw ExecutorError.controlFailed("Accessibility access is required to type text. Enable this build of Jev Voice in System Settings.")
+        }
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let vDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+            throw ExecutorError.controlFailed("Could not create the paste keyboard shortcut")
+        }
+        vDown.flags = .maskCommand
+        vUp.flags = .maskCommand
+        vDown.post(tap: .cghidEventTap)
+        vUp.post(tap: .cghidEventTap)
+    }
+
+    static func runSystem(
+        _ action: SystemAction, percent: Int?,
+        process: (String, [String]) throws -> String = runProcess
+    ) throws -> String {
         switch action {
         case .volumeSet:
             let level = percent ?? 50
@@ -189,16 +232,18 @@ enum Executor {
             try osascript(#"tell application "System Events" to key code 103"#)
             return "Show desktop"
         case .lockScreen:
-            try process("/usr/bin/pmset", ["displaysleepnow"])
-            return "Locked"
+            _ = try process("/usr/bin/osascript", ["-e",
+                #"tell application "System Events" to key code 12 using {control down, command down}"#,
+            ])
+            return "Lock screen requested"
         case .sleep:
-            try process("/usr/bin/pmset", ["sleepnow"])
+            _ = try process("/usr/bin/pmset", ["sleepnow"])
             return "Sleeping"
         case .screenshot:
             let stamp = ISO8601DateFormatter().string(from: Date())
                 .replacingOccurrences(of: ":", with: "-")
             let path = NSHomeDirectory() + "/Desktop/jev-voice-\(stamp).png"
-            try process("/usr/sbin/screencapture", ["-x", path])
+            _ = try process("/usr/sbin/screencapture", ["-x", path])
             return "Screenshot saved to Desktop"
         case .none:
             return "No system action"
@@ -207,11 +252,11 @@ enum Executor {
 
     @discardableResult
     private static func osascript(_ source: String) throws -> String {
-        try process("/usr/bin/osascript", ["-e", source])
+        try runProcess("/usr/bin/osascript", ["-e", source])
     }
 
     @discardableResult
-    private static func process(_ launchPath: String, _ arguments: [String]) throws -> String {
+    private static func runProcess(_ launchPath: String, _ arguments: [String]) throws -> String {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: launchPath)

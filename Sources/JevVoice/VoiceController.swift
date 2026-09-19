@@ -27,11 +27,20 @@ final class VoiceController: ObservableObject {
 
     var onListeningChanged: ((Bool) -> Void)?
     var onDone: (() -> Void)?
+    var onWillExecute: (() -> Void)?
 
     private var apps: [String] = []
     private var cancellables: Set<AnyCancellable> = []
+    private var lastExternalApp = NSWorkspace.shared.frontmostApplication?.localizedName
+    private var commandFrontmostApp: String?
 
     init() {
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .compactMap { $0.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication }
+            .filter { $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in self?.lastExternalApp = $0.localizedName }
+            .store(in: &cancellables)
         recognizer.onFinalTranscript = { [weak self] text in
             Task { @MainActor in await self?.interpretAndExecute(text) }
         }
@@ -79,6 +88,7 @@ final class VoiceController: ObservableObject {
 
     func startListening() {
         guard startTask == nil else { return }
+        commandFrontmostApp = lastExternalApp
         startTask = Task {
             defer { startTask = nil }
             let granted = await SpeechRecognizer.requestAuthorization()
@@ -109,7 +119,7 @@ final class VoiceController: ObservableObject {
         if apps.isEmpty { apps = InstalledApps.all() }
         let client = JevClient(apiKey: config.apiKey)
         let interpreter = CommandInterpreter(client: client, installedApps: apps)
-        let frontmost = NSWorkspace.shared.frontmostApplication?.localizedName
+        let frontmost = commandFrontmostApp
 
         do {
             var result = try await interpreter.interpret(transcript: text, frontmostApp: frontmost)
@@ -150,11 +160,13 @@ final class VoiceController: ObservableObject {
             return
         }
         status = .executing
+        onWillExecute?()
         for decision in actionable {
             do {
                 _ = try await Executor.execute(decision)
             } catch {
                 status = .error(error.localizedDescription)
+                onDone?()
                 return
             }
         }

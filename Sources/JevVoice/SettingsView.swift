@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var controller: VoiceController
     @ObservedObject private var config = Config.shared
+    @State private var apiKeyDraft = ""
+    @State private var apiKeySaved = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -15,8 +17,22 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("TypeSafe API key").font(.caption)
-                SecureField("ts-…", text: $config.apiKey)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    SecureField("ts-…", text: $apiKeyDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveAPIKey)
+                    Button("Save", action: saveAPIKey)
+                }
+                if let error = config.apiKeyError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if apiKeySaved {
+                    Text(apiKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -30,5 +46,11 @@ struct SettingsView: View {
 
             Spacer()
         }
+        .onAppear { apiKeyDraft = config.apiKey }
+        .onChange(of: apiKeyDraft) { _ in apiKeySaved = false }
+    }
+
+    private func saveAPIKey() {
+        apiKeySaved = config.saveAPIKey(apiKeyDraft)
     }
 }

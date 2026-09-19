@@ -3,7 +3,21 @@ import Foundation
 public enum SlotExtractor {
     private static let urlPattern = #"[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|ai|dev|co|app|pl|me|gg|tv|edu|gov|uk|de)(/\S*)?"#
 
+    static func namedWebsiteURL(from clause: String) -> String? {
+        // Match complete navigation targets, never a site mentioned inside
+        // dictated text, a query, or a longer application name.
+        for site in SearchSite.allCases {
+            let name = NSRegularExpression.escapedPattern(for: site.rawValue)
+            let navigation = #"^\s*(?:please\s+)?(?:open|visit|go to|navigate to)\s+"# + name + #"\s*[.!?]?\s*$"#
+            if clause.range(of: navigation, options: [.regularExpression, .caseInsensitive]) != nil {
+                return site.homepage
+            }
+        }
+        return nil
+    }
+
     public static func url(from clause: String) -> String? {
+        if let known = namedWebsiteURL(from: clause) { return known }
         var s = " " + clause.lowercased() + " "
         s = s.replacingOccurrences(of: "w w w", with: "www")
         s = s.replacingOccurrences(of: " dot ", with: ".")
@@ -17,7 +31,7 @@ public enum SlotExtractor {
         return "https://" + host
     }
 
-    public static func searchQuery(from clause: String) -> String? {
+    public static func searchQuery(from clause: String, site: SearchSite? = nil) -> String? {
         let lowered = clause.lowercased()
         let triggers = ["search for", "look up", "search", "google", "find"]
         var best: Range<String.Index>?
@@ -27,17 +41,30 @@ public enum SlotExtractor {
             }
         }
         guard let range = best else { return nil }
-        let query = clause[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        var query = clause[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if let site {
+            let name = NSRegularExpression.escapedPattern(for: site.rawValue)
+            query = query.replacingOccurrences(of: #"^(?:(?:on|in)\s+)?"# + name + #"\s+(?:for\s+)?"#, with: "", options: [.regularExpression, .caseInsensitive])
+            query = query.replacingOccurrences(of: #"\s+(?:on|in)\s+"# + name + #"[.!?]?$"#, with: "", options: [.regularExpression, .caseInsensitive])
+        }
         return query.isEmpty ? nil : query
     }
 
     public static func dictationText(from clause: String) -> String? {
-        let lowered = clause.lowercased()
-        guard let range = lowered.range(
-            of: #"\b(type|write|dictate|say)\b"#, options: .regularExpression
-        ) else { return nil }
-        let text = clause[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let text = literalDictationSuffix(from: clause) else { return nil }
         return text.isEmpty ? nil : text
+    }
+
+    /// Shared boundary for literal text. A recognized prefix owns the entire suffix,
+    /// including command-like words, quotes, and conjunctions. Empty suffixes still
+    /// identify a dictation clause so they cannot fall through to model interpretation.
+    static func literalDictationSuffix(from clause: String) -> String? {
+        let pattern = #"^\s*(?:please(?:\s+|,\s*))?(?:(?:(?:can|could|would|will)\s+you|I\s+(?:want|would\s+like)\s+you\s+to|I['’]d\s+like\s+you\s+to)\s+(?:please(?:\s+|,\s*))?)?(?:type|write|dictate|say)\b"#
+        guard let range = clause.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else {
+            return nil
+        }
+        let text = clause[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return text
     }
 
     public static func numberPercent(from clause: String) -> Int? {

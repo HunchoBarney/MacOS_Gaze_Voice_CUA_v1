@@ -19,5 +19,10 @@ let package = Package(
             dependencies: ["JevVoiceCore"],
             path: "Tests/JevVoiceTests"
         ),
+        .testTarget(
+            name: "JevVoiceAppTests",
+            dependencies: ["JevVoice", "JevVoiceCore"],
+            path: "Tests/JevVoiceAppTests"
+        ),
     ]
 )

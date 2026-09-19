@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onDone = { [weak self] in
             self?.showPopover()
         }
+        controller.onWillExecute = { [weak self] in
+            self?.popover.performClose(nil)
+        }
 
         registerHotKey()
 
