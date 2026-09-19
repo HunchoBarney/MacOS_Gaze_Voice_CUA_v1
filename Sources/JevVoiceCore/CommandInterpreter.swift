@@ -37,12 +37,18 @@ public final class CommandInterpreter {
 
     public func interpret(transcript: String, frontmostApp: String?) async throws -> [Decision] {
         let clauses = ClauseSplitter.split(transcript)
+        // A clause shortcut must not strip conditions from the rest of the request.
+        // Only bypass interpretation when the complete composition is locally understood.
+        let allowLocalNavigation = clauses.allSatisfy {
+            AppMatcher.explicitNavigation(clause: $0, installedApps: installedApps) != nil
+                || SlotExtractor.literalDictationSuffix(from: $0) != nil
+        }
         return try await withThrowingTaskGroup(of: (Int, InterpretedClause).self) { group in
             for (index, clause) in clauses.enumerated() {
                 group.addTask {
                     let decision = try await self.interpretClause(
                         clause, transcript: transcript, frontmostApp: frontmostApp,
-                        clauses: clauses, index: index
+                        clauses: clauses, index: index, allowLocalNavigation: allowLocalNavigation
                     )
                     return (index, decision)
                 }
@@ -54,7 +60,8 @@ public final class CommandInterpreter {
     }
 
     private func interpretClause(
-        _ clause: String, transcript: String, frontmostApp: String?, clauses: [String], index: Int
+        _ clause: String, transcript: String, frontmostApp: String?, clauses: [String], index: Int,
+        allowLocalNavigation: Bool
     ) async throws -> InterpretedClause {
         if let text = SlotExtractor.literalDictationSuffix(from: clause) {
             let action: Action = text.isEmpty ? .none : .dictate
@@ -73,6 +80,14 @@ public final class CommandInterpreter {
                 clause: clause, action: .openURL,
                 actionProbabilities: [Action.openURL.rawValue: 1],
                 url: url, confidence: 1, model: "local-navigation"
+            ))
+        }
+
+        if allowLocalNavigation, let navigation = AppMatcher.explicitNavigation(clause: clause, installedApps: installedApps) {
+            return InterpretedClause(decision: Decision(
+                clause: clause, action: navigation.action,
+                actionProbabilities: [navigation.action.rawValue: 1], targetApp: navigation.app,
+                confidence: 1, model: "local-app-navigation"
             ))
         }
 
@@ -196,7 +211,9 @@ public final class CommandInterpreter {
         }
         let localMatch = refersToFrontmost || inherits
             ? nil : AppMatcher.match(clause: clause, installedApps: installedApps)
-        if url == nil, action != .openURL, action != .webSearch, action != .dictate,
+        // Do not turn a full-context no-action answer into an app action merely
+        // because a name appears inside a conditional or otherwise deferred request.
+        if url == nil, action != .none, action != .openURL, action != .webSearch, action != .dictate,
            let verbAction = AppMatcher.verbAction(clause: clause), let local = localMatch,
            local.confidence >= 0.8 {
             action = verbAction

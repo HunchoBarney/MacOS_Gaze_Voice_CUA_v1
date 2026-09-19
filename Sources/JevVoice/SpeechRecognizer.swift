@@ -1,150 +1,152 @@
 import AVFoundation
-import os
 import Speech
 
+enum SpeechEvent {
+    case partial(String), final(String), failure(String), level(Float)
+}
+
 @MainActor
-final class SpeechRecognizer: ObservableObject {
-    @Published private(set) var transcript = ""
-    @Published private(set) var isRunning = false
+protocol SpeechCapturing: AnyObject {
+    var onEvent: ((UUID, SpeechEvent) -> Void)? { get set }
+    func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String
+    func finish()
+    func cancel()
+}
 
-    var onFinalTranscript: ((String) -> Void)?
-    /// Called when recognition ends without a usable transcript, with the
-    /// underlying error if the system reported one.
-    var onEndedWithoutSpeech: ((Error?) -> Void)?
-    private let log = Logger(subsystem: "com.chriswozniczek.jevvoice", category: "speech")
+/// The audio callback captures its own request and meter, never a later session's mutable state.
+private final class AudioLevel: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Float = 0
+    func sample(_ buffer: AVAudioPCMBuffer) {
+        guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+        var sum: Float = 0
+        for i in 0..<Int(buffer.frameLength) { sum += samples[i] * samples[i] }
+        let rms = sqrt(sum / Float(buffer.frameLength))
+        let level = max(0, min(1, (20 * log10(max(rms, 0.00001)) + 55) / 50))
+        lock.lock(); value = level; lock.unlock()
+    }
+    func read() -> Float { lock.lock(); defer { lock.unlock() }; return value }
+}
 
-    private var audioEngine = AVAudioEngine()
+@MainActor
+final class SpeechRecognizer: SpeechCapturing {
+    var onEvent: ((UUID, SpeechEvent) -> Void)?
+    private var engine: AVAudioEngine?
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
-    private var silenceTimer: Timer?
-    private var heardSpeech = false
+    private var sessionID: UUID?
+    private var meterTimer: Timer?
+    private var configurationObserver: NSObjectProtocol?
+    private var tapInstalled = false
 
     static func requestAuthorization() async -> Bool {
-        let speechStatus = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
-        guard speechStatus == .authorized else { return false }
-        if #available(macOS 14, *) {
-            return await AVAudioApplication.requestRecordPermission()
-        }
-        return await withCheckedContinuation { continuation in
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                continuation.resume(returning: granted)
-            }
-        }
+        if !Permission.microphone.isGranted { await Permission.microphone.request() }
+        guard Permission.microphone.isGranted else { return false }
+        if !Permission.speechRecognition.isGranted { await Permission.speechRecognition.request() }
+        return Permission.speechRecognition.isGranted
     }
 
-    func start() throws {
-        stop(fireCallback: false)
-        transcript = ""
-        heardSpeech = false
-
-        let recognizer = SFSpeechRecognizer(locale: Locale.current)
-        guard let recognizer, recognizer.isAvailable else {
-            throw NSError(
-                domain: "JevVoice.Speech", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Speech recognizer unavailable"]
-            )
-        }
-        self.recognizer = recognizer
-
-        let request = try Self.makeRecognitionRequest(
-            supportsOnDeviceRecognition: recognizer.supportsOnDeviceRecognition
-        )
-        self.request = request
-
-        // A fresh engine picks up the current default input device and the
-        // microphone permission granted since the last attempt.
-        audioEngine = AVAudioEngine()
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            self.request = nil
-            throw NSError(
-                domain: "JevVoice.Speech", code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "No microphone input available"]
-            )
-        }
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
-        }
-
-        audioEngine.prepare()
+    func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String {
+        cancel()
+        // Yield a render opportunity before Core Audio initializes the input.
+        try await Task.sleep(nanoseconds: 10_000_000)
+        try Task.checkCancellation()
+        let device = try MicrophoneCatalog.resolve(uid: inputUID)
+        let engine = AVAudioEngine()
+        self.engine = engine
+        sessionID = session
         do {
-            try audioEngine.start()
-        } catch {
-            inputNode.removeTap(onBus: 0)
-            self.request = nil
-            throw error
-        }
-        isRunning = true
-        log.info("listening: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, onDevice=\(recognizer.supportsOnDeviceRecognition, privacy: .public)")
-
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            Task { @MainActor in
-                if let result {
-                    let text = result.bestTranscription.formattedString
-                    self.log.debug("partial: \(text.count, privacy: .public) chars")
-                    self.transcript = text
-                    if !text.isEmpty {
-                        self.heardSpeech = true
-                        self.scheduleSilenceFinalize()
-                    }
-                    if result.isFinal { self.stop(fireCallback: true) }
+            let request: SFSpeechAudioBufferRecognitionRequest?
+            if transcribe {
+                guard let recognizer = SFSpeechRecognizer(locale: Locale.current), recognizer.isAvailable else {
+                    throw VoiceError("Speech recognition is unavailable. Check your language and try again.")
                 }
-                if let error {
-                    self.log.error("recognition error: \(error.localizedDescription, privacy: .public)")
-                    self.stop(fireCallback: true, error: error)
+                self.recognizer = recognizer
+                request = try Self.makeRecognitionRequest(supportsOnDeviceRecognition: recognizer.supportsOnDeviceRecognition)
+            } else { request = nil }
+            self.request = request
+            let input = engine.inputNode
+            if input.auAudioUnit.deviceID != device.hardwareID {
+                try input.auAudioUnit.setDeviceID(device.hardwareID)
+            }
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else { throw VoiceError("The microphone has no usable audio input.") }
+            let meter = AudioLevel()
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                request?.append(buffer)
+                meter.sample(buffer)
+            }
+            tapInstalled = true
+            if let request, let recognizer {
+                task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                    Task { @MainActor in
+                        guard let self, self.sessionID == session else { return }
+                        if let result {
+                            self.onEvent?(session, result.isFinal ? .final(result.bestTranscription.formattedString)
+                                          : .partial(result.bestTranscription.formattedString))
+                        } else if let error {
+                            self.onEvent?(session, .failure(error.localizedDescription))
+                        }
+                    }
                 }
             }
-        }
+            engine.prepare()
+            try engine.start()
+            let expectedRate = format.sampleRate
+            let expectedChannels = format.channelCount
+            configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
+                object: engine, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.sessionID == session, let engine = self.engine else { return }
+                    // Initialization can enqueue this notification after start(). Validate the
+                    // live engine instead of treating our own setup as device loss.
+                    let current = engine.inputNode.outputFormat(forBus: 0)
+                    guard !engine.isRunning || engine.inputNode.auAudioUnit.deviceID != device.hardwareID
+                        || current.sampleRate != expectedRate || current.channelCount != expectedChannels else { return }
+                    self.onEvent?(session, .failure("Microphone configuration changed. Hold Fn to record again."))
+                }
+            }
+            meterTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 25, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.sessionID == session else { return }
+                    self.onEvent?(session, .level(meter.read()))
+                }
+            }
+            RunLoop.main.add(meterTimer!, forMode: .common)
+            return device.name
+        } catch { cancel(); throw error }
     }
 
-    func stop() {
-        stop(fireCallback: true)
+    func finish() {
+        stopCapture()
+        request?.endAudio()
+        task?.finish()
+    }
+
+    func cancel() {
+        sessionID = nil
+        stopCapture()
+        request?.endAudio()
+        task?.cancel()
+        task = nil; request = nil; recognizer = nil; engine = nil
+    }
+
+    private func stopCapture() {
+        meterTimer?.invalidate(); meterTimer = nil
+        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
+        configurationObserver = nil
+        engine?.stop()
+        if tapInstalled { engine?.inputNode.removeTap(onBus: 0); tapInstalled = false }
     }
 
     static func makeRecognitionRequest(supportsOnDeviceRecognition: Bool) throws -> SFSpeechAudioBufferRecognitionRequest {
         guard supportsOnDeviceRecognition else {
-            throw NSError(
-                domain: "JevVoice.Speech", code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "On-device speech recognition is unavailable for this language on this Mac. Audio will not be sent for online recognition."]
-            )
+            throw VoiceError("On-device speech recognition is unavailable for this language on this Mac. Audio will not be sent for online recognition.")
         }
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
         return request
-    }
-
-    private func stop(fireCallback: Bool, error: Error? = nil) {
-        silenceTimer?.invalidate()
-        silenceTimer = nil
-        guard isRunning || task != nil else { return }
-        isRunning = false
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        request?.endAudio()
-        task?.cancel()
-        request = nil
-        task = nil
-        guard fireCallback else { return }
-        if heardSpeech, !transcript.isEmpty {
-            onFinalTranscript?(transcript)
-        } else {
-            onEndedWithoutSpeech?(error)
-        }
-    }
-
-    private func scheduleSilenceFinalize() {
-        silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.stop(fireCallback: true) }
-        }
     }
 }

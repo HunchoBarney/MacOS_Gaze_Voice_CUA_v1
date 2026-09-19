@@ -3,6 +3,42 @@ import XCTest
 @testable import JevVoiceCore
 
 final class CommandInterpreterTests: XCTestCase {
+    func testExplicitAppNavigationWorksOfflineWithoutModelConfidenceGate() async throws {
+        let (interpreter, session) = makeInterpreter(response: "reject", installedApps: ["Messages", "Calculator", "Google Chrome"])
+        defer { session.invalidateAndCancel() }
+        for (phrase, app, action) in [
+            ("Open Messages.", "Messages", Action.openApp),
+            ("open the Messages app", "Messages", .openApp),
+            ("could you please launch Calculator", "Calculator", .openApp),
+            ("switch to Chrome please", "Google Chrome", .switchApp),
+        ] {
+            let decisions = try await interpreter.interpret(transcript: phrase, frontmostApp: "Finder")
+            XCTAssertEqual(decisions.count, 1)
+            XCTAssertEqual(decisions.first?.action, action)
+            XCTAssertEqual(decisions.first?.targetApp, app)
+            XCTAssertEqual(decisions.first?.confidence, 1)
+            XCTAssertEqual(decisions.first?.model, "local-app-navigation")
+        }
+    }
+
+    func testExplicitAppThenLiteralDictationKeepsContextOffline() async throws {
+        let (interpreter, session) = makeInterpreter(response: "reject")
+        defer { session.invalidateAndCancel() }
+        let decisions = try await interpreter.interpret(transcript: "open Notes and type hello and quit Safari", frontmostApp: "Finder")
+        XCTAssertEqual(decisions.map(\.action), [.openApp, .dictate])
+        XCTAssertEqual(decisions.map(\.targetApp), ["Notes", "Notes"])
+        XCTAssertEqual(decisions.last?.text, "hello and quit Safari")
+    }
+
+    func testConditionalRequestCannotRunAnIsolatedLocalClause() async throws {
+        let (interpreter, session) = makeInterpreter(response: "none")
+        defer { session.invalidateAndCancel() }
+        for phrase in ["When I get home, open Safari and open Notes", "open Notes and open Safari tomorrow"] {
+            let decisions = try await interpreter.interpret(transcript: phrase, frontmostApp: "Finder")
+            XCTAssertTrue(decisions.allSatisfy { $0.action == .none }, phrase)
+        }
+    }
+
     func testNamedUnsupportedSearchDestinationStopsInsteadOfDefaultingToGoogle() async throws {
         let (interpreter, session) = makeInterpreter(response: "unsupportedSearch")
         defer { session.invalidateAndCancel() }
@@ -26,11 +62,11 @@ final class CommandInterpreterTests: XCTestCase {
     func testInstalledAppsAreIncludedInTheActualAPIChoices() async throws {
         let (interpreter, session) = makeInterpreter(response: "validateCandidates")
         defer { session.invalidateAndCancel() }
-        let decisions = try await interpreter.interpret(transcript: "open Notes", frontmostApp: "Finder")
+        let decisions = try await interpreter.interpret(transcript: "I need to use Notes", frontmostApp: "Finder")
         XCTAssertEqual(decisions.first?.targetApp, "Notes")
     }
 
-    func testUncertainSystemActionStillRequiresConfirmation() async throws {
+    func testUncertainSystemActionRetainsConfidenceForDiagnostics() async throws {
         let (interpreter, session) = makeInterpreter(response: "uncertainSystem")
         defer { session.invalidateAndCancel() }
         let decisions = try await interpreter.interpret(transcript: "increase volume", frontmostApp: "Finder")
@@ -145,7 +181,7 @@ final class CommandInterpreterTests: XCTestCase {
     func testModelSelectedDictationWithoutLiteralBoundaryAsksForExplicitPrefix() async throws {
         let (interpreter, session) = makeInterpreter(response: "dictate")
         defer { session.invalidateAndCancel() }
-        for transcript in ["open Notes", "enter hello"] {
+        for transcript in ["I need to use Notes", "enter hello"] {
             do {
                 _ = try await interpreter.interpret(transcript: transcript, frontmostApp: "Finder")
                 XCTFail("Dictation without a safe literal boundary must not produce an executable decision: \(transcript)")

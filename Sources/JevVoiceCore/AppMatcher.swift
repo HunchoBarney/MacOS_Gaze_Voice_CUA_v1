@@ -21,6 +21,29 @@ public enum AppMatcher {
         (#"^(open|launch|start|run)\b"#, .openApp),
     ]
 
+    /// Resolve only a complete, explicit app-navigation request. Extra instructions,
+    /// pronouns and ambiguous short names stay on the interpreter path.
+    static func explicitNavigation(clause: String, installedApps: [String]) -> (action: Action, app: String)? {
+        let text = clause.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!?")))
+        let pattern = #"^(?:(?:can|could|would) you[\s,]+)?(?:please[\s,]+)?(open|launch|start|run|switch to|focus(?: on)?|activate)\s+(?:the\s+)?(.+?)(?:\s+(?:app|application))?(?:\s+please)?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let verbRange = Range(match.range(at: 1), in: text),
+              let nameRange = Range(match.range(at: 2), in: text) else { return nil }
+        let requested = tokens(String(text[nameRange]).lowercased())
+        guard !requested.isEmpty else { return nil }
+        let apps = Array(Set(installedApps))
+        let exact = apps.filter { tokens($0.lowercased()) == requested }
+        let candidates = exact.isEmpty ? apps.filter {
+            let words = tokens($0.lowercased())
+            return words.count >= requested.count && Array(words.suffix(requested.count)) == requested
+        } : exact
+        guard candidates.count == 1 else { return nil }
+        let verb = text[verbRange].lowercased()
+        let action: Action = ["open", "launch", "start", "run"].contains(verb) ? .openApp : .switchApp
+        return (action, candidates[0])
+    }
+
     /// Recognizes an app command from its leading verb, e.g. "minimize chrome" -> .minimizeApp.
     public static func verbAction(clause: String) -> Action? {
         let lowered = clause.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)

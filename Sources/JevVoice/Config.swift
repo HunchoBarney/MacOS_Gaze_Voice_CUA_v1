@@ -10,6 +10,10 @@ final class Config: ObservableObject {
 
     @Published private(set) var apiKey: String
 
+    @Published var microphoneUID: String {
+        didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
+    }
+
     @Published var confidenceThreshold: Double {
         didSet { defaults.set(confidenceThreshold, forKey: "confidenceThreshold") }
     }
@@ -26,6 +30,7 @@ final class Config: ObservableObject {
         self.defaults = defaults
         self.keyStore = keyStore
         self.apiKey = environment["TYPESAFE_API_KEY"] ?? ""
+        self.microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
         self.confidenceThreshold = defaults.object(forKey: "confidenceThreshold") == nil
             ? 0.7
             : defaults.double(forKey: "confidenceThreshold")

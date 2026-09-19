@@ -1,79 +1,85 @@
 import AppKit
-import Carbon
-import SwiftUI
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
-    private var hotKeyRef: EventHotKeyRef?
-    let controller = VoiceController()
+    private var windows: VoiceWindows!
+    private let controller = VoiceController()
+    private let microphones = MicrophoneCatalog()
+    private let input = FnInputMonitor()
+    private var subscriptions: Set<AnyCancellable> = []
+    private var terminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         installEditMenu()
-
+        windows = VoiceWindows(controller: controller, microphones: microphones, input: input)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jev Voice")
-            button.action = #selector(statusItemClicked)
-            button.target = self
+        statusItem.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jev Voice")
+        let menu = NSMenu()
+        let settings = menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        let activity = menu.addItem(withTitle: "Activity", action: #selector(showActivity), keyEquivalent: "")
+        activity.target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit Jev Voice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        statusItem.menu = menu
+
+        input.canBegin = { [weak self] in self?.controller.canBegin ?? false }
+        input.operationActive = { [weak self] in self?.controller.operationActive ?? false }
+        input.onAction = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .begin: self.controller.begin()
+            case .finish: self.controller.finish()
+            case .cancel: self.controller.cancel()
+            case .none: break
+            }
         }
-
-        popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentSize = NSSize(width: 360, height: 520)
-        popover.contentViewController = NSHostingController(
-            rootView: ContentView().environmentObject(controller)
-        )
-
-        controller.onListeningChanged = { [weak self] listening in
-            if listening { self?.showPopover() }
+        input.onInterruption = { [weak self] reason in self?.controller.interruptCapture(reason) }
+        input.start()
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+            NSWorkspace.shared.notificationCenter.publisher(for: name)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.controller.cancel() }.store(in: &subscriptions)
         }
-        controller.onDone = { [weak self] in
-            self?.showPopover()
-        }
-        controller.onWillExecute = { [weak self] in
-            self?.popover.performClose(nil)
-        }
-
-        registerHotKey()
-
-        Task {
-            await controller.requestMissingPermissions()
-            if !controller.missingPermissions.isEmpty { showPopover() }
-        }
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
-    }
-
-    @objc private func statusItemClicked() {
-        togglePopover()
-    }
-
-    private func togglePopover() {
-        if popover.isShown {
-            popover.performClose(nil)
-        } else {
-            showPopover()
-        }
-    }
-
-    func showPopover() {
-        guard let button = statusItem.button, !popover.isShown else { return }
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.input.refresh(); self?.microphones.refresh() }.store(in: &subscriptions)
         controller.refreshPermissions()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+        if ProcessInfo.processInfo.arguments.contains("--settings") {
+            windows.show(.voice)
+        } else if !controller.missingPermissions.isEmpty || !input.ready {
+            controller.showSetup("Finish setup in Voice settings. " + input.message)
+        }
     }
 
-    /// An LSUIElement app has no menu bar, so Cmd+Q and standard edit shortcuts
-    /// (Cmd+V/C/X/A) do nothing unless a main menu defines them.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        controller.refreshPermissions(); input.refresh(); microphones.refresh()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !terminating else { return .terminateLater }
+        terminating = true
+        input.stop()
+        Task {
+            await controller.shutdown()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    func applicationWillTerminate(_ notification: Notification) { input.stop(); microphones.stop() }
+    @objc private func showSettings() { windows.show(.voice) }
+    @objc private func showActivity() { windows.show(.activity) }
+
     private func installEditMenu() {
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        let settings = appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
         appMenu.addItem(withTitle: "Quit Jev Voice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
@@ -89,29 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
         NSApp.mainMenu = mainMenu
-    }
-
-    private func registerHotKey() {
-        var eventSpec = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
-        let handler: EventHandlerUPP = { _, _, userData in
-            guard let userData else { return noErr }
-            let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
-            Task { @MainActor in delegate.controller.toggle() }
-            return noErr
-        }
-        InstallEventHandler(
-            GetApplicationEventTarget(), handler, 1, &eventSpec,
-            Unmanaged.passUnretained(self).toOpaque(), nil
-        )
-        let hotKeyID = EventHotKeyID(signature: OSType(0x4A56_5631), id: 1) // "JVV1"
-        let status = RegisterEventHotKey(
-            UInt32(kVK_Space), UInt32(optionKey), hotKeyID,
-            GetApplicationEventTarget(), 0, &hotKeyRef
-        )
-        controller.hotKeyRegistered = status == noErr
     }
 }
 

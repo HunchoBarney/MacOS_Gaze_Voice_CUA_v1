@@ -1,14 +1,18 @@
-# Start here: implementing the approved voice UI
+# Start here: continuous voice control in the existing UI
 
-The user approved this feature plan on 2026-09-18. The current delivery is documentation only; app implementation has not begun. This brief governs a subsequent implementation request and is not a claim that permission prompts or physical tests have already been completed.
+The original voice UI is delivered. On 2026-09-18 the user requested an updated plan for demo-like continuous execution, reversible corrections, and tests suited to installed apps. That extension is planned, not implemented. Read the current SPEC.md and the active milestones in PLAN.md. Consult prior delivery evidence only when it is relevant to verification or recovery. This documentation update does not authorize starting implementation in a planning-only turn.
 
 ## Read only what the task needs
 
-1. Read [SPEC.md](SPEC.md) for required product behavior and boundaries.
-2. Read [PLAN.md](PLAN.md) for the current milestone, relevant code, validation, and progress.
+1. Read [PLAN.md](PLAN.md)'s incremental scope and active progress; start at the first unfinished milestone.
+2. Read [SPEC.md](SPEC.md)'s C1–C5 for the new behavior. Consult R1–R6 only for preservation constraints relevant to the code being changed; they are not a backlog to rebuild.
 3. Inspect the files needed for that milestone and any applicable repository instructions. Load specialized skills only when they materially help the current work.
 
 The spec owns behavior; the plan owns sequence and evidence; this file owns working instructions. Keep status and decisions in the plan rather than creating another tracker. Later explicit user instructions take precedence over this plan and skill preferences, subject to higher-priority system/developer constraints. Surface an actual conflict precisely rather than silently changing scope.
+
+The updated behavior replaces release-only execution: complete supported commands may execute during a held Fn session. Capture and serial action execution overlap; separate Fn sessions do not. Explicit correction can undo a just-launched app using observed pre-action state. Finalization, error recovery, and transcript review must never replay completed actions. Keep the existing pill, microphone path, Jev integration, preferences, and ordinary-command automatic execution.
+
+Implement only the missing behavior. Reuse the current Fn input, speech engine, microphone picker, permissions, pill/settings, Jev client, command planner, executor, and packaging. Modify a working component only for a demonstrated integration need or regression; record the reason when material. Reuse existing tests instead of duplicating their coverage. Historical evidence is optional reference for a specific failure or rollback, never a list of work to repeat.
 
 ## Work through to a demonstrated result
 

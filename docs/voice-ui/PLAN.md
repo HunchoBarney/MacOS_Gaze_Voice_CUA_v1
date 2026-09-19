@@ -1,137 +1,255 @@
-# FluidVoice-style UI and Fn push-to-talk implementation plan
+# Continuous voice control implementation plan
 
-Status: approved; documentation prepared; implementation not started.
+Status: planning update only; continuous execution is not implemented. This is the existing plan revised in place. Preserve this checkout's tracked and untracked work. Start with the incremental scope and active progress below. Historical evidence is collapsed at the end and is reference-only.
 
-**Goal:** deliver the behavior and acceptance criteria in [SPEC.md](SPEC.md).
+**Goal:** keep the existing pill and Fn experience while executing complete commands during speech, supporting dependent in-app actions and reliable launch corrections.
 
-**Architecture:** retain JevVoiceCore's interpretation/planning and the native executor. Add a small Fn input boundary and microphone-device service; strengthen the existing controller/recognizer lifecycle; bind a native overlay and settings window to that state. Avoid a second application state machine in the views.
+**Architecture:** extend the existing controller with independent capture/progress state, a small incremental command coordinator, and one serial executor. Reuse local routing and Jev typed interpretation; record action identity, prerequisites, actual outcomes, and enough pre-action state for bounded compensation. Do not build a general multi-agent orchestration framework.
 
-**Stack:** Swift, SwiftUI/AppKit, Speech, AVFoundation, Core Audio, Quartz events; macOS 13 minimum; no new package dependencies by default.
+**Tech Stack:** existing Swift/SwiftUI/AppKit, Apple Speech, native automation/accessibility, and Jev. No runtime model replacement.
 
-**Execution:** read [EXECUTION.md](EXECUTION.md) once, then work milestone by milestone. This plan specifies behavioral contracts and evidence, not speculative implementation code. Choose private symbols and exact file decomposition to fit the code encountered. Record evidence-backed changes to the approach while preserving the spec.
+**Spec:** [SPEC.md — continuous control C1–C5 and preserved behavior R1–R6](SPEC.md). Start with [EXECUTION.md](EXECUTION.md).
 
-## Baseline and ownership
+## Incremental scope — build only what is missing
 
-At the documentation audit, HEAD was `77d460d189877e5c13ff0668bcaab61dd6f73663`, with substantial modified and untracked source/tests from earlier work. Do not reset, discard, or bypass them. The earlier run of `swift test` reported 84 passing tests; that is historical evidence, not verification of this feature.
-
-| Responsibility | Existing entry points / intended change |
+| Existing capability to reuse | Necessary change |
 | --- | --- |
-| Session ownership and cancellation | `Sources/JevVoice/VoiceController.swift`; explicit operations and session-scoped callbacks/tasks |
-| Audio/recognition | `Sources/JevVoice/SpeechRecognizer.swift`; separate finish/cancel and per-session capture ownership |
-| Native input and microphone discovery | Small new components under `Sources/JevVoice`; expose events and device snapshots, no model/UI ownership |
-| Presentation and app lifecycle | `main.swift`, `ContentView.swift`, `SettingsView.swift` under `Sources/JevVoice`; thin window controllers and reusable visual components |
-| Persistence and permissions | Existing `Config.swift`, `APIKeyStore.swift`, `Permissions.swift`; preserve identifiers/semantics |
-| Action responsiveness | `Sources/JevVoice/Executor.swift`; isolate blocking processes, preserve native action and paste contracts |
-| Command logic | `Sources/JevVoiceCore`; retain behavior; touch only when a proven boundary defect requires it |
-| Tests | Existing `Tests/JevVoiceAppTests` and `Tests/JevVoiceTests`; add focused session/input/device tests |
+| Fn event handling, Apple speech capture, microphone selection, permissions | Feed existing partial events into incremental decisions; adjust lifecycle assumptions only where capture and execution now overlap |
+| Pill, waveform, transcript, settings, Activity, Expand/Collapse | Bind concurrent listening/action/correction feedback; no UI redesign or FluidVoice re-import |
+| Local app matching, Jev client and typed interpretation, command planning | Add command boundaries, revision reconciliation, context progression, and action identity; do not replace the backend |
+| Native app launch/switch/minimize, URL/search, literal dictation, clipboard cleanup | Reuse these actions in the serial flow; add receipts and bounded launch reversal, plus only the missing document/scroll/back capabilities |
+| Existing tests, preferences, Keychain, package/signing workflow | Add coverage for changed behavior, run relevant regressions, and validate the final package; no migration or signing overhaul |
 
-Interfaces must communicate session identity, readiness, partial/final recognition, normalized audio level, interruption/failure, and current action. Begin/finish/cancel/confirm are controller operations; views do not launch model or executor tasks directly. Use small injectable boundaries for speech, input, interpretation, execution, and deadlines where they enable deterministic tests. Do not create a general service framework.
+This table describes the inspected baseline, not an instruction to reconstruct it. If a later checkout already implements part of a milestone, verify it and continue with the remaining gap. Preserve functionality even where its implementation differs from a proposed filename or component split.
 
-## Milestone 0 — Recoverable baseline
+## Active progress
 
-Covers R4/R6 and establishes the comparison for every later milestone.
-
-- [ ] Inspect current changes and preserve a recoverable source snapshot including untracked files, plus the working app bundle. Verify both snapshots are usable. Do not include credentials or personal recordings.
-- [ ] Run `swift test` and `swift build -c release`; distinguish pre-existing failures from regressions.
-- [ ] Record current settings behavior and named command outcomes in the regression matrix below. Use disposable content and reversible actions.
-- [ ] Record available keyboard, microphone devices, displays, OS version, permission status, and baseline timing observations. Do not imply access to hardware that is absent.
-
-Exit evidence: source/bundle recovery locations, test/build outcomes, observed baseline behaviors and limitations. No implementation milestone is complete yet.
-
-## Milestone 1 — Reliable Fn, capture, and microphone selection
-
-Covers R1/R2/R3. Use minimal presentation first; polished UI depends on this working.
-
-- [ ] Implement the session boundary and Fn transitions, including release-before-start, key combinations, ignored holds while busy, Escape, and event-tap teardown/recovery.
-- [ ] Separate speech finish from cancellation, remove silence submission during a hold, and implement timeout/early-final/maximum-duration review outcomes. Enforce at-most-once transcript submission and stale-callback rejection.
-- [ ] Add stable-UID input selection and a shared microphone-test/capture path. Manage device and format changes, listeners, and resource teardown.
-- [ ] Add focused tests for races/interruption paths before relying on live integration. Use controlled events/deadlines; do not sleep for 55 seconds in unit tests.
-- [ ] Verify the actual MacBook Fn key and microphones. Test pauses within a held command and release immediately after the last word. Preserve normal Fn combinations.
-
-Validation: `swift test --filter JevVoiceAppTests`, `swift build -c release`, and the recording/device rows of the matrix below. If real Fn or speech behavior violates the contract, fix this path before polishing the overlay. Do not claim a synthetic event test proves physical-key behavior.
-
-Checkpoint A for the user: hold Fn, say a phrase with a pause, release; select the MacBook microphone; repeat. The agent first verifies everything it can and asks only for physical input/permission actions it cannot reproduce faithfully.
-
-## Milestone 2 — Responsive execution and accurate cancellation
-
-Covers R4 and the command-facing parts of R2/R5.
-
-- [ ] Give the controller ownership of interpretation/execution and confirmation. Carry session identity and original target context through all asynchronous work.
-- [ ] Prevent duplicate confirmation, overlapping commands, and cancelled results reaching execution. Ensure forced confirmation survives transcript-review flow independently of confidence settings.
-- [ ] Move subprocess waiting/output draining off the main actor. Keep UI/input callbacks short and native AppKit work on its required thread. Ensure a blocked child process cannot freeze Stop or the waveform.
-- [ ] Preserve clipboard handoff/conditional restoration, including normal Quit. Hold Stopping until cleanup finishes. Never retry dispatched effects automatically.
-- [ ] Use actual execution outcomes for progress/results, distinguishing cancellation, no action, partial sequence completion, dispatch success, and errors without promising unsupported external verification.
-- [ ] Run deterministic tests with delayed model/executor responses and subprocess fixtures, then exercise benign real commands.
-
-Validation: `swift test`, `swift build -c release`, plus cancellation, targeting, and command matrix rows. Verify no later action dispatch occurs after cancellation and no result from an old session changes a new UI session.
-
-Checkpoint B: demonstrate a combined search, literal dictation into a disposable document, and cancellation of a delayed multi-action operation with clipboard cleanup intact.
-
-## Milestone 3 — Capsule and settings adaptation
-
-Covers R5 and settings persistence/readiness in R1/R3/R6.
-
-- [ ] Extract only necessary visual code from the pinned FluidVoice commit; retain notices and adapt macOS 15+ APIs to the current deployment target. Compare against upstream visual references before calling the styling faithful.
-- [ ] Implement the nonactivating capsule and a single normal settings/activity/review window. Bind both to controller state; remove the old toggle shortcut and Talk UI when the replacement is verified.
-- [ ] Implement all specified states, complete plan-level confirmation, bounded transcript, full review text, recovery actions, session-scoped hide timers, and accurate current-action feedback.
-- [ ] Verify capsule placement/hit testing, focus preservation, explicit normal-window activation, Spaces/fullscreen behavior, display changes, and accessibility settings.
-- [ ] Preserve API-key Save/delete/paste, Keychain migration, environment fallback, command preferences, and existing activity retention. Test them through the new settings surface.
-
-Validation: targeted app tests, release build, deterministic state previews without network/microphone side effects, and the actual window/focus/settings matrix. A build targeting macOS 13 does not prove runtime behavior on macOS 13; report older-OS runtime coverage honestly.
-
-Checkpoint C: provide a running demonstration of the capsule and settings, then execute the same commands used for the baseline.
-
-## Milestone 4 — Review, measurement, and packaged acceptance
-
-Covers R6 and the complete specification.
-
-- [ ] Review the whole change for session races, main-thread blocking, permission loops, target-app changes, duplicate dispatch, audio/device listener leaks, clipboard cleanup, and accidental imports of FluidVoice services. Simplify unnecessary state/abstractions.
-- [ ] Finish the matrix and compare timing against the baseline. Record monotonic timings for visible feedback, microphone readiness, transcript finalization, interpretation, and dispatch; separate cold and subsequent runs and state sample counts.
-- [ ] Run the full regression suite after final fixes and build the release. Repeat checks only when changes or unresolved failures justify it.
-- [ ] Update user-facing README instructions to the delivered behavior, including Fn setup, microphone selection, transcript review, and known limitations.
-- [ ] Package to the intended location, retaining rollback material. Verify the installed app's signature and real flows; report a required OS permission regrant without resetting TCC or changing signing trust.
-- [ ] Report what passed, what failed or was not exercised, observed timings, the working bundle location, and recovery instructions. Do not mark hardware-dependent acceptance complete when only mocks were tested.
-
-Packaging commands, run from the repository root during implementation:
-
-```sh
-swift test
-swift build -c release
-make app APP="$HOME/Library/Caches/JevVoice/build/Jev Voice.app"
-codesign --verify --deep --strict --verbose=2 "$HOME/Library/Caches/JevVoice/build/Jev Voice.app"
-open "$HOME/Library/Caches/JevVoice/build/Jev Voice.app"
-```
-
-These commands do not replace real interaction checks. Package only after preserving the prior bundle. Avoid repeated installed-bundle replacement during intermediate testing; ad-hoc rebuilds can require permission regrants.
-
-## Regression and acceptance matrix
-
-Record concrete observations and evidence below during implementation, not assumed passes. Fake tests must use isolated preferences/pasteboards and controlled dependencies; no live model calls or desktop actions in the normal test suite.
-
-| Coverage / owner | Cases and required outcome | Evidence method |
+| Task | Status | Evidence required |
 | --- | --- | --- |
-| R1/R2 — M1 | Fn release before startup/authorization, repeated down/up, held-key cancel, new press before cleanup: no delayed recording, duplicate transcript, or queued command | Controlled input/speech tests + real keyboard |
-| R1 — M1 | Fn-arrow/function-key/other-modifier combinations; Escape down/up; secure input; tap disable/recovery; sleep/lock; missing release: ordinary combinations preserved, capture cancelled, fresh press required | Unit transitions + real OS checks; never disable another app's secure input |
-| R2 — M1 | Pause while held; trailing word at release; silence; final and error callback races; timeout; early final; duration limit; old callbacks: one complete submission or explicit review/error, never automatic partial execution | Speech fixtures + physical microphone test |
-| R3 — M1 | Built-in mic vs AirPods when available, explicit unavailable UID, disconnect/reconnect, format change, changed system default, test-to-command transition: accurate device, no silent substitution or overlapping engines | Device fakes + actual available devices |
-| R2/R4 — M2 | Cancel delayed interpretation, wrapped network cancellation, double Run, busy Fn press, review with auto-execute enabled: no stale/duplicate dispatch, review forces confirmation | Controller tests with delayed dependencies |
-| R4 — M2 | Cancel between actions, during blocked subprocess, during clipboard handoff, normal Quit during paste: UI remains responsive, later actions do not dispatch, cleanup completes | Controlled process/executor tests + disposable live document |
-| R4 — M0/M2/M4 | Open Calculator; Google weather in Yuba City; Safari URL; YouTube and DuckDuckGo searches: expected destination and existing merged navigation behavior | Core tests + observed app/browser outcome |
-| R4 — M0/M2/M4 | Explicit separate tabs; open Notes then minimize it; open Notes and type `hello and quit Safari`: context/tab intent preserved, suffix stays literal text | Core tests + reversible live checks |
-| R4 — M2/M4 | Unsupported native-app search, missing arguments, all-no-action plan, invalid key, network failure: no unintended partial plan, clear accurate outcome | Fakes/core tests; benign live error checks where useful |
-| R4/R5 — M3 | Focus external editable field; show capsule; click Run; open review/settings; switch apps mid-command: UI never silently changes captured target, text goes to intended app | Actual native focus + disposable text |
-| R5 — M3 | All visual states; long text; old hide timer; transparent padding; Dock positions; fullscreen/Spaces; unplug display; Reduce Motion/Transparency; keyboard review: usable and no focus/window regression | State previews + actual UI; absent hardware marked unverified |
-| R1/R3/R5 — M3 | Key Save/delete/paste, storage failure, migrated key, environment fallback, preferences relaunch, return from permissions settings: existing data preserved, readiness reflects actual build | Isolated persistence tests + UI; no secret logging |
-| R6 — M4 | Intended packaged bundle launches, settings persist, Fn/mic/command/confirmation work; release signature verifies | Installed-bundle smoke test; not just a development executable |
+| T0 — Baseline and app probes | Planned | Recoverable current snapshot; fresh regression result; app-interface observations |
+| T1 — Incremental command decisions | Planned | Revision/boundary/intent fixtures with no external effects |
+| T2 — Listen and execute together | Planned | Session tests plus first physical action before Fn release |
+| T3 — Stop and launch corrections | Planned | Race tests and actual reversible launch/focus outcomes |
+| T4 — Installed-app workflows | Planned | Disposable TextEdit, Chrome, and Spotify flows verified externally |
+| T5 — Review and delivery | Planned | Packaged regression, live checks, timing report, rollback |
 
-## Progress and decisions
+## Working approach for Astra
+
+Follow EXECUTION.md for autonomy and proportionate verification. The required outcomes and acceptance matrix are fixed; private types, file splits, scheduling, and timing heuristics are implementation choices. Inspect relevant code, choose the simplest reliable approach, and record material departures with evidence. Checkpoints are brief progress reports, not automatic approval stops. Load a specialized skill only when its workflow helps the current task; do not impose a mandatory stack of skills, per-step commits, or repeated full-suite runs.
+
+This structure applies the official [Astra prompting guidance](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices) and [guidance on reducing over-prescriptive skills and prompts](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra), rechecked on 2026-09-18. Those sources guide the implementation agent; they do not establish our product architecture or performance.
+
+## Global constraints
+
+- Preserve the current working UI, command functionality, uncommitted work, Keychain credentials, preferences, clipboard behavior, bundle ID, installed path, and macOS 13 target.
+- No new package dependencies by default; no gaze, wake word, always-on capture, TTS, additional reasoning model, or Cua/VM integration in this extension.
+- Ordinary validated commands run automatically when the existing preference is enabled. Manual mode prevents all early effects. Deletion/purchasing remain unsupported.
+- Only one Fn session and one serial desktop-action queue; capture can continue during execution.
+- Plans may adapt to evidence; product scope and acceptance cannot be silently weakened. Record decisions and evidence here. No application changes are part of this documentation-only update.
+
+## Review focus
+
+1. Partial recognition rewrites already-dispatched words: no duplicate effect, but intentional repeated commands still work (T1/T2).
+2. Correction arrives during a launch or after an app was already open: compensate only the owned effect, with no force quit or document loss (T3).
+3. User moves focus or an app opens a different window: text/shortcuts never land in an unrelated target (T4).
+4. “Stop,” app names, and conjunctions occur inside dictated content: preserve literal text while retaining Escape cancellation (T1/T2).
+5. Capture fails or final text arrives after some successful actions: report partial completion and review only remaining work (T2/T5).
+
+## Evidence and design decisions — 2026-09-18
+
+- The reference clip was inspected through browser frames, captions, and its live transcript. Notes opens around 5 s; a new note is visible around 8.5 s; its title is populated by 12 s. Arc/search and X navigation follow; Photo Booth opens and a shutter countdown/photo follow. These are recording positions, not measured runtime latency. The relevant behavior is incremental instruction execution with context, in-app actions, and a small overlay. Internal model calls and automation mechanisms are unknown.
+- Read-only source inspection: `VoiceController.receive` currently displays partial text and submits final text after release; its single `Status` makes capture and execution exclusive. `SpeechEvent` already carries partial/final events. `Executor.execute` returns a string and does not capture pre-action state. `Action` has launches, URLs/searches, dictation, and system commands, but no create-document or browser-scroll/back capability. These facts justify T1–T4; streaming is not already implemented.
+- Filesystem inventory confirms Google Chrome, Spotify, Discord, TextEdit, and Calculator are installed. This proves availability, not login, permissions, accessibility quality, or automation support. Probe those interfaces during T0/T4 before choosing execution mechanisms. Use Chrome, TextEdit, Spotify, and Calculator in required workflows; Discord is available for a variation in app navigation, not for sending messages.
+- User correction: if an app opens before “actually, don't,” undo the launch. Implement that useful behavior directly with the bounded ownership rules in C3, rather than delaying every app launch until release.
+- Keep literal dictation through release; do not infer command boundaries inside arbitrary content. New in-app actions use reusable capabilities with varied arguments rather than copying the exact Notes/Photo Booth demo.
+- Existing evidence (116 tests and earlier physical checks) belongs to the prior package. It is not evidence that this extension works.
+
+## T0 — Preserve the working baseline and probe capabilities
+
+**Entry points:** begin with `Sources/JevVoice/VoiceController.swift`, `Sources/JevVoiceCore/CommandInterpreter.swift`, and their existing tests. Follow relevant calls into speech, input, executor, planner, presentation, or packaging only as needed. Update evidence in this file; do not perform a fresh whole-repository audit.
+
+- [ ] Snapshot the current source, including untracked files, and the current installed app to a new dated rollback directory. Do not reuse the pre-UI archive as the only recovery point or export secrets.
+- [ ] Run `swift test` and `swift build -c release`; record failures, durations, and the exact source state. Inventory current permissions without resetting them.
+- [ ] Identify existing coverage relevant to the changed path, including conditional composition, literal dictation, merged navigation, and session cancellation. Reuse it. Change only assertions superseded by the new behavior; add tests for uncovered risks instead of recreating the original suite.
+- [ ] Probe TextEdit new-document and addressed insertion, Chrome target/tab identity, scrolling and back navigation, and Spotify activation/minimize/restore using disposable state. Record interface support, required permissions, and observable success signals. Do not assume scripting support or invent keyboard shortcuts. No messages, purchases, or personal documents in probes.
+
+**Checkpoint:** current app still works, recovery verified, proposed execution mechanisms grounded in this machine. A failed required capability is repaired or explicitly reported; do not silently replace its acceptance test with app launch.
+
+## T1 — Decide when a command is complete
+
+**Files:** add `Sources/JevVoiceCore/IncrementalCommandCoordinator.swift` and `Tests/JevVoiceTests/IncrementalCommandCoordinatorTests.swift`; modify the existing interpreter/planner/splitter only where needed. These filenames are proposed boundaries, not a requirement to create redundant layers.
+
+**Contract:** consumes session ID, monotonic time, ordered transcript revisions, finalization/cancellation signals, execution receipts, and external target context. Produces identified pending/ready/cancel/correction decisions. It owns no microphone, UI, or OS effects. Each command has an ID independent of raw transcript text, prerequisites, revision provenance, and pending/dispatched/completed/failed/cancelled/compensated status. Reconcile final text with that history rather than slicing blindly at old character offsets.
+
+- [ ] Add failing behavioral fixtures for the cases below before implementing boundary/identity logic. Use an injected clock and fake interpretation; no real model or desktop in unit tests.
+- [ ] Reuse deterministic whole-clause app routing and existing typed Jev decisions. For streaming, consider available full context so a local phrase does not discard conditions. Coalesce superseded pending interpretation; keep at most one active incremental interpretation and the latest waiting revision. Cancellation/stop detection must not wait behind a slow model response.
+- [ ] Combine semantic completeness with observed stability/boundary signals. Choose and measure any stability window against actual partial-recognition behavior; elapsed time alone is not evidence that a command is complete. Missing slots/ambiguous target/condition hold the command; never issue Jev for every audio buffer or identical partial.
+- [ ] Track literal-content mode and filler/no-action outcomes. Preserve existing full-transcript regression behavior. Keep the coordinator small; do not add a second language parser or general workflow engine.
+- [ ] Run `swift test --filter IncrementalCommandCoordinatorTests` and relevant interpreter/planner regressions. Record the chosen boundary policy and failed alternatives only when they explain the decision.
+
+| Input fixture | Required result |
+| --- | --- |
+| `open` → `open Google` → `open Google Chrome` | No ambiguous launch; once eligible, Chrome at most once |
+| Complete open-app clause → continuation → repeated partial → matching final | One launch, continuation preserved, final never replays |
+| `if …` / `don't open …` / `can you …` / filler | Conditions and negation respected; natural command wording supported; filler no-op |
+| `search for red` → `search for red pandas` without a completed boundary | No premature truncated search; one correct final query |
+| Two separately completed `scroll down` requests | Two intentional actions, without duplicating either on transcript replay |
+| `type hello and quit Spotify` / `type stop` | Entire suffix literal content; no quit/stop effect |
+| Old interpretation completes after replacement/cancel | Discarded, never dispatched |
+
+**Checkpoint:** show fixture evidence for readiness and deduplication; this checkpoint alone does not establish microphone latency or physical usability.
+
+## T2 — Capture and serial execution in one session
+
+**Files:** `Sources/JevVoice/VoiceController.swift`, `SpeechRecognizer.swift` only if event metadata is needed, `FnInput.swift` if readiness assumptions need adjustment, `VoiceWindows.swift`, `ContentView.swift`, and `Tests/JevVoiceAppTests/VoiceSessionTests.swift`.
+
+**Contract:** retain `SpeechCapturing` begin/finish/cancel semantics and session-tagged callbacks. Separate capture state from execution progress in the controller, without duplicating ownership in views. Dispatch identified ready actions through one queue and feed receipts back to T1. A new Fn hold cannot overlap cleanup of the previous hold.
+
+- [ ] Add failing session tests: execution while partial events continue, release while an action runs, final deduplication, stale callbacks, manual mode with zero early effects, old hide timer during capture, and a second hold during cleanup.
+- [ ] Wire partial events into T1 while waveform/transcript continue updating. Finalize only uncommitted work. An action finishing while Fn is held must not stop capture or hide the pill.
+- [ ] Preserve local app resolution, typed Jev, key/config handling, off-main-thread process waits, and conditional clipboard restoration. At every await/dispatch boundary recheck action/session validity.
+- [ ] On timeout/early-final/error/55-second limit, stop pending automatic effects, keep completed receipts, and review only the remainder. Add tests where one action already completed before each failure. Empty remainder must never cause a replay.
+- [ ] Show listening plus current action/correction in the existing pill; reuse expanded Activity for detail. Run `swift test --filter VoiceSessionTests` and `swift test --filter FnInputTests`.
+- [ ] With the packaged app and physical user input, hold Fn, request Calculator, continue talking after it opens, and release. Verify Calculator appears before release, the final word survives, and release does not reopen it. Ask only for physical input/OS grants the agent cannot supply.
+
+**Checkpoint:** first genuine early effect while capture stays active. Continue independent work while optional user feedback is pending; label physical evidence separately.
+
+## T3 — Stop and compensate recent launches
+
+**Files:** `VoiceController.swift`, `Executor.swift`, T1 coordinator, new `Tests/JevVoiceAppTests/LaunchCorrectionTests.swift`, and existing executor tests. Add a small action-receipt type near the executor if needed.
+
+**Contract:** execution returns action ID, dispatch/outcome status, resolved app identity/process instance, prior running/hidden/frontmost state, and any created target identity. A reversal checks that receipt and current state; it does not infer ownership from the app name or blindly call the existing substring-based app lookup. Report quit-requested separately from observed termination.
+
+- [ ] Write controlled tests for correction before dispatch, during delayed launch, after launch, after dependent editing, after external focus change, already-running target, refused termination/save dialog, and replacement command arriving before compensation completes.
+- [ ] Implement spoken stop outside literal content as queue/model cancellation while capture continues. Keep Escape/pill Stop as whole-operation cancellation. Test `stop … open Calculator` in one hold, with no resumption of the cancelled queue.
+- [ ] Implement normal quit for an eligible newly launched app, and prior visibility/focus restoration for an already-running one. Never force terminate or discard work. Observe termination/restore with a bounded timeout and honest failure text; do not interpret an accepted quit request as completed undo.
+- [ ] Serialize launch completion, correction, and replacement so a late launch cannot escape reversal or overtake the replacement. Guard compensation against double execution and reused PIDs/app instances.
+- [ ] Run `swift test --filter LaunchCorrectionTests` and existing executor/session tests, then demonstrate both initially-closed and already-running Calculator cases. Use an unsaved disposable TextEdit document to verify that refusal/save UI is retained rather than automatically dismissed.
+
+**Checkpoint:** say a launch and immediately retract/replace it; verify before-dispatch cancellation and after-dispatch reversal. Existing user work remains intact without an approval dialog for routine correction.
+
+## T4 — In-app workflows on this Mac
+
+**Files:** `Sources/JevVoiceCore/{Command,CommandInterpreter,CommandPlanner,SlotExtractor}.swift`, `Sources/JevVoice/Executor.swift`; extract `NativeAppActions.swift` if the executor becomes unwieldy. Extend core tests and add `Tests/JevVoiceAppTests/NativeAppActionsTests.swift` for target/readiness/error boundaries.
+
+**Contract:** typed create-document, bounded-scroll, and browser-back capabilities carry explicit resolved target identity and prerequisites. T0 chooses the working native mechanism. Executor returns created document/window or navigation outcome where observable. Keep model output as typed choices/arguments, never arbitrary shell or generated script execution.
+
+- [ ] Add failing tests for new-document context propagation, failed prerequisite, browser identity, unknown scroll target, readiness timeout, and external focus changes. Validate both command interpretation and executor routing, not only fabricated actions.
+- [ ] Implement TextEdit create-document plus targeted insertion. Wait for that new editable document to be ready; never overwrite the previously open document. Keep insertion after payload completion through release and preserve the clipboard contract.
+- [ ] Implement bounded Chrome scrolling and browser back, targeting the intended browser window/tab. Preserve the merged one-search-tab behavior and explicit separate-tab requests. A focus mismatch or unavailable AX target fails clearly instead of falling back to global keystrokes.
+- [ ] Verify existing Spotify minimize/restore paths using its observed window state, fixing regressions needed for the matrix. Playback/login/account integration is not required for this extension.
+- [ ] Execute the installed-app matrix below using disposable material; inspect actual external state. Use live Jev calls only for representative model-routed commands, and label fixtures as simulated.
+
+**Checkpoint:** complete actual workflows, not just launches. Show the user a short successful sequence with our current pill; retain test variations and failures in evidence.
+
+## Installed-app acceptance matrix
+
+Every row starts unverified. Example words define outcomes, not an exact-phrase whitelist. Run each principal flow with at least two paraphrases and different disposable content; verify cold launch and already-running state where applicable. Record concrete observations rather than checking boxes from screenshots of the pill alone.
+
+| ID | Workflow | Required external evidence |
+| --- | --- | --- |
+| A1 | Hold Fn: open TextEdit, create a new document, then type `The blue notebook is on my desk`; release | App/document preparation occurs before release; exactly that text inserted once into new document; existing document unchanged |
+| A2 | Open Google Chrome and search Google for `red panda habitat`; release after query | Correct query in Chrome, one new results tab for the compound search, no extra blank/homepage tab; already-open tabs intact |
+| A3 | In that controlled browser context, open a harmless public page with enough content, then request a small downward scroll, then go back | Target viewport changes; back returns to known prior page; no other app receives scrolling/shortcuts. A single finite scroll, not a new continuous-scroll mode |
+| A4 | Open Spotify, minimize its window, then bring it back, all in one hold | Ordered visible transitions, final Spotify window restored; no account/login/playback assumption; capture stays active |
+| A5 | Initially closed Calculator: open it, then immediately say `actually, don't`; repeat after deliberately allowing launch | First test cancels pending launch or safely reverses a race; second observes normal quit, with no duplicate action on release |
+| A6 | Already-running Calculator: switch to it, then retract; repeat with `actually, open Chrome instead` | Calculator session survives retraction; prior focus restored when appropriate; replacement ends in Chrome |
+| A7 | Queue a delayed action, say `stop`, then request another app without releasing Fn | Cancelled work never resumes; listening continues; new command works once. Fake latency plus benign actual-app check distinguished |
+| A8 | In new TextEdit document, `type hello and quit Spotify`, then separately `type stop` | Payloads inserted literally; no unintended quit or cancellation |
+| A9 | Praise/filler, pause, partial correction, release on last word; repeat a supported command intentionally | No filler action, no clipped payload, no replay on release, intentional repeats preserved |
+| A10 | Manual auto-execute disabled; timeout/network failure/mic interruption after one committed action | No early side effects in manual mode; failure accurately reports completed vs pending work; transcript review never replays. Restore original preference |
+
+## T5 — Review, timings, packaging, and honest delivery
+
+**Files:** review the complete diff; update this progress/evidence log and `README.md` only after working behavior exists. Preserve the existing build/signing path in `Makefile`.
+
+- [ ] Review for duplicate/revised actions, dropped conditionals, literal-content splitting, focus theft, racey compensation, main-thread blocking, unbounded model calls, permission churn, and accidental preference resets. Simplify unnecessary abstractions and repair findings.
+- [ ] Measure with monotonic timestamps: Fn-to-overlay, microphone ready, first relevant partial, command eligible, interpretation, queue wait, dispatch, external readiness, release-to-final, and correction-to-observed-reversal. State what was directly observed versus inferred. Capture no raw audio or private text in diagnostics.
+- [ ] Compare the unchanged baseline and new package on the same simple-launch and compound-search workloads, identifying fresh launches versus already-running apps. Collect at least five warm trials per representative flow plus an initial startup trial; report counts, median, range, errors, duplicates, and corrections. No percentile claims from these small samples.
+- [ ] Keep the existing 100 ms overlay target. Use an initial engineering target of at most 500 ms from eligible complete local launch command to dispatch in warm runs; model-mediated commands are measured separately. Boundary waiting and STT delay must be reported separately so that eligibility timing cannot conceal perceived lag. This target is a proposed tuning goal, not a measured claim or evidence from the X video. Correctness and visible pre-release progress are hard acceptance requirements; document any target miss instead of guessing early.
+- [ ] Run `swift test`, `swift build -c release`, and `git diff --check` after fixes. Re-run only checks justified by subsequent changes/failures. Package once ready using `make app APP="$HOME/Library/Caches/JevVoice/build/Jev Voice.app"`, verify with `codesign --verify --deep --strict --verbose=2 "$HOME/Library/Caches/JevVoice/build/Jev Voice.app"`, and launch that exact bundle.
+- [ ] Validate the installed package through A1–A10, distinguishing unit simulations, agent-observed app state, and user physical keyboard/microphone evidence. Required unverified/failed flows remain open; do not call launch-only success a complete delivery.
+- [ ] Record source/binary identity, test results, timing samples, real-model coverage, remaining hardware/OS limits, rollback location, and source restore instructions that preserve unrelated work. Final handoff gives app location, how to use/stop/correct it, measured results, and known limits.
+
+**Scope/coverage audit:** C1 → T1/T2/A1/A2/A7–A10; C2 → T4/A1–A4/A8; C3 → T3/A5–A7; C4 → T2/T5/A9/A10; C5 → T0/T4/T5. Active tasks are all planned; no new tests, app interactions, or runtime improvements are claimed by this documentation update.
+
+## Reference-only historical evidence
+
+Consult only to investigate a specific regression, compare a measurement, or locate rollback material. Earlier completed milestones are not implementation tasks, and earlier passing tests do not establish that new behavior works.
+
+<details>
+<summary>Prior UI delivery, verification limits, and rollback records</summary>
+
+### Prior milestone status
 
 | Milestone | Status | Evidence |
 | --- | --- | --- |
-| 0 — Baseline | Not started | Historical 84-test pass only; fresh baseline required |
-| 1 — Input/capture | Not started | No feature implementation verified |
-| 2 — Execution | Not started | No feature implementation verified |
-| 3 — Presentation | Not started | No feature implementation verified |
-| 4 — Delivery | Not started | No packaged feature build verified |
+| 0 — Baseline | Source/build baseline verified; physical command baseline not repeated | Fresh 84/84 pass; release build passes. Recovery details below. |
+| 1 — Input/capture | Implemented; basic physical path passed | Fn/session/device tests pass. Actual MacBook microphone meter works; user reports successful Calculator command after HID watchdog repair. Paused phrase, trailing word and Fn-arrow check confirmed by user. |
+| 2 — Execution | Implemented and demonstrated | Session/cancellation/process tests pass. Calculator, merged Google search and literal TextEdit dictation demonstrated. Physical clipboard/quit timing remains unverified. |
+| 3 — Presentation | Implemented; native UI exercised | Settings, real mic meter, permission readiness, Activity and target-preserving TextEdit dictation observed. Fullscreen/multiple displays and direct capsule-click focus measurement remain unverified. |
+| 4 — Delivery | Delivered; extended coverage limits recorded | 110 tests pass; warning-free release; signature valid. Independent review found no remaining actionable defects. |
 
 Initial decision, 2026-09-18: preserve the current backend and platform target; extract bounded FluidVoice presentation; prove input/capture and execution before polish. Keep this table and a concise dated decision/evidence log here during implementation. Record the reason and affected requirement when changing an approach; do not manufacture completed evidence or duplicate the specification.
+
+### Implementation log — 2026-09-18
+
+- Verified recovery archive: `/Users/karanvirkang/Library/Caches/JevVoice/rollback/20260918-195635/source.tar.gz` (43 source files, including untracked work), `baseline.patch`, manifest, and copied `Jev Voice.app`. Existing credentials remain in Keychain; no credential export.
+- Baseline: `swift test --quiet` → 84/84 pass (`/tmp/jev-ui-baseline-tests.log`); `swift build -c release` → pass (`/tmp/jev-ui-baseline-build.log`). One built-in 2560×1600 display and MacBook Pro microphone (48 kHz) available; no AirPods/external display connected.
+- Ruling: implement in the requested checkout on a new branch, with the verified snapshot, rather than a HEAD-only worktree that omits the working baseline. Use this plan as the sole progress record, following the approved execution brief.
+- Fn event logic: tests first exposed missing implementation; six now pass covering duplicate events, busy holds, combinations, Escape pairs, and interruption. Physical key behavior is not yet verified.
+
+- Session/capture/execution: deterministic tests cover release-before-start, early final, timeout, late callbacks, stale model response, duplicate Run, forced confirmation, cancel between actions, silence, maximum duration, and old dismissal timers. Microphone resolution tests cover stable UID and unavailable selection. Overlay geometry tests cover negative display coordinates, growth anchoring and bounds. `swift test` passed 109 tests (`/tmp/jev-ui-final-tests.log`, 6.361 seconds suite wall time); these are simulated boundaries, not physical microphone/keyboard evidence.
+- Independent read-only review found Escape repeats leaking after cancellation, reverse-order Fn combinations arming, and interrupted empty transcripts silently dismissing. Added failing regressions, repaired all three, then reviewer verified fixes. Core Audio SDK confirms caller-owned UID/name CFStrings; switched to `Unmanaged.takeRetainedValue()` to remove the compiler warning and honor ownership. No new package dependencies.
+- Real packaged microphone test initially failed because setup generated a configuration-change notification. Skip redundant device assignment; validate live engine/device/format before treating a queued notification as loss. Retest showed **Listening to MacBook Pro Microphone** with a **23%** real meter reading. Test captures audio locally only; no transcript/model call. This is not spoken-command accuracy evidence.
+- Native settings and Activity inspected through macOS accessibility/screenshot tools. Permission rows refresh to actual granted state. Ad-hoc rebuilds still require macOS permission reconciliation; no TCC reset, trust modification, or credential changes performed.
+- First physical Fn attempt reported failure. Activity showed **The Fn release was missed** before any transcript. Corrected watchdog to hardware (`hidSystemState`) rather than consumed session-event state, and require an observed hardware hold before inferring a missing release. Basis: Apple's [event state documentation](https://developer.apple.com/documentation/coregraphics/cgeventsourcestateid). Physical retest required; do not count mocked transitions as proof.
+- Packaged app includes bounded FluidVoice adaptation notices/license in Resources. Release build and `codesign --verify --deep --strict` pass. Real UI inspection runs against the intended installed path; initial and subsequent speech latency remain unmeasured until successful physical capture.
+
+
+### Final package and demonstrated evidence
+
+- Source review: independent reviewer rechecked the three original fixes, notification filtering, CF ownership, hardware watchdog, and cleanup error retention. No remaining actionable findings in those reviews. Removed unused controller/window methods; no general-purpose framework or added dependencies.
+- Final automated suite: **110 tests, 0 failures**, 7.388 seconds (`/tmp/jev-ui-final-tests.log`). Original 84 regression tests remain green. Release compile: **21.39 seconds**, no warnings (`/tmp/jev-ui-final-build.log`). Final package log: `/tmp/jev-ui-final-package.log`; strict/deep signature verification passes. `git diff --check` passes.
+- Final binary SHA-256: `793834e68937a4623640ef50c155623c4a81c9d3dc5cff80af245f88183e75c8`. App: `/Users/karanvirkang/Library/Caches/JevVoice/build/Jev Voice.app`. Launched successfully; final settings screenshot shows visible Voice heading, cards, picker, test meter, and permission controls. Existing API key was never edited/exported; command preferences remain unchanged.
+- Physical retest after HID repair: user reports Calculator command worked. Activity independently showed complete transcript **Open calculator**, decision **Open Calculator**, Jev **1.13.0**, 93% confidence, and successful dispatch timing. Calculator's app contents were not independently inspected after the user's test.
+- Monotonic timings for that single successful run (first demonstrated run after relaunch; no measured pre-change timing baseline): overlay presentation **43 ms**, microphone ready **449 ms**, release-to-final **185 ms**, interpretation **420 ms**, action dispatch **330 ms**. Overlay timing measures the app's presentation call, not a high-speed camera's first visible pixel. One sample does not establish a distribution or universal latency. Recording onset still requires waiting for Listening.
+- Startup interruption now retains its error after asynchronous cleanup instead of returning to a misleading Ready state; regression passes. Settings navigation returns to the visible heading. Final configuration observer accesses engine only on main actor; no Sendable warnings.
+
+### Verification limits and remaining physical checks
+
+- Final packaged pause/trailing-word, merged navigation, and Fn-arrow checks passed by user report. Physical dictation into the originally targeted TextEdit document passed; the agent did not directly observe the user’s confirmation click or measure focus during that click. Physical clipboard cleanup, physical Escape, secure-input/tap-disable/sleep recovery, fullscreen/Spaces, Reduce Motion/Transparency, device disconnect/format switch remain unverified in this run. Automated tests cover their applicable logic boundaries, not these OS interactions.
+- One built-in display and MacBook microphone exercised. AirPods, external monitors, and macOS 13 runtime unavailable; no pass claimed. Build retains macOS 13 deployment target.
+- Hardware polling can detect a missed release only after the HID state reports the physical Fn hold. Keyboards that never report it still have the 55-second capture bound, but missed-release detection on those keyboards is not verified.
+- Ad-hoc signing may require a macOS permission regrant after binary replacement. No stable signing identity exists on this machine; no trust/security settings were changed automatically.
+- Do not mark the entire acceptance matrix complete from the basic Calculator test. Browser/search and literal-dictation/core regressions pass automated tests, but that does not independently establish every listed live app flow.
+
+### Rollback
+
+Quit Jev Voice normally first. Move the current installed app aside, then copy `Jev Voice.app` from `/Users/karanvirkang/Library/Caches/JevVoice/rollback/20260918-195635/` back to the installed location. The rollback source archive includes the user's pre-feature uncommitted work; extract it into a separate folder for inspection/restoration rather than resetting this checkout or deleting later changes. Keychain credentials were not changed. The new microphone UID preference is additive; System Default remains selected. macOS may require reconciling Accessibility for the restored ad-hoc binary.
+
+- Final packaged physical follow-up: user confirmed the paused “open Google … and search for the weather in Yuba City” utterance waited for release, produced one search tab, and Fn-arrow cancelled voice while retaining the combination. Activity independently showed the complete phrase and a single Google-search decision. This establishes the named basic physical path on this keyboard, not every Fn/OS combination.
+- Subsequent actual run after the search: overlay **33 ms**, microphone ready **142 ms**, transcript finalized **122 ms**, interpretation **219 ms**, dispatch **104 ms**. Two measured successful samples total across different commands/build stages; no percentile claims. The second sample is from the final packaged binary.
+- Final native Commands surface inspected: secure API field masked, Save present, auto-execute enabled and confidence **70%**, matching preserved defaults. Temporarily disabled auto-execute for a controlled live TextEdit/capsule-focus check; restored and visibly verified enabled after the test.
+
+- Live dictation check: created a blank disposable TextEdit document with automatic execution temporarily off. User chose **type hello and quit Google**. Activity showed exactly one dictation action targeting TextEdit; direct native accessibility inspection independently verified the document contained **hello and quit Google**. The agent did not click Run itself (the user completed the action), so no claim that the agent directly measured focus during the capsule click. Original auto-execute **enabled**, threshold **70%**, and **System Default — MacBook Pro Microphone** were visibly verified at handoff. All three permission indicators were granted, shortcut ready, microphone meter idle at 0%.
+- Final live behavior demonstrated: physical Fn recording/release, complete spoken phrase, combined single-tab search, ordinary Fn-arrow cancellation, literal dictation into the captured external target, accurate Activity decisions, and live microphone test. No additional code changes after the final tested/signed package.
+- Durable build/test/review-regression logs copied to `/Users/karanvirkang/Library/Caches/JevVoice/verification/20260918/`. Recovery archive remains separate and intact. No API keys, recordings, or clipboard contents are included.
+
+
+### User-directed hands-free refinement — 2026-09-18
+
+**New requirement:** ordinary commands, including “open Messages,” must run without confidence-based permission prompts. Confirmation is appropriate for deletion/purchasing if supported later. The pill is the normal interface; the full window opens only on expansion/menu access. This explicit direction supersedes the original confidence and forced-action-confirmation acceptance criteria; it does not authorize automatic execution of an incomplete transcript.
+
+- Root cause: controller required each decision to exceed the saved threshold; planner also lowered decisions by model context confidence even for straightforward app names. The observed Messages decision was 31% against a 70% threshold.
+- Ordinary validated plans now execute when auto-execute is enabled, regardless of model confidence. The existing manual-review preference remains opt-in; stored threshold is preserved but no longer used or presented as an execution gate. Transcript review still requires accepting the captured text; Continue submits it without a second action-permission gate in automatic mode.
+- Explicit whole-clause open/launch/start/run/switch/focus/activate requests resolve locally against installed full names or unique name suffixes. No substring/prefix guess, ambiguous alias, pronoun or extra instruction qualifies. Named website routing keeps priority. Compound context and literal dictation still go through the existing planner. No model call is required for “open Messages.”
+- Pill has a persistent Expand control while visible. Expanded settings has Collapse. Normal startup uses a nonactivating setup hint when needed; it no longer forces the settings window open. Explicit menu/settings launch remains available.
+- Regression tests first demonstrated missing local navigation and unwanted confirmation. Added offline navigation, ambiguous/extra-argument rejection, compound literal-text context, low-confidence automatic execution, and explicit manual-review/double-Run coverage. API-choice tests use model-bound wording so they still prove real request payload construction.
+- Before package replacement, preserved the prior UI app at `/Users/karanvirkang/Library/Caches/JevVoice/rollback/20260918-handsfree/Jev Voice.app`. Verification in progress; do not claim physical tests for the new build yet.
+
+- Review found that isolated local clauses could discard whole-request conditions. Shortcut eligibility now requires the entire composition to consist of explicit app navigation and/or literal dictation. Tests also exposed an older fallback that rewrote a model no-action answer into an app action; it now respects no-action. Conditional multi-clause regression passes. Reviewer verified local composition restriction; full suite verifies the additional fallback repair.
+- Final refinement suite: **116 tests, 0 failures**, 5.247 seconds (`/tmp/jev-handsfree-final-tests.log`). Release/package passes without warnings (`/tmp/jev-handsfree-package.log`); strict/deep signature verification passes. Launched normal app without `--settings`. Physical no-Run/Expand/Collapse check requested; native automation cannot currently attach when only the nonactivating panel is present, so do not label that UI check passed from source inspection.
+- Demo target reaffirmed by user: [Andy Gao's X post](https://x.com/instantricecook/status/2100814590300889426) describes opening an app before the utterance finishes. Web fetch returned 403, but the in-app browser loaded the post and video; author text and the running Notes demonstration were observed. No claim of a measured comparison or knowledge of the demo's internals. This delivered refinement still executes after speech finalization on Fn release. Matching the mid-sentence behavior requires incremental clause dispatch with revised-transcript handling and at-most-once effects; it is **not implemented** by the local-navigation optimization.
+
+</details>

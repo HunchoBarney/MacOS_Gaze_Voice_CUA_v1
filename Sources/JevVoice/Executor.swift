@@ -27,7 +27,7 @@ enum Executor {
             return try await openApp(named: name)
         case .closeApp:
             guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
-            return closeApp(named: name)
+            return try closeApp(named: name)
         case .switchApp:
             guard let name = decision.targetApp else { throw ExecutorError.missingSlot("target app") }
             return try await switchApp(named: name)
@@ -60,7 +60,7 @@ enum Executor {
             }
             return try await dictate(text)
         case .system:
-            return try runSystem(decision.systemAction ?? .none, percent: decision.percent)
+            return try await runSystemAsync(decision.systemAction ?? .none, percent: decision.percent)
         case .none:
             return "No action"
         }
@@ -81,10 +81,10 @@ enum Executor {
             ?? apps.first { $0.localizedName?.lowercased().contains(name.lowercased()) ?? false }
     }
 
-    private static func closeApp(named name: String) -> String {
+    private static func closeApp(named name: String) throws -> String {
         guard let app = runningApp(named: name) else { return "\(name) is not running" }
-        app.terminate()
-        return "Quit \(app.localizedName ?? name)"
+        guard app.terminate() else { throw ExecutorError.controlFailed("Could not request quit for \(name)") }
+        return "Quit requested for \(app.localizedName ?? name)"
     }
 
     @MainActor
@@ -183,7 +183,7 @@ enum Executor {
             }
         }
         try Task.checkCancellation()
-        return "Typed \"\(text)\""
+        return "Paste sent to the target app"
     }
 
     private static func postPasteShortcut() throws {
@@ -250,6 +250,19 @@ enum Executor {
         }
     }
 
+    /// The dispatched action completes off the UI thread; cancellation prevents the next action.
+    static func runSystemAsync(
+        _ action: SystemAction, percent: Int?,
+        process: @escaping @Sendable (String, [String]) throws -> String = { try runProcess($0, $1) }
+    ) async throws -> String {
+        try Task.checkCancellation()
+        let result = try await Task.detached(priority: .userInitiated) {
+            try runSystem(action, percent: percent, process: process)
+        }.value
+        try Task.checkCancellation()
+        return result
+    }
+
     @discardableResult
     private static func osascript(_ source: String) throws -> String {
         try runProcess("/usr/bin/osascript", ["-e", source])
@@ -264,8 +277,8 @@ enum Executor {
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
-        process.waitUntilExit()
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        process.waitUntilExit()
         if process.terminationStatus != 0 {
             throw NSError(
                 domain: "JevVoice.Executor", code: Int(process.terminationStatus),

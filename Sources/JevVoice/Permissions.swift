@@ -14,7 +14,7 @@ enum Permission: String, CaseIterable, Identifiable {
         switch self {
         case .microphone: return "hear your commands"
         case .speechRecognition: return "transcribe them"
-        case .accessibility: return "type dictated text"
+        case .accessibility: return "enable Fn and control your Mac"
         }
     }
 

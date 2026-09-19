@@ -12,6 +12,8 @@ app: build
 	mkdir -p "$(APP)/Contents/MacOS"
 	cp "$(BINARY)" "$(APP)/Contents/MacOS/JevVoice"
 	cp Info.plist "$(APP)/Contents/Info.plist"
+	mkdir -p "$(APP)/Contents/Resources/ThirdParty/FluidVoice"
+	cp ThirdParty/FluidVoice/LICENSE ThirdParty/FluidVoice/NOTICE.md "$(APP)/Contents/Resources/ThirdParty/FluidVoice/"
 	codesign --force --deep --sign - "$(APP)"
 
 run: app

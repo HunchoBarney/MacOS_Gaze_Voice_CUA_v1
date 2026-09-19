@@ -1,13 +1,15 @@
 # Jev Voice
 
-The approved next update is documented in the [voice UI implementation brief](docs/voice-ui/EXECUTION.md), with a separate specification and milestone plan. It covers FluidVoice-style presentation, Fn hold-to-talk, and microphone selection. These features are planned; the usage instructions below describe the current app.
+This local build adds FluidVoice-style settings and a floating capsule, **Fn/Globe
+hold-to-talk**, and app-specific microphone selection. Implementation and verification
+evidence live in the [voice UI plan](docs/voice-ui/PLAN.md).
 
 A macOS menu-bar app that turns spoken commands into actions using
 [TypeSafe AI's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
 — a System One model that returns *typed decisions with probabilities* instead of
 generated text.
 
-Press **⌥Space**, say something, and Jev decides what to do:
+Hold **Fn/Globe**, speak, then release to finish. Jev interprets the complete transcript:
 
 - "open chrome and go to google.com"
 - "quit spotify"
@@ -78,10 +80,16 @@ Arguments (URLs, queries, dictation text, percentages) can't come from Jev —
 it's decision-only — so they're extracted deterministically by `SlotExtractor`
 heuristics.
 
-Low-confidence decisions (< threshold, default 70%) require clicking **Run** in
-the popover before anything executes.
+Ordinary commands run automatically after Fn release; model confidence is diagnostic,
+not a reason to show **Run**. Explicit app navigation (for example “open Messages” or
+“switch to Chrome”) resolves locally when the installed app is unambiguous, avoiding
+a Jev request. If you explicitly turn off **Run commands automatically**, the pill
+shows one **Run** control for the whole plan. Deletion and purchasing are unsupported.
 
-## Install with Homebrew
+## Upstream Homebrew installation
+
+The upstream release does not include this checkout’s local UI changes. Build from
+this checkout to use the Fn/capsule version.
 
 This repository doubles as a Homebrew tap (see `Casks/jev-voice.rb`):
 
@@ -114,7 +122,7 @@ app outside that folder:
 make app APP="$HOME/Library/Caches/JevVoice/build/Jev Voice.app"
 ```
 
-Then enter your API key in the popover's Settings (gear icon) and click **Save**.
+Then open the waveform menu-bar icon → **Settings → Commands**, enter your API key, and click **Save**.
 It is stored in the macOS Keychain. Existing keys in app preferences migrate to
 Keychain, and the old preference is removed only after storage succeeds. Settings
 shows any storage or migration error. Clearing the field and saving deletes the
@@ -128,8 +136,34 @@ variable configured outside the app.
 
 - **Microphone** — hear commands
 - **Speech Recognition** — transcribe on-device; unsupported recognition fails closed
-- **Accessibility** — required for the Cmd+V paste used by dictation
+- **Accessibility** — required for the global Fn shortcut and app control/dictation
 - **Automation** — required for `osascript` volume/brightness/lock actions
+
+## Using this build
+
+1. Open **Settings → Voice** from the waveform menu-bar icon. Grant Microphone,
+   Speech Recognition, and Accessibility when requested. After an ad-hoc rebuild,
+   macOS may require removing the stale Accessibility entry and adding the current
+   app at `~/Library/Caches/JevVoice/build/Jev Voice.app`. The app does not reset
+   permissions or modify security settings.
+2. Choose **System Default** or a specific microphone. **Test microphone** shows a
+   live level without recognizing speech or calling Jev. Device changes apply to
+   the next recording and never change the Mac's system default.
+3. Hold **Fn/Globe**, wait for **Listening**, speak, and release. If Globe opens
+   emoji or Dictation, use **Keyboard settings** to set “Press 🌐 key to” to
+   **Do Nothing**. Other Fn key combinations cancel the voice attempt.
+4. **Escape** cancels recording or a pending command; **Stop** prevents later
+   actions while dispatched effects and clipboard cleanup may finish. No commands
+   are queued while busy.
+5. Incomplete or interrupted speech requires **Review transcript → Continue**.
+   Continue submits the reviewed text; unfinished speech never runs automatically. A recording
+   warns at 50 seconds and stops at 55 seconds. Ordinary silence runs nothing.
+6. **Activity** contains the current transcript, recent decisions, and optional timing
+   diagnostics. No transcript or recording history is written to disk.
+
+The capsule does not take keyboard focus. Its **Expand** button opens Activity/settings;
+**Collapse** returns to the capsule. Normal startup keeps the full window hidden,
+including when a setup hint is needed. The menu also opens Settings or Activity. Keep the intended target app active when starting dictation.
 
 ## Limitations
 

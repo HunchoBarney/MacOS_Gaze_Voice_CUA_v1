@@ -4,6 +4,17 @@ import XCTest
 final class AppMatcherTests: XCTestCase {
     let apps = ["Google Chrome", "Safari", "Notes", "Visual Studio Code", "Music", "Go"]
 
+    func testExplicitNavigationRequiresWholeUnambiguousAppArgument() {
+        let apps = ["Notes", "Google Chrome", "Visual Studio Code", "Studio Code", "Music"]
+        XCTAssertEqual(AppMatcher.explicitNavigation(clause: "open Notes", installedApps: apps)?.app, "Notes")
+        XCTAssertEqual(AppMatcher.explicitNavigation(clause: "open Chrome", installedApps: apps)?.app, "Google Chrome")
+        for phrase in ["open Code", "open Notes at noon", "do not open Notes", "open it",
+                       "open Music and play jazz", "open Notes or Music", "quit Notes", "type open Notes"] {
+            XCTAssertNil(AppMatcher.explicitNavigation(clause: phrase, installedApps: apps), phrase)
+        }
+        XCTAssertNil(AppMatcher.explicitNavigation(clause: "open Notes", installedApps: []))
+    }
+
     func testPartialName() {
         XCTAssertEqual(AppMatcher.match(clause: "close chrome", installedApps: apps),
                        .init(app: "Google Chrome", confidence: 0.8))
