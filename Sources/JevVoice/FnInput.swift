@@ -4,7 +4,7 @@ import Carbon
 /// Event decisions are independent of the global tap so release/cancellation races are testable.
 struct FnInputState {
     enum Kind { case flagsChanged, keyDown, keyUp }
-    enum Action { case none, begin, finish, cancel }
+    enum Action { case none, begin, finish, cancel, cancelCapture }
     struct Result { var action: Action = .none; var consume = false }
     private(set) var held = false
     private var armed = false
@@ -45,7 +45,7 @@ struct FnInputState {
         }
         if held, armed, kind == .keyDown || (kind == .flagsChanged && otherModifiers) {
             armed = false
-            return Result(action: .cancel)
+            return Result(action: .cancelCapture)
         }
         return Result()
     }
@@ -64,6 +64,7 @@ final class FnInputMonitor: ObservableObject {
     private var source: CFRunLoopSource?
     private var healthTimer: Timer?
     private var observedPhysicalHold = false
+    private(set) var beginHandlingMs: Double = 0
 
     func start() {
         refresh()
@@ -88,7 +89,7 @@ final class FnInputMonitor: ObservableObject {
         }
         if let tap, CGEvent.tapIsEnabled(tap: tap) {
             ready = !IsSecureEventInputEnabled()
-            message = ready ? "Hold Fn to speak, release to run" : "Fn is unavailable while secure keyboard input is active"
+            message = ready ? "Hold Fn to speak, release to finish" : "Fn is unavailable while secure keyboard input is active"
             return
         }
         teardown()
@@ -110,10 +111,11 @@ final class FnInputMonitor: ObservableObject {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         ready = CGEvent.tapIsEnabled(tap: tap) && !IsSecureEventInputEnabled()
-        message = ready ? "Hold Fn to speak, release to run" : "Fn is temporarily unavailable"
+        message = ready ? "Hold Fn to speak, release to finish" : "Fn is temporarily unavailable"
     }
 
     private func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+        let handlingStarted = ProcessInfo.processInfo.systemUptime
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             interrupt("Keyboard monitoring was interrupted. Hold Fn again to retry.")
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
@@ -141,6 +143,7 @@ final class FnInputMonitor: ObservableObject {
         if kind == .flagsChanged, event.getIntegerValueField(.keyboardEventKeycode) == 63 {
             observedPhysicalHold = state.held && physicalFnDown
         }
+        if result.action == .begin { beginHandlingMs = (ProcessInfo.processInfo.systemUptime - handlingStarted) * 1000 }
         if result.action != .none { onAction(result.action) }
         return result.consume ? nil : Unmanaged.passUnretained(event)
     }

@@ -19,7 +19,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>26.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Jev Voice needs microphone access to hear your voice commands.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

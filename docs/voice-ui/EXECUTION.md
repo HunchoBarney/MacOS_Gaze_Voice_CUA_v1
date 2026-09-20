@@ -1,46 +1,54 @@
-# Start here: continuous voice control in the existing UI
+# Start here: execute the approved Cua/Jev voice migration
 
-The original voice UI is delivered. On 2026-09-18 the user requested an updated plan for demo-like continuous execution, reversible corrections, and tests suited to installed apps. That extension is planned, not implemented. Read the current SPEC.md and the active milestones in PLAN.md. Consult prior delivery evidence only when it is relevant to verification or recovery. This documentation update does not authorize starting implementation in a planning-only turn.
+Updated 2026-09-19 for the approved Cua capability/perception and voice-coordination revision. This update records the plan; it does not claim implementation. When asked to implement, work through all phases to packaged delivery. Do not reopen planning or rebuild completed UI.
 
-## Read only what the task needs
+## Read and resume
 
-1. Read [PLAN.md](PLAN.md)'s incremental scope and active progress; start at the first unfinished milestone.
-2. Read [SPEC.md](SPEC.md)'s C1–C5 for the new behavior. Consult R1–R6 only for preservation constraints relevant to the code being changed; they are not a backlog to rebuild.
-3. Inspect the files needed for that milestone and any applicable repository instructions. Load specialized skills only when they materially help the current work.
+Read PLAN.md's active scope/progress and SPEC.md S1–S9. Inspect applicable repository instructions and only the code/docs needed for the current phase. Historical sections are reference-only and contain superseded constraints. The spec owns behavior, the plan owns sequence/evidence, and this file owns execution instructions. Later explicit user instructions apply subject to system/developer constraints.
 
-The spec owns behavior; the plan owns sequence and evidence; this file owns working instructions. Keep status and decisions in the plan rather than creating another tracker. Later explicit user instructions take precedence over this plan and skill preferences, subject to higher-priority system/developer constraints. Surface an actual conflict precisely rather than silently changing scope.
+Start at the first unfinished gate in P0–P5, using the current progress table. Previously implemented speech/UI/provider work is preserved, not automatically rebuilt. Check actual source and evidence before assuming work is absent or complete. Preserve tracked/untracked changes, credentials, preferences, and working functionality. A HEAD-only checkout does not include the user's current baseline. Do not reset/clean the checkout or automatically commit unrelated work.
 
-The updated behavior replaces release-only execution: complete supported commands may execute during a held Fn session. Capture and serial action execution overlap; separate Fn sessions do not. Explicit correction can undo a just-launched app using observed pre-action state. Finalization, error recovery, and transcript review must never replay completed actions. Keep the existing pill, microphone path, Jev integration, preferences, and ordinary-command automatic execution.
+## Authority and completion
 
-Implement only the missing behavior. Reuse the current Fn input, speech engine, microphone picker, permissions, pill/settings, Jev client, command planner, executor, and packaging. Modify a working component only for a demonstrated integration need or regression; record the reason when material. Reuse existing tests instead of duplicating their coverage. Historical evidence is optional reference for a specific failure or rollback, never a list of work to repeat.
+Upon an implementation request, make necessary local code changes, build/package/launch, run tests, and perform reversible integration checks with disposable content. Continue through debugging, review, simplification, and final package validation without milestone approval requests. Checkpoints report progress; they are not permission gates. Do not stop at an initial implementation or a passing unit suite.
 
-## Work through to a demonstrated result
+Choose a simpler supported approach when inspection or measurement supports it. Record material architecture/version changes and their evidence in PLAN.md. Required behavior, preservation requirements and acceptance gates cannot be silently weakened. Use the actual selected Cua/TypeSafe/Apple contracts. The approved plan permits building and repairing unmerged Cua code; draft status alone is not a blocker. Audit ancestry and overlapping PRs, pin the smallest coherent set and verify its combined build. Do not narrow supported capabilities to make tests pass. Reuse existing voice coordination mechanisms without importing unnecessary complete frameworks.
 
-Once implementation is requested, carry the work through implementation, running the app, verification, repair, code review, simplification, and packaged validation. A first implementation or passing build is not completion. Present checkpoint results while continuing independent work; do not turn every milestone into an approval stop.
+Ask only for essential unresolved product decisions, unavailable credentials/hardware, user-controlled OS grants/physical input, or actions outside the authorized scope. Do not ask the user to run checks the agent can perform. Do not send real messages, buy, delete personal content, change OS security settings, or export secrets as integration tests. Use local disposable fixtures for these boundaries.
 
-Make routine reversible implementation choices yourself. You may change decomposition, internal APIs, and tunable timings when repository evidence or measurements justify a better approach. Record the reason and preserve the spec's behavioral guarantees. Do not change models, add product modes, weaken confirmation, raise the OS minimum, or discard existing work to make tests pass.
+## Phase loop
 
-Ask focused questions only when a material product decision is unresolved, an essential credential/device is unavailable, or an action genuinely needs the user's participation or authorization. Do not ask the user where discoverable code is or ask them to run tests the agent can run. If a skill causes a pause, identify the specific instruction and explain why it applies; do not infer extra approvals from generic workflow language.
+1. Establish the phase's entry conditions and inspect relevant contracts/code.
+2. Implement the smallest complete behavior. Reuse existing coverage and add focused tests for uncovered behavior and regressions.
+3. Run appropriate automated checks and real application checks; observe the intended external result where possible.
+4. Review the complete phase diff for correctness, cancellation/target ownership, regressions and unnecessary code. Simplify where it reduces risk.
+5. Repair findings and rerun affected checks. Broaden/repeat tests only for changes, failures or unresolved concerns.
+6. Record evidence, decisions, unresolved blockers and the next phase. Proceed automatically when the gate passes.
 
-During live checks, use disposable documents and reversible commands. Keep API keys, private clipboard contents, personal documents, and recordings out of evidence logs. Use real model calls only for the relevant integration smoke checks, not in the normal unit suite. Do not change OS security settings automatically or represent synthetic keyboard/audio tests as physical validation.
+Do not advance dependent work on an unproven foundation. Continue independent work while waiting for optional feedback or a physical check; keep that check pending. A timeout or lack of feedback is not approval or evidence. Review is a distinct pass against requirements, not merely a reread of the implementation's own tests. A separate reviewer can help where available and authorized, but is not a mandatory per-phase ceremony.
 
-## Verify proportionately and adapt to evidence
+## Evidence and recovery
 
-- Use focused behavioral tests for session races, input/audio interruption, cancellation, target preservation, persistence, and cleanup. Do not write tests that merely restate styling constants or private implementation details.
-- Use fakes for controlled timing/failure tests and the real packaged app for OS integration. Passing one does not establish the other.
-- Repair failures caused by the change before moving on. Distinguish pre-existing failures and missing test hardware explicitly.
-- Run the final regression suite once the feature and review fixes are ready. Broaden or repeat checks only when new changes, failures, or unresolved concerns warrant it.
-- Review the diff for unnecessary dependencies, duplicated state, blocking UI work, and speculative architecture. Prefer a small coherent implementation over a generalized framework.
-- Checkpoint updates should state what works, what evidence establishes it, what remains uncertain, and the next useful user test. User feedback can steer the work without erasing completed progress.
+For adopted upstream code, record exact revisions, dependency order, local repairs and attribution. For each gate record source/build identity, exact commands/checks, results, sanitized artifact paths, observed app state, timing boundaries/sample counts, and remaining limitations. Label evidence as automated simulation, observed OS behavior, or user-reported physical input. Never label fixtures as a physical speech test. Retain failed outcomes in timing/accuracy reports; do not select only fast successful runs.
 
-Stop when the specified deliverable works and the acceptance evidence is recorded, or clearly report the specific external blocker preventing remaining verification. Never silently lower the completion bar. The final handoff includes the app location, brief usage instructions, validation results, measured timings, limitations, and rollback location.
+The baseline, a tool success response, screenshots, or an AI review alone do not prove the new app works. Validate composed workflows and alternative phrasings, including those not used to tune the implementation. Preserve test intent; explain corrections to faulty tests using the spec. Do not relax assertions or remove failures just to obtain green results.
 
-## Astra-specific basis
+On interruption or context compaction, resume from PLAN.md's current phase and evidence; do not redo completed phases without a reason. On an external blocker, describe its exact impact and completed independent work. On uncertain runtime mutations, inspect state and never automatically replay them. After a review fix, rerun the checks affected by that fix before delivering.
 
-This brief applies official guidance to this repository; it is not a claim of a special required Astra plan format.
+## Final gate and handoff
 
-- [Rethinking skills and prompts for GPT-6 Astra](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra): keep guidance focused, avoid conflicting recipes, and define completion and decision boundaries so the agent persists through the intended work.
-- [GPT-6 Astra model guidance](https://developers.openai.com/api/docs/guides/latest-model): calibrate autonomy, clarification, and verification to the task; do not trigger unnecessary repeated testing.
-- [Run long horizon tasks with Codex](https://developers.openai.com/blog/run-long-horizon-tasks-with-codex): maintain a clear spec, testable milestones, and durable evidence/decisions. That article describes a broader coding workflow rather than an Astra-specific guarantee.
+Review the complete migration against the preserved working baseline, including untracked files and packaging changes. Remove obsolete production execution/speech paths and document preserved behavior. Run the final relevant regression suite, validate the actual installed package (not merely the development binary), and verify rollback instructions. If acceptance is blocked, state that the app is not fully accepted.
 
-These sources were read during the 2026-09-18 audit. Their recommendations inform the document structure; the approved product requirements and real test results determine acceptance.
+Finish with the app location, Fn/task/dictation/correction usage, verification results by evidence type, measured timings/sample counts, limitations, and rollback location/instructions. Do not claim universal app support or tested hardware/OS versions that were not exercised.
+
+## Research basis and scope of claims
+
+Official Astra guidance favors focused context, clear decision boundaries, and explicit persistence through a complete outcome. This execution contract applies those principles; it is not an official mandatory template. The research below supports evaluation choices, not a guarantee of autonomous success or of Cua capability.
+
+- [Rethinking skills and prompts for GPT-6 Astra](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra): avoid bloated/conflicting recipes; define authorization and stopping boundaries.
+- [Astra model guide](https://developers.openai.com/api/docs/guides/latest-model): pursue the requested outcome and use proportionate verification.
+- [Long-horizon Codex work](https://developers.openai.com/blog/run-long-horizon-tasks-with-codex): durable spec, milestones and evidence; broader workflow, not Astra-specific performance evidence.
+- [SpecBench](https://arxiv.org/html/2605.21384v2): visible feature tests can miss failures when features are composed; motivates combined application workflows.
+- [DeepSWE](https://arxiv.org/html/2607.07946v1): functional verifiers should accept different implementations that satisfy requested behavior.
+
+Research reviewed on 2026-09-19; official Astra prompting guidance rechecked for this revision. No mandatory full-repository reread, fixed file architecture, per-step commit, or repeated full-suite ritual is required. Historical instructions retained elsewhere do not override this contract.

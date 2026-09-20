@@ -22,7 +22,7 @@ final class FnInputTests: XCTestCase {
         var input = FnInputState()
         _ = input.handle(.flagsChanged, key: 63, fn: true, canBegin: true, active: false)
         let arrow = input.handle(.keyDown, key: 123, fn: true, canBegin: false, active: true)
-        XCTAssertEqual(arrow.action, .cancel)
+        XCTAssertEqual(arrow.action, .cancelCapture)
         XCTAssertFalse(arrow.consume)
         XCTAssertEqual(input.handle(.flagsChanged, key: 63, fn: false, canBegin: true, active: false).action, .none)
     }

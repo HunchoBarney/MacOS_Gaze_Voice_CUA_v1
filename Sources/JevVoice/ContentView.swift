@@ -59,6 +59,9 @@ struct OverlayView: View {
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(.white.opacity(0.2)))
                 }
+                if controller.cuaTasks.contains(where: \.active) {
+                    Button("Stop All", action: controller.stopAll).buttonStyle(.plain).font(.system(size: 11))
+                }
                 Button(action: openReview) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 11, weight: .semibold)).frame(width: 24, height: 24)
@@ -69,6 +72,13 @@ struct OverlayView: View {
                         .accessibilityLabel(controller.status == .executing ? "Stop command" : "Cancel command")
                         .help("Escape to cancel")
                 }
+            }
+            if let task = controller.pendingTaskApproval, let operation = task.approval {
+                Text(operation).font(.caption).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Confirm operation") { controller.approveTask(task.id, approved: true) }.buttonStyle(.borderedProminent)
+                    Button("Cancel operation") { controller.approveTask(task.id, approved: false) }
+                }.controlSize(.small)
             }
             if showsActions {
                 HStack(spacing: 10) {
@@ -98,11 +108,38 @@ struct OverlayView: View {
     }
 }
 
+struct CuaTasksView: View {
+    @ObservedObject var controller: VoiceController
+    var body: some View {
+        if !controller.cuaTasks.isEmpty {
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack { Text("Cua tasks").font(.headline); Spacer(); Button("Stop All", action: controller.stopAll) }
+                    ForEach(controller.cuaTasks) { task in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Button(task.label) { controller.selectTask(task.id) }.buttonStyle(.plain)
+                                Text(task.status).font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                if task.approval != nil { Button("Confirm operation") { controller.approveTask(task.id, approved: true) } }
+                                if task.active { Button("Stop") { controller.cancelTask(task.id) } }
+                            }
+                            Text(task.request).font(.callout)
+                            Text(task.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct ActivityView: View {
     @ObservedObject var controller: VoiceController
     @State private var showDiagnostics = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            CuaTasksView(controller: controller)
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(controller.status.title, systemImage: controller.status.symbol).font(.headline)
@@ -158,8 +195,16 @@ struct ActivityView: View {
             DisclosureGroup("Diagnostics", isExpanded: $showDiagnostics) {
                 VStack(alignment: .leading, spacing: 8) {
                     if !controller.model.isEmpty { Text("Model: \(controller.model)") }
+                    Text("Latest voice capture").fontWeight(.medium)
                     ForEach(controller.measurements.keys.sorted(), id: \.self) { key in
                         Text("\(key): \(Int(controller.measurements[key] ?? 0)) ms")
+                    }
+                    if let task = controller.diagnosticTask {
+                        Text("Selected task: \(task.label)").fontWeight(.medium)
+                        Text("Task elapsed: \(Int(task.elapsedMs)) ms")
+                        ForEach(task.timings.keys.sorted(), id: \.self) { key in
+                            Text("\(key): \(Int(task.timings[key] ?? 0)) ms")
+                        }
                     }
                     ForEach(Array(controller.decisions.enumerated()), id: \.offset) { _, decision in
                         Text("\(decision.action.rawValue): \(Int(decision.confidence * 100))% confidence")

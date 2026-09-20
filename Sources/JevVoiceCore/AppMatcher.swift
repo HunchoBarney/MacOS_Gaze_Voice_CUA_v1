@@ -33,7 +33,10 @@ public enum AppMatcher {
         let requested = tokens(String(text[nameRange]).lowercased())
         guard !requested.isEmpty else { return nil }
         let apps = Array(Set(installedApps))
-        let exact = apps.filter { tokens($0.lowercased()) == requested }
+        // Speech can split a compound name (TextEdit → text edit). Compare
+        // complete names without word boundaries, but still reject collisions.
+        let compact = requested.joined()
+        let exact = apps.filter { tokens($0.lowercased()).joined() == compact }
         let candidates = exact.isEmpty ? apps.filter {
             let words = tokens($0.lowercased())
             return words.count >= requested.count && Array(words.suffix(requested.count)) == requested

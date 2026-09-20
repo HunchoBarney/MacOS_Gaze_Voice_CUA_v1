@@ -40,7 +40,7 @@ public final class CommandInterpreter {
         // A clause shortcut must not strip conditions from the rest of the request.
         // Only bypass interpretation when the complete composition is locally understood.
         let allowLocalNavigation = clauses.allSatisfy {
-            AppMatcher.explicitNavigation(clause: $0, installedApps: installedApps) != nil
+            LocalCommandParser.parse($0, installedApps: installedApps, context: frontmostApp) != nil
                 || SlotExtractor.literalDictationSuffix(from: $0) != nil
         }
         return try await withThrowingTaskGroup(of: (Int, InterpretedClause).self) { group in
@@ -83,12 +83,10 @@ public final class CommandInterpreter {
             ))
         }
 
-        if allowLocalNavigation, let navigation = AppMatcher.explicitNavigation(clause: clause, installedApps: installedApps) {
-            return InterpretedClause(decision: Decision(
-                clause: clause, action: navigation.action,
-                actionProbabilities: [navigation.action.rawValue: 1], targetApp: navigation.app,
-                confidence: 1, model: "local-app-navigation"
-            ))
+        if allowLocalNavigation, let local = LocalCommandParser.parse(clause, installedApps: installedApps, context: frontmostApp) {
+            let explicitlyNamed = LocalCommandParser.parse(clause, installedApps: installedApps, context: nil)?.targetApp != nil
+            return InterpretedClause(decision: local,
+                context: explicitlyNamed || local.model == "local-app-navigation" ? .independent : index > 0 ? .previous : .frontmost)
         }
 
         var appCriteria: [String: String?] = ["none": "No application mentioned"]

@@ -3,6 +3,27 @@ import XCTest
 @testable import JevVoiceCore
 
 final class CommandInterpreterTests: XCTestCase {
+    func testFiniteNativeChainKeepsContextWithoutNetwork() async throws {
+        let (interpreter, session) = makeInterpreter(response: "reject", installedApps: ["TextEdit", "Spotify", "Google Chrome"])
+        defer { session.invalidateAndCancel() }
+        let plan = try await interpreter.interpret(transcript: "open TextEdit and create a new document and type hello and quit Spotify", frontmostApp: "Finder")
+        XCTAssertEqual(plan.map(\.action), [.openApp, .createDocument, .dictate])
+        XCTAssertEqual(plan.map(\.targetApp), ["TextEdit", "TextEdit", "TextEdit"])
+        XCTAssertEqual(plan.last?.text, "hello and quit Spotify")
+        let windows = try await interpreter.interpret(transcript: "open Spotify then minimize it then bring it back", frontmostApp: "Finder")
+        XCTAssertEqual(windows.map(\.action), [.openApp, .minimizeApp, .switchApp])
+        XCTAssertEqual(windows.map(\.targetApp), ["Spotify", "Spotify", "Spotify"])
+    }
+
+    func testExplicitShortBrowserNameOverridesPriorContext() async throws {
+        let (interpreter, session) = makeInterpreter(response: "reject", installedApps: ["TextEdit", "Google Chrome"])
+        defer { session.invalidateAndCancel() }
+        for text in ["go back in Chrome", "open TextEdit then go back in Chrome", "open TextEdit then minimize Chrome"] {
+            let result = try await interpreter.interpret(transcript: text, frontmostApp: "TextEdit")
+            XCTAssertEqual(result.last?.targetApp, "Google Chrome")
+        }
+    }
+
     func testExplicitAppNavigationWorksOfflineWithoutModelConfidenceGate() async throws {
         let (interpreter, session) = makeInterpreter(response: "reject", installedApps: ["Messages", "Calculator", "Google Chrome"])
         defer { session.invalidateAndCancel() }

@@ -61,6 +61,8 @@ enum Executor {
             return try await dictate(text)
         case .system:
             return try await runSystemAsync(decision.systemAction ?? .none, percent: decision.percent)
+        case .createDocument, .scrollDown, .scrollUp, .browserBack:
+            throw ExecutorError.controlFailed("This action requires an active native target session")
         case .none:
             return "No action"
         }

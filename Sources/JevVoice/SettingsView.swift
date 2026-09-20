@@ -18,12 +18,14 @@ final class SettingsNavigation: ObservableObject {
 }
 
 struct SettingsView: View {
+    @ObservedObject private var speechAssets = SpeechAssets.shared
     @ObservedObject var controller: VoiceController
     @ObservedObject var config: Config
     @ObservedObject var microphones: MicrophoneCatalog
     @ObservedObject var input: FnInputMonitor
     @ObservedObject var navigation: SettingsNavigation
     var collapse: () -> Void
+    @StateObject private var cuaSetup = CuaSetup()
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = false
 
@@ -80,17 +82,25 @@ struct SettingsView: View {
                 }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
               }.background(Color(nsColor: .windowBackgroundColor))
                 .onAppear { proxy.scrollTo("settingsTop", anchor: .top) }
-                .onChange(of: navigation.section) { _ in proxy.scrollTo("settingsTop", anchor: .top) }
+                .onChange(of: navigation.section) { proxy.scrollTo("settingsTop", anchor: .top) }
             }
         }
         .frame(minWidth: 740, minHeight: 520)
         .tint(.accentColor)
         .onAppear { apiKeyDraft = config.apiKey }
-        .onChange(of: apiKeyDraft) { _ in apiKeySaved = false }
+        .onChange(of: apiKeyDraft) { apiKeySaved = false }
     }
 
     private var voiceSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("On-device speech", systemImage: "waveform").font(.headline)
+                    Text(speechAssets.message).font(.callout)
+                    Button("Prepare speech") { Task { await speechAssets.refresh(install: true) } }
+                        .disabled(speechAssets.preparing || speechAssets.ready)
+                }.task { await speechAssets.refresh() }
+            }
             VoiceCard {
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Push to talk", systemImage: "keyboard").font(.headline)
@@ -166,6 +176,7 @@ struct SettingsView: View {
 
     private var commandSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
+            TextProviderCard()
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Jev connection", systemImage: "bolt").font(.headline)
@@ -181,10 +192,23 @@ struct SettingsView: View {
                 }
             }
             VoiceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Cua computer control", systemImage: "cursorarrow.motionlines").font(.headline)
+                    Text(cuaSetup.message).font(.caption).foregroundStyle(.secondary)
+                    Text("This check opens its own disposable TextEdit document and verifies a Jev-selected insertion. Voice migration is still in progress.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Test Cua + Jev") { cuaSetup.verify(apiKey: config.apiKey) }.disabled(cuaSetup.busy)
+                        Button("Test browser") { cuaSetup.verify(apiKey: config.apiKey, browser: true) }.disabled(cuaSetup.busy)
+                        if cuaSetup.busy { ProgressView().controlSize(.small); Button("Cancel") { cuaSetup.cancel() } }
+                    }
+                }
+            }
+            VoiceCard {
                 VStack(alignment: .leading, spacing: 16) {
                     Label("Command confirmation", systemImage: "checkmark.shield").font(.headline)
                     Toggle("Run commands automatically", isOn: $config.autoExecute)
-                    Text("Commands run when you release Fn. Turn this off only if you want to review every command before it runs.")
+                    Text("Completed commands can run while you hold Fn. Release to finish remaining speech and dictated text. Turn this off to review commands before they run.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("Model confidence is available in Activity diagnostics. It does not interrupt ordinary commands. Deletion and purchasing are not supported by this app.")
                         .font(.caption).foregroundStyle(.secondary)

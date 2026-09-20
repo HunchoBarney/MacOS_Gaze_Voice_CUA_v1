@@ -1,8 +1,11 @@
 import AVFoundation
 import Speech
+import JevVoiceCore
 
 enum SpeechEvent {
     case partial(String), final(String), failure(String), level(Float)
+    case revision(SpeechRevision, transcript: String)
+    case timing(String, milliseconds: Double)
 }
 
 @MainActor
@@ -39,6 +42,7 @@ final class SpeechRecognizer: SpeechCapturing {
     private var meterTimer: Timer?
     private var configurationObserver: NSObjectProtocol?
     private var tapInstalled = false
+    private var transcript = SpeechTranscriptAccumulator()
 
     static func requestAuthorization() async -> Bool {
         if !Permission.microphone.isGranted { await Permission.microphone.request() }
@@ -56,6 +60,7 @@ final class SpeechRecognizer: SpeechCapturing {
         let engine = AVAudioEngine()
         self.engine = engine
         sessionID = session
+        transcript = SpeechTranscriptAccumulator()
         do {
             let request: SFSpeechAudioBufferRecognitionRequest?
             if transcribe {
@@ -83,8 +88,8 @@ final class SpeechRecognizer: SpeechCapturing {
                     Task { @MainActor in
                         guard let self, self.sessionID == session else { return }
                         if let result {
-                            self.onEvent?(session, result.isFinal ? .final(result.bestTranscription.formattedString)
-                                          : .partial(result.bestTranscription.formattedString))
+                            let text = Self.accumulate(result, into: &self.transcript)
+                            self.onEvent?(session, result.isFinal ? .final(text) : .partial(text))
                         } else if let error {
                             self.onEvent?(session, .failure(error.localizedDescription))
                         }
@@ -138,6 +143,15 @@ final class SpeechRecognizer: SpeechCapturing {
         configurationObserver = nil
         engine?.stop()
         if tapInstalled { engine?.inputNode.removeTap(onBus: 0); tapInstalled = false }
+    }
+
+    static func accumulate(_ result: SFSpeechRecognitionResult, into transcript: inout SpeechTranscriptAccumulator) -> String {
+        let parts = result.bestTranscription.segments
+        let timed = result.speechRecognitionMetadata != nil
+        return transcript.update(result.bestTranscription.formattedString,
+            start: timed ? parts.first?.timestamp : nil,
+            end: timed ? parts.last.map { $0.timestamp + $0.duration } : nil,
+            final: result.isFinal)
     }
 
     static func makeRecognitionRequest(supportsOnDeviceRecognition: Bool) throws -> SFSpeechAudioBufferRecognitionRequest {

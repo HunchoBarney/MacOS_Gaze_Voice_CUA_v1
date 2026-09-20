@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "JevVoice",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS("26.0")],
     targets: [
         .target(
             name: "JevVoiceCore",

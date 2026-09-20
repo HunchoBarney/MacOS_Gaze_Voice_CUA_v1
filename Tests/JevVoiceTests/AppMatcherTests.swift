@@ -15,6 +15,15 @@ final class AppMatcherTests: XCTestCase {
         XCTAssertNil(AppMatcher.explicitNavigation(clause: "open Notes", installedApps: []))
     }
 
+    func testSpokenSpacingMatchesOnlyAnUnambiguousWholeAppName() {
+        let apps = ["TextEdit", "FaceTime", "Google Chrome", "Notes"]
+        XCTAssertEqual(AppMatcher.explicitNavigation(clause: "open text edit", installedApps: apps)?.app, "TextEdit")
+        XCTAssertEqual(AppMatcher.explicitNavigation(clause: "launch face time", installedApps: apps)?.app, "FaceTime")
+        XCTAssertNil(AppMatcher.explicitNavigation(clause: "open text edit later", installedApps: apps))
+        XCTAssertNil(AppMatcher.explicitNavigation(clause: "open note", installedApps: apps))
+        XCTAssertNil(AppMatcher.explicitNavigation(clause: "open text edit", installedApps: ["TextEdit", "Text Edit"]))
+    }
+
     func testPartialName() {
         XCTAssertEqual(AppMatcher.match(clause: "close chrome", installedApps: apps),
                        .init(app: "Google Chrome", confidence: 0.8))

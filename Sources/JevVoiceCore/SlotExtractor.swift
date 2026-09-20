@@ -58,9 +58,10 @@ public enum SlotExtractor {
     /// Shared boundary for literal text. A recognized prefix owns the entire suffix,
     /// including command-like words, quotes, and conjunctions. Empty suffixes still
     /// identify a dictation clause so they cannot fall through to model interpretation.
+    static let literalPrefixPattern = #"(?:please(?:\s+|,\s*))?(?:(?:(?:can|could|would|will)\s+you|I\s+(?:want|would\s+like)\s+you\s+to|I['’]d\s+like\s+you\s+to)\s+(?:please(?:\s+|,\s*))?)?(?:type|write|dictate|say)\b"#
+
     static func literalDictationSuffix(from clause: String) -> String? {
-        let pattern = #"^\s*(?:please(?:\s+|,\s*))?(?:(?:(?:can|could|would|will)\s+you|I\s+(?:want|would\s+like)\s+you\s+to|I['’]d\s+like\s+you\s+to)\s+(?:please(?:\s+|,\s*))?)?(?:type|write|dictate|say)\b"#
-        guard let range = clause.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else {
+        guard let range = clause.range(of: #"^\s*"# + literalPrefixPattern, options: [.regularExpression, .caseInsensitive]) else {
             return nil
         }
         let text = clause[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)

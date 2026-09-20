@@ -2,6 +2,7 @@ import Foundation
 
 public enum Action: String, CaseIterable, Codable {
     case openApp, closeApp, switchApp, minimizeApp, hideApp, openURL, webSearch, dictate, system, none
+    case createDocument, scrollDown, scrollUp, browserBack
 
     public static let appTargeted: Set<Action> = [.openApp, .closeApp, .switchApp, .minimizeApp, .hideApp]
 
@@ -16,6 +17,10 @@ public enum Action: String, CaseIterable, Codable {
         case .webSearch: return "Search the web for a query"
         case .dictate: return "Type or write text at the cursor"
         case .system: return "A system-level action not aimed at one app (volume, lock, sleep, screenshot, brightness, show desktop)"
+        case .createDocument: return "Create a new empty text document in TextEdit"
+        case .scrollDown: return "Scroll down a small amount in the current browser page"
+        case .scrollUp: return "Scroll up a small amount in the current browser page"
+        case .browserBack: return "Navigate back in the browser history"
         case .none: return "No actionable command"
         }
     }

@@ -6,7 +6,7 @@ public enum ClauseSplitter {
         "google", "set", "turn", "mute", "unmute", "lock", "sleep", "take",
         "switch", "show", "hide", "play", "pause", "next", "previous",
         "minimize", "minimise", "shrink", "focus", "activate", "bring", "run",
-        "start", "exit", "kill", "terminate", "shut",
+        "start", "exit", "kill", "terminate", "shut", "create", "make", "scroll", "restore",
     ]
 
     public static func split(_ transcript: String) -> [String] {
@@ -14,7 +14,7 @@ public enum ClauseSplitter {
         if SlotExtractor.literalDictationSuffix(from: transcript) != nil {
             return [trimmedTranscript]
         }
-        let pattern = #"\b(and then|and also|then|and)\b"#
+        let pattern = #"\b(and then|and also|then|and)\b|[.!?;]\s+|\n+"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
             return [trimmedTranscript]
         }
@@ -35,7 +35,8 @@ public enum ClauseSplitter {
                   !quotes.contains(where: { $0.contains(resume) }) else { continue }
             let suffix = String(transcript[resume...])
             let startsDictation = SlotExtractor.literalDictationSuffix(from: suffix) != nil
-            let nextWord = suffix.prefix { $0.isLetter || $0.isNumber }.lowercased()
+            let commandSuffix = suffix.replacingOccurrences(of: #"^(?:(?:can|could|would|will) you\s+)?(?:please\s+)?"#, with: "", options: [.regularExpression, .caseInsensitive])
+            let nextWord = commandSuffix.prefix { $0.isLetter || $0.isNumber }.lowercased()
             guard startsDictation || commandVerbs.contains(nextWord) else { continue }
 
             let piece = transcript[last..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -47,10 +48,12 @@ public enum ClauseSplitter {
         }
         let tail = transcript[last...].trimmingCharacters(in: .whitespacesAndNewlines)
         if !tail.isEmpty { parts.append(tail) }
-        return parts.isEmpty ? [trimmedTranscript] : parts
+        return (parts.isEmpty ? [trimmedTranscript] : parts).map {
+            SlotExtractor.literalDictationSuffix(from: $0) != nil ? $0 : $0.replacingOccurrences(of: "\n", with: " ")
+        }
     }
 
-    private static func quotedRanges(in text: String) -> [Range<String.Index>] {
+    static func quotedRanges(in text: String) -> [Range<String.Index>] {
         var ranges: [Range<String.Index>] = []
         var opening: String.Index?
         var closingQuote: Character?

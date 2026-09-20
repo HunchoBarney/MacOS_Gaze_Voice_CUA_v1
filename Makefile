@@ -14,6 +14,8 @@ app: build
 	cp Info.plist "$(APP)/Contents/Info.plist"
 	mkdir -p "$(APP)/Contents/Resources/ThirdParty/FluidVoice"
 	cp ThirdParty/FluidVoice/LICENSE ThirdParty/FluidVoice/NOTICE.md "$(APP)/Contents/Resources/ThirdParty/FluidVoice/"
+	# Finder metadata on a generated bundle prevents signing; retain security attributes.
+	xattr -dr com.apple.FinderInfo "$(APP)" 2>/dev/null || true
 	codesign --force --deep --sign - "$(APP)"
 
 run: app

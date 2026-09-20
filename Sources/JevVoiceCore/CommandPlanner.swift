@@ -109,12 +109,12 @@ enum CommandPlanner {
                 guard let url = step.url, URL(string: url)?.host != nil else { throw PlanningError.missingArgument("website address") }
             case .webSearch:
                 guard let query = step.query, !query.isEmpty else { throw PlanningError.missingArgument("search terms") }
-            case .openApp, .closeApp, .switchApp, .minimizeApp, .hideApp:
+            case .openApp, .closeApp, .switchApp, .minimizeApp, .hideApp, .createDocument, .scrollDown, .scrollUp, .browserBack:
                 guard step.targetApp != nil else { throw PlanningError.missingArgument("target app") }
             default: break
             }
             plan.append(step)
-            if [.openApp, .switchApp, .openURL, .webSearch].contains(step.action) {
+            if [.openApp, .switchApp, .openURL, .webSearch, .createDocument].contains(step.action) {
                 target = step
             } else if step.action == .closeApp && step.targetApp == target?.targetApp {
                 target = nil

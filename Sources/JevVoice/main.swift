@@ -31,9 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         input.onAction = { [weak self] action in
             guard let self else { return }
             switch action {
-            case .begin: self.controller.begin()
+            case .begin: self.controller.begin(inputHandlingMs: self.input.beginHandlingMs)
             case .finish: self.controller.finish()
             case .cancel: self.controller.cancel()
+            case .cancelCapture: self.controller.cancelCaptureAttempt()
             case .none: break
             }
         }
@@ -42,12 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: name)
                 .receive(on: RunLoop.main)
-                .sink { [weak self] _ in self?.controller.cancel() }.store(in: &subscriptions)
+                .sink { [weak self] _ in self?.controller.interruptCapture("Recording stopped because the session became inactive.") }.store(in: &subscriptions)
         }
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.input.refresh(); self?.microphones.refresh() }.store(in: &subscriptions)
         controller.refreshPermissions()
+        Task { await SpeechAssets.shared.refresh() }
         if ProcessInfo.processInfo.arguments.contains("--settings") {
             windows.show(.voice)
         } else if !controller.missingPermissions.isEmpty || !input.ready {
@@ -99,6 +101,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
+#if SPEECH_FIXTURE_PROBE
+if let index = CommandLine.arguments.firstIndex(of: "--voice-workflow-fixture"), CommandLine.arguments.count > index + 2 {
+    let fixture = MainActor.assumeIsolated {
+        SpeechFixtureWindow(input: URL(fileURLWithPath: CommandLine.arguments[index + 1]),
+            output: URL(fileURLWithPath: CommandLine.arguments[index + 2]))
+    }
+    withExtendedLifetime(fixture) { app.run() }
+    exit(0)
+}
+if let index = CommandLine.arguments.firstIndex(of: "--speech-fixture"), CommandLine.arguments.count > index + 2 {
+    Task { @MainActor in
+        await SpeechFixtureProbe.run(input: URL(fileURLWithPath: CommandLine.arguments[index + 1]),
+            output: URL(fileURLWithPath: CommandLine.arguments[index + 2]))
+        NSApp.terminate(nil)
+    }
+    app.run()
+    exit(0)
+}
+#endif
 let delegate = MainActor.assumeIsolated { AppDelegate() }
 app.delegate = delegate
 app.run()
