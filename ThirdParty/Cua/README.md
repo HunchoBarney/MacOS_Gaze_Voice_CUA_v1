@@ -50,6 +50,9 @@ requires separate integration validation and an intentional pin update.
 
 ## Models and local state
 
+The current source snapshot, pinned Driver and perception bundle are also shared
+as private release assets. See [collaborator handoff](../../docs/HANDOFF.md).
+
 The source patch preserves local artifact tooling/lock metadata. Large downloaded
 model/runtime assets, export environments and sealed perception bundles remain in
 `development/JevVoice/`, where present. They are not part of this Git repository.

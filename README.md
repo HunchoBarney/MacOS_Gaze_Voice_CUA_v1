@@ -47,6 +47,8 @@ boundaries in [architecture](docs/ARCHITECTURE.md).
 
 ## Find your way
 
+- [Collaborator handoff](docs/HANDOFF.md): the current source and downloadable runtime/model packages.
+
 - [Architecture and source map](docs/ARCHITECTURE.md): responsibilities and ownership.
 - [Development and verification](docs/DEVELOPMENT.md): Conductor, tests, packaging, runtime prerequisites.
 - [Behavior specification](docs/voice-ui/SPEC.md): active S1–S9 requirements.
