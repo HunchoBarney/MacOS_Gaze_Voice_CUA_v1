@@ -1,0 +1,2 @@
+# Unified-diff context lines are data; preserve the recovery patch byte-for-byte.
+ThirdParty/Cua/local-integration.patch -whitespace

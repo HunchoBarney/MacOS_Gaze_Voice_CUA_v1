@@ -1,193 +1,62 @@
-# Jev Voice
+# Jarvis / Jev Voice
 
-This local build adds FluidVoice-style settings and a floating capsule, **Fn/Globe
-hold-to-talk**, and app-specific microphone selection. Implementation and verification
-evidence live in the [voice UI plan](docs/voice-ui/PLAN.md).
+A macOS menu-bar computer-control app with a floating voice capsule, Fn/Globe
+hold-to-talk, Apple SpeechAnalyzer, Cua Driver, Jev decisions, and optional text
+generation. The application bundle is still named **Jev Voice.app**.
 
-A macOS menu-bar app that turns spoken commands into actions using
-[TypeSafe AI's Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
-— a System One model that returns *typed decisions with probabilities* instead of
-generated text.
+**Status:** the Cua migration is incomplete. The current production path uses
+SpeechAnalyzer and Cua; passing logic tests does not establish reliable continuous
+speech, live dictation, or concurrent control across all apps. See the
+[current gates](docs/voice-ui/PLAN.md) and [recorded evidence](docs/voice-ui/EVIDENCE.md).
 
-Hold **Fn/Globe**, speak, then release to finish. Jev interprets the complete transcript:
+## Start developing
 
-- "open chrome and go to google.com"
-- "quit spotify"
-- "type hello world"
-- "set volume to 30"
-- "search for swift concurrency"
-
-Speech is transcribed **on-device** (SFSpeechRecognizer). Recording is unavailable
-if the current recognizer cannot process audio locally. Jev receives the transcript
-and app context described below.
-
-## How it works
-
-```
-microphone ──> SFSpeechRecognizer (on-device) ──> transcript
-                                                      │
-                                          ClauseSplitter (multi-verb clauses)
-                                                      │
-                              POST /v1/systemone  ──> Jev (typed answers)
-                                per clause: action?   target_app?
-                                            system_action? target_context?
-                                            search_site?
-                                                      │
-                                 Typed decisions + validated command plan
-                                                      │
-                              Executor (NSWorkspace / CGEvent / osascript / pmset)
-```
-
-Explicit `type`, `write`, `dictate`, and `say` clauses are handled locally as literal
-dictation. Everything after that prefix stays text, including phrases such as
-“and quit Safari.” Say a new command in a separate recording after dictation.
-Commands before dictation still work: “open Notes and type hello and quit Safari”
-opens Notes and types “hello and quit Safari.”
-Polite forms such as “please type…” and “I want you to type…” also work. If Jev
-interprets other wording as dictation without a safe text boundary, the app asks
-you to start with one of the explicit dictation prefixes.
-
-Jev never produces free text — each other clause is one `systemOne` call with a state
-payload (`clause`, ordered `clauses`, `clause_index`, `full_transcript`,
-`frontmost_app`, `installed_apps`) and five
-questions:
-
-| question | type | shape |
-|---|---|---|
-| `action` | choice | one of `openApp`, `closeApp`, `openURL`, `webSearch`, `dictate`, `system`, `none` |
-| `target_app` | choice | installed app names (≤254) + `none` |
-| `system_action` | choice | `volumeSet`, `mute`, `lockScreen`, `screenshot`, … |
-| `target_context` | choice | independent target, continuation, explicitly separate continuation, or original frontmost app |
-| `search_site` | choice | explicitly named supported search website, unsupported destination, or none |
-
-Clause requests run in parallel. Each sees the ordered request, and the planner
-resolves references after all results arrive, before executing anything:
-
-- "open Google and search for the weather in Yuba City" becomes one search navigation.
-- "open Safari and go to example.com" navigates directly in Safari, launching it if needed.
-- "open YouTube and search for cats" searches YouTube; DuckDuckGo is also supported.
-- "open Notes and minimize it" targets Notes, not the app that was active when recording began.
-- "open Notes and type hello" retains both steps and focuses Notes before pasting.
-
-The planner preserves an explicit request for separate tabs. It combines an
-opening step only when the destination action already performs that opening.
-Missing arguments and unsupported in-app searches stop the plan before any steps
-run. These relationships currently apply within a single recorded utterance;
-the app does not inspect arbitrary UI controls or track browser-page context
-between recordings. Search URLs are declared capabilities, not model-generated URLs.
-
-Arguments (URLs, queries, dictation text, percentages) can't come from Jev —
-it's decision-only — so they're extracted deterministically by `SlotExtractor`
-heuristics.
-
-Ordinary commands run automatically after Fn release; model confidence is diagnostic,
-not a reason to show **Run**. Explicit app navigation (for example “open Messages” or
-“switch to Chrome”) resolves locally when the installed app is unambiguous, avoiding
-a Jev request. If you explicitly turn off **Run commands automatically**, the pill
-shows one **Run** control for the whole plan. Deletion and purchasing are unsupported.
-
-## Upstream Homebrew installation
-
-The upstream release does not include this checkout’s local UI changes. Build from
-this checkout to use the Fn/capsule version.
-
-This repository doubles as a Homebrew tap (see `Casks/jev-voice.rb`):
+Requires macOS 26+, Xcode with the macOS 26 SDK, and command-line tools selected
+with `xcode-select`. The Swift package has no external package dependencies.
 
 ```sh
-brew tap chris-wozniczek/jev-voice https://github.com/chris-wozniczek/jev-voice-control
-brew install --cask jev-voice
+make setup       # check the local toolchain; no credentials or downloads
+make test        # default suite; live checks are normally skipped
+make app         # release build → build/Jev Voice.app, ad-hoc signed
+make run         # build and open that bundle (quit other Jev Voice copies first)
+make dist        # package the bundle as a zip
 ```
 
-Homebrew 7+ refuses untrusted third-party taps; if prompted, run
-`brew trust chris-wozniczek/jev-voice` first.
+Building the app does **not** install its runtime dependencies. Computer control
+requires the exact pinned Cua Driver Local and configured perception extension;
+stock Cua is not an interchangeable replacement. See [Cua integration](ThirdParty/Cua/README.md).
 
-Releases are produced by `.github/workflows/release.yml`: bump
-`CFBundleShortVersionString` in `Info.plist`, push a matching `vX.Y.Z` tag, and
-the workflow builds `Jev-Voice-X.Y.Z.zip`, publishes a GitHub release, and
-commits the new version/sha256 into the cask.
+## Use the app
 
-## Build from source
+Open the waveform menu-bar menu → Settings. Configure the Jev key in Commands,
+choose the microphone in Voice, and follow macOS permission prompts. Optional
+text generation has a separate provider/key configuration. Saved keys remain in
+Keychain; do not put them in repository files.
 
-```sh
-make app    # builds build/Jev Voice.app (ad-hoc signed)
-make run    # launches it
-make test   # logic and app-boundary tests; no live microphone/model/desktop actions
-make dist   # zips the app into build/Jev-Voice-<version>.zip and prints its sha256
-```
+Hold Fn/Globe, wait for Listening, speak, and release to finalize. The controller
+can dispatch completed commands during a hold; reliable behavior across the full
+acceptance matrix remains unfinished. Escape cancels the voice interaction;
+task Stop and Stop All controls handle task cancellation. Expand the capsule for
+Activity and diagnostics. Set the macOS Globe-key action to Do Nothing if it
+opens emoji or system Dictation instead.
 
-If a synced checkout adds Finder metadata that prevents code signing, build the
-app outside that folder:
+Speech processing is on-device. Jev and an enabled text provider receive context
+selected by their integrations, which can include speech and observed application
+content. Do not assume only app names leave the device. See the current model
+boundaries in [architecture](docs/ARCHITECTURE.md).
 
-```sh
-make app APP="$HOME/Library/Caches/JevVoice/build/Jev Voice.app"
-```
+## Find your way
 
-Then open the waveform menu-bar icon → **Settings → Commands**, enter your API key, and click **Save**.
-It is stored in the macOS Keychain. Existing keys in app preferences migrate to
-Keychain, and the old preference is removed only after storage succeeds. Settings
-shows any storage or migration error. Clearing the field and saving deletes the
-stored key.
+- [Architecture and source map](docs/ARCHITECTURE.md): responsibilities and ownership.
+- [Development and verification](docs/DEVELOPMENT.md): Conductor, tests, packaging, runtime prerequisites.
+- [Behavior specification](docs/voice-ui/SPEC.md): active S1–S9 requirements.
+- [Migration plan](docs/voice-ui/PLAN.md): active P0–P5 gates and A1–A13 acceptance matrix.
+- [Migration execution instructions](docs/voice-ui/EXECUTION.md): use only when implementing that migration.
+- [Local storage](docs/LOCAL-DEVELOPMENT-STORAGE.md): ignored supporting files and compatibility paths.
+- [Cleanup record](docs/CLEANUP.md): changes, verification and recovery.
 
-You can also supply `TYPESAFE_API_KEY` in the app's launch environment. This fallback
-is not saved automatically. Removing a saved key does not remove an environment
-variable configured outside the app.
-
-### Permissions
-
-- **Microphone** — hear commands
-- **Speech Recognition** — transcribe on-device; unsupported recognition fails closed
-- **Accessibility** — required for the global Fn shortcut and app control/dictation
-- **Automation** — required for `osascript` volume/brightness/lock actions
-
-## Using this build
-
-1. Open **Settings → Voice** from the waveform menu-bar icon. Grant Microphone,
-   Speech Recognition, and Accessibility when requested. After an ad-hoc rebuild,
-   macOS may require removing the stale Accessibility entry and adding the current
-   app at `~/Library/Caches/JevVoice/build/Jev Voice.app`. The app does not reset
-   permissions or modify security settings.
-2. Choose **System Default** or a specific microphone. **Test microphone** shows a
-   live level without recognizing speech or calling Jev. Device changes apply to
-   the next recording and never change the Mac's system default.
-3. Hold **Fn/Globe**, wait for **Listening**, speak, and release. If Globe opens
-   emoji or Dictation, use **Keyboard settings** to set “Press 🌐 key to” to
-   **Do Nothing**. Other Fn key combinations cancel the voice attempt.
-4. **Escape** cancels recording or a pending command; **Stop** prevents later
-   actions while dispatched effects and clipboard cleanup may finish. No commands
-   are queued while busy.
-5. Incomplete or interrupted speech requires **Review transcript → Continue**.
-   Continue submits the reviewed text; unfinished speech never runs automatically. A recording
-   warns at 50 seconds and stops at 55 seconds. Ordinary silence runs nothing.
-6. **Activity** contains the current transcript, recent decisions, and optional timing
-   diagnostics. No transcript or recording history is written to disk.
-
-The capsule does not take keyboard focus. Its **Expand** button opens Activity/settings;
-**Collapse** returns to the capsule. Normal startup keeps the full window hidden,
-including when a setup hint is needed. The menu also opens Settings or Activity. Keep the intended target app active when starting dictation.
-
-## Limitations
-
-- Jev is text-only and never generates strings, so URLs/queries/dictation come
-  from heuristics over the transcript, not from the model.
-- System actions are AppleScript/`pmset` based; brightness key codes may vary
-  on some hardware.
-- Lock requests macOS's [Control–Command–Q shortcut](https://support.apple.com/en-my/102650), rather than sleeping the
-  display. The request can fail if Automation/Accessibility access is unavailable;
-  it does not independently verify that macOS has locked the session.
-- Dictation uses the clipboard and waits 0.5 seconds for the target to handle paste
-  before restoring it. This does not verify insertion in every app. Overlapping
-  paste requests are rejected; user clipboard changes are preserved.
-- Searching inside native apps such as Notes is not implemented. Such a plan
-  reports that limitation instead of sending the query to a web search engine.
-- App launching scans `/Applications`, `/System/Applications`, Utilities, and
-  `~/Applications`.
-
-## Privacy
-
-- Speech recognition requires on-device support and sets `requiresOnDeviceRecognition`.
-- Only the transcript, frontmost app name, and installed app list are sent to
-  `api.typesafe.ai`. A mixed command includes the full transcript, including any
-  dictated text, in the context sent for its non-dictation clauses.
-- Saved API keys live in macOS Keychain. If migration fails, the existing preference
-  remains available for retry and Settings displays an error; new saves never fall
-  back to plaintext preferences.
+This project originated from [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).
+FluidVoice attribution is in [ThirdParty/FluidVoice](ThirdParty/FluidVoice/NOTICE.md).
+The retained Homebrew cask and release workflow describe the upstream distribution;
+they are not the installation path for this local Cua integration. Publishing or
+retargeting that distribution is outside this cleanup.

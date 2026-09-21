@@ -34,3 +34,10 @@ To reverse this consolidation with all builds/apps stopped: verify the old cache
 path is still the symlink described above, remove only that symlink, and move
 `development/JevVoice` back to `/Users/karanvirkang/Library/Caches/JevVoice`.
 Do not recursively delete either directory.
+
+## Source recovery added during cleanup
+
+The original broken Cua worktree metadata is unchanged. Its local modifications
+are now preserved independently as a patch and 898-file manifest under
+[ThirdParty/Cua](../ThirdParty/Cua/README.md). Large generated outputs and model
+assets remain here; this does not make `development/` disposable.

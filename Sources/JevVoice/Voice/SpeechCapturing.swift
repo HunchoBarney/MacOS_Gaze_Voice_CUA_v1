@@ -14,4 +14,3 @@ protocol SpeechCapturing: AnyObject {
     func finish()
     func cancel()
 }
-

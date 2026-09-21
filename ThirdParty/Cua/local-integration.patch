@@ -1,0 +1,2646 @@
+diff --git a/libs/cua-driver/contract/manifest.json b/libs/cua-driver/contract/manifest.json
+index 09e8c46..cd83714 100644
+--- a/libs/cua-driver/contract/manifest.json
++++ b/libs/cua-driver/contract/manifest.json
+@@ -1590,6 +1590,27 @@
+                     "null"
+                   ]
+                 },
++                "custom_actions": {
++                  "items": {
++                    "properties": {
++                      "name": {
++                        "type": "string"
++                      },
++                      "raw": {
++                        "type": "string"
++                      }
++                    },
++                    "required": [
++                      "name",
++                      "raw"
++                    ],
++                    "type": "object"
++                  },
++                  "type": [
++                    "array",
++                    "null"
++                  ]
++                },
+                 "depth": {
+                   "format": "uint32",
+                   "minimum": 0,
+@@ -1642,6 +1663,12 @@
+                     "null"
+                   ]
+                 },
++                "help": {
++                  "type": [
++                    "string",
++                    "null"
++                  ]
++                },
+                 "in_web_content": {
+                   "type": [
+                     "boolean",
+@@ -2075,7 +2102,7 @@
+     },
+     {
+       "name": "invoke_menu",
+-      "description": "Resolve an exact application-menu path one live native level at a time and invoke its final item through accessibility APIs. Missing, ambiguous, disabled, or structurally mismatched segments fail closed; this tool never falls back to pixels.",
++      "description": "Resolve an exact application-menu path one live native level at a time and invoke its final item through accessibility APIs. A final segment that opens a submenu is never pressed: the reply lists that submenu's items instead, so a caller can extend the path. Missing, ambiguous, disabled, or structurally mismatched segments fail closed and name both the segment that failed and the items available at that level; this tool never falls back to pixels.",
+       "platforms": [
+         "macos",
+         "windows",
+@@ -2598,6 +2625,9 @@
+                     "null"
+                   ]
+                 },
++                "title": {
++                  "type": "string"
++                },
+                 "window_id": {
+                   "format": "uint64",
+                   "minimum": 0,
+diff --git a/libs/cua-driver/python/src/cua_driver/_native_contract.py b/libs/cua-driver/python/src/cua_driver/_native_contract.py
+index 3f2bae0..1abb12d 100644
+--- a/libs/cua-driver/python/src/cua_driver/_native_contract.py
++++ b/libs/cua-driver/python/src/cua_driver/_native_contract.py
+@@ -3001,6 +3001,42 @@ class _UniffiFfiConverterTypeDragInput(_UniffiConverterRustBuffer):
+         _UniffiFfiConverterOptionalTypeClickButton.write(value.button, buf)
+         _UniffiFfiConverterOptionalSequenceString.write(value.modifier, buf)
+ 
++@dataclass
++class ElementCustomAction:
++    def __init__(self, *, name:str, raw:str):
++        self.name = name
++        self.raw = raw
++
++
++
++
++    def __str__(self):
++        return "ElementCustomAction(name={}, raw={})".format(self.name, self.raw)
++    def __eq__(self, other):
++        if self.name != other.name:
++            return False
++        if self.raw != other.raw:
++            return False
++        return True
++
++class _UniffiFfiConverterTypeElementCustomAction(_UniffiConverterRustBuffer):
++    @staticmethod
++    def read(buf):
++        return ElementCustomAction(
++            name=_UniffiFfiConverterString.read(buf),
++            raw=_UniffiFfiConverterString.read(buf),
++        )
++
++    @staticmethod
++    def check_lower(value):
++        _UniffiFfiConverterString.check_lower(value.name)
++        _UniffiFfiConverterString.check_lower(value.raw)
++
++    @staticmethod
++    def write(value, buf):
++        _UniffiFfiConverterString.write(value.name, buf)
++        _UniffiFfiConverterString.write(value.raw, buf)
++
+ @dataclass
+ class ElementFrame:
+     def __init__(self, *, x:float, y:float, w:float, h:float):
+@@ -7345,6 +7381,54 @@ class _UniffiFfiConverterTypeVisualParseError(_UniffiConverterRustBuffer):
+         _UniffiFfiConverterBoolean.write(value.retryable, buf)
+         _UniffiFfiConverterOptionalString.write(value.detail, buf)
+ 
++class _UniffiFfiConverterSequenceTypeElementCustomAction(_UniffiConverterRustBuffer):
++    @classmethod
++    def check_lower(cls, value):
++        for item in value:
++            _UniffiFfiConverterTypeElementCustomAction.check_lower(item)
++
++    @classmethod
++    def write(cls, value, buf):
++        items = len(value)
++        buf.write_i32(items)
++        for item in value:
++            _UniffiFfiConverterTypeElementCustomAction.write(item, buf)
++
++    @classmethod
++    def read(cls, buf):
++        count = buf.read_i32()
++        if count < 0:
++            raise InternalError("Unexpected negative sequence length")
++
++        return [
++            _UniffiFfiConverterTypeElementCustomAction.read(buf) for i in range(count)
++        ]
++
++class _UniffiFfiConverterOptionalSequenceTypeElementCustomAction(_UniffiConverterRustBuffer):
++    @classmethod
++    def check_lower(cls, value):
++        if value is not None:
++            _UniffiFfiConverterSequenceTypeElementCustomAction.check_lower(value)
++
++    @classmethod
++    def write(cls, value, buf):
++        if value is None:
++            buf.write_u8(0)
++            return
++
++        buf.write_u8(1)
++        _UniffiFfiConverterSequenceTypeElementCustomAction.write(value, buf)
++
++    @classmethod
++    def read(cls, buf):
++        flag = buf.read_u8()
++        if flag == 0:
++            return None
++        elif flag == 1:
++            return _UniffiFfiConverterSequenceTypeElementCustomAction.read(buf)
++        else:
++            raise InternalError("Unexpected flag byte for optional type")
++
+ class _UniffiFfiConverterOptionalTypeElementFrame(_UniffiConverterRustBuffer):
+     @classmethod
+     def check_lower(cls, value):
+@@ -7372,18 +7456,21 @@ class _UniffiFfiConverterOptionalTypeElementFrame(_UniffiConverterRustBuffer):
+ 
+ @dataclass
+ class WindowElement:
+-    def __init__(self, *, element_index:int, role:str, depth:int, element_token:typing.Optional[str], label:typing.Optional[str], value:typing.Optional[str], value_description:typing.Optional[str], enabled:typing.Optional[bool], selected:typing.Optional[bool], in_web_content:typing.Optional[bool], actions:typing.Optional[typing.List[str]], parent_index:typing.Optional[int], frame:typing.Optional[ElementFrame], min:typing.Optional[float], max:typing.Optional[float]):
++    def __init__(self, *, element_index:int, role:str, depth:int, element_token:typing.Optional[str], label:typing.Optional[str], description:typing.Optional[str], help:typing.Optional[str], value:typing.Optional[str], value_description:typing.Optional[str], enabled:typing.Optional[bool], selected:typing.Optional[bool], in_web_content:typing.Optional[bool], actions:typing.Optional[typing.List[str]], custom_actions:typing.Optional[typing.List[ElementCustomAction]], parent_index:typing.Optional[int], frame:typing.Optional[ElementFrame], min:typing.Optional[float], max:typing.Optional[float]):
+         self.element_index = element_index
+         self.role = role
+         self.depth = depth
+         self.element_token = element_token
+         self.label = label
++        self.description = description
++        self.help = help
+         self.value = value
+         self.value_description = value_description
+         self.enabled = enabled
+         self.selected = selected
+         self.in_web_content = in_web_content
+         self.actions = actions
++        self.custom_actions = custom_actions
+         self.parent_index = parent_index
+         self.frame = frame
+         self.min = min
+@@ -7393,7 +7480,7 @@ class WindowElement:
+ 
+ 
+     def __str__(self):
+-        return "WindowElement(element_index={}, role={}, depth={}, element_token={}, label={}, value={}, value_description={}, enabled={}, selected={}, in_web_content={}, actions={}, parent_index={}, frame={}, min={}, max={})".format(self.element_index, self.role, self.depth, self.element_token, self.label, self.value, self.value_description, self.enabled, self.selected, self.in_web_content, self.actions, self.parent_index, self.frame, self.min, self.max)
++        return "WindowElement(element_index={}, role={}, depth={}, element_token={}, label={}, description={}, help={}, value={}, value_description={}, enabled={}, selected={}, in_web_content={}, actions={}, custom_actions={}, parent_index={}, frame={}, min={}, max={})".format(self.element_index, self.role, self.depth, self.element_token, self.label, self.description, self.help, self.value, self.value_description, self.enabled, self.selected, self.in_web_content, self.actions, self.custom_actions, self.parent_index, self.frame, self.min, self.max)
+     def __eq__(self, other):
+         if self.element_index != other.element_index:
+             return False
+@@ -7405,6 +7492,10 @@ class WindowElement:
+             return False
+         if self.label != other.label:
+             return False
++        if self.description != other.description:
++            return False
++        if self.help != other.help:
++            return False
+         if self.value != other.value:
+             return False
+         if self.value_description != other.value_description:
+@@ -7417,6 +7508,8 @@ class WindowElement:
+             return False
+         if self.actions != other.actions:
+             return False
++        if self.custom_actions != other.custom_actions:
++            return False
+         if self.parent_index != other.parent_index:
+             return False
+         if self.frame != other.frame:
+@@ -7436,12 +7529,15 @@ class _UniffiFfiConverterTypeWindowElement(_UniffiConverterRustBuffer):
+             depth=_UniffiFfiConverterUInt32.read(buf),
+             element_token=_UniffiFfiConverterOptionalString.read(buf),
+             label=_UniffiFfiConverterOptionalString.read(buf),
++            description=_UniffiFfiConverterOptionalString.read(buf),
++            help=_UniffiFfiConverterOptionalString.read(buf),
+             value=_UniffiFfiConverterOptionalString.read(buf),
+             value_description=_UniffiFfiConverterOptionalString.read(buf),
+             enabled=_UniffiFfiConverterOptionalBoolean.read(buf),
+             selected=_UniffiFfiConverterOptionalBoolean.read(buf),
+             in_web_content=_UniffiFfiConverterOptionalBoolean.read(buf),
+             actions=_UniffiFfiConverterOptionalSequenceString.read(buf),
++            custom_actions=_UniffiFfiConverterOptionalSequenceTypeElementCustomAction.read(buf),
+             parent_index=_UniffiFfiConverterOptionalUInt64.read(buf),
+             frame=_UniffiFfiConverterOptionalTypeElementFrame.read(buf),
+             min=_UniffiFfiConverterOptionalFloat64.read(buf),
+@@ -7455,12 +7551,15 @@ class _UniffiFfiConverterTypeWindowElement(_UniffiConverterRustBuffer):
+         _UniffiFfiConverterUInt32.check_lower(value.depth)
+         _UniffiFfiConverterOptionalString.check_lower(value.element_token)
+         _UniffiFfiConverterOptionalString.check_lower(value.label)
++        _UniffiFfiConverterOptionalString.check_lower(value.description)
++        _UniffiFfiConverterOptionalString.check_lower(value.help)
+         _UniffiFfiConverterOptionalString.check_lower(value.value)
+         _UniffiFfiConverterOptionalString.check_lower(value.value_description)
+         _UniffiFfiConverterOptionalBoolean.check_lower(value.enabled)
+         _UniffiFfiConverterOptionalBoolean.check_lower(value.selected)
+         _UniffiFfiConverterOptionalBoolean.check_lower(value.in_web_content)
+         _UniffiFfiConverterOptionalSequenceString.check_lower(value.actions)
++        _UniffiFfiConverterOptionalSequenceTypeElementCustomAction.check_lower(value.custom_actions)
+         _UniffiFfiConverterOptionalUInt64.check_lower(value.parent_index)
+         _UniffiFfiConverterOptionalTypeElementFrame.check_lower(value.frame)
+         _UniffiFfiConverterOptionalFloat64.check_lower(value.min)
+@@ -7473,12 +7572,15 @@ class _UniffiFfiConverterTypeWindowElement(_UniffiConverterRustBuffer):
+         _UniffiFfiConverterUInt32.write(value.depth, buf)
+         _UniffiFfiConverterOptionalString.write(value.element_token, buf)
+         _UniffiFfiConverterOptionalString.write(value.label, buf)
++        _UniffiFfiConverterOptionalString.write(value.description, buf)
++        _UniffiFfiConverterOptionalString.write(value.help, buf)
+         _UniffiFfiConverterOptionalString.write(value.value, buf)
+         _UniffiFfiConverterOptionalString.write(value.value_description, buf)
+         _UniffiFfiConverterOptionalBoolean.write(value.enabled, buf)
+         _UniffiFfiConverterOptionalBoolean.write(value.selected, buf)
+         _UniffiFfiConverterOptionalBoolean.write(value.in_web_content, buf)
+         _UniffiFfiConverterOptionalSequenceString.write(value.actions, buf)
++        _UniffiFfiConverterOptionalSequenceTypeElementCustomAction.write(value.custom_actions, buf)
+         _UniffiFfiConverterOptionalUInt64.write(value.parent_index, buf)
+         _UniffiFfiConverterOptionalTypeElementFrame.write(value.frame, buf)
+         _UniffiFfiConverterOptionalFloat64.write(value.min, buf)
+@@ -7856,6 +7958,7 @@ __all__ = [
+     "CursorThemeSelection",
+     "CursorVisualOutput",
+     "DragInput",
++    "ElementCustomAction",
+     "ElementFrame",
+     "ElementSelector",
+     "ElementPredicate",
+diff --git a/libs/cua-driver/rust/crates/cua-driver-contract/src/desktop.rs b/libs/cua-driver/rust/crates/cua-driver-contract/src/desktop.rs
+index 1f52857..86b241b 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-contract/src/desktop.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-contract/src/desktop.rs
+@@ -230,7 +230,7 @@ fn set_window_frame() -> ToolContract {
+ fn invoke_menu() -> ToolContract {
+     contract::<InvokeMenuInput, ActionResult>(
+         "invoke_menu",
+-        "Resolve an exact application-menu path one live native level at a time and invoke its final item through accessibility APIs. Missing, ambiguous, disabled, or structurally mismatched segments fail closed; this tool never falls back to pixels.",
++        "Resolve an exact application-menu path one live native level at a time and invoke its final item through accessibility APIs. A final segment that opens a submenu is never pressed: the reply lists that submenu's items instead, so a caller can extend the path. Missing, ambiguous, disabled, or structurally mismatched segments fail closed and name both the segment that failed and the items available at that level; this tool never falls back to pixels.",
+         &["menu.path.invoke", "accessibility.menu.native"],
+         ToolAnnotations {
+             read_only: false,
+diff --git a/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs b/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs
+index 964baf3..22733b8 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs
+@@ -109,6 +109,17 @@ pub fn is_action_result_tool(name: &str) -> bool {
+     ACTION_RESULT_TOOLS.contains(&name)
+ }
+ 
++pub const LISTING_STATUS: &str = "listed";
++
++pub const LISTING_ACTION_TOOLS: &[&str] = &["invoke_menu"];
++
++pub fn is_action_listing_output(name: &str, value: &Value) -> bool {
++    LISTING_ACTION_TOOLS.contains(&name)
++        && value.get("status").and_then(Value::as_str) == Some(LISTING_STATUS)
++        && value.get("resolved_path").is_some_and(Value::is_array)
++        && value.get("items").is_some_and(Value::is_array)
++}
++
+ #[derive(
+     Debug,
+     Clone,
+@@ -318,6 +329,9 @@ pub fn advertises_output_schema(name: &str) -> bool {
+ /// also generates its SDK schema. Returns `Ok(false)` for non-SDK tools.
+ pub fn validate_success_output(name: &str, value: Value) -> Result<bool, String> {
+     if is_action_result_tool(name) {
++        if is_action_listing_output(name, &value) {
++            return Ok(false);
++        }
+         validate_typed_output::<ActionResult>(value)?;
+         return Ok(true);
+     }
+@@ -392,6 +406,34 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn only_a_listing_tool_answering_with_a_listing_escapes_the_action_result_shape() {
++        let listing = serde_json::json!({
++            "status": "listed",
++            "resolved_path": ["Card", "Add Field"],
++            "items": [{"title": "Phone", "has_submenu": false}],
++        });
++
++        assert_eq!(
++            validate_success_output("invoke_menu", listing.clone()),
++            Ok(false)
++        );
++        for name in ACTION_RESULT_TOOLS
++            .iter()
++            .filter(|name| !LISTING_ACTION_TOOLS.contains(name))
++        {
++            assert!(
++                validate_success_output(name, listing.clone()).is_err(),
++                "{name} cannot answer an action with a listing"
++            );
++        }
++        assert!(validate_success_output(
++            "invoke_menu",
++            serde_json::json!({"status": "listed", "items": []})
++        )
++        .is_err());
++    }
++
+     #[test]
+     fn verify_state_is_a_portable_read_only_contract() {
+         let contract = tool_contract("verify_state").expect("verify_state contract");
+diff --git a/libs/cua-driver/rust/crates/cua-driver-contract/src/outputs.rs b/libs/cua-driver/rust/crates/cua-driver-contract/src/outputs.rs
+index 0933fb5..840dce2 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-contract/src/outputs.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-contract/src/outputs.rs
+@@ -131,13 +131,30 @@ pub(crate) fn output_schema_with_additional_properties<T: JsonSchema>(
+     schema
+ }
+ 
++/// Compact generated schemas by removing the JSON Schema annotations `title`
++/// and `description`.
++///
++/// `properties` and `patternProperties` hold property names as keys, not
++/// annotations, so the stripper must recurse into each property schema without
++/// touching the map's keys — a tool may legitimately publish a property named
++/// `title` (list_windows does), and deleting it silently under-describes the
++/// contract.
+ fn strip_schema_titles(value: &mut Value) {
+     match value {
+         Value::Object(object) => {
+             object.remove("title");
+             object.remove("description");
+-            for child in object.values_mut() {
+-                strip_schema_titles(child);
++            for (key, child) in object.iter_mut() {
++                if key == "properties" || key == "patternProperties" {
++                    match child {
++                        Value::Object(properties) => {
++                            properties.values_mut().for_each(strip_schema_titles)
++                        }
++                        other => strip_schema_titles(other),
++                    }
++                } else {
++                    strip_schema_titles(child);
++                }
+             }
+         }
+         Value::Array(values) => values.iter_mut().for_each(strip_schema_titles),
+@@ -691,6 +708,48 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn schema_compaction_keeps_properties_named_title_or_description() {
++        let mut schema = serde_json::json!({
++            "title": "TopLevel",
++            "description": "Top-level annotation",
++            "properties": {
++                "title": { "type": "string", "description": "The window title." },
++                "description": { "type": "string" },
++                "nested": {
++                    "title": "Nested",
++                    "properties": { "title": { "type": "string", "title": "Inner" } }
++                }
++            }
++        });
++
++        strip_schema_titles(&mut schema);
++
++        assert!(schema.get("title").is_none(), "annotation must be stripped");
++        assert!(
++            schema.get("description").is_none(),
++            "annotation must be stripped"
++        );
++        let properties = schema["properties"].as_object().expect("properties map");
++        assert!(
++            properties.contains_key("title"),
++            "property name must survive compaction"
++        );
++        assert!(
++            properties.contains_key("description"),
++            "property name must survive compaction"
++        );
++        assert!(
++            properties["nested"]["properties"]
++                .as_object()
++                .expect("nested properties")
++                .contains_key("title"),
++            "nested property name must survive compaction"
++        );
++        assert!(properties["title"].get("description").is_none());
++        assert!(properties["nested"].get("title").is_none());
++    }
++
+     #[test]
+     fn action_result_schema_is_exact_and_closed() {
+         let schema = ActionResult::output_schema();
+diff --git a/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs b/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs
+index 70394d0..1e58285 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs
+@@ -216,6 +216,10 @@ pub struct WindowElement {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub label: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub description: Option<String>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub help: Option<String>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub value: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub value_description: Option<String>,
+@@ -228,6 +232,8 @@ pub struct WindowElement {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub actions: Option<Vec<String>>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub custom_actions: Option<Vec<ElementCustomAction>>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub parent_index: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub frame: Option<ElementFrame>,
+@@ -237,6 +243,12 @@ pub struct WindowElement {
+     pub max: Option<f64>,
+ }
+ 
++#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
++pub struct ElementCustomAction {
++    pub name: String,
++    pub raw: String,
++}
++
+ #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
+ pub struct SnapshotImage {
+     pub mime_type: String,
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/perception_client.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/perception_client.rs
+index e2b6f7f..8a191de 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/perception_client.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/perception_client.rs
+@@ -2016,6 +2016,129 @@ write_frame({'protocol':'cua-perception/1','request_id':request['request_id'],'s
+         assert!(calls.ends_with("after-cancel\n"));
+     }
+ 
++    #[cfg(target_os = "macos")]
++    #[tokio::test]
++    #[ignore = "requires a verified installed native perception bundle and local fixture PNG"]
++    async fn installed_macos_worker_reuse_idle_and_cancellation() {
++        let root = PathBuf::from(
++            std::env::var("JARVIS_PERCEPTION_ROOT").expect("installed extension root"),
++        );
++        let fixture =
++            PathBuf::from(std::env::var("JARVIS_PERCEPTION_FIXTURE").expect("disposable PNG"));
++        let png = std::fs::read(fixture).unwrap();
++        let (width, height) = crate::image_utils::png_dimensions(&png).unwrap();
++        let mut config = PerceptionWorkerConfig::installed_with_identity(
++            root.join("cua-perception"),
++            "cua-perception",
++            "0.1.1",
++        )
++        .with_bounded_reuse(WarmWorkerPolicy {
++            idle_ttl: Duration::from_millis(500),
++            ..WarmWorkerPolicy::default()
++        });
++        config.args = vec![
++            "--manifest".into(),
++            root.join("model-manifest.json").to_str().unwrap().into(),
++            "--onnx-runtime-library".into(),
++            root.join("runtime/libonnxruntime.dylib")
++                .to_str()
++                .unwrap()
++                .into(),
++            "--extension-id".into(),
++            "cua-perception".into(),
++            "--extension-version".into(),
++            "0.1.1".into(),
++        ];
++        let client = PerceptionClient::new(config).unwrap();
++        let started = Instant::now();
++        let first = client
++            .parse("cold-fixture", width, height, &png, &Default::default())
++            .await
++            .unwrap();
++        assert!(first["regions"]
++            .as_array()
++            .is_some_and(|regions| !regions.is_empty()));
++        println!(
++            "Installed contained worker cold parse ms: {}",
++            started.elapsed().as_millis()
++        );
++        let first_directory = client
++            .state
++            .worker
++            .lock()
++            .await
++            .as_ref()
++            .unwrap()
++            ._working_directory
++            .path()
++            .to_path_buf();
++        let started = Instant::now();
++        let second = client
++            .parse("warm-fixture", width, height, &png, &Default::default())
++            .await
++            .unwrap();
++        println!(
++            "Installed contained worker warm parse ms: {}",
++            started.elapsed().as_millis()
++        );
++        assert_eq!(first["regions"], second["regions"]);
++        assert_eq!(
++            first_directory,
++            client
++                .state
++                .worker
++                .lock()
++                .await
++                .as_ref()
++                .unwrap()
++                ._working_directory
++                .path()
++        );
++        tokio::time::sleep(Duration::from_millis(1000)).await;
++        assert!(
++            client.state.worker.lock().await.is_none(),
++            "idle worker must be retired"
++        );
++        assert!(
++            !first_directory.exists(),
++            "private worker directory must be removed"
++        );
++
++        let restarted = client
++            .parse("restart-fixture", width, height, &png, &Default::default())
++            .await
++            .unwrap();
++        assert_eq!(first["regions"], restarted["regions"]);
++        let restarted_directory = client
++            .state
++            .worker
++            .lock()
++            .await
++            .as_ref()
++            .unwrap()
++            ._working_directory
++            .path()
++            .to_path_buf();
++        assert_ne!(first_directory, restarted_directory);
++        let cancellation = PerceptionCancellation::default();
++        let cancel = cancellation.clone();
++        tokio::spawn(async move {
++            tokio::time::sleep(Duration::from_millis(100)).await;
++            cancel.cancel();
++        });
++        let error = client
++            .parse("cancel-fixture", width, height, &png, &cancellation)
++            .await
++            .unwrap_err();
++        assert_eq!(error.code, VisualParseErrorCode::WorkerCancelled);
++        assert!(
++            client.state.worker.lock().await.is_none(),
++            "cancelled work must not remain reusable"
++        );
++        assert!(!restarted_directory.exists());
++        client.shutdown_now();
++    }
++
+     #[tokio::test]
+     async fn shutdown_now_cancels_inference_and_drops_warm_worker() {
+         let evidence = tempfile::tempdir().unwrap();
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
+index 79c7ded..cc801b0 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
+@@ -1630,7 +1630,7 @@ impl ToolRegistry {
+                 None
+             }
+         });
+-        if result.is_error != Some(true) && crate::action_record::is_action_tool(resolved_name) {
++        if requires_action_projection(resolved_name, &result) {
+             if let Err(error) = publish_action_result(&mut result) {
+                 result = ToolResult::error(format!(
+                     "internal action outcome mismatch for {resolved_name}: {error}; the tool may have executed. Verify state before retrying."
+@@ -2758,6 +2758,17 @@ fn session_selecting_tool(tool_name: &str) -> bool {
+         )
+ }
+ 
++fn requires_action_projection(tool_name: &str, result: &ToolResult) -> bool {
++    result.is_error != Some(true)
++        && crate::action_record::is_action_tool(tool_name)
++        && !result
++            .structured_content
++            .as_ref()
++            .is_some_and(|structured| {
++                cua_driver_contract::is_action_listing_output(tool_name, structured)
++            })
++}
++
+ fn publish_action_result(result: &mut ToolResult) -> Result<(), String> {
+     let action = result
+         .action_record
+@@ -2831,8 +2842,8 @@ fn restore_public_runtime_value(value: &mut Value, runtime_prefix: &str) -> bool
+ mod runtime_isolation_tests {
+     use super::{
+         canonical_proposed_path, desktop_action_coordinator, namespace_runtime_args,
+-        publish_action_result, restore_public_runtime_result, try_admit_text_input,
+-        TrustedInvocationEvidence, DISPATCH_RUNTIME_SCOPE,
++        publish_action_result, requires_action_projection, restore_public_runtime_result,
++        try_admit_text_input, TrustedInvocationEvidence, DISPATCH_RUNTIME_SCOPE,
+     };
+     use crate::{
+         authorization::PermissionMode,
+@@ -4656,6 +4667,37 @@ resources:
+         }));
+     }
+ 
++    #[test]
++    fn a_menu_listing_success_is_not_held_to_an_execution_record() {
++        let listing = serde_json::json!({
++            "status": "listed",
++            "resolved_path": ["Card", "Add Field"],
++            "items": [{"title": "Phone", "has_submenu": false}],
++        });
++        assert!(!requires_action_projection(
++            "invoke_menu",
++            &ToolResult::text("listed").with_structured(listing.clone())
++        ));
++        let mut unprojectable = ToolResult::text("listed").with_structured(listing.clone());
++        assert_eq!(
++            publish_action_result(&mut unprojectable).unwrap_err(),
++            "successful action omitted its internal execution record"
++        );
++        assert!(requires_action_projection(
++            "click",
++            &ToolResult::text("listed").with_structured(listing)
++        ));
++        assert!(requires_action_projection(
++            "invoke_menu",
++            &ToolResult::text("listed")
++                .with_structured(serde_json::json!({"status": "listed", "items": []}))
++        ));
++        assert!(requires_action_projection(
++            "invoke_menu",
++            &ToolResult::text("dispatched the final accessibility action")
++        ));
++    }
++
+     #[tokio::test]
+     async fn element_tokens_are_bound_to_the_dispatch_runtime_generation() {
+         let pid = 8_675_309;
+diff --git a/libs/cua-driver/rust/crates/cua-driver-sdk/src/lib.rs b/libs/cua-driver/rust/crates/cua-driver-sdk/src/lib.rs
+index 0b531e0..0cb2134 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-sdk/src/lib.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-sdk/src/lib.rs
+@@ -1941,7 +1941,9 @@ fn normalize_result(tool: &str, raw: Value) -> Result<ToolResult, DriverError> {
+         .get("isError")
+         .and_then(Value::as_bool)
+         .unwrap_or(false);
+-    let action = if !is_error && cua_driver_core::action_record::is_action_tool(tool) {
++    let listing =
++        structured.is_some_and(|value| cua_driver_contract::is_action_listing_output(tool, value));
++    let action = if !is_error && !listing && cua_driver_core::action_record::is_action_tool(tool) {
+         let structured = structured.ok_or_else(|| DriverError::Protocol {
+             reason: format!("{tool} response omitted ActionResult"),
+         })?;
+@@ -2974,6 +2976,48 @@ mod tests {
+         ));
+     }
+ 
++    #[test]
++    fn result_normalization_keeps_a_menu_listing_as_a_success_without_an_action_result() {
++        let listing = serde_json::json!({
++            "status": "listed",
++            "resolved_path": ["Card", "Add Field"],
++            "items": [{"title": "Phone", "has_submenu": false}],
++        });
++        let listed = normalize_result(
++            "invoke_menu",
++            serde_json::json!({
++                "content": [{"type": "text", "text": "listed 1 item"}],
++                "structuredContent": listing.clone(),
++                "isError": false
++            }),
++        )
++        .expect("a submenu listing is a successful non-action reply");
++        assert!(!listed.is_error);
++        assert!(listed.action().is_none());
++        assert_eq!(
++            listed
++                .structured_json
++                .as_deref()
++                .map(|json| serde_json::from_str::<Value>(json).expect("structured json")),
++            Some(listing.clone())
++        );
++
++        let pressed = normalize_result(
++            "click",
++            serde_json::json!({
++                "content": [{"type": "text", "text": "listed 1 item"}],
++                "structuredContent": listing,
++                "isError": false
++            }),
++        )
++        .unwrap_err();
++        assert!(matches!(
++            pressed,
++            DriverError::Protocol { reason }
++                if reason.contains("invalid ActionResult")
++        ));
++    }
++
+     #[tokio::test]
+     #[cfg(unix)]
+     async fn tool_discovery_uses_the_shared_direct_daemon_protocol() {
+diff --git a/libs/cua-driver/rust/crates/cua-driver/src/extension_manager.rs b/libs/cua-driver/rust/crates/cua-driver/src/extension_manager.rs
+index fccaa70..6eeac1b 100644
+--- a/libs/cua-driver/rust/crates/cua-driver/src/extension_manager.rs
++++ b/libs/cua-driver/rust/crates/cua-driver/src/extension_manager.rs
+@@ -1086,6 +1086,13 @@ fn perception_worker_config_in(store: &ExtensionStore) -> Result<Option<Percepti
+         manifest.id.clone(),
+         manifest.version.clone(),
+     );
++    // Local macOS integration: contained real-model reuse, idle retirement,
++    // restart and in-flight cancellation are validated by the opt-in native
++    // test in perception_client. Other platforms retain cold-per-call policy.
++    #[cfg(target_os = "macos")]
++    {
++        config = config.with_bounded_reuse(Default::default());
++    }
+     #[cfg(windows)]
+     {
+         config = config.with_windows_acl_lease_path(store.windows_acl_lease_path(PERCEPTION_ID));
+@@ -3228,7 +3235,10 @@ fn run_extension_hook(
+         root,
+         manifest,
+         self_test,
+-        std::time::Duration::from_secs(10),
++        // Native perception self-test includes model loading and real synthetic
++        // inference. On an 8 GB M1 this takes ~10 seconds even when healthy.
++        // Keep setup bounded without truncating the integrity/inference checks.
++        std::time::Duration::from_secs(60),
+         journal_path,
+     )
+ }
+@@ -5224,7 +5234,14 @@ mod tests {
+                 "1.0.0"
+             ]
+         );
+-        assert!(config.warm_worker.is_none());
++        if cfg!(target_os = "macos") {
++            let policy = config.warm_worker.expect("bounded macOS reuse");
++            assert_eq!(policy.idle_ttl, Duration::from_secs(30));
++            assert_eq!(policy.shutdown_timeout, Duration::from_secs(2));
++            assert_eq!(policy.inference_timeout, Duration::from_secs(30));
++        } else {
++            assert!(config.warm_worker.is_none());
++        }
+         assert_eq!(
+             config
+                 .expected_extension_identity
+diff --git a/libs/cua-driver/rust/crates/cua-perception/models/export_omniparser_detector.py b/libs/cua-driver/rust/crates/cua-perception/models/export_omniparser_detector.py
+index 27aa3c9..a33af54 100644
+--- a/libs/cua-driver/rust/crates/cua-perception/models/export_omniparser_detector.py
++++ b/libs/cua-driver/rust/crates/cua-perception/models/export_omniparser_detector.py
+@@ -10,6 +10,7 @@ import shutil
+ 
+ EXPECTED_INPUT = "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57"
+ EXPECTED_OUTPUT = "d8a876bf7f9fb73d7da9432904ade7fa78e092e9a91674e5a2806b45562a9ab2"
++LOCAL_CANONICAL_OUTPUT = "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac"
+ EXPECTED_VERSIONS = {
+     "torch": "2.8.0",
+     "torchvision": "0.23.0",
+@@ -27,6 +28,8 @@ def main() -> int:
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("source_model", type=Path)
+     parser.add_argument("output", type=Path)
++    parser.add_argument("--local-canonical", action="store_true",
++                        help="Use the separately pinned macOS export with normalized timestamp metadata")
+     args = parser.parse_args()
+     if digest(args.source_model) != EXPECTED_INPUT:
+         parser.error("source model SHA-256 differs from the sealed source input")
+@@ -54,7 +57,15 @@ def main() -> int:
+     args.output.parent.mkdir(parents=True, exist_ok=True)
+     if exported.resolve() != args.output.resolve():
+         shutil.copyfile(exported, args.output)
+-    if digest(args.output) != EXPECTED_OUTPUT:
++    if args.local_canonical:
++        model = onnx.load(args.output)
++        for item in model.metadata_props:
++            if item.key == "date":
++                item.value = "SOURCE_DATE_EPOCH:0"
++        onnx.checker.check_model(model)
++        onnx.save(model, args.output)
++    expected = LOCAL_CANONICAL_OUTPUT if args.local_canonical else EXPECTED_OUTPUT
++    if digest(args.output) != expected:
+         parser.error("export completed, but output differs from the reviewed ONNX digest")
+     return 0
+ 
+diff --git a/libs/cua-driver/rust/crates/cua-perception/models/local-macos-conversion.json b/libs/cua-driver/rust/crates/cua-perception/models/local-macos-conversion.json
+new file mode 100644
+index 0000000..a52ad34
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/cua-perception/models/local-macos-conversion.json
+@@ -0,0 +1,11 @@
++{
++  "upstream_recipe": "conversion-recipe.json",
++  "upstream_sha256": "d8a876bf7f9fb73d7da9432904ade7fa78e092e9a91674e5a2806b45562a9ab2",
++  "local_sha256": "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac",
++  "local_size": 80906060,
++  "python": "3.12.12",
++  "platform": "macOS arm64",
++  "command": "python models/export_omniparser_detector.py INPUT OUTPUT --local-canonical",
++  "change": "Normalize exporter date metadata to SOURCE_DATE_EPOCH:0. Upstream artifact not reproduced; local export independently pinned, not claimed identical to upstream.",
++  "evidence": "Two independent exports have identical canonical SHA256. PyTorch equivalence log: /tmp/jarvis-detector-equivalence.log."
++}
+diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py b/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py
+old mode 100644
+new mode 100755
+index 648b1d0..fd13633
+--- a/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py
++++ b/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py
+@@ -272,11 +272,11 @@ def verify_corresponding_sources(bundle: Path, manifest: dict[str, Any], lock: d
+     return entries
+ 
+ 
+-def static_verify(bundle: Path, require_host: bool = True) -> dict[str, Any]:
++def static_verify(bundle: Path, require_host: bool = True, lock_path: Path = LOCK_PATH) -> dict[str, Any]:
+     manifest = read_json(bundle / "artifact-manifest.json")
+     extension_identity(manifest)
+     target = manifest.get("target", {}).get("triple")
+-    lock = read_json(LOCK_PATH)
++    lock = read_json(lock_path)
+     if target not in lock["onnx_runtime"]["targets"]:
+         raise ArtifactError(f"unsupported bundle target: {target}")
+     if require_host and target != host_target():
+diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/artifacts.local-macos.lock.json b/libs/cua-driver/rust/crates/cua-perception/scripts/artifacts.local-macos.lock.json
+new file mode 100644
+index 0000000..2a8243f
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/cua-perception/scripts/artifacts.local-macos.lock.json
+@@ -0,0 +1,194 @@
++{
++  "schema_version": 1,
++  "onnx_runtime": {
++    "version": "1.26.0",
++    "license": "MIT",
++    "targets": {
++      "aarch64-apple-darwin": {
++        "os": "macos",
++        "arch": "aarch64",
++        "archive_url": "https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-osx-arm64-1.26.0.tgz",
++        "archive_sha256": "7a1280bbb1701ea514f71828765237e7896e0f2e1cd332f1f70dbd5c3e33aca3",
++        "archive_format": "tar.gz",
++        "archive_member": "./onnxruntime-osx-arm64-1.26.0/lib/libonnxruntime.dylib",
++        "filename": "libonnxruntime.dylib",
++        "sha256": "cb0462c3fd35ad722e8772313030a33c182f3d4c6b33f4e5e1fcb2ce3199b86c",
++        "size": 37310032,
++        "worker_filename": "cua-perception"
++      },
++      "x86_64-pc-windows-msvc": {
++        "os": "windows",
++        "arch": "x86_64",
++        "archive_url": "https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-win-x64-1.26.0.zip",
++        "archive_sha256": "6ebe99b5564bf4d029b6e93eac9ff423682b6212eade769e9ca3f685eaf500b4",
++        "archive_format": "zip",
++        "archive_member": "onnxruntime-win-x64-1.26.0/lib/onnxruntime.dll",
++        "filename": "onnxruntime.dll",
++        "sha256": "b2ba7ca16e0e4fe71ad5148744ab885a2f5809e52a0c3de4d9ba3853a03977f9",
++        "size": 14897976,
++        "worker_filename": "cua-perception.exe"
++      },
++      "x86_64-unknown-linux-gnu": {
++        "os": "linux",
++        "arch": "x86_64",
++        "archive_url": "https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-linux-x64-1.26.0.tgz",
++        "archive_sha256": "1254da24fb389cf39dc0ff3451ab48301740ffbfcbaf646849df92f80ee92c57",
++        "archive_format": "tar.gz",
++        "archive_member": "onnxruntime-linux-x64-1.26.0/lib/libonnxruntime.so.1.26.0",
++        "filename": "libonnxruntime.so",
++        "sha256": "5bd5bedf736fc501692435d0ec4f6e8b2bdf48cd30af8e6d00d61b3ddc9a7ab8",
++        "size": 23023576,
++        "worker_filename": "cua-perception"
++      }
++    }
++  },
++  "corresponding_source": [
++    {
++      "content_kind": "model-source-input",
++      "filename": "omniparser-icon-detect-model.pt",
++      "bundle_path": "source/upstream/omniparser-icon-detect-model.pt",
++      "url": "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/6600256cb0f1b07651e3bc86166196307bad7e2d/icon_detect/model.pt",
++      "sha256": "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57",
++      "size": 40623819,
++      "repository": "https://huggingface.co/microsoft/OmniParser-v2.0",
++      "revision": "6600256cb0f1b07651e3bc86166196307bad7e2d",
++      "license": "AGPL-3.0-only",
++      "format": "file",
++      "source_offer_status": "bundled-review-only"
++    },
++    {
++      "content_kind": "exporter-source",
++      "filename": "ultralytics-8f7fe171f0db13e5c2eff55eee3443f8903e5068.tar.gz",
++      "bundle_path": "source/exporter/ultralytics-8f7fe171f0db13e5c2eff55eee3443f8903e5068.tar.gz",
++      "url": "https://codeload.github.com/ultralytics/ultralytics/tar.gz/8f7fe171f0db13e5c2eff55eee3443f8903e5068",
++      "sha256": "6c289215a5ce593a872111b87e58ffff6949d235c2af720e8f01704375f7bf44",
++      "size": 1872606,
++      "repository": "https://github.com/ultralytics/ultralytics",
++      "revision": "8f7fe171f0db13e5c2eff55eee3443f8903e5068",
++      "license": "AGPL-3.0-only",
++      "format": "tar.gz",
++      "required_paths": [
++        "ultralytics/engine/exporter.py",
++        "pyproject.toml"
++      ],
++      "source_offer_status": "bundled-review-only"
++    },
++    {
++      "content_kind": "exporter-source",
++      "filename": "pytorch-ba56102387ef21a3b04b357e5b183d48f0afefc7.tar.gz",
++      "bundle_path": "source/exporter/pytorch-ba56102387ef21a3b04b357e5b183d48f0afefc7.tar.gz",
++      "url": "https://codeload.github.com/pytorch/pytorch/tar.gz/ba56102387ef21a3b04b357e5b183d48f0afefc7",
++      "sha256": "a9623012b046e9cc87c919f178782860bcee9fbf014ad5c24a2655b517d0881b",
++      "size": 56595340,
++      "repository": "https://github.com/pytorch/pytorch",
++      "revision": "ba56102387ef21a3b04b357e5b183d48f0afefc7",
++      "license": "BSD-3-Clause",
++      "format": "tar.gz",
++      "required_paths": [
++        "torch/onnx",
++        "torch/_dynamo",
++        "setup.py"
++      ],
++      "source_offer_status": "bundled-review-only"
++    },
++    {
++      "content_kind": "exporter-source",
++      "filename": "torchvision-824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8.tar.gz",
++      "bundle_path": "source/exporter/torchvision-824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8.tar.gz",
++      "url": "https://codeload.github.com/pytorch/vision/tar.gz/824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8",
++      "sha256": "8e44b7705c901b9af76113393fe675b02ceeb43b1c688db50e0d8ff8a9dcef03",
++      "size": 14499056,
++      "repository": "https://github.com/pytorch/vision",
++      "revision": "824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8",
++      "license": "BSD-3-Clause",
++      "format": "tar.gz",
++      "required_paths": [
++        "torchvision",
++        "setup.py"
++      ],
++      "source_offer_status": "bundled-review-only"
++    },
++    {
++      "content_kind": "exporter-source",
++      "filename": "onnx-57b9c6a4f6eebb09ae1b34cfb632078518f72832.tar.gz",
++      "bundle_path": "source/exporter/onnx-57b9c6a4f6eebb09ae1b34cfb632078518f72832.tar.gz",
++      "url": "https://codeload.github.com/onnx/onnx/tar.gz/57b9c6a4f6eebb09ae1b34cfb632078518f72832",
++      "sha256": "a1a9c44e20ea1f9cf0c094e0f82001113b36e0867e04c06966475c46e3c75739",
++      "size": 13109973,
++      "repository": "https://github.com/onnx/onnx",
++      "revision": "57b9c6a4f6eebb09ae1b34cfb632078518f72832",
++      "license": "Apache-2.0",
++      "format": "tar.gz",
++      "required_paths": [
++        "onnx",
++        "pyproject.toml"
++      ],
++      "source_offer_status": "bundled-review-only"
++    },
++    {
++      "content_kind": "exporter-source",
++      "filename": "onnxslim-0.1.68.tar.gz",
++      "bundle_path": "source/exporter/onnxslim-0.1.68.tar.gz",
++      "url": "https://files.pythonhosted.org/packages/f3/03/7eecb5b187b7b3e11d066f19211b1850a8b4e5cc79f5e3c78875a676a1c8/onnxslim-0.1.68.tar.gz",
++      "sha256": "ff1ec2bf61ff10b75e33990b2046c446dec522ba7f0a12b2f984547ff43f9138",
++      "size": 141502,
++      "repository": "https://github.com/inisis/OnnxSlim",
++      "revision": "0.1.68",
++      "license": "Apache-2.0",
++      "format": "tar.gz",
++      "required_paths": [
++        "onnxslim",
++        "VERSION"
++      ],
++      "source_offer_status": "bundled-review-only"
++    }
++  ],
++  "artifacts": [
++    {
++      "role": "icon-detect",
++      "filename": "omniparser-icon-detect-1280-opset17.onnx",
++      "sha256": "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac",
++      "size": 80906060,
++      "url": null,
++      "origin": "https://huggingface.co/microsoft/OmniParser-v2.0",
++      "revision": "6600256cb0f1b07651e3bc86166196307bad7e2d",
++      "source_path": "icon_detect/model.pt",
++      "source_sha256": "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57",
++      "license": "AGPL-3.0-only",
++      "verification_status": "local-macos-reproduced-twice; ONNX checker; PyTorch parity fixtures"
++    },
++    {
++      "role": "ocr-detect",
++      "filename": "ppocrv5-mobile-det.onnx",
++      "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
++      "size": 4826518,
++      "url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx",
++      "origin": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx",
++      "revision": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
++      "license": "Apache-2.0",
++      "verification_status": "release-verified"
++    },
++    {
++      "role": "ocr-recognize",
++      "filename": "ppocrv5-mobile-rec-en.onnx",
++      "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
++      "size": 7848423,
++      "url": "https://huggingface.co/PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx/resolve/3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b/inference.onnx",
++      "origin": "https://huggingface.co/PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx",
++      "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b",
++      "license": "Apache-2.0",
++      "verification_status": "release-verified"
++    },
++    {
++      "role": "ocr-dictionary",
++      "filename": "ppocrv5-mobile-rec-en-inference.yml",
++      "sha256": "27e91d0582f40168aa218303c76e184bc78fa7a5d105aad0cfbad8458b441067",
++      "size": 3964,
++      "url": "https://huggingface.co/PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx/resolve/3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b/inference.yml",
++      "origin": "https://huggingface.co/PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx",
++      "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b",
++      "license": "Apache-2.0",
++      "verification_status": "release-verified"
++    }
++  ]
++}
+diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py b/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py
+old mode 100644
+new mode 100755
+index cca0b92..eed08ab
+--- a/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py
++++ b/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py
+@@ -325,7 +325,7 @@ def deterministic_bundle_archive(bundle: Path, destination: Path) -> None:
+ 
+ 
+ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
+-    lock = read_json(LOCK_PATH)
++    lock = read_json(getattr(args, "lock", LOCK_PATH))
+     if args.target not in lock["onnx_runtime"]["targets"]:
+         raise ArtifactError(f"unsupported target: {args.target}")
+     if args.target != host_target():
+@@ -413,7 +413,7 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
+         exercise_bundle(bundle, args.target, fixture, identity, fixture.parent)
+         write_json(bundle / "artifact-manifest.json", release_manifest(bundle, lock, args.target, args.version, args.source_sha))
+         write_sums(bundle)
+-        static_verify(bundle)
++        static_verify(bundle, lock_path=getattr(args, "lock", LOCK_PATH))
+         archive = bundle.parent / f"cua-perception-{args.version}-{args.target}.tar.gz"
+         if archive.exists():
+             raise ArtifactError(f"refusing to overwrite existing archive: {archive}")
+@@ -428,6 +428,8 @@ def main() -> int:
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--target", required=True, choices=sorted(read_json(LOCK_PATH)["onnx_runtime"]["targets"]))
+     parser.add_argument("--worker", required=True, type=Path)
++    parser.add_argument("--lock", type=Path, default=LOCK_PATH,
++                        help="Pinned artifact lock; local variants retain all hash and runtime checks")
+     parser.add_argument("--inputs", required=True, type=Path, help="directory containing reviewed local artifacts")
+     parser.add_argument("--cache", required=True, type=Path, help="content-verified immutable download cache")
+     parser.add_argument("--real-parse-fixture", required=True, type=Path)
+diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/quality_runner.py b/libs/cua-driver/rust/crates/cua-perception/scripts/quality_runner.py
+index ec1c9cd..cc7aecf 100644
+--- a/libs/cua-driver/rust/crates/cua-perception/scripts/quality_runner.py
++++ b/libs/cua-driver/rust/crates/cua-perception/scripts/quality_runner.py
+@@ -640,7 +640,9 @@ def _validate_rust_response(value: dict[str, Any], request_id: str, image: dict[
+ 
+ def _normalize_rust_region(value: Any, index: int, image: dict[str, Any]) -> dict[str, Any]:
+     where = f"worker result.regions[{index}]"
+-    item = _closed(value, ("id", "kind", "bounds", "confidence"), ("text", "label", "class_id"), where)
++    item = _closed(value, ("id", "kind", "bounds", "confidence"), ("text", "label", "class_id", "interactive"), where)
++    if "interactive" in item and not isinstance(item["interactive"], bool):
++        raise RunnerError(f"{where}.interactive must be boolean")
+     if item["kind"] not in {"text", "icon"}:
+         raise RunnerError(f"{where}.kind is unsupported")
+     bounds = _closed(item["bounds"], ("x", "y", "width", "height"), (), f"{where}.bounds")
+diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_artifact_tooling.py b/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_artifact_tooling.py
+index 5cbc831..c659f24 100644
+--- a/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_artifact_tooling.py
++++ b/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_artifact_tooling.py
+@@ -340,7 +340,8 @@ class ArtifactToolingTests(unittest.TestCase):
+                 events.append("exercise")
+                 return {}
+ 
+-            def fake_static_verify(bundle):
++            def fake_static_verify(bundle, *, lock_path):
++                self.assertEqual(lock_path, LOCK_PATH)
+                 manifest_path = bundle / "artifact-manifest.json"
+                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                 self.assertEqual(extension_identity(manifest), ("cua-perception", "1.2.3"))
+diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_quality_runner.py b/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_quality_runner.py
+index 9db4f6c..788f7d7 100644
+--- a/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_quality_runner.py
++++ b/libs/cua-driver/rust/crates/cua-perception/scripts/tests/test_quality_runner.py
+@@ -88,6 +88,15 @@ def json_directory_binding(root: Path, path: Path) -> dict[str, str]:
+ 
+ 
+ class QualityRunnerTests(unittest.TestCase):
++    def test_real_worker_interactive_annotation_preserves_detection_metrics(self) -> None:
++        region = {"id": "text-1", "kind": "text", "text": "Save", "confidence": 0.9,
++                  "bounds": {"x": 1, "y": 2, "width": 20, "height": 10}}
++        image = {"width": 100, "height": 80}
++        expected = quality_runner._normalize_rust_region(region, 0, image)
++        self.assertEqual(quality_runner._normalize_rust_region(dict(region, interactive=False), 0, image), expected)
++        with self.assertRaisesRegex(quality_runner.RunnerError, "interactive must be boolean"):
++            quality_runner._normalize_rust_region(dict(region, interactive="false"), 0, image)
++
+     def test_python_invocation_disables_site_startup_and_inherited_python_paths(self) -> None:
+         execution = {
+             "python": Path("/bound/python"),
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/ax/actions.rs b/libs/cua-driver/rust/crates/platform-macos/src/ax/actions.rs
+new file mode 100644
+index 0000000..54b3ffd
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/platform-macos/src/ax/actions.rs
+@@ -0,0 +1,133 @@
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct CustomAction {
++    pub name: String,
++    pub raw: String,
++}
++
++#[derive(Debug, Default)]
++pub struct ElementActions {
++    pub standard: Vec<String>,
++    pub custom: Vec<CustomAction>,
++}
++
++impl ElementActions {
++    pub fn is_empty(&self) -> bool {
++        self.standard.is_empty() && self.custom.is_empty()
++    }
++}
++
++/// The envelope macOS expects for one of this element's published custom
++/// actions, addressed either by the readable `name` a consumer reads or by the
++/// `raw` envelope itself. Standard AX names are not resolved here.
++pub fn custom_wire_name<'a>(advertised: &'a [String], action: &str) -> Option<&'a str> {
++    advertised
++        .iter()
++        .filter(|raw| !raw.starts_with("AX"))
++        .find(|raw| raw.as_str() == action || custom_action_name(raw) == action)
++        .map(String::as_str)
++}
++
++pub fn split(advertised: Vec<String>) -> ElementActions {
++    let mut actions = ElementActions::default();
++    for raw in advertised {
++        if raw.starts_with("AX") {
++            actions.standard.push(raw);
++            continue;
++        }
++        let name = custom_action_name(&raw);
++        if name.is_empty() || actions.custom.iter().any(|action| action.raw == raw) {
++            continue;
++        }
++        actions.custom.push(CustomAction { name, raw });
++    }
++    actions
++}
++
++fn custom_action_name(raw: &str) -> String {
++    let first_line = raw.lines().next().unwrap_or_default();
++    first_line
++        .strip_prefix("Name:")
++        .unwrap_or(first_line)
++        .trim()
++        .to_owned()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn advertised(names: &[&str]) -> Vec<String> {
++        names.iter().map(|name| (*name).to_owned()).collect()
++    }
++
++    #[test]
++    fn a_custom_action_is_read_out_of_its_envelope_and_kept_invocable() {
++        let actions = split(advertised(&[
++            "AXShowMenu",
++            "Name:Move Down\nTarget:0x0\nSelector:(null)",
++        ]));
++        assert_eq!(actions.standard, vec!["AXShowMenu".to_owned()]);
++        assert_eq!(
++            actions.custom,
++            vec![CustomAction {
++                name: "Move Down".to_owned(),
++                raw: "Name:Move Down\nTarget:0x0\nSelector:(null)".to_owned(),
++            }]
++        );
++    }
++
++    #[test]
++    fn a_published_custom_action_is_addressable_by_its_name_or_its_envelope() {
++        let envelope = "Name:Move Down\nTarget:0x0\nSelector:(null)";
++        let names = advertised(&["AXShowMenu", envelope]);
++        assert_eq!(custom_wire_name(&names, envelope), Some(envelope));
++        assert_eq!(
++            custom_wire_name(&names, "Move Down"),
++            Some(envelope),
++            "the readable name every consumer sees dispatches the envelope"
++        );
++        assert_eq!(
++            custom_wire_name(&names, "AXShowMenu"),
++            None,
++            "a standard AX name is not a custom action"
++        );
++        assert_eq!(custom_wire_name(&names, "Move Up"), None);
++    }
++
++    #[test]
++    fn a_cell_that_lists_the_same_custom_action_twice_publishes_it_once() {
++        let actions = split(advertised(&[
++            "Name:Pin List\nTarget:0x0\nSelector:(null)",
++            "Name:Details\nTarget:0x0\nSelector:(null)",
++            "Name:Pin List\nTarget:0x0\nSelector:(null)",
++        ]));
++        assert_eq!(
++            actions
++                .custom
++                .iter()
++                .map(|action| action.name.as_str())
++                .collect::<Vec<_>>(),
++            vec!["Pin List", "Details"]
++        );
++    }
++
++    #[test]
++    fn a_nameless_envelope_is_not_published_as_an_action() {
++        let actions = split(advertised(&["Name:\nTarget:0x0", "  ", ""]));
++        assert!(actions.custom.is_empty());
++        assert!(actions.is_empty());
++    }
++
++    #[test]
++    fn an_unenveloped_name_is_still_custom_and_keeps_its_wire_form() {
++        let actions = split(advertised(&["Flag"]));
++        assert_eq!(
++            actions.custom,
++            vec![CustomAction {
++                name: "Flag".to_owned(),
++                raw: "Flag".to_owned(),
++            }]
++        );
++        assert!(actions.standard.is_empty());
++    }
++}
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/ax/mod.rs b/libs/cua-driver/rust/crates/platform-macos/src/ax/mod.rs
+index ee7b6c4..af27703 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/ax/mod.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/ax/mod.rs
+@@ -16,6 +16,7 @@
+ //! - Non-indexed (no actions, not interesting): `- AXRole = "value"`
+ //! - 2-space indent per depth level
+ 
++pub mod actions;
+ pub mod bindings;
+ pub mod cache;
+ pub mod enablement;
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs b/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs
+index ee1f5d3..14f9faa 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs
+@@ -61,6 +61,7 @@ pub struct AXNode {
+     pub identifier: Option<String>,
+     pub help: Option<String>,
+     pub actions: Vec<String>,
++    pub custom_actions: Vec<super::actions::CustomAction>,
+     /// The raw AXUIElementRef pointer value, for caching.
+     pub element_ptr: usize,
+     /// Depth in the rendered markdown tree (matches the indent level used in
+@@ -414,7 +415,7 @@ unsafe fn walk_element(
+     let description = copy_string_attr(element, "AXDescription");
+     let identifier = copy_string_attr(element, "AXIdentifier");
+     let help = copy_string_attr(element, "AXHelp").filter(|h| !h.trim().is_empty());
+-    let actions = copy_action_names(element);
++    let advertised = super::actions::split(copy_action_names(element));
+ 
+     let visible_title = title.as_deref().unwrap_or("").trim().to_owned();
+     let visible_description = description.as_deref().unwrap_or("").trim().to_owned();
+@@ -428,19 +429,19 @@ unsafe fn walk_element(
+     // field but unable to call set_value on it. Probe writability only for the
+     // small family of value controls so arbitrary display nodes do not pay an
+     // extra AX round trip.
+-    let value_settable = actions.is_empty()
++    let value_settable = advertised.is_empty()
+         && role_supports_value_addressing(&role)
+         && is_attribute_settable(element, "AXValue");
+     // A closed submenu can keep its descendants in AXChildren while reporting
+     // those controls disabled. Never assign such a row a live element index:
+     // the same native state also causes dispatch to refuse it, and exposing an
+     // index for it invites agents to retain an unusable menu target.
+-    let enabled = if !actions.is_empty() || value_settable {
++    let enabled = if !advertised.is_empty() || value_settable {
+         copy_bool_attr(element, "AXEnabled")
+     } else {
+         None
+     };
+-    let is_actionable = is_addressable(!actions.is_empty(), value_settable, enabled);
++    let is_actionable = is_addressable(!advertised.is_empty(), value_settable, enabled);
+ 
+     if !is_actionable && !has_content && role != "AXWindow" && role != "AXSheet" {
+         let children = copy_children(element);
+@@ -508,7 +509,8 @@ unsafe fn walk_element(
+             },
+             identifier: identifier.clone(),
+             help: help.clone(),
+-            actions: actions.clone(),
++            actions: advertised.standard,
++            custom_actions: advertised.custom,
+             element_ptr,
+             depth,
+             parent_element_index: parent_index,
+@@ -543,6 +545,7 @@ unsafe fn walk_element(
+             identifier: identifier.clone(),
+             help: help.clone(),
+             actions: vec![],
++            custom_actions: vec![],
+             element_ptr,
+             depth,
+             parent_element_index: parent_index,
+@@ -651,6 +654,15 @@ fn format_node_line(node: &AXNode) -> String {
+                 .join(",");
+             attrs.push(format!("actions=[{}]", action_str));
+         }
++        if !node.custom_actions.is_empty() {
++            let action_str = node
++                .custom_actions
++                .iter()
++                .map(|action| serde_json::json!(action.name).to_string())
++                .collect::<Vec<_>>()
++                .join(",");
++            attrs.push(format!("custom_actions=[{}]", action_str));
++        }
+         if !attrs.is_empty() {
+             parts.push_str(" [");
+             parts.push_str(&attrs.join(" "));
+@@ -782,4 +794,42 @@ mod tests {
+         assert_eq!(reads.get(), 1, "actionable nodes must read state once");
+         assert_eq!(actionable.enabled, Some(true));
+     }
++
++    #[test]
++    fn a_custom_action_name_cannot_add_tree_rows() {
++        let node = AXNode {
++            element_index: Some(4),
++            role: "AXCell".into(),
++            title: None,
++            value: None,
++            description: None,
++            identifier: None,
++            help: None,
++            actions: vec!["AXShowMenu".into()],
++            custom_actions: crate::ax::actions::split(vec![
++                "Name:Pin List\nTarget:0x0\nSelector:(null)".into(),
++                "Name:Move Down\nTarget:0x0\nSelector:(null)".into(),
++            ])
++            .custom,
++            element_ptr: 0,
++            depth: 0,
++            parent_element_index: None,
++            frame: None,
++            value_state: None,
++            value_description: None,
++            min_value: None,
++            max_value: None,
++            enabled: Some(true),
++            selected: None,
++            in_web_content: false,
++        };
++        let rendered = format_node_line(&node);
++        assert_eq!(rendered.lines().count(), 1, "{rendered}");
++        assert!(rendered.contains("actions=[showmenu]"), "{rendered}");
++        assert!(
++            rendered.contains("custom_actions=[\"Pin List\",\"Move Down\"]"),
++            "{rendered}"
++        );
++        assert!(!rendered.contains("Selector"), "{rendered}");
++    }
+ }
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs b/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs
+index 4d2e131..aedd3b8 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs
+@@ -398,6 +398,7 @@ mod tests {
+             identifier: None,
+             help: None,
+             actions: actions.iter().map(|value| (*value).to_owned()).collect(),
++            custom_actions: vec![],
+             element_ptr: 7,
+             depth,
+             parent_element_index: None,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs b/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs
+index 0ba2abd..a77e1b6 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs
+@@ -1721,6 +1721,7 @@ mod tests {
+             identifier: None,
+             help: None,
+             actions: actions.iter().map(|value| (*value).to_owned()).collect(),
++            custom_actions: vec![],
+             element_ptr: 7,
+             depth: 0,
+             parent_element_index: None,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/input/ax_actions.rs b/libs/cua-driver/rust/crates/platform-macos/src/input/ax_actions.rs
+index 3717737..a7f1a0d 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/input/ax_actions.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/input/ax_actions.rs
+@@ -217,9 +217,13 @@ pub fn ensure_ax_action_enabled(element_ptr: usize, action: &str) -> anyhow::Res
+     ensure_ax_enabled(enabled, action)
+ }
+ 
+-/// Perform an AX action on a cached element.
++/// Perform an AX action on a cached element. A custom action the element
++/// publishes is addressed by its readable name or its envelope; everything
++/// else goes through the documented alias table.
+ pub fn perform_ax_action(element_ptr: usize, action: &str) -> anyhow::Result<()> {
+-    let ax_action = map_action(action);
++    let advertised = unsafe { copy_action_names(element_ptr as AXUIElementRef) };
++    let ax_action =
++        crate::ax::actions::custom_wire_name(&advertised, action).unwrap_or(map_action(action));
+     ensure_ax_action_enabled(element_ptr, ax_action)?;
+     let err = unsafe { perform_action(element_ptr as AXUIElementRef, ax_action) };
+ 
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/input/interactive.rs b/libs/cua-driver/rust/crates/platform-macos/src/input/interactive.rs
+index 38c8404..79b76e9 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/input/interactive.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/input/interactive.rs
+@@ -171,6 +171,16 @@ struct WorkItem {
+ /// The worker owns and reuses one `CGEventSource`, pointer-button state, click
+ /// grouping, and fractional scroll residuals. Native CoreGraphics objects
+ /// never cross threads.
++/// How long to let a target's event loop adopt the primed pointer position
++/// before the button event that depends on it. One display frame.
++const POINTER_PRIMER_SETTLE: Duration = Duration::from_millis(12);
++
++/// Minimum spacing between a background Down and its Up. Matches what the
++/// foreground and background right-click paths already use, both of which
++/// Blender honours; a shorter gap can land both in one pass of an app's event
++/// loop, where some toolkits collapse the pair into nothing.
++const POINTER_DOWN_UP_FLOOR: Duration = Duration::from_millis(28);
++
+ pub struct InteractiveInputSession {
+     sender: Option<SyncSender<WorkItem>>,
+     worker: Mutex<Option<JoinHandle<()>>>,
+@@ -366,6 +376,9 @@ struct NativeInputState {
+     scroll_residual_y: f64,
+     bounds: crate::windows::WindowBounds,
+     last_bounds_refresh: Instant,
++    /// When the last background Down went out, so the Up can be held off until
++    /// the target's event loop has had a pass to see them as separate.
++    last_background_down: Option<Instant>,
+ }
+ 
+ impl NativeInputState {
+@@ -383,6 +396,7 @@ impl NativeInputState {
+             scroll_residual_y: 0.0,
+             bounds,
+             last_bounds_refresh: Instant::now(),
++            last_background_down: None,
+         }
+     }
+ 
+@@ -506,14 +520,56 @@ impl NativeInputState {
+             self.pressed_button = Some(effective_button);
+             self.click_group_id = self.click_group_id.wrapping_add(1).max(1);
+         }
++        // Background button events need the pointer to be WHERE the button is.
++        //
++        // An app that runs its own event loop can resolve a mouse-button event
++        // at the pointer position it last saw rather than at the coordinate the
++        // event carries -- Blender's GHOST layer does exactly this. Measured on
++        // a live guest: a background down+drag drew Blender's box-select
++        // rectangle anchored at the PREVIOUS interaction's coordinate, and an
++        // identical click that failed cold succeeded once two standalone moves
++        // had settled the pointer first. Nothing else differed.
++        //
++        // So prime the position before a Down and give the app a frame to adopt
++        // it, and never let the Up follow the Down in the same pass of that
++        // loop. The foreground path and the background RIGHT-click path already
++        // do both, which is why those worked while this one silently did not.
++        if !self.is_foreground() {
++            match phase {
++                PointerPhase::Down => {
++                    super::mouse::post_background_move_primer(
++                        self.config.pid,
++                        &self.source,
++                        point,
++                        Some(window_local),
++                        Some(self.config.window_id),
++                        Some(self.click_group_id),
++                    );
++                    std::thread::sleep(POINTER_PRIMER_SETTLE);
++                }
++                PointerPhase::Up => {
++                    if let Some(down_at) = self.last_background_down {
++                        let elapsed = down_at.elapsed();
++                        if elapsed < POINTER_DOWN_UP_FLOOR {
++                            std::thread::sleep(POINTER_DOWN_UP_FLOOR - elapsed);
++                        }
++                    }
++                }
++                _ => {}
++            }
++        }
+         self.post_pointer(
+             &event,
+             window_local,
+             effective_button,
+             matches!(phase, PointerPhase::Down | PointerPhase::Up),
+         );
++        if !self.is_foreground() && phase == PointerPhase::Down {
++            self.last_background_down = Some(Instant::now());
++        }
+         if matches!(phase, PointerPhase::Up | PointerPhase::Cancel) {
+             self.pressed_button = None;
++            self.last_background_down = None;
+         }
+         Ok(())
+     }
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/input/mouse.rs b/libs/cua-driver/rust/crates/platform-macos/src/input/mouse.rs
+index b2f2d49..9b735e0 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/input/mouse.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/input/mouse.rs
+@@ -532,6 +532,31 @@ pub fn click_at_xy_chromium(
+     // ≥1 frame so Chromium sees primer + target as separate gestures, not run-on.
+     std::thread::sleep(std::time::Duration::from_millis(100));
+ 
++    // Re-aim before the real click.
++    //
++    // Some toolkits resolve a mouse-button event at the pointer position they
++    // last SAW, not at the coordinate the event carries -- Blender's GHOST
++    // event loop is one. The off-screen primer above is a move to (-1,-1)
++    // followed by a full frame of settle, which is exactly long enough for
++    // such an app to adopt (-1,-1) as where the pointer is; the target
++    // down/up that follows then resolves off the window and the click does
++    // nothing at all, silently, while every layer reports success.
++    //
++    // Chromium needs the off-screen primer (it opens the user-activation gate
++    // at a coordinate that cannot hit a DOM element), so this does not remove
++    // it -- it moves the cached pointer back onto the target afterwards, which
++    // costs one event and a frame and leaves the Chromium gate open.
++    let reaim = CGEvent::new_mouse_event(
++        source.clone(),
++        CGEventType::MouseMoved,
++        target,
++        CGMouseButton::Left,
++    )
++    .map_err(|_| anyhow::anyhow!("re-aim event creation failed"))?;
++    stamp(&reaim, win_local, 0, 2);
++    post(&reaim);
++    std::thread::sleep(std::time::Duration::from_millis(12));
++
+     // Step 3: target click pair(s) with clickState stepped 1→N for double-click
+     // coalescing (Chromium renderer coalesces pairs into dblclick when state=1→2).
+     for pair_index in 1..=click_pairs {
+@@ -546,7 +571,11 @@ pub fn click_at_xy_chromium(
+         .map_err(|_| anyhow::anyhow!("target down event creation failed"))?;
+         stamp(&down, win_local, click_state, 3);
+         post(&down);
+-        std::thread::sleep(std::time::Duration::from_millis(1));
++        // 28 ms, matching the foreground path and the background RIGHT-click
++        // path, both of which Blender honours. A 1 ms gap puts the down and the
++        // up in one pass of an app's event loop, which some toolkits collapse
++        // into nothing.
++        std::thread::sleep(std::time::Duration::from_millis(28));
+ 
+         let up = CGEvent::new_mouse_event(
+             source.clone(),
+@@ -1215,6 +1244,29 @@ fn post_mouse_event_with_mode(
+ /// default Rust pixel path had dropped. Click-state 0 / no button (move events
+ /// carry no button); window-routing fields still stamped so the move reaches the
+ /// right backgrounded window.
++/// Background move primer for the interactive-input path: put the pointer at
++/// `point` so an app that caches the pointer position resolves the button
++/// event that follows at the right place.
++#[allow(clippy::too_many_arguments)]
++pub(crate) fn post_background_move_primer(
++    pid: i32,
++    source: &CGEventSource,
++    point: CGPoint,
++    window_local: Option<(f64, f64)>,
++    wid: Option<u32>,
++    click_group_id: Option<i64>,
++) {
++    post_mouse_moved_primer(
++        pid,
++        source,
++        point,
++        window_local,
++        wid,
++        click_group_id,
++        MousePostMode::Both,
++    );
++}
++
+ fn post_mouse_moved_primer(
+     pid: i32,
+     source: &CGEventSource,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/click.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/click.rs
+index 9aabc9c..07fa063 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/click.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/click.rs
+@@ -1297,19 +1297,22 @@ fn perform_ax_click(
+     modifiers: &[String],
+     foreground: bool,
+ ) -> anyhow::Result<(String, bool, bool, bool, bool)> {
+-    let ax_action = map_action(action_str);
+     let element = element_ptr as AXUIElementRef;
+ 
++    // Capture advertised actions BEFORE dispatching so we can detect silent no-ops
++    // (AX returns success even when the element doesn't advertise the action), and
++    // so a custom action the element publishes can be addressed by its readable
++    // name as well as by the envelope macOS dispatches.
++    let advertised = unsafe { copy_action_names(element) };
++    let ax_action = crate::ax::actions::custom_wire_name(&advertised, action_str)
++        .unwrap_or(map_action(action_str));
++
+     // Check the live value immediately before dispatch. Foreground assist can
+     // enable menu items that were disabled in the cached snapshot, while a
+     // background transition can disable them after that snapshot. macOS may
+     // otherwise return success for a disabled action that did nothing.
+     crate::input::ax_actions::ensure_ax_action_enabled(element_ptr, ax_action)?;
+ 
+-    // Capture advertised actions BEFORE dispatching so we can detect silent no-ops
+-    // (AX returns success even when the element doesn't advertise the action).
+-    let advertised = unsafe { copy_action_names(element) };
+-
+     let role = unsafe { copy_string_attr(element, "AXRole") }.unwrap_or_default();
+     let title = unsafe { copy_string_attr(element, "AXTitle") }.unwrap_or_default();
+ 
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
+index 6208d50..6596d04 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
+@@ -33,8 +33,14 @@ fn def() -> &'static ToolDef {
+             PREFERRED CONSUMERS read `structuredContent.elements` (one entry per \
+             indexed row with `element_index`, `role`, `label`, `value` (the \
+             element's text/AXValue when present — use it to verify what a field \
+-            holds), `actions` (names of AX actions exposed by the element, \
+-            omitted when empty), `frame: {x,y,w,h}`, `parent_index`, `depth`). The markdown \
++            holds), `description` (AXDescription, omitted when it is already \
++            the label) and `help` (AXHelp — the tooltip, which is where apps \
++            put an element's semantics: which calendar an event belongs to, \
++            what a toggle does), `actions` (names of AX actions exposed by the \
++            element, omitted when empty), `custom_actions` (application secondary \
++            actions as `{name, raw}`; either form can be passed as click's action), \
++            `frame: {x,y,w,h}`, `parent_index`, \
++            `depth`). The markdown \
+             `tree_markdown` stays available \
+             and unchanged in shape for existing text-parsing callers — but new \
+             fields will only be added to the structured side.\n\n\
+@@ -881,6 +887,17 @@ pub(crate) fn build_elements_array_with_token(
+                 entry["element_token"] =
+                     serde_json::json!(cua_driver_core::element_token::token_for(sid, idx));
+             }
++            if let Some(description) = node
++                .description
++                .as_deref()
++                .filter(|description| !description.trim().is_empty())
++                .filter(|description| label.as_deref() != Some(description))
++            {
++                entry["description"] = serde_json::Value::String(description.to_owned());
++            }
++            if let Some(help) = &node.help {
++                entry["help"] = serde_json::Value::String(help.clone());
++            }
+             if let Some(label) = label {
+                 entry["label"] = serde_json::Value::String(label);
+             }
+@@ -938,6 +955,16 @@ pub(crate) fn build_elements_array_with_token(
+             if !node.actions.is_empty() {
+                 entry["actions"] = serde_json::json!(node.actions);
+             }
++            if !node.custom_actions.is_empty() {
++                entry["custom_actions"] = serde_json::json!(node
++                    .custom_actions
++                    .iter()
++                    .map(|action| serde_json::json!({
++                        "name": action.name,
++                        "raw": action.raw,
++                    }))
++                    .collect::<Vec<_>>());
++            }
+             if node.in_web_content {
+                 entry["in_web_content"] = serde_json::Value::Bool(true);
+             }
+@@ -1160,6 +1187,7 @@ mod tests {
+             identifier: None,
+             help: None,
+             actions,
++            custom_actions: vec![],
+             element_ptr: 0,
+             depth,
+             parent_element_index: parent,
+@@ -1174,6 +1202,26 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn a_custom_action_is_published_with_the_string_that_performs_it() {
++        let mut cell = node(Some(0), "AXCell", None, 2, None, None, vec![]);
++        cell.actions = vec!["AXShowMenu".into()];
++        cell.custom_actions = crate::ax::actions::split(vec![
++            "Name:Pin List\nTarget:0x0\nSelector:(null)".into(),
++            "Name:Pin List\nTarget:0x0\nSelector:(null)".into(),
++        ])
++        .custom;
++        let entry = &build_elements_array_with_token(&[cell], None)[0];
++        assert_eq!(entry["actions"], serde_json::json!(["AXShowMenu"]));
++        assert_eq!(
++            entry["custom_actions"],
++            serde_json::json!([{
++                "name": "Pin List",
++                "raw": "Name:Pin List\nTarget:0x0\nSelector:(null)",
++            }])
++        );
++    }
++
+     #[test]
+     fn elements_match_indexed_node_count() {
+         // Mix of indexed + non-indexed nodes; only indexed should surface.
+@@ -1360,6 +1408,27 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn structured_rows_carry_help_and_a_distinct_description() {
++        let mut event = node(Some(0), "AXButton", Some("Standup"), 1, None, None, vec![]);
++        event.help = Some("Calendar: Bench".into());
++        event.description = Some("all-day event".into());
++        let entry = &build_elements_array_with_token(&[event], None)[0];
++        assert_eq!(entry["label"], "Standup");
++        assert_eq!(entry["help"], "Calendar: Bench");
++        assert_eq!(entry["description"], "all-day event");
++    }
++
++    #[test]
++    fn a_description_that_is_already_the_label_is_not_repeated() {
++        let mut digit = node(Some(0), "AXButton", None, 1, None, None, vec![]);
++        digit.description = Some("2".into());
++        let entry = &build_elements_array_with_token(&[digit], None)[0];
++        assert_eq!(entry["label"], "2", "description still supplies the label");
++        assert!(entry.get("description").is_none());
++        assert!(entry.get("help").is_none());
++    }
++
+     #[test]
+     fn elements_surface_control_state_fields() {
+         // A slider whose AXValue is a CFNumber: `value` comes from the
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/invoke_menu.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/invoke_menu.rs
+index ff2f7d4..7aa23f8 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/invoke_menu.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/invoke_menu.rs
+@@ -22,8 +22,9 @@ use std::{
+ 
+ use crate::ax::bindings::{
+     ax_get_window_id, copy_action_names, copy_ax_windows, copy_bool_attr, copy_children,
+-    copy_element_attr, copy_string_attr, kAXErrorSuccess, perform_action, set_bool_attr_true,
+-    AXUIElementCreateApplication, AXUIElementRef, AXUIElementSetMessagingTimeout,
++    copy_element_attr, copy_number_attr, copy_string_attr, kAXErrorSuccess, perform_action,
++    set_bool_attr_true, AXUIElementCreateApplication, AXUIElementRef,
++    AXUIElementSetMessagingTimeout,
+ };
+ 
+ pub struct InvokeMenuTool;
+@@ -70,6 +71,95 @@ fn normalized_path(path: Vec<String>) -> Result<Vec<String>, String> {
+         .collect()
+ }
+ 
++#[derive(Debug, Clone, serde::Serialize)]
++struct MenuItem {
++    title: String,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    enabled: Option<bool>,
++    has_submenu: bool,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    shortcut: Option<String>,
++}
++
++#[derive(Debug)]
++struct MenuRefusal {
++    message: String,
++    failed_segment: Option<usize>,
++    items: Vec<MenuItem>,
++}
++
++impl MenuRefusal {
++    fn plain(message: impl Into<String>) -> Self {
++        Self {
++            message: message.into(),
++            failed_segment: None,
++            items: Vec::new(),
++        }
++    }
++
++    fn at_segment(depth: usize, message: impl Into<String>) -> Self {
++        Self {
++            message: message.into(),
++            failed_segment: Some(depth),
++            items: Vec::new(),
++        }
++    }
++
++    fn with_items(mut self, items: Vec<MenuItem>) -> Self {
++        self.items = items;
++        self
++    }
++}
++
++#[derive(Debug)]
++enum MenuOutcome {
++    Invoked,
++    Listed(Vec<MenuItem>),
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum Hop {
++    List,
++    Press(&'static str),
++}
++
++const MENU_MODIFIER_SHIFT: i64 = 1;
++const MENU_MODIFIER_OPTION: i64 = 1 << 1;
++const MENU_MODIFIER_CONTROL: i64 = 1 << 2;
++const MENU_MODIFIER_NO_COMMAND: i64 = 1 << 3;
++
++fn menu_shortcut(cmd_char: Option<&str>, modifiers: Option<f64>) -> Option<String> {
++    let key = cmd_char?.trim();
++    if key.is_empty() {
++        return None;
++    }
++    let mask = modifiers.unwrap_or_default() as i64;
++    let mut rendered = String::new();
++    if mask & MENU_MODIFIER_CONTROL != 0 {
++        rendered.push('⌃');
++    }
++    if mask & MENU_MODIFIER_OPTION != 0 {
++        rendered.push('⌥');
++    }
++    if mask & MENU_MODIFIER_SHIFT != 0 {
++        rendered.push('⇧');
++    }
++    if mask & MENU_MODIFIER_NO_COMMAND == 0 {
++        rendered.push('⌘');
++    }
++    rendered.push_str(&key.to_uppercase());
++    Some(rendered)
++}
++
++fn listable_title(raw: Option<String>) -> Option<String> {
++    let title = raw?.trim().to_owned();
++    if title.is_empty() {
++        None
++    } else {
++        Some(title)
++    }
++}
++
+ /// Return the semantic menu children of an AX node. AppKit inserts an
+ /// untitled `AXMenu` container between a menu-bar/submenu item and its items;
+ /// callers express paths in visible labels, so that container is transparent.
+@@ -86,10 +176,43 @@ unsafe fn semantic_children(parent: AXUIElementRef) -> Vec<AXUIElementRef> {
+     out
+ }
+ 
++unsafe fn has_submenu(item: AXUIElementRef) -> bool {
++    let children = copy_children(item);
++    let present = !children.is_empty();
++    for child in children {
++        CFRelease(child as CFTypeRef);
++    }
++    present
++}
++
++unsafe fn describe_item(item: AXUIElementRef) -> Option<MenuItem> {
++    Some(MenuItem {
++        title: listable_title(copy_string_attr(item, "AXTitle"))?,
++        enabled: copy_bool_attr(item, "AXEnabled"),
++        has_submenu: has_submenu(item),
++        shortcut: menu_shortcut(
++            copy_string_attr(item, "AXMenuItemCmdChar").as_deref(),
++            copy_number_attr(item, "AXMenuItemCmdModifiers"),
++        ),
++    })
++}
++
++unsafe fn describe_items(parent: AXUIElementRef) -> Vec<MenuItem> {
++    let children = semantic_children(parent);
++    let mut items = Vec::with_capacity(children.len());
++    for child in children {
++        if let Some(item) = describe_item(child) {
++            items.push(item);
++        }
++        CFRelease(child as CFTypeRef);
++    }
++    items
++}
++
+ unsafe fn resolve_exact_prefix(
+     menu_bar: AXUIElementRef,
+     prefix: &[String],
+-) -> Result<AXUIElementRef, String> {
++) -> Result<AXUIElementRef, MenuRefusal> {
+     let mut current = menu_bar;
+     let mut owns_current = false;
+ 
+@@ -99,35 +222,48 @@ unsafe fn resolve_exact_prefix(
+             CFRelease(current as CFTypeRef);
+         }
+ 
+-        let mut matches = Vec::new();
+-        for child in children {
+-            let title = copy_string_attr(child, "AXTitle").unwrap_or_default();
+-            if title.trim() == segment {
+-                matches.push(child);
++        let matched: Vec<usize> = children
++            .iter()
++            .enumerate()
++            .filter(|(_, child)| {
++                copy_string_attr(**child, "AXTitle")
++                    .unwrap_or_default()
++                    .trim()
++                    == segment
++            })
++            .map(|(index, _)| index)
++            .collect();
++
++        if matched.len() != 1 {
++            let message = if matched.is_empty() {
++                format!("invoke_menu: path segment {depth} was not found")
+             } else {
++                format!("invoke_menu: path segment {depth} is ambiguous")
++            };
++            let items = children
++                .iter()
++                .filter_map(|child| describe_item(*child))
++                .collect();
++            for child in children {
+                 CFRelease(child as CFTypeRef);
+             }
++            return Err(MenuRefusal::at_segment(depth, message).with_items(items));
+         }
+ 
+-        if matches.len() != 1 {
+-            let match_count = matches.len();
+-            for candidate in matches {
+-                CFRelease(candidate as CFTypeRef);
++        let keep = matched[0];
++        for (index, child) in children.iter().enumerate() {
++            if index != keep {
++                CFRelease(*child as CFTypeRef);
+             }
+-            return Err(if match_count == 0 {
+-                format!("invoke_menu: path segment {depth} was not found")
+-            } else {
+-                format!("invoke_menu: path segment {depth} is ambiguous")
+-            });
+         }
+-        current = matches.pop().expect("one exact match");
++        current = children[keep];
+         owns_current = true;
+     }
+ 
+     if owns_current {
+         Ok(current)
+     } else {
+-        Err("invoke_menu: path is empty".into())
++        Err(MenuRefusal::plain("invoke_menu: path is empty"))
+     }
+ }
+ 
+@@ -141,53 +277,154 @@ fn choose_action(actions: &[String], final_segment: bool) -> Option<&'static str
+     order.iter().copied().find(|action| supports(action))
+ }
+ 
+-unsafe fn invoke_path(pid: i32, path: &[String]) -> Result<(), String> {
+-    let app = AXUIElementCreateApplication(pid);
+-    if app.is_null() {
+-        return Err("invoke_menu: target application is unavailable".into());
++fn plan_hop(actions: &[String], final_segment: bool, has_submenu: bool) -> Option<Hop> {
++    if final_segment && has_submenu {
++        return Some(Hop::List);
+     }
+-    set_messaging_timeout(app);
++    choose_action(actions, final_segment).map(Hop::Press)
++}
++
++unsafe fn menu_bar_of(app: AXUIElementRef) -> Option<AXUIElementRef> {
++    let menu_bar = copy_element_attr(app, "AXMenuBar")?;
++    set_messaging_timeout(menu_bar);
++    Some(menu_bar)
++}
++
++unsafe fn peek_submenu(app: AXUIElementRef, path: &[String]) -> Option<Vec<MenuItem>> {
++    let menu_bar = menu_bar_of(app)?;
++    let resolved = resolve_exact_prefix(menu_bar, path);
++    CFRelease(menu_bar as CFTypeRef);
++    let target = resolved.ok()?;
++    set_messaging_timeout(target);
++    let items = has_submenu(target)
++        .then(|| describe_items(target))
++        .filter(|items| !items.is_empty());
++    CFRelease(target as CFTypeRef);
++    items
++}
++
++unsafe fn cancel_menu(item: AXUIElementRef) {
++    if copy_action_names(item)
++        .iter()
++        .any(|name| name == "AXCancel")
++    {
++        let _ = perform_action(item, "AXCancel");
++        return;
++    }
++    for child in copy_children(item) {
++        if copy_string_attr(child, "AXRole").as_deref() == Some("AXMenu")
++            && copy_action_names(child)
++                .iter()
++                .any(|name| name == "AXCancel")
++        {
++            let _ = perform_action(child, "AXCancel");
++        }
++        CFRelease(child as CFTypeRef);
++    }
++}
++
++unsafe fn dismiss_opened_menus(app: AXUIElementRef, root: &[String]) {
++    let Some(menu_bar) = menu_bar_of(app) else {
++        return;
++    };
++    let resolved = resolve_exact_prefix(menu_bar, root);
++    CFRelease(menu_bar as CFTypeRef);
++    let Ok(item) = resolved else {
++        return;
++    };
++    set_messaging_timeout(item);
++    cancel_menu(item);
++    CFRelease(item as CFTypeRef);
++}
++
++unsafe fn press_each_segment(
++    app: AXUIElementRef,
++    path: &[String],
++) -> Result<MenuOutcome, MenuRefusal> {
++    for depth in 0..path.len() {
++        let final_segment = depth + 1 == path.len();
++        // Resolve from the live app root for every hop. Opening a menu can
++        // replace its AX objects and reorder unrelated snapshot indices.
++        let menu_bar = menu_bar_of(app)
++            .ok_or_else(|| MenuRefusal::plain("invoke_menu: target exposes no AXMenuBar"))?;
++        let target = resolve_exact_prefix(menu_bar, &path[..=depth]);
++        CFRelease(menu_bar as CFTypeRef);
++        let target = target?;
++        set_messaging_timeout(target);
++
++        if copy_bool_attr(target, "AXEnabled") == Some(false) {
++            CFRelease(target as CFTypeRef);
++            return Err(MenuRefusal::at_segment(
++                depth,
++                format!("invoke_menu: path segment {depth} is disabled"),
++            ));
++        }
+ 
+-    let result = (|| {
+-        for depth in 0..path.len() {
+-            // Resolve from the live app root for every hop. Opening a menu can
+-            // replace its AX objects and reorder unrelated snapshot indices.
+-            let menu_bar = copy_element_attr(app, "AXMenuBar")
+-                .ok_or_else(|| "invoke_menu: target exposes no AXMenuBar".to_owned())?;
+-            set_messaging_timeout(menu_bar);
+-            let target = resolve_exact_prefix(menu_bar, &path[..=depth]);
+-            CFRelease(menu_bar as CFTypeRef);
+-            let target = target?;
+-            set_messaging_timeout(target);
+-
+-            if copy_bool_attr(target, "AXEnabled") == Some(false) {
++        let actions = copy_action_names(target);
++        let action = match plan_hop(
++            &actions,
++            final_segment,
++            final_segment && has_submenu(target),
++        ) {
++            Some(Hop::List) => {
++                let items = describe_items(target);
+                 CFRelease(target as CFTypeRef);
+-                return Err(format!("invoke_menu: path segment {depth} is disabled"));
+-            }
+-            let actions = copy_action_names(target);
+-            let action = choose_action(&actions, depth + 1 == path.len()).ok_or_else(|| {
+-                format!("invoke_menu: path segment {depth} has no usable native menu action")
+-            });
+-            let action = match action {
+-                Ok(action) => action,
+-                Err(error) => {
+-                    CFRelease(target as CFTypeRef);
+-                    return Err(error);
++                if items.is_empty() {
++                    return Err(MenuRefusal::at_segment(
++                        depth,
++                        format!(
++                            "invoke_menu: path segment {depth} opens a submenu whose items accessibility does not expose"
++                        ),
++                    ));
+                 }
+-            };
+-            let error = perform_action(target, action);
+-            CFRelease(target as CFTypeRef);
+-            if error != kAXErrorSuccess {
+-                return Err(format!(
+-                    "invoke_menu: native action for path segment {depth} failed with AX error {error}"
++                return Ok(MenuOutcome::Listed(items));
++            }
++            Some(Hop::Press(action)) => action,
++            None => {
++                CFRelease(target as CFTypeRef);
++                return Err(MenuRefusal::at_segment(
++                    depth,
++                    format!("invoke_menu: path segment {depth} has no usable native menu action"),
+                 ));
+             }
+-            if depth + 1 != path.len() {
+-                std::thread::sleep(Duration::from_millis(80));
++        };
++
++        let error = perform_action(target, action);
++        CFRelease(target as CFTypeRef);
++        if error != kAXErrorSuccess {
++            return Err(MenuRefusal::at_segment(
++                depth,
++                format!(
++                    "invoke_menu: native action for path segment {depth} failed with AX error {error}"
++                ),
++            ));
++        }
++        if !final_segment {
++            std::thread::sleep(Duration::from_millis(80));
++        }
++    }
++    Ok(MenuOutcome::Invoked)
++}
++
++unsafe fn invoke_path(pid: i32, path: &[String]) -> Result<MenuOutcome, MenuRefusal> {
++    let app = AXUIElementCreateApplication(pid);
++    if app.is_null() {
++        return Err(MenuRefusal::plain(
++            "invoke_menu: target application is unavailable",
++        ));
++    }
++    set_messaging_timeout(app);
++
++    let result = match peek_submenu(app, path) {
++        Some(items) => Ok(MenuOutcome::Listed(items)),
++        None => {
++            let outcome = press_each_segment(app, path);
++            if !matches!(outcome, Ok(MenuOutcome::Invoked)) && path.len() > 1 {
++                dismiss_opened_menus(app, &path[..1]);
+             }
++            outcome
+         }
+-        Ok(())
+-    })();
++    };
+ 
+     CFRelease(app as CFTypeRef);
+     result
+@@ -357,13 +594,55 @@ fn exact_window_is_ready(
+     frontmost_pid == Some(target_pid) && focused_window_id == Some(target_window_id)
+ }
+ 
+-fn refusal(message: String) -> ToolResult {
+-    ToolResult::error(message.clone()).with_structured(serde_json::json!({
++fn refusal(details: MenuRefusal) -> ToolResult {
++    let mut refused = serde_json::json!({
++        "code": "menu_path_unavailable",
++        "message": details.message.clone(),
++    });
++    if let Some(segment) = details.failed_segment {
++        refused["failed_segment"] = serde_json::json!(segment);
++    }
++    if !details.items.is_empty() {
++        refused["items"] = serde_json::json!(details.items);
++    }
++    ToolResult::error(details.message).with_structured(serde_json::json!({
+         "status": "refused",
+-        "refusal": { "code": "menu_path_unavailable", "message": message }
++        "refusal": refused,
++    }))
++}
++
++fn listed(resolved_path: Vec<String>, items: Vec<MenuItem>) -> ToolResult {
++    ToolResult::text(format!(
++        "Resolved the live native menu path to a submenu and listed its {} items without dispatching anything; extend the path with one of those titles to invoke a command.",
++        items.len()
++    ))
++    .with_structured(serde_json::json!({
++        "status": cua_driver_contract::LISTING_STATUS,
++        "resolved_path": resolved_path,
++        "items": items,
+     }))
+ }
+ 
++fn invoked() -> ToolResult {
++    ToolResult::text(
++        "Resolved the live native menu path and dispatched its final accessibility action; verify the command's semantic effect from fresh state.",
++    )
++    .with_action_record(
++        ActionExecutionRecord::builder(
++            ActionEffect::Unverifiable,
++            ActionTransport::MacosAxAction,
++            RequestedDelivery::Foreground,
++        )
++        .actual_delivery(ActualDelivery::Foreground)
++        .evidence(ActionEvidence {
++            kind: EvidenceKind::NativeApiResult,
++            detail: "Every menu hop resolved uniquely and AX accepted the final action".into(),
++        })
++        .build()
++        .expect("invoke_menu record is valid"),
++    )
++}
++
+ #[async_trait]
+ impl Tool for InvokeMenuTool {
+     fn def(&self) -> &ToolDef {
+@@ -378,22 +657,25 @@ impl Tool for InvokeMenuTool {
+             };
+         let path = match normalized_path(input.path) {
+             Ok(path) => path,
+-            Err(error) => return refusal(error),
++            Err(error) => return refusal(MenuRefusal::plain(error)),
+         };
+         let pid = match i32::try_from(input.pid) {
+             Ok(pid) => pid,
+-            Err(_) => return refusal("invoke_menu: pid is out of range".into()),
++            Err(_) => return refusal(MenuRefusal::plain("invoke_menu: pid is out of range")),
+         };
+         let window_id = match u32::try_from(input.window_id) {
+             Ok(window_id) => window_id,
+-            Err(_) => return refusal("invoke_menu: window_id is out of range".into()),
++            Err(_) => return refusal(MenuRefusal::plain("invoke_menu: window_id is out of range")),
+         };
+         if !crate::windows::all_windows()
+             .iter()
+             .any(|window| window.pid == pid && window.window_id == window_id)
+         {
+-            return refusal("invoke_menu: window_id does not belong to pid".into());
++            return refusal(MenuRefusal::plain(
++                "invoke_menu: window_id does not belong to pid",
++            ));
+         }
++        let resolved_path = path.clone();
+ 
+         let outcome = tokio::task::spawn_blocking(move || {
+             let prior_frontmost = crate::apps::frontmost_pid();
+@@ -401,8 +683,10 @@ impl Tool for InvokeMenuTool {
+                 prior_frontmost.and_then(crate::ax::bindings::focused_window_id_of_pid);
+             let needs_activation = prior_frontmost != Some(pid);
+ 
+-            let result = focus_exact_window(pid, window_id)
+-                .and_then(|()| unsafe { invoke_path(pid, &path) });
++            let result = match focus_exact_window(pid, window_id) {
++                Ok(()) => unsafe { invoke_path(pid, &path) },
++                Err(error) => Err(MenuRefusal::plain(error)),
++            };
+ 
+             // Restore the exact prior key window when one was observable,
+             // including across applications. Falling back to app activation
+@@ -424,25 +708,12 @@ impl Tool for InvokeMenuTool {
+         .await;
+ 
+         match outcome {
+-            Ok(Ok(())) => ToolResult::text(
+-                "Resolved the live native menu path and dispatched its final accessibility action; verify the command's semantic effect from fresh state.",
+-            )
+-            .with_action_record(
+-                ActionExecutionRecord::builder(
+-                    ActionEffect::Unverifiable,
+-                    ActionTransport::MacosAxAction,
+-                    RequestedDelivery::Foreground,
+-                )
+-                .actual_delivery(ActualDelivery::Foreground)
+-                .evidence(ActionEvidence {
+-                    kind: EvidenceKind::NativeApiResult,
+-                    detail: "Every menu hop resolved uniquely and AX accepted the final action".into(),
+-                })
+-                .build()
+-                .expect("invoke_menu record is valid"),
+-            ),
+-            Ok(Err(error)) => refusal(error),
+-            Err(error) => refusal(format!("invoke_menu: blocking task failed: {error}")),
++            Ok(Ok(MenuOutcome::Invoked)) => invoked(),
++            Ok(Ok(MenuOutcome::Listed(items))) => listed(resolved_path, items),
++            Ok(Err(refused)) => refusal(refused),
++            Err(error) => refusal(MenuRefusal::plain(format!(
++                "invoke_menu: blocking task failed: {error}"
++            ))),
+         }
+     }
+ }
+@@ -468,6 +739,156 @@ mod tests {
+         assert_eq!(choose_action(&["AXShowMenu".into()], true), None);
+     }
+ 
++    #[test]
++    fn a_final_segment_that_opens_a_submenu_is_listed_instead_of_pressed() {
++        let pressable = vec!["AXPress".to_owned()];
++        assert_eq!(plan_hop(&pressable, true, true), Some(Hop::List));
++        assert_eq!(plan_hop(&[], true, true), Some(Hop::List));
++        assert_eq!(
++            plan_hop(&pressable, true, false),
++            Some(Hop::Press("AXPress"))
++        );
++        assert_eq!(
++            plan_hop(&pressable, false, true),
++            Some(Hop::Press("AXPress"))
++        );
++        assert_eq!(plan_hop(&["AXShowMenu".to_owned()], true, false), None);
++    }
++
++    #[test]
++    fn a_menu_shortcut_renders_the_modifiers_macos_reports() {
++        assert_eq!(menu_shortcut(Some("s"), Some(0.0)).as_deref(), Some("⌘S"));
++        assert_eq!(menu_shortcut(Some("s"), None).as_deref(), Some("⌘S"));
++        assert_eq!(menu_shortcut(Some("s"), Some(1.0)).as_deref(), Some("⇧⌘S"));
++        assert_eq!(menu_shortcut(Some("["), Some(2.0)).as_deref(), Some("⌥⌘["));
++        assert_eq!(
++            menu_shortcut(Some("d"), Some(7.0)).as_deref(),
++            Some("⌃⌥⇧⌘D")
++        );
++        assert_eq!(menu_shortcut(Some("f"), Some(8.0)).as_deref(), Some("F"));
++        assert_eq!(menu_shortcut(Some("f"), Some(12.0)).as_deref(), Some("⌃F"));
++        assert_eq!(menu_shortcut(Some("  "), Some(0.0)), None);
++        assert_eq!(menu_shortcut(None, Some(0.0)), None);
++    }
++
++    #[test]
++    fn an_untitled_row_is_not_a_listable_item() {
++        assert_eq!(
++            listable_title(Some("  Move Down ".into())).as_deref(),
++            Some("Move Down")
++        );
++        assert_eq!(listable_title(Some(String::new())), None);
++        assert_eq!(listable_title(Some("   ".into())), None);
++        assert_eq!(listable_title(None), None);
++    }
++
++    #[test]
++    fn a_listed_submenu_publishes_its_items_as_a_success() {
++        let result = listed(
++            vec!["View".into(), "Code Folding".into()],
++            vec![
++                MenuItem {
++                    title: "Fold".into(),
++                    enabled: Some(true),
++                    has_submenu: false,
++                    shortcut: Some("⌥⌘F".into()),
++                },
++                MenuItem {
++                    title: "More".into(),
++                    enabled: None,
++                    has_submenu: true,
++                    shortcut: None,
++                },
++            ],
++        );
++        assert_eq!(result.is_error, None);
++        let structured = result.structured_content.expect("structured content");
++        assert_eq!(structured["status"], "listed");
++        assert_eq!(
++            structured["resolved_path"],
++            serde_json::json!(["View", "Code Folding"])
++        );
++        assert_eq!(structured["items"][0]["title"], "Fold");
++        assert_eq!(structured["items"][0]["enabled"], true);
++        assert_eq!(structured["items"][0]["has_submenu"], false);
++        assert_eq!(structured["items"][0]["shortcut"], "⌥⌘F");
++        assert_eq!(structured["items"][1]["has_submenu"], true);
++        assert!(structured["items"][1].get("enabled").is_none());
++        assert!(structured["items"][1].get("shortcut").is_none());
++    }
++
++    #[test]
++    fn a_listed_submenu_is_a_non_action_outcome_the_runtime_accepts() {
++        let structured = listed(
++            vec!["Card".into(), "Add Field".into()],
++            vec![MenuItem {
++                title: "Phone".into(),
++                enabled: Some(true),
++                has_submenu: false,
++                shortcut: None,
++            }],
++        )
++        .structured_content
++        .expect("structured content");
++        assert!(cua_driver_contract::is_action_listing_output(
++            "invoke_menu",
++            &structured
++        ));
++        assert_eq!(
++            cua_driver_contract::validate_success_output("invoke_menu", structured),
++            Ok(false)
++        );
++    }
++
++    #[test]
++    fn a_pressed_menu_item_still_carries_its_execution_record() {
++        let pressed = invoked();
++        assert_eq!(pressed.is_error, None);
++        assert!(pressed.structured_content.is_none());
++        let public = serde_json::to_value(
++            pressed
++                .action_record
++                .expect("execution record")
++                .public_result()
++                .expect("public projection"),
++        )
++        .expect("projection serializes");
++        assert_eq!(public["effect"], "unverifiable");
++        assert_eq!(public["route"], "accessibility");
++        assert_eq!(public["delivery"]["mode"], "foreground");
++    }
++
++    #[test]
++    fn an_unresolved_segment_names_the_level_it_failed_at() {
++        let result = refusal(
++            MenuRefusal::at_segment(1, "invoke_menu: path segment 1 was not found").with_items(
++                vec![MenuItem {
++                    title: "Bold".into(),
++                    enabled: Some(false),
++                    has_submenu: false,
++                    shortcut: None,
++                }],
++            ),
++        );
++        assert_eq!(result.is_error, Some(true));
++        let structured = result.structured_content.expect("structured content");
++        assert_eq!(structured["status"], "refused");
++        assert_eq!(structured["refusal"]["code"], "menu_path_unavailable");
++        assert_eq!(structured["refusal"]["failed_segment"], 1);
++        assert_eq!(structured["refusal"]["items"][0]["title"], "Bold");
++        assert_eq!(structured["refusal"]["items"][0]["enabled"], false);
++
++        let plain = refusal(MenuRefusal::plain("invoke_menu: pid is out of range"))
++            .structured_content
++            .expect("structured content");
++        assert_eq!(
++            plain["refusal"]["message"],
++            "invoke_menu: pid is out of range"
++        );
++        assert!(plain["refusal"].get("failed_segment").is_none());
++        assert!(plain["refusal"].get("items").is_none());
++    }
++
+     #[test]
+     fn menu_focus_requires_the_exact_frontmost_app_and_window() {
+         assert!(exact_window_is_ready(Some(7), 7, Some(42), 42));
+diff --git a/libs/cua-driver/typescript/src/native/cua_driver_contract.ts b/libs/cua-driver/typescript/src/native/cua_driver_contract.ts
+index 02dea5f..5edc4b6 100644
+--- a/libs/cua-driver/typescript/src/native/cua_driver_contract.ts
++++ b/libs/cua-driver/typescript/src/native/cua_driver_contract.ts
+@@ -1719,6 +1719,49 @@ const FfiConverterTypeDragInput = (() => {
+     return new FFIConverter();
+ })();
+ 
++export type ElementCustomAction = {
++    name: string,
++    raw: string
++}
++
++/**
++ * Generated factory for {@link ElementCustomAction} record objects.
++ */
++export const ElementCustomAction = (() => {
++    const defaults = () => ({
++    });
++    const create = (() => {
++        return uniffiCreateRecord<ElementCustomAction, ReturnType<typeof defaults>>(defaults);
++    })();
++    return Object.freeze({
++        create,
++        new: create,
++        defaults: () => Object.freeze(defaults()) as Partial<ElementCustomAction>,
++    });
++})();
++
++const FfiConverterTypeElementCustomAction = (() => {
++    type TypeName = ElementCustomAction;
++    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
++        read(from: RustBuffer): TypeName {
++            return {
++                name: FfiConverterString.read(from),
++                raw: FfiConverterString.read(from)
++            };
++        }
++        write(value: TypeName, into: RustBuffer): void {
++            FfiConverterString.write(value.name, into);
++            FfiConverterString.write(value.raw, into);
++        }
++        allocationSize(value: TypeName): number {
++            return FfiConverterString.allocationSize(value.name) +
++             FfiConverterString.allocationSize(value.raw);
++
++        }
++    };
++    return new FFIConverter();
++})();
++
+ export type ElementFrame = {
+     x: number,
+     y: number,
+@@ -5533,12 +5576,15 @@ export type WindowElement = {
+     depth: number,
+     elementToken?: string,
+     label?: string,
++    description?: string,
++    help?: string,
+     value?: string,
+     valueDescription?: string,
+     enabled?: boolean,
+     selected?: boolean,
+     inWebContent?: boolean,
+     actions?: Array<string>,
++    customActions?: Array<ElementCustomAction>,
+     parentIndex?: bigint,
+     frame?: ElementFrame,
+     min?: number,
+@@ -5571,12 +5617,15 @@ const FfiConverterTypeWindowElement = (() => {
+                 depth: FfiConverterUInt32.read(from),
+                 elementToken: FfiConverterOptionalString.read(from),
+                 label: FfiConverterOptionalString.read(from),
++                description: FfiConverterOptionalString.read(from),
++                help: FfiConverterOptionalString.read(from),
+                 value: FfiConverterOptionalString.read(from),
+                 valueDescription: FfiConverterOptionalString.read(from),
+                 enabled: FfiConverterOptionalBoolean.read(from),
+                 selected: FfiConverterOptionalBoolean.read(from),
+                 inWebContent: FfiConverterOptionalBoolean.read(from),
+                 actions: FfiConverterOptionalSequenceString.read(from),
++                customActions: FfiConverterOptionalSequenceTypeElementCustomAction.read(from),
+                 parentIndex: FfiConverterOptionalUInt64.read(from),
+                 frame: FfiConverterOptionalTypeElementFrame.read(from),
+                 min: FfiConverterOptionalFloat64.read(from),
+@@ -5589,12 +5638,15 @@ const FfiConverterTypeWindowElement = (() => {
+             FfiConverterUInt32.write(value.depth, into);
+             FfiConverterOptionalString.write(value.elementToken, into);
+             FfiConverterOptionalString.write(value.label, into);
++            FfiConverterOptionalString.write(value.description, into);
++            FfiConverterOptionalString.write(value.help, into);
+             FfiConverterOptionalString.write(value.value, into);
+             FfiConverterOptionalString.write(value.valueDescription, into);
+             FfiConverterOptionalBoolean.write(value.enabled, into);
+             FfiConverterOptionalBoolean.write(value.selected, into);
+             FfiConverterOptionalBoolean.write(value.inWebContent, into);
+             FfiConverterOptionalSequenceString.write(value.actions, into);
++            FfiConverterOptionalSequenceTypeElementCustomAction.write(value.customActions, into);
+             FfiConverterOptionalUInt64.write(value.parentIndex, into);
+             FfiConverterOptionalTypeElementFrame.write(value.frame, into);
+             FfiConverterOptionalFloat64.write(value.min, into);
+@@ -5606,12 +5658,15 @@ const FfiConverterTypeWindowElement = (() => {
+              FfiConverterUInt32.allocationSize(value.depth) +
+              FfiConverterOptionalString.allocationSize(value.elementToken) +
+              FfiConverterOptionalString.allocationSize(value.label) +
++             FfiConverterOptionalString.allocationSize(value.description) +
++             FfiConverterOptionalString.allocationSize(value.help) +
+              FfiConverterOptionalString.allocationSize(value.value) +
+              FfiConverterOptionalString.allocationSize(value.valueDescription) +
+              FfiConverterOptionalBoolean.allocationSize(value.enabled) +
+              FfiConverterOptionalBoolean.allocationSize(value.selected) +
+              FfiConverterOptionalBoolean.allocationSize(value.inWebContent) +
+              FfiConverterOptionalSequenceString.allocationSize(value.actions) +
++             FfiConverterOptionalSequenceTypeElementCustomAction.allocationSize(value.customActions) +
+              FfiConverterOptionalUInt64.allocationSize(value.parentIndex) +
+              FfiConverterOptionalTypeElementFrame.allocationSize(value.frame) +
+              FfiConverterOptionalFloat64.allocationSize(value.min) +
+@@ -5896,6 +5951,12 @@ const FfiConverterSequenceTypeStatePredicate = new FfiConverterArray(FfiConverte
+ // FfiConverter for Array<PredicateOutcome>
+ const FfiConverterSequenceTypePredicateOutcome = new FfiConverterArray(FfiConverterTypePredicateOutcome);
+ 
++// FfiConverter for Array<ElementCustomAction>
++const FfiConverterSequenceTypeElementCustomAction = new FfiConverterArray(FfiConverterTypeElementCustomAction);
++
++// FfiConverter for Array<ElementCustomAction> | undefined
++const FfiConverterOptionalSequenceTypeElementCustomAction = new FfiConverterOptional(FfiConverterSequenceTypeElementCustomAction);
++
+ // FfiConverter for ElementFrame | undefined
+ const FfiConverterOptionalTypeElementFrame = new FfiConverterOptional(FfiConverterTypeElementFrame);
+ 
+@@ -5967,6 +6028,7 @@ export default Object.freeze({
+     FfiConverterTypeDesktopScope,
+     FfiConverterTypeDragInput,
+     FfiConverterTypeEffectiveScope,
++    FfiConverterTypeElementCustomAction,
+     FfiConverterTypeElementFrame,
+     FfiConverterTypeElementPredicate,
+     FfiConverterTypeElementSelector,

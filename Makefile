@@ -3,7 +3,15 @@ BINARY = .build/release/JevVoice
 VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
 ZIP = build/Jev-Voice-$(VERSION).zip
 
-.PHONY: build app run test dist clean
+.PHONY: setup build app run test test-tools dist clean
+
+setup:
+	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
+	@test "$$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" -ge 26 || (echo "macOS 26 SDK or newer is required" >&2; exit 1)
+	@xcrun --find swift >/dev/null
+	@swift --version
+	@xcrun --sdk macosx --show-sdk-version
+	@echo "Runtime prerequisites: see docs/DEVELOPMENT.md and ThirdParty/Cua/README.md"
 
 build:
 	swift build -c release
@@ -21,8 +29,11 @@ app: build
 run: app
 	open "$(APP)"
 
-test:
+test: test-tools
 	swift test
+
+test-tools:
+	python3 -B -m unittest discover -s Tests/Tooling -v
 
 # Zip suitable for a GitHub release asset / Homebrew cask (ditto preserves signatures).
 dist: app
