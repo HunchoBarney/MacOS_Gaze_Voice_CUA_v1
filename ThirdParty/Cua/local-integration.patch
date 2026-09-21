@@ -855,9 +855,7 @@ index 0000000..a52ad34
 +  "evidence": "Two independent exports have identical canonical SHA256. PyTorch equivalence log: /tmp/jarvis-detector-equivalence.log."
 +}
 diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py b/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py
-old mode 100644
-new mode 100755
-index 648b1d0..fd13633
+index 648b1d0..fd13633 100755
 --- a/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py
 +++ b/libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py
 @@ -272,11 +272,11 @@ def verify_corresponding_sources(bundle: Path, manifest: dict[str, Any], lock: d
@@ -1075,9 +1073,7 @@ index 0000000..2a8243f
 +  ]
 +}
 diff --git a/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py b/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py
-old mode 100644
-new mode 100755
-index cca0b92..eed08ab
+index cca0b92..eed08ab 100755
 --- a/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py
 +++ b/libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py
 @@ -325,7 +325,7 @@ def deterministic_bundle_archive(bundle: Path, destination: Path) -> None:

@@ -13,7 +13,7 @@ class DesktopLockTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             result = subprocess.run(
                 [sys.executable, str(WRAPPER), sys.executable, '-c', 'raise SystemExit(17)'],
-                env=dict(os.environ, HOME=home), capture_output=True)
+                env=dict(os.environ, JARVIS_DESKTOP_LOCK_DIRECTORY=home), capture_output=True)
             self.assertEqual(result.returncode, 17)
 
     def test_commands_from_different_directories_do_not_overlap(self):
@@ -32,7 +32,7 @@ class DesktopLockTests(unittest.TestCase):
                     cwd.mkdir()
                     processes.append(subprocess.Popen(
                         [sys.executable, str(WRAPPER), sys.executable, '-c', command, str(log), label],
-                        cwd=cwd, env=dict(os.environ, HOME=home), stdout=subprocess.DEVNULL))
+                        cwd=cwd, env=dict(os.environ, JARVIS_DESKTOP_LOCK_DIRECTORY=home), stdout=subprocess.DEVNULL))
                 for process in processes:
                     self.assertEqual(process.wait(timeout=10), 0)
                 events = log.read_text().splitlines()

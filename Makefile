@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := build
+
 APP = build/Jev Voice.app
 BINARY = .build/release/JevVoice
 VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)

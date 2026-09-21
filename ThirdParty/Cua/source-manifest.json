@@ -2,7 +2,7 @@
   "upstream": "https://github.com/trycua/cua.git",
   "base_revision": "b703a8d17fb513c6288f247f710d30643abd068d",
   "recorded_local_revision": "662e9ddb2e2fd6ded048635713e199b3476926a6",
-  "patch_sha256": "e148014254ea51e9ebc8005014b1fda67006afd9f65c5887b543e2e0c602d847",
+  "patch_sha256": "f513c985af5dbf06403d9ccf0eea51c9ca1bc439380830f88f5987c339016052",
   "files": {
     ".cursorignore": "84f2a251b743dc8e8a0c654731311144e6dca1e41c8f78febb0558a5dc42b90a",
     ".editorconfig": "b698b323bd42e701c59890a18348c6890983a2915365ab2da829f92835d9e20e",
@@ -902,5 +902,19 @@
     "scripts/install-cli.sh": "14fcaec4fdb4ae322b6bdfaaf49fabb490f662caa0506dbf7279106d9b683b4c",
     "scripts/spdx-headers.py": "4a3b0c6db70ca6055e28c096f24f8801f935fd0a08473fd884470adb1bbc5ce3",
     "uv.lock": "97db5c07e894d5537b3192adcf9ea342cb64f517db75febc9586e27de0b45ba3"
-  }
+  },
+  "executable_files": [
+    "libs/cua-driver/rust/crates/cua-perception/scripts/artifact_tooling.py",
+    "libs/cua-driver/rust/crates/cua-perception/scripts/assemble_bundle.py",
+    "libs/cua-driver/rust/crates/cua-perception/scripts/verify_bundle.py",
+    "libs/cua-driver/scripts/_install-local-rust.sh",
+    "libs/cua-driver/scripts/cursor-gallery.sh",
+    "libs/cua-driver/scripts/install-local.sh",
+    "libs/cua-driver/scripts/install.sh",
+    "libs/cua-driver/scripts/sync-vm-worktree.sh",
+    "libs/cua-driver/scripts/uninstall-local.sh",
+    "libs/cua-driver/scripts/uninstall.sh",
+    "scripts/install-cli.sh",
+    "scripts/spdx-headers.py"
+  ]
 }

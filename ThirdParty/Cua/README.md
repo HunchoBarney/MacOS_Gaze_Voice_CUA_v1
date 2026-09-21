@@ -16,7 +16,7 @@ Do not update the pin just to accept a different build.
 - `local-integration.patch`: the 30 changed/added files relative to that base,
   recovered by byte comparison with the pinned upstream archive.
 - `source-manifest.json`: hashes of all 898 preserved local source/config/fixture
-  files and the patch. The working tree is sparse; absent upstream paths are not
+  files, executable-file inventory, and the patch. The working tree is sparse; absent upstream paths are not
   treated as deletions. Generated builds, dependencies and models are excluded.
 - `LICENSE.md`: upstream license. Preserve upstream notices in reconstructed builds.
 

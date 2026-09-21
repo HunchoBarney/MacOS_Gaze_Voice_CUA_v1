@@ -41,7 +41,8 @@ remains explicitly identified as upstream distribution, not retargeted or publis
   cooperating commands launched from different working directories.
 - Cua patch: applied to an independent upstream-source worktree; all 898 source
   hashes match the preserved local source. This does not prove binary reproducibility
-  or runtime acceptance.
+  or runtime acceptance. The final reconstruction also verifies executable-file
+  modes; negative checks reject changed content and executable permissions.
 - The release build/signing command succeeds, but later strict verification in
   the original synced checkout fails: the file provider restores FinderInfo on
   the generated bundle. Verification outside that directory is recorded below.
@@ -50,6 +51,23 @@ Existing migration gaps remain in [PLAN.md](voice-ui/PLAN.md) and
 [EVIDENCE.md](voice-ui/EVIDENCE.md), including speech readiness/quick-release,
 complete normal-voice application workflows, dictation and concurrency acceptance.
 No new physical Fn/microphone, provider or live desktop result is claimed here.
+
+## Final verification
+
+- A clean detached checkout at `1382a97` passed setup, two tooling tests and
+  all 248 Swift tests (18 opt-in skips, zero failures, 10.816 s), then built the
+  release app in 48.07 s. Strict/deep code-signature verification passed outside
+  the synced Documents directory. Later tooling-only review repairs preserve
+  plain `make` as a release build and isolate lock tests using a task-specific
+  variable; those affected checks were rerun.
+- Checked all 93 moved source/test files against the baseline: byte-identical
+  except the exact shared-declaration extractions. Historical plan/spec text
+  remains verbatim; relative Markdown links resolve.
+- Conductor TOML parses; its command equivalents were exercised locally. The
+  Conductor UI itself was not exercised.
+- No installed app or Driver was launched/replaced, and no product latency or
+  physical-input acceptance is claimed. The synced-checkout Finder metadata
+  issue remains an environment limitation; use the documented output override.
 
 ## Recovery
 

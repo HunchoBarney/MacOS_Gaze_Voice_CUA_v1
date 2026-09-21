@@ -52,6 +52,8 @@ JARVIS_CUA_TEST=1 python3 scripts/with-desktop-lock.py swift test --filter CuaCo
 ```
 
 The lock serializes cooperating commands across worktrees for the current user.
+`JARVIS_DESKTOP_LOCK_DIRECTORY` is only needed for isolated wrapper tests; keep the
+default shared directory for actual desktop checks.
 It cannot prevent an independently launched app or human from using the desktop.
 Use one desktop owner, disposable fixtures, and avoid concurrent installed-app
 replacement. Never send real messages, purchase, or delete personal content as tests.

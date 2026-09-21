@@ -17,9 +17,11 @@ def main():
     if hashlib.sha256(patch.read_bytes()).hexdigest() != manifest["patch_sha256"]:
         sys.exit("Integration patch does not match its recorded hash")
     failures = []
+    executables = set(manifest["executable_files"])
     for name, expected in manifest["files"].items():
         path = args.source / name
-        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        if (not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected
+                or bool(path.stat().st_mode & 0o111) != (name in executables)):
             failures.append(name)
     if failures:
         sys.exit("Missing or changed source files:\n" + "\n".join(failures))
