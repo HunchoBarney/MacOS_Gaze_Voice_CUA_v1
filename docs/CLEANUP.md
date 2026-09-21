@@ -69,6 +69,20 @@ No new physical Fn/microphone, provider or live desktop result is claimed here.
   physical-input acceptance is claimed. The synced-checkout Finder metadata
   issue remains an environment limitation; use the documented output override.
 
+## Validated local package
+
+The final tooling revision `cf1fa3e` passed `make test-tools`, default-target
+inspection, `make dist`, and strict/deep signature verification in the clean
+checkout. Its archive was extracted and verified again at
+`~/Library/Caches/JarvisDevelopment/cleanup-20260920/Jev Voice.app`.
+Archive SHA-256: `c90eb9a806b993f03323a22e6a13e5fadf3a984c548d87cdf90a0803071618af`.
+This is a validation copy, not an installed/launched replacement.
+
+Task-created clean-build and Cua comparison worktrees and the upstream download
+were removed after verification. The baseline bundle, verified 898-file source
+archive, manifests, logs and package validation record remain in the recovery
+directory. Existing supporting data was not deleted.
+
 ## Recovery
 
 Local cleanup commits can be reverted in reverse order on a separate branch after
