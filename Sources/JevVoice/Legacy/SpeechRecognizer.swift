@@ -2,20 +2,6 @@ import AVFoundation
 import Speech
 import JevVoiceCore
 
-enum SpeechEvent {
-    case partial(String), final(String), failure(String), level(Float)
-    case revision(SpeechRevision, transcript: String)
-    case timing(String, milliseconds: Double)
-}
-
-@MainActor
-protocol SpeechCapturing: AnyObject {
-    var onEvent: ((UUID, SpeechEvent) -> Void)? { get set }
-    func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String
-    func finish()
-    func cancel()
-}
-
 /// The audio callback captures its own request and meter, never a later session's mutable state.
 private final class AudioLevel: @unchecked Sendable {
     private let lock = NSLock()
