@@ -1,6 +1,12 @@
 # Start here: execute the approved Cua/Jev voice migration
 
-Updated 2026-09-19 for the approved Cua capability/perception and voice-coordination revision. This update records the plan; it does not claim implementation. When asked to implement, work through all phases to packaged delivery. Do not reopen planning or rebuild completed UI.
+Updated 2026-09-19 for the approved Cua capability/perception and voice-coordination revision. This update records the plan; it does not claim implementation. When asked to implement the full migration, work through all phases to packaged delivery. Do not reopen planning or rebuild completed UI.
+
+These instructions apply only to an authorized full-migration task. For the
+approved [execution simplification](../EXECUTION-SIMPLIFICATION-PLAN.md), use that
+plan's execution prompt and scoped gates instead. Do not infer authorization to
+resume P0–P5, change speech/UI behavior, or perform live tests from this document
+while carrying out the simplification.
 
 ## Read and resume
 

@@ -2,6 +2,15 @@
 
 Build-specific evidence; current gates remain in [PLAN.md](PLAN.md).
 
+This ledger also records build-specific results for the approved
+[execution simplification](../EXECUTION-SIMPLIFICATION-PLAN.md). Label those entries
+with the simplification step, source/build/dependency identities, exact checks,
+evidence type, outcomes and sanitized artifact paths. Link any applicable migration
+acceptance IDs without treating a scoped pass as completion of the full gate.
+Replacement ownership, deletion criteria and scoped progress belong in the
+simplification plan. Historical entries below remain evidence for their recorded
+builds; this routing note claims no new implementation or runtime result.
+
 ## Evidence ledger and decisions
 
 For each gate record: date, phase/acceptance IDs, source/build/dependency identity, exact check, outcome and sanitized artifact path, evidence type, timing boundaries/sample counts, issue and next action. Checkboxes mean verified completion. Prior evidence below remains unchanged and applies only to its recorded build; old blocker statements do not override the revised source-build approach.
@@ -263,3 +272,48 @@ All 58 discovered tools retain their exact input schemas in the inventory artifa
 | `move_cursor`, `set_agent_cursor_enabled`, `set_agent_cursor_motion`, `set_agent_cursor_theme`, `get_agent_cursor_state` | Cua cursor feedback and settings, P3. Reuse upstream renderer; verify consistent session labels and display coordinates. |
 | `start_recording`, `stop_recording`, `get_recording_state`, `replay_trajectory`, `install_ffmpeg` | Explicit diagnostic recording/replay and dependency setup, P5. No persistent recording by default. Replaying effects requires a current explicit request and target checks; never use replay to recover an uncertain mutation. |
 | `check_permissions`, `health_report`, `get_config`, `set_config`, `check_for_update`, `install_extension` | Setup/settings/diagnostics, P0/P5. Keep permission grants user-controlled and selected source identity pinned. Checking updates does not authorize silently replacing required patches. |
+
+
+## Execution simplification — isolated candidate, 2026-09-21
+
+Scoped steps 1–4 only; [replacement map and boundary decision](../EXECUTION-SIMPLIFICATION-REPLACEMENTS.md). No migration gate closed.
+
+- Baseline revision `d756cf37931d12a85d2e35aef45d9ff3dd7664b8`; 14 pre-existing changed/untracked files preserved in `.context/execution-simplification/baseline-workspace-changes.tar.gz`, alongside baseline diff/status. Archive members were read and checked; no credentials included.
+- Configured Conductor setup passed. Cua source verifier passed 898 files; installed Driver executable matched pinned `699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a`. No source/runtime pin changes or shared-reference writes.
+- Baseline `make test`: 248 Swift tests, 18 opt-in skips, zero failures; tooling passed. Candidate `make test`: 253 Swift tests, 19 opt-in skips, zero failures, 9.550 seconds; tooling passed. Four new offline adapter checks pass. One additional live contract probe compiled but skipped. Logs: `.context/execution-simplification/{baseline-tests,verification-tests,candidate-tests}.log`.
+- The candidate adapter is not called by production. No existing execution protections or loops were deleted. Existing voice/UI/configuration behavior was not modified. No native/browser workflow acceptance, model quality, physical input, focus safety, or performance improvement is established by these tests.
+- `make app` passed; `codesign --verify --deep --strict "build/Jev Voice.app"` passed. Candidate executable SHA-256 `add3aa9ac4001a695f2bb5cbbe56761fb756539cb0e887a30889b0fc6fa967a1`. Local archive `development/JevVoice/verification/execution-simplification/candidate-app.zip` extracted to `.context/execution-simplification/recovered-app`; recovered executable hash matched and strict signature verification passed. This proves packaging/archive recovery, not launched-app acceptance or final delivery. Installed app untouched.
+- Live desktop authorization was requested and remains pending. No desktop checks were run. `TYPESAFE_API_KEY` is absent in this shell; the app's Keychain credential was not inspected or exported. Native and browser real-Jev proofs, failure workflows, production integration/deletion, matched measurements and packaged-app behavior remain unverified.
+- Read-only checkpoint review found that non-throwing assertions in the staged live probe could continue after ambiguous or unverified prerequisites. Repaired with throwing guards before insertion and before the stale-token mutation probe. Focused rerun: 5 tests, 1 live skip, zero failures (`.context/execution-simplification/review-tests.log`). Only test code changed after the full suite/package checks; packaged executable remains the identified build.
+
+
+### Execution simplification — authorized live checkpoint, 2026-09-21
+
+Supersedes the preceding authorization-pending status; steps 4–8 remain incomplete.
+All desktop commands were serialized through `scripts/with-desktop-lock.py` after
+explicit authorization. No physical Fn/microphone acceptance is claimed.
+
+- `live-contract-nonempty.log`: native verify/original-token dispatch/retired-token refusal and independent final readback passed (8.321s). Earlier blank probes returned unknown/unsupported predicate, because source omits empty AX values. No weakening to treat absence as blank.
+- Immediate native trials failed exact foreground verification. Source and controlled activation isolated the detached launch watchdog as a conflict. `native-settled-live.log` passed new-document exact text/original preservation with a test-only 9s setup wait (26.684s total; 12.443s agent). This is diagnostic, not immediate-launch product acceptance.
+- `browser-baseline-live.log`: real Jev form passed (10.253s). Search baseline and first extraction candidate failed independent query readback despite model completion: extra comma/control words. `search-quoted-candidate-live.log` passed exact quoted query/tab/destination (10.776s). Unquoted search remains unverified/failing.
+- `scroll-candidate-live.log`: explicit candidate passed two intentional scroll dispatches with independent positions 500/1000 (10.176s).
+- `native-candidate-live.log`: failed original preservation (29.618s total; 15.265s agent). A leading `O` was already present at the first content observation, before logged new-document/insertion actions. Source unknown; another workspace's app running is only a possible interference source. Further native/package mutations paused for exclusive desktop ownership clarification. No candidate promotion.
+- `authorized-checkpoint-tests.log`: `make test` passed 258 Swift tests, 21 opt-in skips, zero failures (9.939s); tooling passed. `repair-focused-tests.log`: 20 focused tests, one live skip, zero failures. Later fixture-only guards add before/after activation preservation checks; compiled verification passed (four opt-in tests skipped, no live claim).
+- Bounded Driver repair: 31 focused Rust tests passed; `cargo build --release --locked -p cua-driver -p cua-perception` passed. Candidate Driver SHA-256 `b8be58db2df46c27486e66d2861a5ccd12fd06b350fbdc583057212320c7a6de`; strict signature passes. Patch forward/reverse recovery verified. Installed pin remains unchanged. Direct-runtime live repair proof is pending.
+- All logs/repair metadata above are in `.context/execution-simplification/`. Earlier app ZIP/signature recovery describes an earlier build, not the current edited candidate. Final packaging, launched-app acceptance, retired-path removal and maintenance reduction remain outstanding. Small unequal samples are diagnostic; no p95 or performance improvement claimed.
+
+- Isolated candidate permission probe under the shared lock: Accessibility=false, Screen Recording=false, host attribution; direct capture readiness not probed. No permission prompts/grants or installed runtime changes. Evidence: `candidate-permissions.json`. Reviewed ignored source delta copied to `ThirdParty/Cua/launch-watchdog-candidate.patch`; baseline manifest/pin preserved.
+
+
+### Execution simplification — exclusive desktop and review repair, 2026-09-21
+
+- User confirmed they had also been using desktop 1, then authorized exclusive use. Under the shared lock, `native-exclusive-live.log` passed (22.698s total, 9.243s agent): exact new document text, original unchanged before/after activation and at completion. The 9s setup settle remains diagnostic; immediate launch/foreground repair is still unproven.
+- Review reproduced missing `effect:indeterminate` handling (`indeterminate-red.log`), repaired and verified in `indeterminate-green.log`: six tests, one live skip, zero failures. Focused production fix committed `b119086`. Structured evidence is retained without echoing observed content into error UI.
+- Review reproduced the permissive candidate's replay gap (`replay-red.log`). Revised disabled candidate retains suppression for unconfirmed/missing outcomes, requires nonempty Driver confirmation evidence and an explicit additional-effect judgment before repetition. UUIDs are history labels only. Final nine task tests pass, including a refused repeat and confirmed→unverifiable sequence (`replay-final-tests.log`).
+- `scroll-reviewed-live.log`: revised candidate fails real Jev acceptance (7.928s). One scroll reached position 500; Jev then clicked the region and claimed completion. Independent readback rejected success. Earlier two-scroll success is insufficient deletion evidence. No production promotion or protection removal.
+- `reviewed-regression.log`: `make test` passes 258 tests, 21 opt-in skips, zero failures (9.563s), tooling passes. Later bounded candidate evidence/sequence additions pass the focused nine-test suite. No physical input or unrelated migration gate accepted.
+- Intermediate reviewed package build/signature and ZIP recovery pass; executable `dc1388b97690f81db0f2cc6b1218b7e96519f4e2d034045947082169aa8732c4`. This predates the final disabled candidate guard; final checkpoint packaging is recorded separately. The app was not installed or launched.
+
+- Final **checkpoint**, not final delivery: `make app`, strict/deep bundle signature, ZIP extraction and recovered executable equality passed. Executable SHA-256 `5807825618178a022bbfa25a045786a40f0da7021e8aeb808739cdfd2ebba264`. Archive: `development/JevVoice/verification/execution-simplification/final-checkpoint-app.zip`; metadata/log: `.context/execution-simplification/final-recovery.json` and `final-checkpoint-package.log`. Installed app/Driver untouched; launched packaged behavior remains unverified.
+
+- Final bounded source review confirms no supported exact browser scroll offsets or scroll verification predicate in the pinned public API. Internal synthetic scroll compares offsets but exposes only movement Boolean/requested deltas; public effect remains unverifiable. A narrow runtime contract change is needed before replacing host repetition protection. User-controlled Conductor host grants were requested; no TCC modification attempted. Desktop tests ended and released their shared lock.
