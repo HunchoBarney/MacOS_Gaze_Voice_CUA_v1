@@ -463,3 +463,23 @@ New build staged at `.context/silence/Jev Voice.app`, executable SHA-256
 running unchanged; this refinement has not been physically tested or launched.
 The user clarification explains at least some empty input as intentional, but does
 not assign each earlier empty transcript or resolve the separate task failures.
+
+### Negated-prefix review fix — 2026-09-22
+
+Non-action speech at the current transcript edge now stays pending until release,
+so a pause after “Don't” cannot strip negation from the later “open Safari”. This
+also permits revisions of ignored speech without a false committed-command error.
+A separately bounded ignored prefix can still advance to a following command.
+Three regressions cover these paths, including volatile/final recognition segments,
+release completion, early command handoff and no replay. The two defect regressions
+failed before the fix; all 56 focused interpretation/controller tests passed after it.
+
+Final `make test` passed 2 tooling tests and 168 Swift tests (22 opt-in skips), with
+zero failures. The first full run had one transient failure in the unchanged
+`VoiceSessionTests.testRecordingLimitStopsCaptureAndRequiresReview`: no text remained
+for review. Its 20 ms capture deadline can expire during its yield-based setup;
+that timing explanation is inferred, not instrumented. The test passed in isolation
+and in the full rerun without changes. Logs: `.context/negation-fix-tests.log` and
+`.context/negation-fix-tests-rerun.log`. `git diff --check` passed. These checks use
+scripted judgments and simulated capture; no real-model, physical-input, desktop,
+packaging or installation verification was performed for this fix.

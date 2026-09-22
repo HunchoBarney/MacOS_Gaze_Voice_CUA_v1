@@ -185,6 +185,61 @@ extension ContinuousIntentTests {
 }
 
 extension ContinuousIntentTests {
+    func testNegatedPrefixRemainsInGrowingSpeechUntilRelease() async throws {
+        for recognitionFinal in [false, true] {
+            var submissions: [String] = []
+            let model = JevSpeechIntent(evaluate: { state, questions in
+                let text = try XCTUnwrap(state["pending_speech"]?.string)
+                let values = ["polarity": text.hasPrefix("Don't") ? "prohibited" : "notProhibited",
+                              "purpose": "request", "kind": "command", "mode": "control", "extent": "whole"]
+                return try questions.reduce(into: [:]) { answers, question in
+                    let value = try XCTUnwrap(values[question.key])
+                    answers[question.key] = .choice(choice: value, confidence: 1, probabilities: [:])
+                }
+            })
+            let c = ContinuousIntentCoordinator(interpret: {
+                try await model.understand(words: $0, final: $1, context: $2)
+            }, submit: { submissions.append($0.text) })
+            c.begin()
+            c.record(.init(start: 0, end: 1, text: "Don't", isFinal: recognitionFinal))
+            c.update("Don't", final: false); await c.waitForPending()
+            XCTAssertEqual(c.remainder, "Don't", "Recognition stability must not consume the governing negation")
+            c.record(.init(start: 1, end: 2, text: " open Safari", isFinal: recognitionFinal))
+            c.update("Don't open Safari", final: false); await c.waitForPending()
+            XCTAssertTrue(submissions.isEmpty)
+            XCTAssertEqual(c.remainder, "Don't open Safari")
+            c.update("Don't open Safari", final: true); await c.waitForPending()
+            XCTAssertTrue(submissions.isEmpty)
+            XCTAssertTrue(c.remainder.isEmpty)
+            XCTAssertEqual(c.outcome, "noRequest")
+            XCTAssertFalse(c.busy)
+            XCTAssertNil(c.error)
+        }
+    }
+
+    func testIgnoredTailCanBeRevisedIntoARequestWithoutCommittedRevisionFailure() async {
+        var submissions: [String] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
+            .init(kind: words == ["uh"] ? .ignore : .command, count: words.count, text: "")
+        }, submit: { submissions.append($0.text) })
+        c.begin(); c.update("uh", final: false); await c.waitForPending()
+        c.update("open Notes", final: true); await c.waitForPending()
+        XCTAssertEqual(submissions, ["open Notes"])
+        XCTAssertNil(c.error)
+    }
+
+    func testBoundedIgnoredPrefixStillAllowsFollowingCommandBeforeRelease() async {
+        var submissions: [String] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
+            if words.first == "thanks" { return .init(kind: .ignore, count: 1, text: "") }
+            return .init(kind: .command, count: words.count, text: "")
+        }, submit: { submissions.append($0.text) })
+        c.begin(); c.update("thanks open Notes", final: false); await c.waitForPending()
+        XCTAssertEqual(submissions, ["open Notes"])
+        c.update("thanks open Notes", final: true); await c.waitForPending()
+        XCTAssertEqual(submissions, ["open Notes"])
+    }
+
     func testStableFirstRequestDoesNotStarveBehindGrowingIndependentSpeech() async throws {
         var release: CheckedContinuation<Void, Never>?, calls = 0
         var submissions: [String] = []

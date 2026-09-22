@@ -107,6 +107,10 @@ final class ContinuousIntentCoordinator {
                     case .limitation(let reason):
                         self.outcome = "limitation"; self.error = reason; return
                     }
+                    // A non-action at the current speech edge can still govern later
+                    // words ("Don't" + "open Safari") or be revised. Keep that tail
+                    // pending until release; a bounded prefix can still make progress.
+                    if intent.kind == .ignore && !self.final && intent.count == words.count { return }
                     if intent.kind == .dictate { self.literal = true }
                     if (intent.kind == .dictate || intent.kind == .textEntry) && !self.final {
                         self.message = "Text inserts on release; safe live revision is not available yet."
