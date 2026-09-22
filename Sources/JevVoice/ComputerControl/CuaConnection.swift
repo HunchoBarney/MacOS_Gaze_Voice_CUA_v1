@@ -7,6 +7,16 @@ struct CuaToolResult: Sendable {
     let content: [JSONValue]
 }
 
+/// A dispatched effect may exist even when Driver reports an error. Keep its
+/// evidence available to the task owner without reflecting observed content in UI.
+struct CuaUncertainOutcome: Error, LocalizedError, Sendable {
+    let tool: String
+    let result: JSONValue
+    var errorDescription: String? {
+        "Cua reported a partial or uncertain outcome for \(tool). An effect may have occurred; inspect the target before retrying."
+    }
+}
+
 /// One persistent MCP transport per task. Never reconnects or retries a mutation.
 actor CuaConnection {
     private let executable: URL
@@ -113,6 +123,10 @@ actor CuaConnection {
         let value = try await request("tools/call", params: .object([
             "name": .string(name), "arguments": .object(arguments)
         ]), timeout: timeout)
+        if let body = value["structuredContent"],
+           body["status"] == .string("partial") || ["partial", "indeterminate"].contains(body["effect"]?.string ?? "") || body["execution_state"] == .string("unknown") {
+            throw CuaUncertainOutcome(tool: name, result: body)
+        }
         // Retain typed refusal codes without reflecting arbitrary tool/page text into error UI.
         let code = value["structuredContent"]?["refusal"]?["code"]?.string
             ?? value["structuredContent"]?["code"]?.string ?? ""

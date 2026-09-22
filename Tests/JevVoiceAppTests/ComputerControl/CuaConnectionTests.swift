@@ -29,6 +29,9 @@ for line in sys.stdin:
         print('invalid-json',flush=True)
         continue
     elif req['params']['name']=='invalid_output': result={'structuredContent':{'code':'tool_output_invalid','execution_state':'unknown','invalid_output':{}}}
+    elif req['params']['name']=='partial_effect': result={'isError':True,'structuredContent':{'status':'partial','observed':{'focused':False},'private':'fixture content'}}
+    elif req['params']['name']=='indeterminate_text': result={'isError':True,'structuredContent':{'effect':'indeterminate','code':'type_text_synthesis_budget_exceeded','retryable':False,'escalation':{'recommended':'verify_state'}}}
+    elif req['params']['name']=='partial_text': result={'structuredContent':{'effect':'partial','requested_chars':10,'delivered_chars':4}}
     elif req['params']['name']=='native_refusal': result={'isError':True,'structuredContent':{'status':'refused','refusal':{'code':'menu_path_unavailable','message':'private target contents'}}}
     elif req['params']['name']=='refuse_status': result={'structuredContent':{'status':'refused'}}
     elif req['params']['name']=='refuse': result={'structuredContent':{'refusal':{'message':'No target'}}}
@@ -51,7 +54,28 @@ for line in sys.stdin:
         do { _ = try await connection.call("refuse_status", arguments: [:]); XCTFail("Accepted status-only refusal") }
         catch { XCTAssertEqual(error as? DriverConnectionError, .refused("Cua refused this action.")) }
         do { _ = try await connection.call("invalid_output", arguments: [:]); XCTFail("Accepted invalid upstream output") }
-        catch { XCTAssertEqual(error as? DriverConnectionError, .malformed) }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.result["execution_state"], .string("unknown"))
+        }
+        do { _ = try await connection.call("partial_effect", arguments: [:]); XCTFail("Accepted partial effect") }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.tool, "partial_effect")
+            XCTAssertEqual(uncertain.result["observed"]?["focused"], .bool(false))
+            XCTAssertFalse(error.localizedDescription.contains("fixture content"))
+        }
+        do { _ = try await connection.call("partial_text", arguments: [:]); XCTFail("Accepted partial text as success") }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.result["delivered_chars"], .number(4))
+        }
+        do { _ = try await connection.call("indeterminate_text", arguments: [:]); XCTFail("Accepted indeterminate text") }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.result["retryable"], .bool(false))
+            XCTAssertEqual(uncertain.result["escalation"]?["recommended"], .string("verify_state"))
+        }
         do { _ = try await connection.call("native_refusal", arguments: [:]); XCTFail("Accepted native refusal") }
         catch {
             XCTAssertTrue(error.localizedDescription.contains("menu_path_unavailable"))
