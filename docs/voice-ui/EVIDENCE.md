@@ -483,3 +483,125 @@ and in the full rerun without changes. Logs: `.context/negation-fix-tests.log` a
 `.context/negation-fix-tests-rerun.log`. `git diff --check` passed. These checks use
 scripted judgments and simulated capture; no real-model, physical-input, desktop,
 packaging or installation verification was performed for this fix.
+
+## Sydney current acceptance refresh — 2026-09-22
+
+**Identity/scope:** clean entry at `433f473`, branch `chore/review-voice-commands`.
+Current candidate is that revision plus the voice patch at
+`.context/voice-current/candidate.patch`; exact source/test/config hashes are in
+`source-manifest.json`. Existing simplification was retained. No installed app,
+Driver, preferences, credentials, dependency pins or `development/` content changed.
+The test candidate has not been launched for physical acceptance.
+
+**Supported fixes:** initial current-version development run scored valid 29/40,
+13 total failures, critical 0. Returned judgments incorrectly treated ordinary target
+references as conditions and overwrote an outer correction with text-entry mode.
+Clarified condition/reference, self-repair and supplied-content judgments and source
+extraction. An attempted request classified without an effective operation now asks
+for clarification rather than silently consuming it as conversation. Two regressions
+failed before those handling fixes (`correction-red.log`, `clarification-red.log`).
+
+Independent review found that preserving correction kind alone lost literal safety.
+`SpeechIntent` now carries literal mode separately from outer kind; the coordinator
+preserves both through dictation continuation, waits for release for literal replacements,
+and carries the mode into handoff. After existing replacement-source extraction,
+the voice/runtime adapter extracts literal content and invokes the existing literal-only
+execution contract. Task routing, target ownership, cancellation/compensation policy
+and Cua implementation are unchanged. Two coordinator/production-wiring regressions
+failed before this fix and passed after (`literal-correction-red2.log`,
+`literal-correction-green.log`, 45 focused checks). The first test attempt had an
+invalid finalized-range fixture and crashed; it was corrected to append a new range,
+not treated as a product failure (`literal-correction-red.log`). No material review
+finding remains unaddressed; semantic acceptance failures below remain open.
+
+### Real Jev, non-executing sink
+
+Configured `jev-latest`; every returned identifier was `jev-1.13.0`. No desktop
+execution. Final runs use the existing exact opt-ins under the shared desktop lock;
+commands are in `run-evaluations.py`, source/fixture freeze in `freeze.json`, exit
+statuses in `evaluation-status.json`. All paths in this entry are under
+`.context/voice-current/` unless otherwise stated. Development attempts and the
+pre-review acceptance run are retained, not replaced by only successful outcomes.
+
+| Final evaluation | Result | Interpretation |
+| --- | --- | --- |
+| Development | valid 38/40 (95%); all 43 other cases correct; critical 0; 117 calls | Passes development assertions; two valid misses remain. |
+| Held-out, unchanged 60-case split | valid 27/30 (90%); all 15 negatives + 15 scenarios correct; critical 0; 83 calls | Meets held-out numerical/scenario thresholds for this run, not universal accuracy. |
+| Controlled revision delivery with real answers | 3/6 correct; 18 calls | **Fails:** same-text finality and new-capture cases produced incomplete rather than expected commands; extended query became textEntry. |
+
+All six timelines observed discarded stale responses. Cancellation, changed-app
+revision and negated revision passed. Failed timelines show subsequent semantic
+misses/misclassification, not observed stale revival or duplicate handoff. Deterministic
+lifecycle coverage passing does not override this failure. No service failure was
+recorded in development/held-out/latency runs. Timeline output is
+`timelines-results.jsonl`; semantic output is `development-final-results.jsonl` and
+`heldout-results.jsonl`.
+
+Held-out failure text/answers were not inspected or used for tuning. The pre-review
+frozen run had valid 29/30 and 29/30 other cases, critical 0; timeline 4/6. The subsequent
+changes addressed an independently found literal-mode integration defect, not those
+held-out failures. Final held-out results vary; both runs are retained. No acceptance
+claim is based on cherry-picking the stronger valid-request score. V4 remains open
+because the current real-model revision timelines fail.
+
+### Stage-specific performance and capture evidence
+
+| Stage/boundary | Samples and measurements | Limits/failures |
+| --- | --- | --- |
+| Current transcript update → non-executing handoff | First request216.71ms; 30 warm median136.01ms/p95227.50ms; all 31 correct; 33 model calls | Meets ≤1s voice interpretation target; excludes audio, credential retrieval, downstream task creation/execution. First request is not proof of backend cold boot. |
+| Frozen original semantic adapter, matched same 31 simple requests/current coordinator | First227.45ms; all 30 warm attempts median138.62ms/p95230.13ms; only 27 warm correct; 31 calls | Three semantic failures; benchmark assertion failed because it requires 30 correct warm samples. Correct-only median142.72ms/p95230.13ms, n=27. No discarded failed samples in the all-attempt statistics. |
+| Synthetic audio start → first result | First1113.31ms; 30 warm median1095.54ms/p951111.24ms | Same 0.988 s Samantha fixture at audio cadence; includes playback time, not physical microphone startup. |
+| Synthetic input EOF → last recognition result | First58.12ms; 30 warm median63.59ms/p9575.98ms | Controlled input EOF, not a human's observed spoken completion. |
+| Synthetic input EOF → finalized capture | First59.12ms; 30 warm median64.14ms/p9576.58ms | All 31 retained “Blue notebook desk.” and met the existing 2 s deadline; zero recorded-audio failures. |
+| Real microphone preparation/admission | Attempted existing 30-hold runner under lock; **zero samples** | Test process lacked microphone permission and failed before capture. App grants are separate. No new startup improvement claim. |
+| Physical feedback, spoken completion → handoff, downstream action/verified result | No new samples | Requires coordinated physical input/identified-app observations; no integrated 2 s or UI 100 ms acceptance claimed. |
+
+The latency comparator is the retained test-only `BaselineSpeechIntent`, not a
+restored production legacy path. Workloads/model IDs match; runs are sequential,
+not randomized. The roughly 3 ms median/p95 differences are too small to establish
+robust speed improvement under provider variability, and the comparator failed
+quality. V6 stays open. `summary.json` retains counts, all-attempt/correct-only
+statistics and model identities. Baseline and recorded runs were collected before
+the independent literal-mode fix; their exact relevant baseline/capture/test code
+is unchanged in the final candidate. This does not turn them into physical evidence.
+
+Recorded check now accepts `JARVIS_SHORT_SPEECH_SAMPLES=31` and reports recognition
+and finalization separately. Origin remains `.context/voice/audio-origin.json`;
+no new human/raw microphone recording. `recorded.log` and `ready-microphone.log`
+preserve successful/blocked outcomes respectively.
+
+**Capture/revision review:** current `SpeechAnalyzerCapture` reports unexpected
+result-stream termination, controller release timeout retains reviewable speech,
+and stale callbacks are rejected. Current consumed-span ledger rejects changes to
+handed-off text and does not reopen it for replay. Existing capture/controller,
+revision, cancellation and no-replay tests passed in the final suite; recorded audio
+completed 31/31. This supersedes old implementation assumptions, but does not resolve
+the historical physical nonterminal capture or late “calculatorcul” observation.
+Those remain physical retest requirements; silent holds remain intentional UI checks.
+
+### Verification, candidate and next requirement
+
+- `make setup` passed: Swift 6.2.4, macOS SDK 26.2 on this Mac.
+- Final `make test`: two tooling tests + 172 Swift tests, 22 opt-in skips, 0 failures
+  (`make-test.log`). These are automated checks, not app/physical acceptance.
+- `make app APP='.context/voice-current/Jev Voice.app'` and strict/deep codesign
+  passed (`app.log`, `codesign.log`). Executable SHA-256:
+  `8cb7278a07e02bcf8003963a3451b092c8467ebd690998e2b959b0cce34fc7e5`.
+- A separate disposable Git checkout of the complete candidate code passed the same
+  two tooling + 172 Swift tests/22 skips, release build, strict/deep signature and
+  clean Git status (`clean-checkout.log`, `clean-checkout-path.txt`). All tracked
+  source/test/config hashes match the workspace. Subsequent documentation-only
+  evidence/trial-sheet edits do not alter that binary.
+- Full affected voice paths and branch diff were reviewed, including working-tree
+  changes. `git diff --check` passed. No installed bundle was replaced; desktop lock
+  wrappers exited after each scoped check.
+
+Next: coordinate the [physical trial sheet](SYDNEY-VOICE-TRIALS.md) on this candidate:
+five spoken immediate releases, two longer holds, silent/cancellation/manual/UI,
+sleep/wake, lock/unlock and available microphone-device recovery. The agent must
+reacquire the shared desktop lock and begin logging before trials. The separate
+30-hold real microphone benchmark requires a user-controlled grant for its test
+process. Unavailable hardware remains untested. V2/V4/V6/V7 remain open; Cua stale
+window/prerequisite failures, context delivery, gaze and live dictation stay with
+their existing owners. Current semantic timeline failures need further voice work;
+do not claim overall acceptance or demand that the user diagnose them.

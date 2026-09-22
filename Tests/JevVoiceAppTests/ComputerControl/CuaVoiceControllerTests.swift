@@ -257,6 +257,14 @@ for line in sys.stdin:
     }
 
     func testCorrectionBeforeDispatchCancelsThenRunsReplacement() async throws {
+        try await verifyCorrectionBeforeDispatch(literal: false)
+    }
+
+    func testLiteralCorrectionCannotLaunchAnAppNamedInsideReplacement() async throws {
+        try await verifyCorrectionBeforeDispatch(literal: true)
+    }
+
+    private func verifyCorrectionBeforeDispatch(literal: Bool) async throws {
         let (_, _, fixture, _) = try setup()
         defer { try? FileManager.default.removeItem(at: fixture) }
         let config = Config(defaults: UserDefaults(suiteName: "CuaCorrection-\(UUID())")!, keyStore: Keys(), environment: [:])
@@ -274,7 +282,7 @@ for line in sys.stdin:
                 case "completeness": value = "complete"
                 case "polarity": value = "notProhibited"
                 case "purpose": value = "request"
-                case "mode": value = "control"
+                case "mode": value = literal && state["pending_speech"]?.string?.hasPrefix("actually") == true ? "dictate" : "control"
                 case "kind": value = state["pending_speech"]?.string?.hasPrefix("actually") == true ? "correction" : "command"
                 case "boundary": value = String(state["pending_speech"]!.string!.split(separator: " ").count)
                 case "route": value = state["request"]?.string?.hasPrefix("actually") == true ? targetID!.uuidString : "independent"
@@ -288,7 +296,7 @@ for line in sys.stdin:
                 case "scope": value = "launch"
                 case "replacement": value = "replace"
                 case "start": value = "1"
-                case "end": value = "2"
+                case "end": value = literal ? "6" : "2"
                 default: throw DriverConnectionError.malformed
                 }
                 answers[key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
@@ -300,12 +308,18 @@ for line in sys.stdin:
         try await until { waiting }
         targetID = try XCTUnwrap(runtime.tasks.first?.id)
         runtime.begin(app: "Fixture")
-        runtime.update("actually open Fixture instead", final: true)
+        runtime.update(literal ? "actually dictate open Notes and stop all instead" : "actually open Fixture instead", final: true)
         try await until { runtime.tasks.count == 2 && runtime.tasks.allSatisfy { !$0.active } }
         XCTAssertEqual(runtime.tasks[0].status, "Cancelled")
         XCTAssertFalse(runtime.tasks[0].dispatchedEffect)
-        XCTAssertEqual(runtime.tasks[1].status, "Completed", runtime.tasks[1].message)
-        XCTAssertTrue(runtime.tasks[1].dispatchedEffect)
+        if literal {
+            XCTAssertEqual(runtime.tasks[1].status, "Failed")
+            XCTAssertTrue(runtime.tasks[1].message.contains("No app was launched"), runtime.tasks[1].message)
+            XCTAssertFalse(runtime.tasks[1].dispatchedEffect)
+        } else {
+            XCTAssertEqual(runtime.tasks[1].status, "Completed", runtime.tasks[1].message)
+            XCTAssertTrue(runtime.tasks[1].dispatchedEffect)
+        }
         await runtime.shutdown()
     }
 

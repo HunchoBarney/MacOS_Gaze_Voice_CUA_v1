@@ -1,6 +1,6 @@
 # Sydney Voice Reliability and Natural Understanding — Execution Plan
 
-**Status (reconciled 2026-09-22):** Core voice implementation and the authorized simplification are integrated in the Sydney branch. Current-version semantic evaluation, performance evidence and physical acceptance remain open. Section 16 separates completed work, agent-owned next steps and user participation. No new physical trials are requested until the agent prepares an identified candidate and trial sheet.
+**Status (refreshed 2026-09-22):** Core implementation and simplification are integrated. Current evaluation and a signed candidate/trial sheet are prepared; held-out thresholds pass, but real-model revision timelines, physical acceptance and full performance gates remain open. Section 16 records the current evidence and remaining work.
 
 **Workspace:** `/Users/karanvirkang/conductor/workspaces/JarvisMacOSv1/sydney`
 
@@ -471,18 +471,19 @@ Maintain these records as execution proceeds:
 
 ### Progress — current implementation versus acceptance
 
-Reference source: `6608d88` (`Preserve negated speech prefixes until release`),
-on `chore/review-voice-commands`. “Integrated” means present in this branch, not
+Reference source: `433f473` plus the current voice acceptance patch on
+`chore/review-voice-commands`; candidate executable `8cb7278a…34fc7e5`. Exact source
+hashes and patch are in `.context/voice-current/`. “Integrated” means present in this branch, not
 proof of merge into `origin/main`, installed-app identity or physical acceptance.
 
 - [x] V0 — Baseline and historical failures recorded.
 - [x] V1 — Development/held-out evaluation, revision timelines and non-executing submission sink implemented.
 - [ ] V2 — Capture implementation integrated; current-build physical acceptance remains open.
 - [x] V3 — Revision/finality-aware interpretation, stale-result rejection and no-replay implementation with deterministic coverage.
-- [ ] V4 — Semantic implementation integrated; refresh real-model acceptance for the latest fixes. The earlier checked gate described an older prompt/runtime revision.
+- [ ] V4 — Current held-out valid 27/30 and all 30 negative/scenario cases pass, critical 0; real-model revision timelines fail 3/6, so acceptance remains open.
 - [x] V5 — Scoped cancellation, failure isolation and manual-review behavior implemented with production-wiring coverage.
-- [ ] V6 — Bounded processing and ready-microphone improvements integrated; matched current-version performance evidence remains open.
-- [ ] V7 — Final candidate packaging, physical acceptance and delivery/handoff remain open.
+- [ ] V6 — Current 30 warm interpretation samples meet 1s p95; recorded audio has30 warm samples. Robust matched speed improvement, real-microphone 30 samples and physical/integrated timings remain open.
+- [ ] V7 — Current candidate, regression/clean-checkout/build/signature verification and trial sheet prepared; physical acceptance and delivery remain open.
 
 Completed implementation retained from the original Sydney execution:
 
@@ -518,6 +519,8 @@ and controller interfaces; do not restart V0–V5 implementation from scratch.
 
 ### Decision log
 
+- **2026-09-22 — Current refresh:** Fixed development-supported condition/reference and correction handling. Independent review required preserving literal mode separately from correction kind through the voice/runtime adapter; this uses the existing literal-only execution contract without changing task routing or Cua. Real-model revision timeline failures remain recorded rather than weakening the criteria. Held-out failure details were not used for tuning.
+
 - **2026-09-21 — Scope:** Own voice capture and understanding only. Context delivery, gaze, Cua, and live dictation remain assigned elsewhere, following the user's explicit scope reductions.
 - **2026-09-21 — Stack:** Retain Apple SpeechAnalyzer and Jev. Astra executes development work and is not a product runtime dependency.
 - **2026-09-21 — Execution style:** Use outcome-based milestones, explicit acceptance, proportionate verification, and durable progress records so Astra can continue without repeated routine approval requests.
@@ -531,7 +534,8 @@ Do not combine measurements from different revisions into one accepted build.
 
 | Evidence | Recorded result | What it does not establish |
 | --- | --- | --- |
-| Latest negated-prefix fix, `6608d88` | 56 focused checks; final default rerun passed 2 tooling + 168 Swift tests, 22 skips, zero failures | Scripted judgments/simulated capture, not real-model or physical acceptance. First full run had a transient recording-limit test failure; its proposed timing cause is inferred. No packaging was performed for this fix. |
+| Current candidate `8cb7278a…34fc7e5` | 172 Swift/22 skips +2 tooling, zero failures; clean-checkout build/signatures pass. Development 38/40 valid; heldout 27/30 valid, all 30 other cases, critical 0; real-model timelines 3/6 | Timeline semantics still fail; no physical acceptance. Interpretation 30 warm median 136 ms/p95 228 ms; mic runner blocked before capture. |
+| Earlier negated-prefix fix, `6608d88` | 56 focused checks; final default rerun passed 2 tooling + 168 Swift tests, 22 skips, zero failures | Scripted judgments/simulated capture, not real-model or physical acceptance. First full run had a transient recording-limit test failure; its proposed timing cause is inferred. No packaging was performed for this fix. |
 | Earlier real-Jev held-out round 2 | 28/30 valid requests (93.3%); all 30 negative/scenario cases correct; zero observed critical violations; six delayed-response timelines passed | Predates subsequent conditional/extraction and coordinator fixes; current-version V4 needs refreshed evidence. |
 | Earlier matched interpretation benchmark | 30 warm samples: revised median154ms/p95237ms; baseline132ms/217ms | Meets the one-second target, but does not prove improvement over baseline or spoken-completion-to-action latency. |
 | Corrected ready-microphone candidate `459df5e…` | 13 observed holds: first-audio median58.144ms versus earlier254ms; no restart loop; two captures handed off while held | Small uncontrolled capture-stage samples, not a matched 30-sample benchmark or complete voice/desktop acceptance. |
@@ -544,20 +548,25 @@ treat them as recognition failures or ask the user to reconstruct every silent h
 
 ### Remaining work owned by the agent
 
-- [ ] Refresh development, held-out and delayed-revision real-Jev evaluation through the existing non-executing sink, using the latest implementation and existing scoped authorization. Preserve held-out separation; do not tune on held-out failures without retiring/replacing those cases.
-- [ ] Refresh matched cold/warm voice-stage latency evidence, including at least 30 warm samples, failures and model-call counts. Keep capture readiness, interpretation and downstream execution measurements separate.
-- [ ] Review current capture/revision behavior against the older nonterminal-capture and post-handoff revision findings. Reproduce or establish superseding evidence before proposing fixes; preserve no replay.
-- [ ] Prepare and identify one current candidate, complete required regression/build/signature checks and applicable clean-checkout verification, then provide a concise physical trial sheet. Do not replace the installed app merely to package it.
+- [x] Refresh development, held-out and delayed-revision real-Jev evaluation through the existing non-executing sink. Current results are recorded, including failed timelines; held-out separation preserved. This checks completion of the evaluation run, not V4 acceptance.
+- [ ] Resolve current real-model timeline semantic misses (same-text finality/new capture incomplete; extended query classified as textEntry) using development evidence. Do not use held-out failures for tuning without retiring/replacing them.
+- [x] Refresh matched 31-attempt interpretation evidence and 31 recorded-audio recognition/finalization samples, retaining failures/model-call counts and stage boundaries.
+- [ ] Obtain 30 warm real-microphone samples (runner permission currently missing), physical feedback/spoken-completion measurements and external execution timings. No integrated or robust speed-improvement acceptance yet.
+- [x] Review current capture/revision paths against older findings; terminal/failure/review handling and fail-closed consumed revisions have current automated coverage; 31 recorded captures completed.
+- [ ] Retest historical physical nonterminal capture and post-handoff revision on the identified candidate; simulated/recorded checks do not close these findings.
+- [x] Prepare identified candidate `8cb7278a…34fc7e5`, regression/build/signature and clean-checkout verification, plus [physical trial sheet](SYDNEY-VOICE-TRIALS.md). Installed app preserved; candidate not yet launched.
 - [ ] Correlate physical trial logs with the user's intended phrases and observations, classify voice versus execution outcomes, and update this plan and EVIDENCE.md.
 - [ ] Close owned gates only when evidence supports them; report external execution dependencies separately.
 
 ### What is needed from the user
 
-**Nothing to test immediately.** The agent first completes independent evaluation
-and candidate preparation above. No repeated implementation approval is needed
-within the existing authorized Sydney scope.
+**Ready to coordinate physical participation.** Reply “ready for voice trials”; the
+agent then acquires the desktop lock, coordinates launch of the identified candidate
+and begins logs. Follow the [trial sheet](SYDNEY-VOICE-TRIALS.md). No repeated
+implementation approval is needed. The 30-hold microphone runner separately needs
+a user-controlled microphone grant for its test process; app grants are insufficient.
 
-When the identified candidate and trial sheet are ready, participation is needed for:
+On the identified candidate, participation is needed for:
 
 - [ ] **Five spoken immediate-release trials:** say the supplied short phrase and release Fn immediately after its final word. Confirm whether the displayed first/final words match what was spoken.
 - [ ] **Two spoken longer-hold trials:** finish the phrase while continuing to hold Fn. Confirm responsiveness and any unwanted repetition; the agent checks handoff timing and later recognition revisions separately from desktop success.
@@ -583,17 +592,20 @@ acceptance remains open until the corresponding execution outcomes are supported
 
 ### Next action
 
-Run the existing current-version voice semantic evaluation with the non-executing
-sink, beginning with development cases and preserving the held-out set. Record the
-source revision and model identity; no desktop actions are required. Then perform
-the remaining agent-owned checks before requesting physical participation.
+Coordinate the prepared physical trial sheet under the shared desktop lock when
+the user is ready. Independently, diagnose the current real-model timeline semantic
+misses from development evidence; preserve the held-out freeze and all failed runs.
+See the latest EVIDENCE.md entry and `.context/voice-current/` for exact candidate,
+commands, failures and stage measurements. Do not repeat completed verification
+without a relevant change or unresolved risk.
 
 ### Outcome
 
-Core Sydney voice implementation and simplification are integrated. Latest recorded
-deterministic checks pass with the transient test issue noted above. Current-version
-semantic, performance and physical acceptance are unfinished; V2/V4/V6/V7 remain
-open. Cua, context delivery, gaze and live dictation remain outside this worktree's
+Core Sydney voice implementation and simplification are integrated. Current
+deterministic, packaging and clean-checkout checks pass. Held-out thresholds pass
+in the final run, but real-model revision timelines fail; microphone benchmarking
+is permission-blocked and physical/integrated acceptance is untested on this build.
+V2/V4/V6/V7 remain open. Cua, context delivery, gaze and live dictation remain outside this worktree's
 implementation scope.
 
 ### Resumption protocol
@@ -620,3 +632,5 @@ These references support the chosen approach; the required execution instruction
 - **2026-09-21:** Saved the full chat-approved Sydney voice plan. Updated status to approved/saved with implementation unstarted, expanded abbreviated source paths, and initialized execution records. Added supporting references and clarified that final review includes uncommitted/untracked work. No product scope expansion or implementation change.
 
 - **2026-09-22:** Reconciled the original execution with authorized simplification and source through `6608d88`; distinguished implementation from acceptance, reopened current-version V4 evidence, superseded stale microphone/legacy instructions, and separated agent work, user participation and external execution dependencies. Documentation only; no new test, build or physical result claimed.
+
+- **2026-09-22 — Acceptance refresh:** Recorded development-supported fixes, literal correction review/regressions, current real-Jev evaluation (including failed timelines), matched stage evidence and verified candidate/trial sheet. Physical and full performance acceptance remain open; installed app preserved.

@@ -139,6 +139,32 @@ extension JevSpeechIntentTests {
 }
 
 extension JevSpeechIntentTests {
+    func testLiteralReplacementRetainsCorrectionKind() async throws {
+        let text = "Actually, write hello into Notes instead."
+        let words = text.split(separator: " ").map(String.init)
+        let model = JevSpeechIntent(evaluate: { _, _ in
+            Dictionary(uniqueKeysWithValues: [
+                "kind": "correction", "mode": "textEntry", "purpose": "request",
+                "polarity": "notProhibited", "extent": "whole", "boundary": String(words.count)
+            ].map { ($0.key, Answer.choice(choice: $0.value, confidence: 1, probabilities: [:])) })
+        })
+        let intent = try await model.next(words: words, final: true, context: .object([:]))
+        XCTAssertEqual(intent?.kind, .correction)
+        XCTAssertEqual(intent?.text, text)
+    }
+
+    func testRecognizedRequestWithNoEffectiveOperationAsksForClarification() async throws {
+        let words = "Put this somewhere else".split(separator: " ").map(String.init)
+        let model = JevSpeechIntent(evaluate: { _, _ in
+            Dictionary(uniqueKeysWithValues: [
+                "kind": "ignore", "mode": "control", "purpose": "request",
+                "polarity": "notProhibited", "extent": "refine", "boundary": String(words.count)
+            ].map { ($0.key, Answer.choice(choice: $0.value, confidence: 1, probabilities: [:])) })
+        })
+        let outcome = try await model.understand(words: words, final: true, context: .object([:]))
+        guard case .clarification = outcome else { return XCTFail("An attempted request must not be silently consumed as conversation") }
+    }
+
     func testUnresolvedConditionCannotHandoffOnHoldOrRelease() async throws {
         let model = JevSpeechIntent(evaluate: { _, _ in
             Dictionary(uniqueKeysWithValues: [

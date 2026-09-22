@@ -128,3 +128,9 @@ in order with focused, reviewable changes; use existing live-test authorization
 only where it actually applies. Physical trials require user participation.
 
 Progress: [x] legacy removal · [x] state ownership · [x] ready microphone implementation · [ ] verification/physical acceptance
+
+Current refresh (2026-09-22): candidate `8cb7278a…34fc7e5` passes default tests,
+release/signature and clean-checkout verification. The30-hold microphone runner
+remains permission-blocked; physical acceptance is pending the
+[coordinated trial sheet](SYDNEY-VOICE-TRIALS.md). See the latest EVIDENCE.md entry
+for current semantic failures and separate recorded/interpretation timings.

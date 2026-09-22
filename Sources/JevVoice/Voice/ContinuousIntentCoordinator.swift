@@ -10,7 +10,7 @@ final class ContinuousIntentCoordinator {
     private var ledger = SpeechConsumption()
     private var generation = UUID()
     private var pendingTask: Task<Void, Never>?
-    private var literal = false
+    private var literalKind: SpeechIntent.Kind?
     private var final = false
     private var currentText = ""
     private var inputRevision = -1
@@ -40,7 +40,7 @@ final class ContinuousIntentCoordinator {
     func begin(captureID: UUID = UUID()) {
         cancel()
         self.captureID = captureID; audio = RangedTranscript()
-        ledger = SpeechConsumption(); literal = false; final = false; currentText = ""; inputRevision = -1; error = nil; message = ""; outcome = "idle"
+        ledger = SpeechConsumption(); literalKind = nil; final = false; currentText = ""; inputRevision = -1; error = nil; message = ""; outcome = "idle"
     }
     func record(_ snapshot: RangedTranscript) { audio = snapshot }
     func update(_ text: String, final: Bool) {
@@ -55,7 +55,7 @@ final class ContinuousIntentCoordinator {
         // Growing speech coalesces behind the in-flight judgment. Revisions cancel it.
         if busy && extendsPrevious { return }
         pendingTask?.cancel()
-        if !extendsPrevious { literal = false }
+        if !extendsPrevious { literalKind = nil }
         generation = UUID()
         let revision = generation
         busy = true; error = nil; message = ""; outcome = "understanding"
@@ -70,8 +70,8 @@ final class ContinuousIntentCoordinator {
                     let inputAudio = self.audio
                     let receivedAt = self.transcriptReceivedAt
                     let understanding: JevSpeechIntent.Understanding
-                    if self.literal {
-                        understanding = .ready(SpeechIntent(kind: .dictate, count: words.count, text: words.joined(separator: " ")))
+                    if let literalKind = self.literalKind {
+                        understanding = .ready(SpeechIntent(kind: literalKind, count: words.count, text: words.joined(separator: " "), literalMode: .dictate))
                     } else { understanding = try await self.interpret(words, wasFinal, self.context()) }
                     guard !Task.isCancelled, self.generation == revision else {
                         self.observe(.discarded, nil); return
@@ -111,8 +111,8 @@ final class ContinuousIntentCoordinator {
                     // words ("Don't" + "open Safari") or be revised. Keep that tail
                     // pending until release; a bounded prefix can still make progress.
                     if intent.kind == .ignore && !self.final && intent.count == words.count { return }
-                    if intent.kind == .dictate { self.literal = true }
-                    if (intent.kind == .dictate || intent.kind == .textEntry) && !self.final {
+                    if intent.literalMode == .dictate { self.literalKind = intent.kind }
+                    if intent.literalMode != nil && !self.final {
                         self.message = "Text inserts on release; safe live revision is not available yet."
                         self.onChange(); return
                     }
@@ -133,7 +133,7 @@ final class ContinuousIntentCoordinator {
                     let committed = try self.ledger.commit(wordCount: intent.count)
                     if intent.kind != .ignore {
                         self.outcome = "handoff"; self.observe(.handoff, intent)
-                        try await self.submit(SpeechIntent(kind: intent.kind, count: intent.count, text: committed.text, provenance: SpeechProvenance(captureID: self.captureID, revision: inputAudio.revision, wordStart: start, wordEnd: start + intent.count, audioRanges: inputAudio.segments), transcriptReceivedAt: receivedAt))
+                        try await self.submit(SpeechIntent(kind: intent.kind, count: intent.count, text: committed.text, provenance: SpeechProvenance(captureID: self.captureID, revision: inputAudio.revision, wordStart: start, wordEnd: start + intent.count, audioRanges: inputAudio.segments), transcriptReceivedAt: receivedAt, literalMode: intent.literalMode))
                     }
                     try Task.checkCancellation()
                     guard self.generation == revision else { return }

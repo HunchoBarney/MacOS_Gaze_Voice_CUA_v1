@@ -4,6 +4,37 @@ import JevVoiceCore
 
 @MainActor
 final class ContinuousIntentTests: XCTestCase {
+    func testDictatedCorrectionWaitsForReleaseAndRetainsLiteralContinuation() async throws {
+        var requests: [SpeechIntent] = []
+        var calls = 0
+        let model = JevSpeechIntent(evaluate: { state, _ in
+            calls += 1
+            return Dictionary(uniqueKeysWithValues: [
+                "kind": "correction", "mode": "dictate", "purpose": "request",
+                "extent": "whole", "polarity": "notProhibited",
+                "boundary": String(state["pending_speech"]!.string!.split(separator: " ").count)
+            ].map { ($0.key, Answer.choice(choice: $0.value, confidence: 1, probabilities: [:])) })
+        })
+        let coordinator = ContinuousIntentCoordinator(interpret: { try await model.understand(words: $0, final: $1, context: $2) }, submit: { requests.append($0) })
+        coordinator.begin()
+        let prefix = "Actually, dictate blue notebook"
+        coordinator.record(.init(start: 0, end: 1, text: prefix, isFinal: true))
+        coordinator.update(prefix, final: false)
+        await coordinator.waitForPending()
+        XCTAssertTrue(requests.isEmpty, "Literal replacements must not hand off while held")
+        let initialCalls = calls
+        let complete = prefix + " stop all"
+        coordinator.record(.init(start: 1, end: 2, text: " stop all", isFinal: true))
+        coordinator.update(complete, final: false)
+        await coordinator.waitForPending()
+        XCTAssertTrue(requests.isEmpty)
+        coordinator.update(complete, final: true)
+        await coordinator.waitForPending()
+        XCTAssertEqual(requests.map(\.kind), [.correction])
+        XCTAssertEqual(requests.map(\.text), [complete])
+        XCTAssertEqual(calls, initialCalls, "Dictation continuation must remain literal without reclassification")
+    }
+
     func testPartialDispatchReleaseNoReplayAndNewHold() async throws {
         var requests: [String] = []
         let coordinator = ContinuousIntentCoordinator(decide: { words, _, _ in
