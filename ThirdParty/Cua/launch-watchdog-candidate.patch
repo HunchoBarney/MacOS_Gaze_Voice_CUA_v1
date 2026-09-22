@@ -1,0 +1,394 @@
+--- a/libs/cua-driver/rust/crates/platform-macos/src/focus_steal.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/focus_steal.rs
+@@ -97,12 +97,59 @@
+     allowed_pid: Option<i32>,
+     /// Pid to restore focus to when an activation matches this entry.
+     restore_to: i32,
+-    /// Monotonic deadline. After this, the entry is pruned without
+-    /// firing.
++    /// Monotonic observer deadline. Expired watchdog entries remain registered
++    /// for timer retirement until their owner drops, but never match observers.
+     deadline: Instant,
+     /// Provenance for tracing — e.g. `"LaunchAppTool.pre"`.
+     #[allow(dead_code)]
+     origin: &'static str,
++    /// Only detached launch watchdogs can be retired by an explicit foreground
++    /// request. The gate also synchronizes observer and timer restore callbacks.
++    launch_watchdog: Option<Arc<Mutex<bool>>>,
++}
++
++/// A detached launch guard whose observer and timer share one retirement gate.
++/// Keep the entry until this owner drops, even after its observer deadline, so
++/// an explicit foreground request can still stop the remainder of the timer.
++pub(crate) struct LaunchWatchdog {
++    _lease: SuppressionLease,
++    active: Arc<Mutex<bool>>,
++}
++
++impl LaunchWatchdog {
++    pub(crate) fn restore_if_active(&self, restore: impl FnOnce()) -> bool {
++        let active = self.active.lock().unwrap();
++        if !*active {
++            return false;
++        }
++        restore();
++        true
++    }
++}
++
++impl Drop for LaunchWatchdog {
++    fn drop(&mut self) {
++        *self.active.lock().unwrap() = false;
++    }
++}
++
++struct RestoreRequest {
++    pid: i32,
++    launch_watchdog: Option<Arc<Mutex<bool>>>,
++}
++
++impl RestoreRequest {
++    fn run(&self, restore: impl FnOnce()) {
++        // Hold the gate through the OS request: retirement waits for any
++        // already-running restore before the intentional activation begins.
++        let active = self
++            .launch_watchdog
++            .as_ref()
++            .map(|gate| gate.lock().unwrap());
++        if active.as_ref().is_none_or(|active| **active) {
++            restore();
++        }
++    }
+ }
+ 
+ /// Singleton focus-steal preventer.
+@@ -147,6 +194,18 @@
+             dispatcher: Arc::clone(&shared.dispatcher),
+             released: false,
+         }
++    }
++
++    pub(crate) fn begin_launch_watchdog(pid: i32, restore_to: i32) -> LaunchWatchdog {
++        Self::shared()
++            .dispatcher
++            .add_launch_watchdog(pid, restore_to)
++    }
++
++    /// An authorized explicit foreground request supersedes only prior detached
++    /// launch guards for this PID. Other input/launch leases remain authoritative.
++    pub(crate) fn retire_launch_watchdogs(pid: i32) {
++        Self::shared().dispatcher.retire_launch_watchdogs(pid);
+     }
+ 
+     /// Begin wildcard suppression while allowing one intentional activation.
+@@ -271,7 +330,7 @@
+         restore_to: i32,
+         origin: &'static str,
+     ) -> SuppressionHandle {
+-        self.add_entry(target_pid, None, restore_to, origin)
++        self.add_entry(target_pid, None, restore_to, origin, None)
+     }
+ 
+     /// Add a wildcard entry that ignores one intentional target activation.
+@@ -281,7 +340,58 @@
+         restore_to: i32,
+         origin: &'static str,
+     ) -> SuppressionHandle {
+-        self.add_entry(None, Some(allowed_pid), restore_to, origin)
++        self.add_entry(None, Some(allowed_pid), restore_to, origin, None)
++    }
++
++    fn add_launch_watchdog(self: &Arc<Self>, pid: i32, restore_to: i32) -> LaunchWatchdog {
++        let active = Arc::new(Mutex::new(true));
++        let handle = self.add_entry(
++            Some(pid),
++            None,
++            restore_to,
++            "LaunchAppTool.watchdog",
++            Some(Arc::clone(&active)),
++        );
++        LaunchWatchdog {
++            _lease: SuppressionLease {
++                handle,
++                dispatcher: Arc::clone(self),
++                released: false,
++            },
++            active,
++        }
++    }
++
++    fn retire_launch_watchdogs(&self, pid: i32) {
++        let gates: Vec<_> = self
++            .entries
++            .lock()
++            .unwrap()
++            .iter()
++            .filter(|(_, entry)| entry.target_pid == Some(pid))
++            .filter_map(|(id, entry)| {
++                entry
++                    .launch_watchdog
++                    .as_ref()
++                    .map(|gate| (*id, Arc::clone(gate)))
++            })
++            .collect();
++        // Keep entries discoverable while waiting: a second foreground request
++        // for this PID must also wait for any already-running restore.
++        // Never hold the entries mutex across a restore or a wait for one.
++        for (_, gate) in &gates {
++            *gate.lock().unwrap() = false;
++        }
++        let empty = {
++            let mut entries = self.entries.lock().unwrap();
++            for (id, _) in gates {
++                entries.remove(&id);
++            }
++            entries.is_empty()
++        };
++        if empty {
++            let _ = self.janitor_active.send(false);
++        }
+     }
+ 
+     fn add_entry(
+@@ -290,6 +400,7 @@
+         allowed_pid: Option<i32>,
+         restore_to: i32,
+         origin: &'static str,
++        launch_watchdog: Option<Arc<Mutex<bool>>>,
+     ) -> SuppressionHandle {
+         let id = Uuid::new_v4();
+         let entry = Entry {
+@@ -298,6 +409,7 @@
+             restore_to,
+             deadline: Instant::now() + ENTRY_DEADLINE,
+             origin,
++            launch_watchdog,
+         };
+         {
+             let mut guard = self.entries.lock().unwrap();
+@@ -327,15 +439,18 @@
+     /// Snapshot the entries (cloned to a small Vec) — used by tests
+     /// and the activation handler to evaluate matches without holding
+     /// the lock across the restore call.
+-    fn snapshot_matches(&self, activated_pid: i32) -> Vec<i32> {
++    fn restore_requests(&self, activated_pid: i32) -> Vec<RestoreRequest> {
+         let mut guard = self.entries.lock().unwrap();
+         // Reap expired entries first — keeps the dispatcher honest even
+         // if the janitor hasn't ticked yet.
+         let now = Instant::now();
+-        guard.retain(|_, e| e.deadline > now);
++        guard.retain(|_, e| e.deadline > now || e.launch_watchdog.is_some());
+         guard
+             .values()
+             .filter(|e| {
++                if e.deadline <= now {
++                    return false;
++                }
+                 if e.allowed_pid == Some(activated_pid) {
+                     return false;
+                 }
+@@ -347,7 +462,18 @@
+                     None => activated_pid != e.restore_to,
+                 }
+             })
+-            .map(|e| e.restore_to)
++            .map(|e| RestoreRequest {
++                pid: e.restore_to,
++                launch_watchdog: e.launch_watchdog.clone(),
++            })
++            .collect()
++    }
++
++    #[cfg(test)]
++    fn snapshot_matches(&self, activated_pid: i32) -> Vec<i32> {
++        self.restore_requests(activated_pid)
++            .into_iter()
++            .map(|request| request.pid)
+             .collect()
+     }
+ 
+@@ -361,7 +487,7 @@
+         let mut guard = self.entries.lock().unwrap();
+         let now = Instant::now();
+         let before = guard.len();
+-        guard.retain(|_, e| e.deadline > now);
++        guard.retain(|_, e| e.deadline > now || e.launch_watchdog.is_some());
+         let after = guard.len();
+         let reaped = before - after;
+         if after == 0 && reaped > 0 {
+@@ -515,9 +641,8 @@
+         pid as i32
+     };
+ 
+-    let restore_pids = dispatcher.snapshot_matches(activated_pid);
+-    for pid in restore_pids {
+-        restore_focus(pid);
++    for request in dispatcher.restore_requests(activated_pid) {
++        request.run(|| restore_focus(request.pid));
+     }
+ }
+ 
+@@ -541,6 +666,98 @@
+ mod tests {
+     use super::*;
+     use std::sync::Arc;
++
++    #[test]
++    fn explicit_foreground_retires_only_matching_launch_watchdogs() {
++        let d = Arc::new(Dispatcher::new());
++        let matching = d.add_launch_watchdog(42, 7);
++        let other = d.add_launch_watchdog(99, 8);
++        let _ordinary = d.add(Some(42), 9, "ClickTool");
++        let _wildcard = d.add(None, 10, "LaunchAppTool.pre");
++        assert!(matching.restore_if_active(|| {}));
++        d.retire_launch_watchdogs(42);
++        assert!(!matching.restore_if_active(|| panic!("retired manual restore ran")));
++        assert!(other.restore_if_active(|| {}));
++        let mut remaining = d.snapshot_matches(42);
++        remaining.sort_unstable();
++        assert_eq!(remaining, vec![9, 10]);
++        assert!(d.snapshot_matches(99).contains(&8));
++        // Explicit foreground does not exempt future background launches.
++        let later = d.add_launch_watchdog(42, 11);
++        assert!(later.restore_if_active(|| {}));
++        assert!(d.snapshot_matches(42).contains(&11));
++    }
++
++    #[test]
++    fn retired_watchdog_cannot_restore_from_a_queued_observer_snapshot() {
++        let d = Arc::new(Dispatcher::new());
++        let watchdog = d.add_launch_watchdog(42, 7);
++        let queued = d.restore_requests(42);
++        assert_eq!(queued.len(), 1);
++        d.retire_launch_watchdogs(42);
++        for request in queued {
++            request.run(|| panic!("queued observer restored after retirement"));
++        }
++        assert!(!watchdog.restore_if_active(|| panic!("manual watchdog restored")));
++    }
++
++    #[test]
++    fn expired_observer_entry_keeps_timer_retirable_until_watchdog_drops() {
++        let d = Arc::new(Dispatcher::new());
++        let watchdog = d.add_launch_watchdog(42, 7);
++        for entry in d.entries.lock().unwrap().values_mut() {
++            entry.deadline = Instant::now() - Duration::from_secs(1);
++        }
++        d.reap_expired();
++        assert!(
++            d.restore_requests(42).is_empty(),
++            "observer deadline still applies"
++        );
++        assert!(
++            watchdog.restore_if_active(|| {}),
++            "existing eight-second timer remains active"
++        );
++        d.retire_launch_watchdogs(42);
++        assert!(!watchdog.restore_if_active(|| panic!("expired observer hid a live timer")));
++        drop(watchdog);
++        assert_eq!(d.len(), 0);
++    }
++
++    #[test]
++    fn foreground_retirement_waits_for_an_already_running_restore() {
++        let d = Arc::new(Dispatcher::new());
++        let watchdog = d.add_launch_watchdog(42, 7);
++        let request = d.restore_requests(42).pop().unwrap();
++        let (started_tx, started_rx) = std::sync::mpsc::channel();
++        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
++        let restore = std::thread::spawn(move || {
++            request.run(|| {
++                started_tx.send(()).unwrap();
++                finish_rx.recv().unwrap();
++            })
++        });
++        started_rx.recv().unwrap();
++        let (retired_tx, retired_rx) = std::sync::mpsc::channel();
++        let retiring: Vec<_> = (0..2)
++            .map(|_| {
++                let d = Arc::clone(&d);
++                let retired_tx = retired_tx.clone();
++                std::thread::spawn(move || {
++                    d.retire_launch_watchdogs(42);
++                    retired_tx.send(()).unwrap();
++                })
++            })
++            .collect();
++        assert!(retired_rx.recv_timeout(Duration::from_millis(30)).is_err());
++        finish_tx.send(()).unwrap();
++        restore.join().unwrap();
++        for thread in retiring {
++            thread.join().unwrap();
++        }
++        retired_rx.recv_timeout(Duration::from_secs(1)).unwrap();
++        retired_rx.recv_timeout(Duration::from_secs(1)).unwrap();
++        assert!(!watchdog.restore_if_active(|| panic!("restore survived retirement")));
++    }
+ 
+     /// Dispatcher::add returns a handle, the entry is reachable by
+     /// match, and remove() drops it.
+@@ -639,6 +856,7 @@
+                     restore_to: 7,
+                     deadline: Instant::now() - Duration::from_secs(1),
+                     origin: "test.leak",
++                    launch_watchdog: None,
+                 },
+             );
+         }
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/launch_app.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/launch_app.rs
+@@ -406,19 +406,25 @@
+                     if slow_launch_path {
+                         let launched_pid = *pid;
+                         let prior_pid = prior;
++                        // Register before spawning so an immediately following
++                        // explicit foreground request cannot miss the guard.
++                        let watchdog =
++                            crate::focus_steal::FocusStealPreventer::begin_launch_watchdog(
++                                launched_pid,
++                                prior_pid,
++                            );
+                         tokio::spawn(async move {
+-                            let _lease = crate::focus_steal::FocusStealPreventer::begin_suppression(
+-                                Some(launched_pid),
+-                                prior_pid,
+-                                "LaunchAppTool.watchdog",
+-                            );
+                             let mut late_activations = 0u32;
+                             for _ in 0..32 {
+                                 // 32 × 250ms = 8s
+                                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+-                                if crate::apps::frontmost_pid() == Some(launched_pid) {
+-                                    late_activations += 1;
+-                                    let _ = crate::apps::activate_pid(prior_pid);
++                                if !watchdog.restore_if_active(|| {
++                                    if crate::apps::frontmost_pid() == Some(launched_pid) {
++                                        late_activations += 1;
++                                        let _ = crate::apps::activate_pid(prior_pid);
++                                    }
++                                }) {
++                                    break;
+                                 }
+                             }
+                             if late_activations > 0 {
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/bring_to_front.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/bring_to_front.rs
+@@ -339,6 +339,10 @@
+                     "request_accepted": false,
+                 }));
+             }
++
++            // Validation succeeded: this explicit request supersedes the
++            // target's earlier detached background-launch suppression only.
++            crate::focus_steal::FocusStealPreventer::retire_launch_watchdogs(pid);
+ 
+             // The persistent kCPSNoWindows request owns process activation
+             // without broadly ordering every application window. The separate
+@@ -386,6 +390,7 @@
+             );
+         }
+ 
++        crate::focus_steal::FocusStealPreventer::retire_launch_watchdogs(pid);
+         let request_accepted = unsafe {
+             app.activateWithOptions(NSApplicationActivationOptions::NSApplicationActivateAllWindows)
+         };

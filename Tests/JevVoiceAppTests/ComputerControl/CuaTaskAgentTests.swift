@@ -4,6 +4,65 @@ import JevVoiceCore
 
 @MainActor
 final class CuaTaskAgentTests: XCTestCase {
+    func testConfirmedScrollsCanRepeatButTimeoutAndUnverifiableEffectsCannot() async throws {
+        for (timeout, unverifiable, repeatAuthorized, uncertainSecond) in [(false, false, true, false), (true, false, true, false), (false, true, true, false), (false, false, false, false), (false, false, true, true)] {
+            var effects = 0
+            let agent = CuaTaskAgent(call: { tool, _ in
+                switch tool {
+                case "list_apps", "get_accessibility_tree": return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture"), "pid": .number(42)])])])
+                case "list_windows": return .object(["windows": .array([.object(["window_id": .number(7)])])])
+                case "get_browser_state": throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
+                case "get_window_state": return .object(["elements": .array([.object(["role": .string("AXScrollArea"), "label": .string("Document"), "element_token": .string("scroll-\(effects)")])])])
+                case "scroll":
+                    effects += 1
+                    if timeout { throw DriverConnectionError.timedOut }
+                    let unknown = unverifiable || (uncertainSecond && effects == 2)
+                    return .object(["effect": .string(unknown ? "unverifiable" : "confirmed"), "route": .string("accessibility"),
+                        "evidence": unknown ? .null : .array([.object(["kind": .string("value_readback")])])])
+                default: throw DriverConnectionError.malformed
+                }
+            }, judge: { state, questions in
+                var answers: [String: Answer] = [:]
+                for (key, question) in questions {
+                    let choice: String
+                    switch key {
+                    case "app": choice = "app_0"
+                    case "scope": choice = "work"
+                    case "visibility": choice = "background"
+                    case "risk": choice = "ordinary"
+                    case "windowEffect": choice = "same"
+                    case "repeatIntent": choice = repeatAuthorized ? "additional" : "stop"
+                    case "next":
+                        if effects == (uncertainSecond ? 3 : 2) {
+                            let history = state["history"]?.array ?? []
+                            let ids = history.compactMap { $0["dispatch_id"]?.string }
+                            XCTAssertEqual(ids.count, 2); XCTAssertEqual(Set(ids).count, 2)
+                            choice = "done"
+                        } else {
+                            guard case let .choice(_, choices) = question,
+                                  let id = choices.first(where: { $0.value == "Scroll Document down one page" })?.key else {
+                                throw DriverConnectionError.refused("An intentional repeated scroll was suppressed.")
+                            }
+                            choice = id
+                        }
+                    default: throw DriverConnectionError.malformed
+                    }
+                    answers[key] = .choice(choice: choice, confidence: 1, probabilities: [:])
+                }
+                return answers
+            }, windowID: 7, allowConfirmedRepetition: true)
+            do {
+                _ = try await agent.run(goal: "Scroll this document down one page, then down one more page", context: "", progress: { _ in })
+                XCTAssertFalse(timeout || unverifiable || !repeatAuthorized || uncertainSecond)
+            } catch {
+                if timeout { XCTAssertEqual(error as? DriverConnectionError, .timedOut) }
+                else if unverifiable || uncertainSecond { XCTAssertTrue(error.localizedDescription.contains("suppressed")) }
+                else if !repeatAuthorized { XCTAssertTrue(error.localizedDescription.contains("No additional effect")) }
+                else { throw error }
+            }
+            XCTAssertEqual(effects, timeout || unverifiable || !repeatAuthorized ? 1 : 2)
+        }
+    }
     func testDecisionContextPreservesAppStateAndExcludesUnrelatedSystemMenuSubtree() {
         let elements: [JSONValue] = [
             .object(["element_index": .number(0), "role": .string("AXMenuBarItem"), "label": .string("Apple")]),

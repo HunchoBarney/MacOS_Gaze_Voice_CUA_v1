@@ -8,17 +8,26 @@ final class CuaBrowserLiveTests: XCTestCase {
     func testIsolatedFormThroughAgentOptIn() async throws {
         try await runFixture(generatedDraft: false)
     }
+    func testSearchNavigationThroughAgentOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_SEARCH_TEST"] == "1" else { throw XCTSkip("Opt-in disposable local search/navigation") }
+        try await runFixture(generatedDraft: false, searchNavigation: true)
+    }
+    func testRepeatedScrollThroughAgentOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_SEARCH_TEST"] == "1" else { throw XCTSkip("Opt-in disposable repeated scrolling") }
+        try await runFixture(generatedDraft: false, repeatedScrolling: true)
+    }
     func testGeneratedDraftDoesNotSubmitOptIn() async throws {
         guard ProcessInfo.processInfo.environment["JARVIS_CUA_GENERATION_TEST"] == "1" else { throw XCTSkip("Opt-in configured provider fixture") }
         try await runFixture(generatedDraft: true)
     }
-    private func runFixture(generatedDraft: Bool) async throws {
+    private func runFixture(generatedDraft: Bool, searchNavigation: Bool = false, repeatedScrolling: Bool = false) async throws {
         let env = ProcessInfo.processInfo.environment
-        guard env["JARVIS_CUA_BROWSER_TEST"] == "1", let key = env["TYPESAFE_API_KEY"],
+        guard env["JARVIS_CUA_BROWSER_TEST"] == "1",
               let url = env["JARVIS_FIXTURE_URL"], URL(string: url)?.host == "127.0.0.1" else {
             throw XCTSkip("Opt-in real Jev/Cua with a disposable loopback form")
         }
-        let connection = CuaConnection()
+        let key = try CuaLiveCredential.jev()
+        let connection = try CuaLiveDriver.connection()
         try await connection.connect()
         let label = "Jarvis browser fixture \(UUID().uuidString.prefix(6))"
         _ = try await connection.call("start_session", arguments: ["session": .string(label)])
@@ -35,13 +44,13 @@ final class CuaBrowserLiveTests: XCTestCase {
                 if !windows.isEmpty { break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            XCTAssertEqual(windows.count, 1)
+            guard windows.count == 1 else { throw DriverConnectionError.refused("Disposable browser fixture window is ambiguous.") }
             let window = try XCTUnwrap(windows.first?["window_id"]?.integer)
             let call: CuaTaskAgent.Call = { tool, arguments in
                 try await connection.call(tool, arguments: arguments.merging(["session": .string(label)]) { _, b in b })
             }
             let target = try await CuaBrowserTarget.bind(pid: pid, window: window, call: call)
-            _ = try await call("browser_navigate", ["target_id": target.target, "tab_id": target.tab, "url": .string(url)])
+            _ = try await call("browser_navigate", ["target_id": target.target, "tab_id": target.tab, "url": .string(repeatedScrolling ? url + "scrolling" : url)])
             var mutations: [String] = []
             let agent = CuaTaskAgent(call: { tool, arguments in
                 // This supporting integration test constrains inventory to its own isolated process.
@@ -62,16 +71,37 @@ final class CuaBrowserLiveTests: XCTestCase {
                 return answers
             }, windowID: window, generate: generatedDraft ? { prompt, context, reasoning in
                 try await TextProviderSettings.shared.client().generate(prompt: prompt, context: context, reasoning: reasoning)
-            } : nil,
+            } : nil, allowConfirmedRepetition: env["JARVIS_CUA_SIMPLIFIED"] == "1",
                payload: { request, purpose in try await JevSpeechIntent(client: JevClient(apiKey: key)).textPayload(request: request, purpose: purpose) })
-            let goal = generatedDraft
+            let goal = repeatedScrolling
+                ? "In Google Chrome in the background, scroll the Scrollable guide down once, then scroll it down one more time. Make exactly two downward scroll actions."
+                : searchNavigation
+                ? (env["JARVIS_CUA_QUOTED_QUERY"] == "1"
+                    ? "In Google Chrome in the background, search this local site for exactly \"copper lantern\", then open the Copper Lantern Guide result."
+                    : "In Google Chrome in the background, search this local site for copper lantern, then open the Copper Lantern Guide result.")
+                : generatedDraft
                 ? "In Google Chrome in the background, write an original five-word friendly greeting in the verification value field. Leave it as a draft; do not submit."
                 : "In Google Chrome in the background, type copper lantern in the verification value field and submit this local test form."
             let result = try await agent.run(goal: goal, context: "This is an isolated disposable local form. The target window is already supplied. No real recipient or purchase exists.", progress: { print("Browser fixture step:", $0) })
             let (data, _) = try await URLSession.shared.data(from: URL(string: url + "state")!)
             let state = try JSONDecoder().decode(JSONValue.self, from: data)
-            XCTAssertTrue(mutations.contains("browser_type"))
-            if generatedDraft {
+            if !repeatedScrolling { XCTAssertTrue(mutations.contains("browser_type")) }
+            if repeatedScrolling {
+                XCTAssertEqual(mutations.filter { $0 == "browser_pointer" }.count, 2)
+                XCTAssertEqual(state["scroll_positions"], .array([.number(500), .number(1000)]))
+            } else if searchNavigation {
+                XCTAssertEqual(state["query"], .string("copper lantern"))
+                XCTAssertEqual(state["destination_query"], .string("copper lantern"))
+                let page = try await target.observe(call: call)
+                XCTAssertEqual(page["target_id"], target.target)
+                XCTAssertEqual(page["tab_id"], target.tab)
+                let destination = try XCTUnwrap(page["page"]?["url"]?.string)
+                let components = try XCTUnwrap(URLComponents(string: destination))
+                XCTAssertEqual(components.host, "127.0.0.1")
+                XCTAssertEqual(components.port, URLComponents(string: url)?.port)
+                XCTAssertEqual(components.path, "/destination")
+                XCTAssertEqual(components.queryItems?.first(where: { $0.name == "q" })?.value, "copper lantern")
+            } else if generatedDraft {
                 XCTAssertEqual(state["submitted"], .null, "Drafting must not submit")
                 XCTAssertFalse(mutations.contains("browser_click"))
                 let page = try await target.observe(call: call)

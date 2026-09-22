@@ -63,3 +63,29 @@ The existing source still lives at `development/JevVoice/cua-source`; its `.git`
 points to a missing worktree database. Nothing in this cleanup rewrites that pointer
 or deletes its builds. Run the verifier above against it to compare the preserved
 snapshot. See [storage and recovery](../../docs/LOCAL-DEVELOPMENT-STORAGE.md).
+
+
+## Unaccepted execution-simplification candidate
+
+`launch-watchdog-candidate.patch` is a separate, narrowly reviewed delta **after**
+the preserved `local-integration.patch` snapshot. It is not part of the installed
+runtime or baseline source manifest. It makes an explicit foreground request retire
+only that PID's detached background-launch watchdog, with synchronization against
+queued/in-flight restoration. Existing ordinary guards remain active.
+
+The workspace-local candidate passed 31 focused Rust tests, locked release build,
+strict binary signature verification, and forward/reverse patch recovery. Its
+executable SHA-256 is
+`b8be58db2df46c27486e66d2861a5ccd12fd06b350fbdc583057212320c7a6de`.
+Its own isolated `mcp --direct --embedded` permission probe reported Accessibility
+and Screen Recording unavailable under host attribution. Live repair acceptance
+is therefore outstanding; do not install it or change the production pin on the
+strength of these build/tests. Plain `mcp` would proxy to the installed broker and
+would not prove the candidate code.
+
+To reconstruct for review, first reconstruct and verify the baseline above, then
+run `git apply --check` followed by `git apply` with this candidate patch in the
+new checkout. Reverse only this delta with `git apply -R` after checking it applies.
+The baseline verifier intentionally reports these three changed files after the
+candidate patch. See [the scoped record](../../docs/EXECUTION-SIMPLIFICATION-REPLACEMENTS.md)
+for remaining acceptance requirements. No dependency versions were changed.
