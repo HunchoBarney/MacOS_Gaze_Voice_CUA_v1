@@ -1,11 +1,9 @@
 import AppKit
 import ApplicationServices
 import AVFoundation
-import Speech
 
 enum Permission: String, CaseIterable, Identifiable {
     case microphone = "Microphone"
-    case speechRecognition = "Speech Recognition"
     case accessibility = "Accessibility"
 
     // SpeechAnalyzer is on-device and does not require the legacy recognizer grant.
@@ -16,7 +14,6 @@ enum Permission: String, CaseIterable, Identifiable {
     var purpose: String {
         switch self {
         case .microphone: return "hear your commands"
-        case .speechRecognition: return "transcribe them"
         case .accessibility: return "enable Fn and control your Mac"
         }
     }
@@ -24,7 +21,6 @@ enum Permission: String, CaseIterable, Identifiable {
     private var settingsAnchor: String {
         switch self {
         case .microphone: return "Privacy_Microphone"
-        case .speechRecognition: return "Privacy_SpeechRecognition"
         case .accessibility: return "Privacy_Accessibility"
         }
     }
@@ -36,8 +32,6 @@ enum Permission: String, CaseIterable, Identifiable {
                 return AVAudioApplication.shared.recordPermission == .granted
             }
             return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        case .speechRecognition:
-            return SFSpeechRecognizer.authorizationStatus() == .authorized
         case .accessibility:
             return AXIsProcessTrusted()
         }
@@ -51,8 +45,6 @@ enum Permission: String, CaseIterable, Identifiable {
                 return AVAudioApplication.shared.recordPermission == .undetermined
             }
             return AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
-        case .speechRecognition:
-            return SFSpeechRecognizer.authorizationStatus() == .notDetermined
         case .accessibility:
             return true
         }
@@ -74,10 +66,6 @@ enum Permission: String, CaseIterable, Identifiable {
                 _ = await AVAudioApplication.requestRecordPermission()
             } else {
                 _ = await AVCaptureDevice.requestAccess(for: .audio)
-            }
-        case .speechRecognition:
-            _ = await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
             }
         case .accessibility:
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary

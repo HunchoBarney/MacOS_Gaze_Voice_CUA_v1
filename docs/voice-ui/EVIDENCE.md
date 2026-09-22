@@ -263,3 +263,203 @@ All 58 discovered tools retain their exact input schemas in the inventory artifa
 | `move_cursor`, `set_agent_cursor_enabled`, `set_agent_cursor_motion`, `set_agent_cursor_theme`, `get_agent_cursor_state` | Cua cursor feedback and settings, P3. Reuse upstream renderer; verify consistent session labels and display coordinates. |
 | `start_recording`, `stop_recording`, `get_recording_state`, `replay_trajectory`, `install_ffmpeg` | Explicit diagnostic recording/replay and dependency setup, P5. No persistent recording by default. Replaying effects requires a current explicit request and target checks; never use replay to recover an uncertain mutation. |
 | `check_permissions`, `health_report`, `get_config`, `set_config`, `check_for_update`, `install_extension` | Setup/settings/diagnostics, P0/P5. Keep permission grants user-controlled and selected source identity pinned. Checking updates does not authorize silently replacing required patches. |
+
+## Sydney execution — 2026-09-21 (incomplete physical acceptance)
+
+Baseline: branch `chore/review-voice-commands`, HEAD `d756cf37931d12a85d2e35aef45d9ff3dd7664b8`; only initial dirty item was the untracked Sydney plan. Current implementation is uncommitted. Installed app, credentials, preferences, dependency pins and Driver preserved.
+
+Delivered: revision/finality-aware inference and stale response rejection; finalized-prefix progress while a suffix grows; 350ms unchanged semantic-complete early eligibility; explicit incomplete/clarification/service outcomes retaining source; scoped cancellation and no replay after uncertain submission; hierarchical exact-source selection up to 2048 words with a recoverable larger-input limit; literal dictate and quoted-control protection; empty-speech feedback; stop-all completion notification; overlay reordering only on initial presentation. Text insertion remains on release; broader Cua/live-dictation work is not claimed.
+
+### Evidence classes and measurements
+
+- **Default simulated/regression:** final `make test` passed 271 tests, 21 opt-in skips, zero failures (13.132s). Skips are not acceptance. Production controller/coordinator wiring, metadata-only finality, stale capture callbacks, failure isolation and review findings have regression coverage. Log: `.context/voice/make-test.log`.
+- **Recorded synthetic audio:** `short.wav` is macOS Samantha synthesis, 0.988s, not human microphone evidence. Immediate EOF preserved “Blue notebook desk.” including the final word; finalization196ms. Matched fastResults true/false/false/true all retained text, finalization74/61/69/58ms. No evidence to change fastResults. Logs/origin: `recorded-short.log`, `recorded-fast-comparison.log`, `audio-origin.json`.
+- **Real model, nonexecuting sink:** configured Jev returned `jev-1.13.0`. Expanded development valid37/40=92.5%, mandatory examples and all negative/scenario outcomes passed, critical0. Fresh heldout round2: 60 cases, valid28/30=93.3%, all30 negative/scenario correct, critical0. Two valid failures remain; their details were not used for tuning. Round1 had a critical negation error and was retired in full into development before tuning; historical artifacts retained. Six additional real-model controlled-delivery timelines passed with stale outputs discarded. No desktop actions were executed by these evaluation sinks.
+- **Warm text-to-handoff latency:** one cold plus30 warm matched simple-command samples each. Revised median153.70ms/p95237.05ms, cold290.30ms; frozen baseline median131.93ms/p95216.53ms, cold286.30ms. All31 revised outcomes correct. Meets the1s interpretation target; does NOT demonstrate improvement over the original baseline. This is not spoken-completion-to-action latency.
+- **Physical user report, initial executable `53e862ecdc99e9d4ad929e0b06f8b8f79f492275ed392ba719f5d3abd42995dd`: FAILED.** User reported UI flicker, intermittent Calculator not opening, and no action before Fn release despite a2s post-speech hold. Exact trial counts and final-word/timeout classifications were not established; do not fabricate a5+2 matrix. Activity inspection showed captured “Open calculator” requests, some completed and others reporting “The pinned target window closed. No other window was substituted.” / “The prerequisite task did not complete. Nothing dependent was executed.” These downstream failures are outside Sydney voice execution ownership. Saved screenshot: `physical-activity-initial.png`; initial AX file unfortunately contains only a scroll diff, not a complete transcript export.
+- **Observed initial timing sample:** captured/converted1900ms; first audio223ms; mic ready149ms; overlay32ms; first partial2165ms; finalization104ms; transcript-to-submission250ms. Latest close-Calculator task first dispatch4833ms/result5994ms. One sample only, not a distribution; does not satisfy the integrated2s target.
+- **Final build:** `build/Jev Voice.app`, executable SHA-256 `6ce651ba46d2b5101380d4bf9f9e3cf884f728c6af95925d0e942cc8732d5646`. `make app` and strict/deep codesign verification passed. Launched under shared desktop lock. SpeechAnalyzer ready en_US; MacBook Pro Microphone selected. Initial UI transiently reported unavailable permissions; refreshed UI showed both granted without agent changing permissions or credentials. New Activity is empty after relaunch. Readiness artifacts: `final-build-readiness.txt/png`. Physical participation requested for5 immediate-release and2 delayed-release trials; no new acceptance claimed yet.
+
+All artifact paths above are under `.context/voice/`. Heldout freeze: `heldout-round2-freeze.json`; results: `development-results.jsonl`, `heldout-results.jsonl`, `latency-results.jsonl`, `baseline-latency-results.jsonl`, `real-model-timelines.jsonl`. Final quoted-operator guard was found by source review after semantic freeze, not from heldout failures; covered by a failing-then-passing regression and final default suite. Evaluation prompts are unchanged from the freeze.
+
+### Review and remaining requirements
+
+Independent complete-path review found finalized-prefix starvation, silent empty-final capture, and stop-all stuck state; all fixed with regressions. Final self-review found quoted operators incorrectly becoming control; fixed. Affected uncommitted/untracked paths and final hashes are inventoried in `affected-manifest.json`; `git diff --check` passed.
+
+V2/V7 remain open: repeated physical immediate-release final-word retention, seven-trial outcomes, early handoff while held, absence of flicker/duplicate effects, and integrated execution timing in this final build. V6 original-baseline speed improvement remains unproven despite meeting the interpretation target. Downstream Cua pinned-window/prerequisite failures are a separate integration dependency. Overall V0–V7 completion is NOT claimed.
+
+### Final-build physical follow-up (user confirmed done)
+
+ MacBook Pro Microphone. User confirmed completion of requested five immediate-release plus two longer-hold trials. Agent inspected logs and expanded Activity. No credentials or permissions changed by agent.
+
+
+See `.context/voice/physical-trials.md` for all seven trial rows, plus two startup attempts. Four immediate-release requests retained “calculator”; one capture has no terminal event/task. Six tasks: three completed, two pinned-window failures, one prerequisite failure. Both longer holds submitted before release (6.65s/1.89s), but the last produced a later “Open calculatorcul” revision and repair warning. No duplicate task observed; flicker resolution unverified. Finalization139–184ms in measured captures; completed task results7.52–9.87s. Physical acceptance FAILED, not unavailable. Logs and expanded Activity saved. Remaining owned gaps: unexplained capture termination and post-handoff recognition instability; downstream Cua failures remain separate.
+
+### Sydney review fixes — 2026-09-21
+
+Fixed the two subsequent review findings: the batched extent judgment now has an explicit unresolved-condition outcome that retains speech without handoff on hold or release; purpose-based source extraction now retains replacement operations and destinations, while insertion extraction keeps its literal rules and explicit-dictate shortcut. The evaluation sink now uses the same extraction entry points as production. Added development cases for complete unsatisfied conditions and replacement extraction; the held-out set is unchanged.
+
+Deterministic verification: new regressions first exposed the unsupported conditional outcome and the incorrectly applied dictation shortcut (`.context/review-fixes-red.log`). Focused interpretation/coordinator/controller checks passed 37 tests (`.context/review-fixes-focused.log`). Fresh `make test` passed 2 tooling tests and 274 Swift tests with 21 opt-in skips and zero failures (`.context/review-fixes-tests.log`). `git diff --check` passed. These injected judgments verify code handling, not real-model semantic accuracy. No paid evaluation, physical input, desktop interaction, app packaging or installation was performed for these fixes. Earlier model scores, latency measurements and executable hashes describe the prior build; the revised prompts and new development cases still require opt-in real-model evaluation. Existing physical acceptance gaps remain open.
+
+## Sydney voice simplification — 2026-09-21 (physical acceptance pending)
+
+Authorized implementation of `VOICE-SIMPLIFICATION-PLAN.md`. The pre-existing dirty
+work was archived before edits in `.context/simplification/baseline.tar.gz` with
+file hashes, status and diff; no workspace reset, branch rename, installed bundle
+replacement, Driver rebuild, credential/preference change or dependency update.
+
+**Implementation:** one SpeechAnalyzer → intent coordinator → Cua runtime route.
+Removed 17 obsolete Swift source files: legacy recognizer/native executor/app
+lookup, command parser/planner/matcher/slot chain, conditional fixture probe,
+legacy error, dictation draft and transcript accumulator. Capture emits authoritative
+ranged snapshots and shares its identity with intent provenance. Capture presentation
+is separate from task execution state. A serial microphone owner keeps hardware
+running while ready; a synchronized admission gate drops idle/pre-hold audio and
+feeds a fresh bounded recognition session per hold. Finalization drains accepted
+audio; the next analyzer prepares without restarting hardware. Settings report
+readiness and explain the persistent system microphone indicator.
+
+**Behavioral test migration/retirement:** old `VoiceSessionTests` were replaced by
+production-controller lifecycle tests for early/late finalization, startup cancel,
+interruptions, silence, duration limit, manual approval, timeout review, and stale
+callbacks. Production `CuaVoiceControllerTests`/`ContinuousIntentTests` retain
+before-release handoff, no replay, intentional repeated spans, literal content,
+correction/cancellation and task isolation. Gate tests cover idle/released audio,
+independent holds and buffers straddling Fn down. Old command/slot/parser, native
+executor, launch-correction, legacy recognizer policy and native process polling
+tests were retired with their exclusively legacy implementation. Range snapshots
+and consumed spans replace the old accumulator tests. Owned live-dictation tests
+were retired with their unused helper; **live TextEdit dictation remains open**,
+not proven by task text insertion. Baseline 274 Swift tests/21 skips is not directly
+comparable to the reduced suite: obsolete algorithm tests were intentionally removed.
+
+**Verification so far:** `make test` passed two tooling tests and 162 Swift tests
+(including 22 gated skips), zero failures. `make app` and strict/deep codesign passed
+for the initial candidate. Focused review fixes passed 28 tests. The capture-ID
+regression failed before identity consolidation and passed afterward. A recorded
+short utterance using installed Apple assets passed, with 55.997 ms finalization
+(`.context/simplification/recorded-audio.log`); it is not a physical microphone test.
+The opt-in real microphone runner stopped before capture because its command-line
+process lacked microphone permission (`ready-mic-live.log`): **zero warm samples,
+no measured startup improvement yet**. App permission grants were subsequently
+observed in Voice settings, distinct from the runner's grants.
+
+**Review corrections:** prompt hardware shutdown before slow preparation cleanup;
+interruption also invalidates finalizing capture/intent; canceled preparations
+cannot restart input; same-device configuration interruption requests fresh readiness;
+deferred device-change callbacks recheck lifecycle eligibility. Sleep, session
+ownership and screen lock are independent. Screen-lock notification names and
+state key come from the installed loginwindow integration, not a public SDK contract;
+physical lock/unlock and recovery verification remain required.
+
+**Open gates:** final candidate clean-checkout/build signature evidence, real warm
+input measurements, at least five physical immediate-release and two longer-hold
+trials, recognition first/final words, before-release handoff, duplicate effects,
+UI responsiveness and lifecycle recovery. Prior physical capture/post-handoff
+revision/downstream Cua failures recorded above remain unresolved until retested.
+No prompt/stability-timer/Cua optimization or broad migration acceptance is claimed.
+
+**Final code candidate:** release executable SHA-256
+`432b199c29059833b1b5c81288fd4d9bfa1427d9f987e6bdc3b6898cf29a9e28`.
+Workspace `make app`, strict/deep signature verification and `git diff --check`
+passed. A separate disposable Git checkout containing the full intended tracked
+and untracked snapshot passed `make test` (2 tooling + 162 Swift, 22 skips, 0 failures),
+`make app`, strict/deep signature verification, and had clean Git status. Logs:
+`.context/simplification/clean-final.log`, `app-final.log`; snapshot location is in
+`clean-checkout-path.txt`. Source/test/config content agrees (ignored Finder
+`.DS_Store` is deliberately absent). The final two deferred device callbacks now
+recheck lifecycle state inside their tasks, resolving the final review finding.
+Documentation-only evidence updates after that snapshot do not alter the binary.
+
+The initial app candidate exposed a configuration interruption and a failed
+zero-word start before these review fixes; do not count that as a successful trial.
+Final candidate was launched at 23:52 local time. macOS invalidated its ad-hoc
+Microphone/Accessibility grants after rebuilding; renewal and physical trials
+were requested from the user. Log collection contains XCTest entries as well as
+app entries: only `JevVoice` process entries for the identified candidate qualify
+as app observations. Programmatic test events must not be counted as physical Fn.
+
+**Physical failure / superseded candidate:** the `432b199c…` candidate did not stay
+ready after permission renewal. Logs recorded 324 microphone-preparation completions
+in approximately one minute and multiple zero-word interrupted Fn attempts; the
+user reported that something was definitely wrong. The app was stopped. This is a
+regression introduced by the extraction, not an accepted ready-microphone result.
+The old configuration observer only interrupted if the engine stopped or its device
+or format actually changed. The new observer had omitted that predicate; delayed
+setup notifications triggered destruction/recreation and another setup notification.
+CoreAudio logs show repeated device setup followed by configuration notification
+(`.context/simplification/audio-configuration.log`).
+
+The corrected observer restores the running/device/format predicate and rejects
+notifications queued for a replaced engine. New candidate executable SHA-256:
+`459df5e0741903096d53f05475722753300bca7a0369abd2cb81531a7faa6aec`.
+Workspace `make test` again passed 2 tooling + 162 Swift (22 skips, zero failures);
+release build and strict/deep codesign passed. Logs: `configuration-fix-tests.log`
+and `configuration-fix-app.log`. Live readiness verification of this fix is pending
+renewed macOS grants. Do not infer it from the passing automated suite.
+
+**Observed corrected app (`459df5e…`, PID 60754):** permissions were renewed. At
+23:57:07 the configuration notification reported `running=true`, matching selected
+device and matching format; it was correctly ignored. Voice settings subsequently
+showed “Ready — MacBook Pro Microphone” without the prior restart loop. Initial
+ready preparation took 242.946 ms after the app's asset warm-up (not a cold-boot
+model benchmark). User reported “yea it seems to be working i think.”
+
+First five observed holds reached first audio in 36.237, 96.743, 39.198, 75.406,
+104.621 ms: median 75.406 ms, range 36.237–104.621 ms. Prior eight-hold baseline
+was 219–322 ms, median 254 ms: approximately 70% lower median for **capture call to
+first audio**, not an end-to-end task latency claim or controlled 30-sample estimate.
+Admission itself took 0.004–0.022 ms. The five sessions finalized after release
+in 35–285 ms; three produced zero words, and two produced 2/3 words. The empty
+sessions' spoken/silent status is unconfirmed, so recognition acceptance remains
+pending. No premature configuration interruption occurred in these holds.
+Follow-up five-spoken-short/two-long trials and phrase/outcome confirmation requested.
+The full logged sample list is `.context/simplification/observed-holds.json`.
+
+The corrected candidate also passed the clean disposable checkout's test/build/
+strict signature/clean-status checks (`clean-configuration-fix.log`): 2 tooling,
+162 Swift, 22 skips, 0 failures. Independent review found no important issue in
+the targeted notification predicate fix. Physical sleep/lock/device recovery and
+accurate speech/desktop acceptance are still open.
+
+**End-of-window observation, 2026-09-22 00:02 local:** user said they “tried a
+bunch of stuff.” Thirteen observed app holds had first audio in 29.169–104.621 ms,
+median 58.144 ms (about 77% below the earlier 254 ms median; small uncontrolled
+samples, capture stage only). There was one initial healthy configuration
+notification and one hardware-preparation completion, with no restart loop across
+these trials. Four holds finalized with zero words. Eight finalized with nonempty
+text; one was cancelled after a before-release handoff. Two distinct captures
+logged handoff while Fn was held; this proves timing of handoff, not desktop success.
+
+Activity inspection showed six tasks: Calculator and Spotify each completed once
+with reported foreground-window verification; four tasks failed (three “pinned
+target window closed,” one dependent prerequisite failure). Those are app-reported
+outcomes, not independently observed desktop success. User clarification is pending
+on silent versus missed-speech holds, intentional window closures, word accuracy
+and unwanted repetition. Therefore the prescribed five immediate-release/two-long
+spoken acceptance matrix is **not yet signed off**, despite observed timing gains.
+No additional Cua/prompt changes were made in response to these outcomes.
+
+**User clarification, 2026-09-22:** some trials deliberately contained ordinary
+conversation, such as “oh what's up” or “hey wyd,” rather than commands. A recognized
+conversational utterance producing `noRequest` is expected and is not an execution
+failure. Activity showed “Uh, what's up?” as recognized text. This clarification
+does not map the four zero-word transcripts to silence or establish why they were
+empty, and does not explain the separate closed-target/prerequisite task failures.
+Those uncertainties and the remaining physical acceptance gates stay open.
+
+**Silent release refinement, 2026-09-22:** user confirmed pressing/releasing
+without saying anything and requested dismissal rather than an error. Successfully
+finalized empty/whitespace input now cancels only the capture attempt and returns
+to idle (the overlay hides), without cancelling existing tasks or invoking Jev.
+Actual recognition failures, unexpected early termination and finalization timeouts
+retain their error/review behavior. Two changed regression tests failed against the
+old error behavior, then passed with the fix; an added check preserves real input
+failure feedback. `make test`: 2 tooling + 163 Swift, 22 skips, zero failures.
+Release packaging and strict/deep codesign passed; `git diff --check` passed.
+Logs: `.context/simplification/silence-{red,tests,app}.log`.
+New build staged at `.context/silence/Jev Voice.app`, executable SHA-256
+`7aa42f74c9ecf0291caea0c073c632a73304f1b2ab15eb9667218e8408367c1d`. The previously tested app remains
+running unchanged; this refinement has not been physically tested or launched.
+The user clarification explains at least some empty input as intentional, but does
+not assign each earlier empty transcript or resolve the separate task failures.

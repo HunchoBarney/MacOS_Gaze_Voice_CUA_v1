@@ -18,6 +18,7 @@ struct MicrophoneDevice: Identifiable, Equatable {
 @MainActor
 final class MicrophoneCatalog: ObservableObject {
     @Published private(set) var devices: [MicrophoneDevice] = []
+    @Published private(set) var defaultHardwareID: AudioDeviceID = 0
     @Published private(set) var defaultName = "No microphone"
     private var listeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
 
@@ -43,7 +44,8 @@ final class MicrophoneCatalog: ObservableObject {
 
     func refresh() {
         devices = Self.availableDevices()
-        defaultName = devices.first { $0.hardwareID == Self.defaultInputID() }?.name ?? "No microphone"
+        defaultHardwareID = Self.defaultInputID()
+        defaultName = devices.first { $0.hardwareID == defaultHardwareID }?.name ?? "No microphone"
     }
 
     static func resolve(uid: String?) throws -> MicrophoneDevice {

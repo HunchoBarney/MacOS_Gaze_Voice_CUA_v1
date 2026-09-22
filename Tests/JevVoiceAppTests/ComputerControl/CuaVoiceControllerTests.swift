@@ -7,9 +7,14 @@ final class CuaVoiceControllerTests: XCTestCase {
     private final class Capture: SpeechCapturing {
         var onEvent: ((UUID, SpeechEvent) -> Void)?
         var id: UUID?
-        func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String { id = session; return "Fixture microphone" }
+        var snapshot = RangedTranscript()
+        func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String { id = session; snapshot = RangedTranscript(); return "Fixture microphone" }
         func finish() {}
         func cancel() {}
+        func emitRevision(_ revision: SpeechRevision) {
+            try! snapshot.apply(revision)
+            emit(.transcript(snapshot))
+        }
         func emit(_ event: SpeechEvent) { if let id { onEvent?(id, event) } }
     }
     private struct Keys: APIKeyStore {
@@ -17,7 +22,7 @@ final class CuaVoiceControllerTests: XCTestCase {
         func save(_ apiKey: String) throws {}
         func delete() throws {}
     }
-    private func setup(automatic: Bool = true, delayedIntent: Bool = false, intentKind: String = "command") throws -> (VoiceController, Capture, URL, UserDefaults) {
+    private func setup(automatic: Bool = true, delayedIntent: Bool = false, intentKind: String = "command", laterFailure: String? = nil) throws -> (VoiceController, Capture, URL, UserDefaults) {
         let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("jarvis-pipeline-\(UUID()).py")
         try #"""
 import json,sys
@@ -39,21 +44,33 @@ for line in sys.stdin:
         let defaults = UserDefaults(suiteName: "CuaVoiceControllerTests-\(UUID())")!
         let config = Config(defaults: defaults, keyStore: Keys(), environment: [:])
         config.autoExecute = automatic
+        var intentCalls = 0
         let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", fixture.path]) }, judge: { state, questions in
+            if questions["boundary"] != nil {
+                intentCalls += 1
+                if intentCalls > 1, laterFailure == "service" { throw URLError(.notConnectedToInternet) }
+            }
             if delayedIntent, questions["boundary"] != nil { try? await Task.sleep(for: .milliseconds(80)) }
             var answers: [String: Answer] = [:]
             for key in questions.keys {
                 let value: String
                 switch key {
-                case "boundary": value = String(state["pending_speech"]!.string!.split(separator: " ").count)
+                case "boundary": value = intentCalls > 1 && laterFailure == "incomplete" ? "missingQuery" : String(state["pending_speech"]!.string!.split(separator: " ").count)
+                case "extent": value = "refine"
+                case "completeness": value = "complete"
+                case "polarity": value = "notProhibited"
+                case "purpose": value = "request"
+                case "mode": value = ["dictate", "textEntry"].contains(intentKind) ? intentKind : "control"
                 case "kind": value = intentKind
                 case "start": value = "1"
-                case "end": value = String(state["words"]!.array!.count)
+                case "end": value = String(state["words"]!.array!.count - 1)
                 case "route":
                     XCTAssertGreaterThan(state["context"]?["tasks"]?.array?.count ?? 0, 1, "No routing judgment is needed without a prior task")
                     if intentKind == "dictate" { XCTAssertFalse(state["request"]?.string?.contains("open Notes") == true) }
                     value = "independent"
-                case "app": value = "app_0"
+                case "app":
+                    if laterFailure != nil { try await Task.sleep(for: .seconds(30)) }
+                    value = "app_0"
                 case "visibility": value = "background"
                 case "scope": value = "launch"
                 case "next": value = "done"
@@ -74,18 +91,40 @@ for line in sys.stdin:
         }
         XCTFail("Timed out waiting for the production voice pipeline")
     }
+    func testInterpretationFailureDoesNotCancelSelectedWork() async throws {
+        for failure in ["service", "incomplete"] {
+            let (controller, capture, file, _) = try setup(laterFailure: failure)
+            defer { try? FileManager.default.removeItem(at: file) }
+            controller.begin(); try await until { controller.status == .listening }
+            capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture", isFinal: true))
+            try await until { controller.cuaTasks.first?.active == true }
+            controller.finish(); capture.emit(.final("open Fixture search for"))
+            await controller.cua.speech.waitForPending()
+            let work = try XCTUnwrap(controller.cuaTasks.first)
+            XCTAssertTrue(work.active)
+            XCTAssertNotEqual(work.status, "Stopping")
+            XCTAssertNotEqual(work.status, "Cancelled")
+            XCTAssertEqual(controller.cua.speech.remainder, "search for")
+            await controller.shutdown()
+        }
+    }
+
     func testProductionPathActsBeforeReleaseAndDoesNotRepeatFinal() async throws {
         let (controller, capture, file, _) = try setup()
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin()
         try await until { controller.status == .listening }
-        capture.emit(.revision(SpeechRevision(start: 0, end: 1, text: "open Fixture", isFinal: false), transcript: "open Fixture"))
+        capture.emitRevision(SpeechRevision(start: 0, end: 1, text: "open Fixture", isFinal: false))
+        for _ in 0..<100 where controller.cua.speech.outcome != "candidate" { await Task.yield() }
+        XCTAssertTrue(controller.cuaTasks.isEmpty, "Fresh volatile recognition is not ready")
+        capture.emitRevision(SpeechRevision(start: 0, end: 1, text: "open Fixture", isFinal: true))
         try await until { controller.cuaTasks.first?.status == "Completed" }
         XCTAssertEqual(controller.status, .listening)
         XCTAssertEqual(controller.cuaTasks.count, 1)
         let provenance = try XCTUnwrap(controller.cuaTasks.first?.provenance)
         XCTAssertEqual(provenance.audioRanges.first?.start, 0)
         XCTAssertEqual(provenance.audioRanges.first?.end, 1)
+        XCTAssertEqual(provenance.captureID, capture.id)
         XCTAssertEqual(provenance.wordStart, 0)
         XCTAssertEqual(provenance.wordEnd, 2)
         controller.finish(); capture.emit(.final("open Fixture"))
@@ -141,6 +180,46 @@ for line in sys.stdin:
             await controller.shutdown()
         }
     }
+    func testOldCaptureCallbackCannotEnterNewProductionHold() async throws {
+        let (controller, capture, file, _) = try setup()
+        defer { try? FileManager.default.removeItem(at: file) }
+        controller.begin(); try await until { controller.status == .listening }
+        let old = try XCTUnwrap(capture.id)
+        controller.cancelCaptureAttempt(); try await until { controller.canBegin }
+        controller.begin(); try await until { controller.status == .listening }
+        var stale = RangedTranscript()
+        try stale.apply(.init(start: 0, end: 1, text: "open old app", isFinal: true))
+        capture.onEvent?(old, .transcript(stale))
+        await controller.cua.speech.waitForPending()
+        XCTAssertEqual(controller.transcript, "")
+        XCTAssertTrue(controller.cuaTasks.isEmpty)
+        capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture", isFinal: true))
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+        XCTAssertEqual(controller.cuaTasks.count, 1)
+        await controller.shutdown()
+    }
+
+    func testStopAllWithNoTasksFinishesFeedback() async throws {
+        let (controller, capture, file, _) = try setup(intentKind: "stopAll")
+        defer { try? FileManager.default.removeItem(at: file) }
+        controller.begin(); try await until { controller.status == .listening }
+        controller.finish(); capture.emit(.final("stop all"))
+        await controller.cua.speech.waitForPending()
+        XCTAssertEqual(controller.status, .done)
+        XCTAssertTrue(controller.cuaTasks.isEmpty)
+        await controller.shutdown()
+    }
+
+    func testAutomaticEmptyFinalDismissesWithoutTask() async throws {
+        let (controller, capture, file, _) = try setup()
+        defer { try? FileManager.default.removeItem(at: file) }
+        controller.begin(); try await until { controller.status == .listening }
+        controller.finish(); capture.emit(.final(" "))
+        XCTAssertEqual(controller.status, .idle)
+        XCTAssertTrue(controller.cuaTasks.isEmpty)
+        await controller.shutdown()
+    }
+
     func testSilenceDoesNotAskForManualApproval() async throws {
         let (controller, capture, file, _) = try setup(automatic: false)
         defer { try? FileManager.default.removeItem(at: file) }
@@ -191,6 +270,11 @@ for line in sys.stdin:
             for key in questions.keys {
                 let value: String
                 switch key {
+                case "extent": value = "refine"
+                case "completeness": value = "complete"
+                case "polarity": value = "notProhibited"
+                case "purpose": value = "request"
+                case "mode": value = "control"
                 case "kind": value = state["pending_speech"]?.string?.hasPrefix("actually") == true ? "correction" : "command"
                 case "boundary": value = String(state["pending_speech"]!.string!.split(separator: " ").count)
                 case "route": value = state["request"]?.string?.hasPrefix("actually") == true ? targetID!.uuidString : "independent"
@@ -204,7 +288,7 @@ for line in sys.stdin:
                 case "scope": value = "launch"
                 case "replacement": value = "replace"
                 case "start": value = "1"
-                case "end": value = "3"
+                case "end": value = "2"
                 default: throw DriverConnectionError.malformed
                 }
                 answers[key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])

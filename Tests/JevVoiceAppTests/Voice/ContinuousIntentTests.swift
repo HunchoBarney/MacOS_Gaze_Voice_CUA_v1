@@ -72,3 +72,136 @@ final class ContinuousIntentTests: XCTestCase {
     }
 
 }
+
+extension ContinuousIntentTests {
+    func testVolatileCandidateWaitsForStabilityAndSameTextFinalizationDispatches() async throws {
+        var requests: [SpeechIntent] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
+            SpeechIntent(kind: .command, count: words.count, text: words.joined(separator: " "))
+        }, submit: { requests.append($0) })
+        c.begin()
+        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: false))
+        c.update("open Notes", final: false)
+        for _ in 0..<100 where c.outcome != "candidate" { await Task.yield() }
+        XCTAssertTrue(requests.isEmpty, "A fresh volatile candidate is not a handoff")
+        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: true))
+        c.update("open Notes", final: false)
+        await c.waitForPending()
+        XCTAssertEqual(requests.map(\.text), ["open Notes"])
+        XCTAssertEqual(requests.first?.provenance?.revision, 2)
+    }
+
+    func testVolatileApplicationRepairDoesNotSubmitOldApplication() async throws {
+        var requests: [String] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
+            SpeechIntent(kind: .command, count: words.count, text: words.joined(separator: " "))
+        }, submit: { requests.append($0.text) })
+        c.begin()
+        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: false))
+        c.update("open Notes", final: false)
+        for _ in 0..<100 where c.outcome != "candidate" { await Task.yield() }
+        c.record(.init(start: 0, end: 1, text: "open Maps", isFinal: true))
+        c.update("open Maps", final: false); await c.waitForPending()
+        XCTAssertEqual(requests, ["open Maps"])
+    }
+}
+
+extension ContinuousIntentTests {
+    func testDuplicateRevisionsAndIntentionalRepeatHaveDifferentSpans() async throws {
+        var submitted: [SpeechIntent] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in .init(kind: .command, count: words.count, text: "") }, submit: { submitted.append($0) })
+        c.begin()
+        let first = SpeechRevision(start: 0, end: 1, text: "open Notes", isFinal: true)
+        c.record(first); c.update("open Notes", final: false); await c.waitForPending()
+        c.record(first); c.update("open Notes", final: false); await c.waitForPending()
+        c.record(.init(start: 1, end: 2, text: " open Notes", isFinal: true))
+        c.update("open Notes open Notes", final: false); await c.waitForPending()
+        c.update("open Notes open Notes", final: true); await c.waitForPending()
+        XCTAssertEqual(submitted.map(\.text), ["open Notes", "open Notes"])
+        XCTAssertEqual(submitted.compactMap { $0.provenance?.wordStart }, [0, 2])
+    }
+    func testReleaseDuringPendingJudgmentRechecksAndPreservesParagraphs() async throws {
+        var release: CheckedContinuation<Void, Never>?, calls = 0
+        var submitted: [String] = []
+        let c = ContinuousIntentCoordinator(decide: { words, final, _ in
+            calls += 1
+            if calls == 1 { await withCheckedContinuation { release = $0 } }
+            return final ? .init(kind: .textEntry, count: words.count, text: "") : nil
+        }, submit: { submitted.append($0.text) })
+        c.begin(); c.update("type café\n\n👩🏽‍💻", final: false)
+        for _ in 0..<100 where release == nil { await Task.yield() }
+        c.update("type café\n\n👩🏽‍💻", final: true); release?.resume()
+        await c.waitForPending()
+        XCTAssertEqual(submitted, ["type café\n\n👩🏽‍💻"])
+        XCTAssertEqual(calls, 2)
+    }
+    func testUncertainSubmissionCannotReplayAfterServiceFailure() async throws {
+        var submissions = 0
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in .init(kind: .command, count: words.count, text: "") }, submit: { _ in
+            submissions += 1; throw URLError(.networkConnectionLost)
+        })
+        c.begin(); c.update("open Notes", final: true); await c.waitForPending()
+        c.update("open Notes", final: true); await c.waitForPending()
+        XCTAssertEqual(submissions, 1)
+        XCTAssertTrue(c.remainder.isEmpty)
+        XCTAssertNotNil(c.error)
+    }
+    func testIncompleteAndServiceFailureRetainPendingSpeech() async throws {
+        for service in [false, true] {
+            let c = ContinuousIntentCoordinator(interpret: { _, _, _ in
+                if service { throw URLError(.notConnectedToInternet) }
+                return .incomplete("What would you like to search for?")
+            }, submit: { _ in XCTFail("No handoff allowed") })
+            c.begin(); c.update("search for", final: true); await c.waitForPending()
+            XCTAssertEqual(c.remainder, "search for")
+            XCTAssertEqual(c.outcome, service ? "failure" : "incomplete")
+            XCTAssertTrue(c.error?.contains(service ? "Voice interpretation failed" : "search for") == true)
+        }
+    }
+    func testOldCaptureResponseDoesNotReviveAfterNewHold() async throws {
+        var release: CheckedContinuation<Void, Never>?, calls = 0
+        var submitted: [String] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
+            calls += 1
+            if calls == 1 { await withCheckedContinuation { release = $0 } }
+            return .init(kind: .command, count: words.count, text: "")
+        }, submit: { submitted.append($0.text) })
+        c.begin(); c.update("open Notes", final: true)
+        for _ in 0..<100 where release == nil { await Task.yield() }
+        c.begin(); c.update("open Maps", final: true)
+        release?.resume(); await c.waitForPending()
+        XCTAssertEqual(submitted, ["open Maps"])
+    }
+}
+
+extension ContinuousIntentTests {
+    func testStableVolatileCompleteRequestCanHandoffBeforeRelease() async throws {
+        var requests: [String] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in .init(kind: .command, count: words.count, text: "") }, submit: { requests.append($0.text) })
+        c.begin(); c.record(.init(start: 0, end: 1, text: "open Calculator", isFinal: false))
+        c.update("open Calculator", final: false); await c.waitForPending()
+        XCTAssertEqual(requests, ["open Calculator"], "Recognition finality must not become a release-only handoff gate")
+    }
+}
+
+extension ContinuousIntentTests {
+    func testStableFirstRequestDoesNotStarveBehindGrowingIndependentSpeech() async throws {
+        var release: CheckedContinuation<Void, Never>?, calls = 0
+        var submissions: [String] = []
+        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
+            calls += 1
+            if calls == 1 { await withCheckedContinuation { release = $0 }; return .init(kind: .command, count: 2, text: "open Notes") }
+            return nil
+        }, submit: { submissions.append($0.text) })
+        c.begin()
+        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: true))
+        c.record(.init(start: 1, end: 2, text: " then search", isFinal: false))
+        c.update("open Notes then search", final: false)
+        for _ in 0..<100 where release == nil { await Task.yield() }
+        c.record(.init(start: 1, end: 3, text: " then search for hiking", isFinal: false))
+        c.update("open Notes then search for hiking", final: false)
+        release?.resume(); await c.waitForPending()
+        XCTAssertEqual(submissions, ["open Notes"])
+        XCTAssertEqual(c.remainder, "then search for hiking")
+    }
+}

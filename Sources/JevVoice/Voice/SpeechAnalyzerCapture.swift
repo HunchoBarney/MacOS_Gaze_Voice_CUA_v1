@@ -142,173 +142,221 @@ final class AnalyzerAudioFeed: @unchecked Sendable {
 @MainActor
 final class SpeechAnalyzerCapture: SpeechCapturing {
     var onEvent: ((UUID, SpeechEvent) -> Void)?
-    private var engine: AVAudioEngine?
-    private var analyzer: SpeechAnalyzer?
-    private var feed: AnalyzerAudioFeed?
-    private var resultsTask: Task<Void, Error>?
-    private var analysisTask: Task<Void, Never>?
+    var onReadiness: ((SpeechReadiness) -> Void)?
+    private let input = MicrophoneInput()
+    private var prepared: Session?
+    private var active: (id: UUID, session: Session)?
+    private var preparation: Task<String, Error>?
+    private var preparationID = UUID()
+    private var selectedUID: String?
+    private var enabled = false
     private var finishTask: Task<Void, Never>?
     private var meterTimer: Timer?
-    private var configurationObserver: NSObjectProtocol?
-    private var sessionID: UUID?
-    private var transcript = RangedTranscript()
-    private var tapInstalled = false
+
+    @MainActor
+    private final class Session {
+        let name: String
+        let module: SpeechTranscriber?
+        let analyzer: SpeechAnalyzer?
+        let feed: AnalyzerAudioFeed
+        var transcript = RangedTranscript()
+        var results: Task<Void, Error>?
+        init(name: String, module: SpeechTranscriber?, analyzer: SpeechAnalyzer?, feed: AnalyzerAudioFeed) {
+            self.name = name; self.module = module; self.analyzer = analyzer; self.feed = feed
+        }
+    }
 
     static func requestAuthorization() async -> Bool {
         if !Permission.microphone.isGranted { await Permission.microphone.request() }
         return Permission.microphone.isGranted
     }
 
-    func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String {
-        cancel()
-        sessionID = session; transcript = RangedTranscript()
-        let startedAt = ProcessInfo.processInfo.systemUptime
-        var checkpoint = startedAt
-        func record(_ name: String) {
-            let now = ProcessInfo.processInfo.systemUptime
-            onEvent?(session, .timing(name, milliseconds: (now - checkpoint) * 1000))
-            checkpoint = now
+    func prepare(inputUID: String?) async throws -> String {
+        try Task.checkCancellation()
+        let uid = inputUID ?? ""
+        if selectedUID == uid {
+            if let prepared { return prepared.name }
+            if let preparation { return try await preparation.value }
+        } else {
+            await suspend()
         }
-        do {
-            let device = try MicrophoneCatalog.resolve(uid: inputUID)
-            record("Microphone device lookup")
-            let engine = AVAudioEngine()
-            self.engine = engine
-            let input = engine.inputNode
-            if input.auAudioUnit.deviceID != device.hardwareID { try input.auAudioUnit.setDeviceID(device.hardwareID) }
-            let format = input.outputFormat(forBus: 0)
-            guard format.sampleRate > 0, format.channelCount > 0 else { throw VoiceError("The microphone has no usable audio input.") }
-            record("Audio input setup")
-            let output: AVAudioFormat
-            if transcribe {
+        try Task.checkCancellation()
+        enabled = true; selectedUID = uid
+        let token = UUID(); preparationID = token
+        onReadiness?(.preparing)
+        let task = Task { [weak self] () throws -> String in
+            guard let self else { throw CancellationError() }
+            defer { if self.preparationID == token { self.preparation = nil } }
+            do {
+                try Task.checkCancellation()
+                guard Permission.microphone.isGranted else { throw VoiceError("Microphone access is needed. Open Voice settings.") }
+                let device = try MicrophoneCatalog.resolve(uid: uid)
+                let hardware = try await self.input.prepare(device: device) { [weak self] in
+                    Task { @MainActor in
+                        guard let self, self.enabled, self.preparationID == token else { return }
+                        let reason = "Microphone configuration changed. Preparing a fresh input is required."
+                        if let active = self.active { self.onEvent?(active.id, .failure(reason)) }
+                        await self.suspend()
+                        self.onReadiness?(.interrupted(reason))
+                    }
+                }
+                try Task.checkCancellation()
                 let module = try await SpeechAssets.transcriber()
                 guard await AssetInventory.status(forModules: [module]) == .installed else {
                     throw VoiceError("Prepare on-device speech assets in Voice settings before recording.")
                 }
-                guard let compatible = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module], considering: format) else {
-                    throw VoiceError("No supported SpeechAnalyzer audio format is available.")
+                guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module], considering: hardware.format) else {
+                    throw VoiceError("No supported speech audio format is available.")
                 }
-                try Task.checkCancellation()
-                guard sessionID == session else { throw CancellationError() }
-                output = compatible
-                record("Speech assets and format")
                 let analyzer = SpeechAssets.analyzer(for: module)
-                self.analyzer = analyzer
-                try await analyzer.prepareToAnalyze(in: output)
-                record("Speech model preparation")
-                try Task.checkCancellation()
-                guard sessionID == session else { throw CancellationError() }
-                resultsTask = Task { [weak self] in
-                    do {
-                        for try await result in module.results {
-                            guard let self, self.sessionID == session, !Task.isCancelled else { return }
-                            let revision = SpeechRevision(start: result.range.start.seconds,
-                                end: CMTimeRangeGetEnd(result.range).seconds,
-                                text: String(result.text.characters), isFinal: result.isFinal)
-                            if try self.transcript.apply(revision) {
-                                self.onEvent?(session, .revision(revision, transcript: self.transcript.text))
-                            }
-                        }
-                    } catch {
-                        guard let self, self.sessionID == session, !Task.isCancelled else { return }
-                        self.onEvent?(session, .failure(error.localizedDescription))
-                        throw error
-                    }
-                }
-            } else { output = format }
-            try Task.checkCancellation()
-            guard sessionID == session else { throw CancellationError() }
-            let feed = try AnalyzerAudioFeed(input: format, output: output)
-            self.feed = feed
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in feed.append(buffer) }
-            tapInstalled = true
-            let analyzer = self.analyzer
-            analysisTask = Task { [weak self] in
                 do {
-                    if let analyzer { try await analyzer.start(inputSequence: feed.stream) }
-                    else { for try await _ in feed.stream { } }
-                    if let self, self.sessionID == session, !Task.isCancelled {
-                        self.onEvent?(session, .timing("Capture call to analyzer start", milliseconds: (ProcessInfo.processInfo.systemUptime - startedAt) * 1000))
+                    let feed = try AnalyzerAudioFeed(input: hardware.format, output: format)
+                    try await analyzer.prepareToAnalyze(in: format)
+                    try Task.checkCancellation()
+                    guard self.enabled, self.preparationID == token else { throw CancellationError() }
+                    try await analyzer.start(inputSequence: feed.stream)
+                    try Task.checkCancellation()
+                    guard self.enabled, self.preparationID == token else { throw CancellationError() }
+                    self.prepared = Session(name: hardware.name, module: module, analyzer: analyzer, feed: feed)
+                    self.onReadiness?(.ready(hardware.name))
+                    return hardware.name
+                } catch { await analyzer.cancelAndFinishNow(); throw error }
+            } catch {
+                if self.preparationID == token {
+                    await self.input.stop()
+                    self.onReadiness?(.unavailable(error.localizedDescription))
+                }
+                throw error
+            }
+        }
+        preparation = task
+        return try await task.value
+    }
+
+    func start(session id: UUID, inputUID: String?, transcribe: Bool) async throws -> String {
+        cancel()
+        let started = ProcessInfo.processInfo.systemUptime
+        let session: Session
+        if transcribe {
+            _ = try await prepare(inputUID: inputUID)
+            try Task.checkCancellation()
+            guard let next = prepared else { throw VoiceError("Speech input is not ready yet.") }
+            session = next
+            prepared = nil
+        } else {
+            // Metering does not require speech assets or a recognizer.
+            await suspend()
+            try Task.checkCancellation()
+            selectedUID = inputUID ?? ""; enabled = true
+            let device = try MicrophoneCatalog.resolve(uid: inputUID)
+            let hardware = try await input.prepare(device: device) { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if self.active?.id == id { self.onEvent?(id, .failure("Microphone configuration changed.")) }
+                    await self.suspend()
+                }
+            }
+            try Task.checkCancellation()
+            session = Session(name: hardware.name, module: nil, analyzer: nil,
+                              feed: try AnalyzerAudioFeed(input: hardware.format, output: hardware.format))
+        }
+        active = (id, session)
+        if let module = session.module {
+            session.results = Task { [weak self] in
+                do {
+                    for try await result in module.results {
+                        guard let self, self.active?.id == id, !Task.isCancelled else { return }
+                        let revision = SpeechRevision(start: result.range.start.seconds,
+                            end: CMTimeRangeGetEnd(result.range).seconds,
+                            text: String(result.text.characters), isFinal: result.isFinal)
+                        if try session.transcript.apply(revision) { self.onEvent?(id, .transcript(session.transcript)) }
+                    }
+                    if let self, self.active?.id == id, self.finishTask == nil, !Task.isCancelled {
+                        self.onEvent?(id, .failure("Speech recognition ended unexpectedly. Release Fn to review."))
                     }
                 } catch {
-                    guard let self, self.sessionID == session, !Task.isCancelled else { return }
-                    self.onEvent?(session, .failure(error.localizedDescription))
+                    guard let self, self.active?.id == id, !Task.isCancelled else { return }
+                    self.onEvent?(id, .failure(error.localizedDescription))
+                    throw error
                 }
             }
-            record("Audio pipeline setup")
-            engine.prepare(); try engine.start()
-            record("Audio engine start")
-            configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
-                object: engine, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, self.sessionID == session, let engine = self.engine else { return }
-                    let current = engine.inputNode.outputFormat(forBus: 0)
-                    if !engine.isRunning || engine.inputNode.auAudioUnit.deviceID != device.hardwareID || current != format {
-                        self.onEvent?(session, .failure("Microphone configuration changed. Hold Fn to record again."))
-                    }
-                }
-            }
-            var reportedFirstBuffer = false
-            meterTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, self.sessionID == session else { return }
-                    if !reportedFirstBuffer, let first = feed.firstBufferTime() {
-                        reportedFirstBuffer = true
-                        self.onEvent?(session, .timing("Capture call to first audio", milliseconds: (first - startedAt) * 1000))
-                    }
-                    self.onEvent?(session, .level(feed.level()))
-                }
-            }
-            if let meterTimer { RunLoop.main.add(meterTimer, forMode: .common) }
-            return device.name
-        } catch {
-            if sessionID == session { cancel() }
-            throw error
         }
+        // Meter-only input uses the same hardware/feed but never reaches recognition.
+        if !transcribe {
+            session.results = Task { for try await _ in session.feed.stream {} }
+        }
+        input.gate.open(session.feed)
+        onEvent?(id, .timing("Input admission", milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000))
+        var reportedFirst = false
+        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.active?.id == id else { return }
+                if !reportedFirst, let first = session.feed.firstBufferTime() {
+                    reportedFirst = true
+                    self.onEvent?(id, .timing("Capture call to first audio", milliseconds: (first - started) * 1000))
+                }
+                self.onEvent?(id, .level(session.feed.level()))
+            }
+        }
+        if let meterTimer { RunLoop.main.add(meterTimer, forMode: .common) }
+        return session.name
     }
 
     func finish() {
-        guard finishTask == nil, let id = sessionID else { return }
-        let finishStarted = ProcessInfo.processInfo.systemUptime
-        stopCapture(); feed?.finish()
-        onEvent?(id, .timing("Audio capture stopped and drained", milliseconds: (ProcessInfo.processInfo.systemUptime - finishStarted) * 1000))
-        if let durations = feed?.audioDurations() {
-            onEvent?(id, .timing("Captured audio duration", milliseconds: durations.input * 1000))
-            onEvent?(id, .timing("Audio above minus 50 dBFS", milliseconds: durations.audible * 1000))
-            onEvent?(id, .timing("Converted audio duration", milliseconds: durations.converted * 1000))
-        }
-        let analyzer = self.analyzer, results = resultsTask, analysis = analysisTask
+        guard finishTask == nil, let active else { return }
+        let started = ProcessInfo.processInfo.systemUptime
+        input.gate.close()?.finish()
+        meterTimer?.invalidate(); meterTimer = nil
+        let durations = active.session.feed.audioDurations()
+        onEvent?(active.id, .timing("Captured audio duration", milliseconds: durations.input * 1000))
+        onEvent?(active.id, .timing("Converted audio duration", milliseconds: durations.converted * 1000))
         finishTask = Task { [weak self] in
             do {
-                await analysis?.value
-                guard let self, self.sessionID == id, !Task.isCancelled else { return }
-                self.onEvent?(id, .timing("Release to analyzer start joined", milliseconds: (ProcessInfo.processInfo.systemUptime - finishStarted) * 1000))
-                try await analyzer?.finalizeAndFinishThroughEndOfInput()
-                self.onEvent?(id, .timing("Release to analyzer finalized", milliseconds: (ProcessInfo.processInfo.systemUptime - finishStarted) * 1000))
-                try await results?.value
-                guard self.sessionID == id, !Task.isCancelled else { return }
-                self.onEvent?(id, .final(self.transcript.text))
+                try await active.session.analyzer?.finalizeAndFinishThroughEndOfInput()
+                try await active.session.results?.value
+                guard let self, self.active?.id == active.id, !Task.isCancelled else { return }
+                self.onEvent?(active.id, .timing("Release to analyzer finalized", milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000))
+                self.onEvent?(active.id, .final(active.session.transcript.text))
             } catch {
-                guard let self, self.sessionID == id, !Task.isCancelled else { return }
-                self.onEvent?(id, .failure(error.localizedDescription))
+                guard let self, self.active?.id == active.id, !Task.isCancelled else { return }
+                self.onEvent?(active.id, .failure(error.localizedDescription))
             }
         }
+        prepareNext()
     }
 
     func cancel() {
-        sessionID = nil
-        stopCapture(); feed?.finish(); feed = nil
-        analysisTask?.cancel(); analysisTask = nil
-        resultsTask?.cancel(); resultsTask = nil
-        finishTask?.cancel(); finishTask = nil
-        if let analyzer { Task { await analyzer.cancelAndFinishNow() } }
-        analyzer = nil; engine = nil
-    }
-    private func stopCapture() {
+        let prior = active
+        active = nil
+        input.gate.close()?.finish()
         meterTimer?.invalidate(); meterTimer = nil
-        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
-        configurationObserver = nil
-        engine?.stop()
-        if tapInstalled { engine?.inputNode.removeTap(onBus: 0); tapInstalled = false }
+        finishTask?.cancel(); finishTask = nil
+        prior?.session.results?.cancel()
+        if let prior { Task { await prior.session.analyzer?.cancelAndFinishNow() } }
+        prepareNext()
+    }
+
+    private func prepareNext() {
+        guard enabled, prepared == nil, preparation == nil else { return }
+        Task { [weak self] in
+            guard let self, self.enabled else { return }
+            _ = try? await self.prepare(inputUID: self.selectedUID)
+        }
+    }
+
+    func suspend() async {
+        enabled = false
+        preparationID = UUID()
+        let pending = preparation
+        preparation = nil
+        pending?.cancel()
+        cancel()
+        let idle = prepared
+        prepared = nil
+        // Stop hardware before awaiting model cleanup, which can be slow.
+        await input.stop()
+        await idle?.analyzer?.cancelAndFinishNow()
+        _ = try? await pending?.value
+        onReadiness?(.unavailable("Microphone is paused."))
     }
 }

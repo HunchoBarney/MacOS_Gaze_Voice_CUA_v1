@@ -50,11 +50,25 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    private func recognizeFixture(path: String, requireStreaming: Bool, finalizationLimit: Double?) async throws {
+    func testCompareFastResultsOnSameRecordedAudioOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_SPEECH_COMPARE_FAST"] == "1",
+              let path = ProcessInfo.processInfo.environment["JARVIS_SHORT_SPEECH_TEST_FILE"] else {
+            throw XCTSkip("Opt-in matched recorded-audio fastResults comparison")
+        }
+        for fast in [true, false, false, true] {
+            try await recognizeFixture(path: path, requireStreaming: false, finalizationLimit: VoiceTimings().finalization, fast: fast)
+        }
+    }
+
+    @MainActor
+    private func recognizeFixture(path: String, requireStreaming: Bool, finalizationLimit: Double?, fast: Bool = true) async throws {
         if ProcessInfo.processInfo.environment["JARVIS_PREPARE_SPEECH"] == "1" {
             await SpeechAssets.shared.refresh(install: true)
         }
-        let module = try await SpeechAssets.transcriber()
+        let prepared = try await SpeechAssets.transcriber()
+        let supported = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current)
+        let locale = try XCTUnwrap(supported)
+        let module = fast ? prepared : SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.audioTimeRange])
         let status = await AssetInventory.status(forModules: [module])
         XCTAssertEqual(status, .installed, "Prepare speech assets in the app's Voice settings.")
         guard status == .installed else { return }
@@ -90,7 +104,7 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
             try await analyzer.finalizeAndFinishThroughEndOfInput()
             let text = try await collection.value
             let finalization = ProcessInfo.processInfo.systemUptime - finishStarted
-            print("Recorded speech finalization ms:", finalization * 1000)
+            print("Recorded speech fastResults:", fast, "finalization ms:", finalization * 1000, "transcript:", text)
             if let finalizationLimit { XCTAssertLessThanOrEqual(finalization, finalizationLimit, "The current live deadline would discard this utterance") }
             XCTAssertTrue(text.lowercased().contains("blue notebook"), "Recorded fixture content missing: \(text)")
             XCTAssertTrue(text.lowercased().contains("desk"), "Final word missing: \(text)")

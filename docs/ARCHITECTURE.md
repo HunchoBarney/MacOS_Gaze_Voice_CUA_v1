@@ -8,7 +8,13 @@ Directory groups are navigation aids, not new packages or access-control boundar
 
 `main.swift` creates the menu-bar application, windows, microphone catalog and Fn
 monitor. `VoiceController` owns capture/session state and defaults to
-`SpeechAnalyzerCapture`. Speech events include revisions, finalization and timing.
+`SpeechAnalyzerCapture`. Speech events include authoritative transcript snapshots, finalization and timing.
+`MicrophoneInput` owns the long-lived engine on a serial queue. Its admission gate
+drops idle buffers and strips any pre-hold prefix from a straddling buffer.
+`SpeechAnalyzerCapture` owns a fresh prepared analyzer and bounded feed per hold;
+it alone reconciles recognition ranges. Capture IDs pass unchanged into intent
+provenance. Fn release closes admission and drains accepted audio, while the next
+analyzer prepares independently of the still-running hardware.
 `ContinuousIntentCoordinator` coordinates decisions over changing speech.
 `CuaVoiceRuntime` owns task contexts and connects them to `CuaTaskAgent` and
 `CuaWorkQueue`. `CuaConnection` transports MCP to the pinned local Driver.
@@ -26,11 +32,8 @@ This describes wiring, not acceptance of every behavior. See
 | `Sources/JevVoice/UI` | Settings, capsule/Activity windows, styling and provider controls |
 | `Sources/JevVoice/Settings` | Preferences, Keychain and permission/provider configuration |
 | `Sources/JevVoice/ComputerControl` | Cua transport, dependency verification, observations, action catalog, task execution and scheduling |
-| `Sources/JevVoice/Legacy` | Older recognizer/native executor and app discovery retained for regression comparisons and opt-in fixtures |
-| `Sources/JevVoice/Testing` | Conditional `SPEECH_FIXTURE_PROBE` harness; not enabled in normal builds |
-| `Sources/JevVoiceCore/Speech` | Transcript/range consumption and owned dictation values |
+| `Sources/JevVoiceCore/Speech` | Recognition ranges, consumed spans and capture provenance |
 | `Sources/JevVoiceCore/Models` | JSON/typed Jev contracts and network clients for Jev and text generation |
-| `Sources/JevVoiceCore/Commands` | Command values, matching, interpretation/planning and comparison-path coordination |
 | `Tests/JevVoiceAppTests` | App integration contracts and explicitly gated live checks, grouped by responsibility |
 | `Tests/JevVoiceTests` | Core logic/model tests, grouped by responsibility |
 | `Tests/Fixtures` | Disposable external application fixtures |
@@ -40,14 +43,21 @@ their task and target ownership. The UI/controller uses the main actor; network,
 Driver and audio work have their own existing lifecycles. Consult implementation
 before changing isolation. No new global coordinator is implied by these groups.
 
-## Legacy boundaries
+## Capture lifecycle
 
-Production defaults to Cua. Injected interpreter/executor seams still exercise
-older behavior in regression tests; Driver failure does not select them as a
-fallback. The old recognizer supports historical fixture/policy checks, while the
-shared `SpeechCapturing` contract lives with current voice code. `ExecutorError`
-remains a shared error type despite its historical name. Removing these paths
-requires replacement evidence under the migration, not only an unused-code scan.
+There is one production interpretation/execution route: SpeechAnalyzer → continuous
+intent coordination → Cua task runtime. Capture state and task progress have separate
+owners. Cancellation and session identity reject late results; consumed-span tracking
+prevents replay while preserving intentional repetitions. Manual mode still requires
+explicit submission. Legacy recognizer, parser/planner, native executor, dictation
+helper and conditional probe were removed under the authorized simplification plan.
+Live dictation remains an open migration gate, not a replaced capability.
+
+Ready hardware keeps the macOS microphone indicator active. Idle audio is discarded,
+never retained or transcribed. Quit, sleep, session inactivity, permission loss and
+input interruption stop hardware. Recovery prepares fresh input without resuming a
+hold. Screen-lock notifications use loginwindow's installed notification names, an
+undocumented OS integration that requires physical verification on supported builds.
 
 ## Runtime and data boundaries
 

@@ -4,7 +4,8 @@ import JevVoiceCore
 @MainActor
 final class ContinuousIntentCoordinator {
     typealias Decide = ([String], Bool, JSONValue) async throws -> SpeechIntent?
-    private let decide: Decide
+    typealias Interpret = ([String], Bool, JSONValue) async throws -> JevSpeechIntent.Understanding
+    private let interpret: Interpret
     private let submit: (SpeechIntent) async throws -> Void
     private var ledger = SpeechConsumption()
     private var generation = UUID()
@@ -12,30 +13,39 @@ final class ContinuousIntentCoordinator {
     private var literal = false
     private var final = false
     private var currentText = ""
+    private var inputRevision = -1
     private var transcriptReceivedAt = ProcessInfo.processInfo.systemUptime
     private var captureID = UUID()
-    private var audio = RangedTranscript()
+    private(set) var audio = RangedTranscript()
     var context: () -> JSONValue = { .object([:]) }
     var onChange: () -> Void = {}
+    enum Event: String { case candidate, handoff, discarded, incomplete, clarification, noRequest, failure }
+    var observe: (Event, SpeechIntent?) -> Void = { _, _ in }
+    private(set) var outcome = "idle"
     private(set) var message = ""
     private(set) var error: String?
     private(set) var busy = false
     var remainder: String { ledger.pending }
 
     init(decide: @escaping Decide, submit: @escaping (SpeechIntent) async throws -> Void) {
-        self.decide = decide; self.submit = submit
+        self.interpret = { words, final, context in
+            if let intent = try await decide(words, final, context) { return .ready(intent) }
+            return .incomplete("Please finish the request or specify its missing information.")
+        }
+        self.submit = submit
     }
-    func begin() {
+    init(interpret: @escaping Interpret, submit: @escaping (SpeechIntent) async throws -> Void) {
+        self.interpret = interpret; self.submit = submit
+    }
+    func begin(captureID: UUID = UUID()) {
         cancel()
-        captureID = UUID(); audio = RangedTranscript()
-        ledger = SpeechConsumption(); literal = false; final = false; currentText = ""; error = nil; message = ""
+        self.captureID = captureID; audio = RangedTranscript()
+        ledger = SpeechConsumption(); literal = false; final = false; currentText = ""; inputRevision = -1; error = nil; message = ""; outcome = "idle"
     }
-    func record(_ revision: SpeechRevision) {
-        do { try audio.apply(revision) }
-        catch { cancel(); self.error = "Speech audio ranges changed inconsistently. Release Fn and try again."; onChange() }
-    }
+    func record(_ snapshot: RangedTranscript) { audio = snapshot }
     func update(_ text: String, final: Bool) {
-        guard text != currentText || final != self.final else { return }
+        guard text != currentText || final != self.final || inputRevision != audio.revision else { return }
+        inputRevision = audio.revision
         transcriptReceivedAt = ProcessInfo.processInfo.systemUptime
         let previous = ledger.pendingWords
         do { try ledger.update(text) }
@@ -48,7 +58,7 @@ final class ContinuousIntentCoordinator {
         if !extendsPrevious { literal = false }
         generation = UUID()
         let revision = generation
-        busy = true
+        busy = true; error = nil; message = ""; outcome = "understanding"
         pendingTask = Task { [weak self] in
             guard let self else { return }
             defer { if self.generation == revision { self.busy = false; self.onChange() } }
@@ -59,37 +69,73 @@ final class ContinuousIntentCoordinator {
                     let wasFinal = self.final
                     let inputAudio = self.audio
                     let receivedAt = self.transcriptReceivedAt
-                    let intent: SpeechIntent?
+                    let understanding: JevSpeechIntent.Understanding
                     if self.literal {
-                        intent = SpeechIntent(kind: .dictate, count: words.count, text: words.joined(separator: " "))
-                    } else { intent = try await self.decide(words, wasFinal, self.context()) }
-                    try Task.checkCancellation()
-                    guard self.generation == revision else { return }
-                    let latest = self.ledger.pendingWords
-                    guard let intent else {
-                        if latest != words || self.final != wasFinal { continue }
-                        if self.final { self.error = "I need a clearer or more complete request: " + self.ledger.pending }
-                        return
+                        understanding = .ready(SpeechIntent(kind: .dictate, count: words.count, text: words.joined(separator: " ")))
+                    } else { understanding = try await self.interpret(words, wasFinal, self.context()) }
+                    guard !Task.isCancelled, self.generation == revision else {
+                        self.observe(.discarded, nil); return
                     }
-                    // A command ending at the old transcript edge might acquire another
-                    // argument as speech grows. Rejudge it using the newest context.
-                    if latest != words && (intent.count >= words.count || !latest.starts(with: words)) { continue }
+                    let latest = self.ledger.pendingWords
+                    let unchanged = latest == words && self.final == wasFinal && self.audio.revision == inputAudio.revision
+                    let stablePrefix: Bool
+                    if case .ready(let candidate) = understanding {
+                        let end = self.ledger.consumedWordCount + candidate.count
+                        stablePrefix = candidate.count > 0 && candidate.count < words.count &&
+                            latest.starts(with: words.prefix(candidate.count)) &&
+                            inputAudio.isFinal(throughWord: end) && self.audio.isFinal(throughWord: end)
+                    } else { stablePrefix = false }
+                    guard unchanged || stablePrefix else {
+                        self.observe(.discarded, nil); continue
+                    }
+                    let intent: SpeechIntent
+                    switch understanding {
+                    case .ready(let candidate):
+                        intent = candidate
+                        self.outcome = "candidate"; self.observe(.candidate, candidate)
+                    case .noRequest:
+                        intent = SpeechIntent(kind: .ignore, count: words.count, text: words.joined(separator: " "))
+                        self.outcome = "noRequest"; self.observe(.noRequest, nil)
+                    case .incomplete(let reason):
+                        self.outcome = "incomplete"; self.observe(.incomplete, nil)
+                        if self.final { self.error = reason } else { self.message = "Listening for the rest of your request…" }
+                        return
+                    case .clarification(let reason):
+                        self.outcome = "clarification"; self.observe(.clarification, nil)
+                        if self.final { self.error = reason } else { self.message = reason }
+                        return
+                    case .limitation(let reason):
+                        self.outcome = "limitation"; self.error = reason; return
+                    }
                     if intent.kind == .dictate { self.literal = true }
                     if (intent.kind == .dictate || intent.kind == .textEntry) && !self.final {
                         self.message = "Text inserts on release; safe live revision is not available yet."
                         self.onChange(); return
                     }
+                    // Finalized segments are stable immediately. Volatile or text-only
+                    // input must remain unchanged for 350ms, in addition to semantic
+                    // completeness. This is eligibility evidence, never a deadline.
+                    if !self.final && !inputAudio.isFinal(throughWord: self.ledger.consumedWordCount + intent.count) {
+                        let remaining = max(0, 0.35 - (ProcessInfo.processInfo.systemUptime - receivedAt))
+                        if remaining > 0 { try await Task.sleep(for: .seconds(remaining)) }
+                        try Task.checkCancellation()
+                        guard self.generation == revision else { return }
+                        if self.ledger.pendingWords != words || self.final != wasFinal || self.audio.revision != inputAudio.revision {
+                            self.observe(.discarded, intent); continue
+                        }
+                    }
                     // Commit before handing off: uncertainty/error must never make this span replayable.
                     let start = self.ledger.consumedWordCount
                     let committed = try self.ledger.commit(wordCount: intent.count)
                     if intent.kind != .ignore {
+                        self.outcome = "handoff"; self.observe(.handoff, intent)
                         try await self.submit(SpeechIntent(kind: intent.kind, count: intent.count, text: committed.text, provenance: SpeechProvenance(captureID: self.captureID, revision: inputAudio.revision, wordStart: start, wordEnd: start + intent.count, audioRanges: inputAudio.segments), transcriptReceivedAt: receivedAt))
                     }
                     try Task.checkCancellation()
                     guard self.generation == revision else { return }
                 }
-            } catch is CancellationError { }
-            catch { if self.generation == revision { self.error = error.localizedDescription } }
+            } catch is CancellationError { self.observe(.discarded, nil) }
+            catch { if self.generation == revision { self.outcome = "failure"; self.observe(.failure, nil); self.error = "Voice interpretation failed: " + error.localizedDescription } }
         }
     }
     func reviewRemainder(_ text: String) throws -> String {

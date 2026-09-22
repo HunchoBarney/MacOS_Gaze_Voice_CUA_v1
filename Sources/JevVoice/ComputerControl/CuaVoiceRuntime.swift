@@ -34,9 +34,9 @@ final class CuaVoiceRuntime {
     private let instanceLabel = String(UUID().uuidString.prefix(6))
     var onChange: () -> Void = {}
     lazy var speech: ContinuousIntentCoordinator = {
-        let c = ContinuousIntentCoordinator(decide: { [weak self] words, final, context in
+        let c = ContinuousIntentCoordinator(interpret: { [weak self] words, final, context in
             guard let self else { throw CancellationError() }
-            return try await JevSpeechIntent(evaluate: self.judge).next(words: words, final: final, context: context)
+            return try await JevSpeechIntent(evaluate: self.judge).understand(words: words, final: final, context: context)
         }, submit: { [weak self] intent in self?.enqueue(intent) })
         c.context = { [weak self] in self?.context ?? .object([:]) }
         c.onChange = { [weak self] in self?.onChange() }
@@ -54,7 +54,7 @@ final class CuaVoiceRuntime {
                      "status": .string($0.status), "app": .string($0.bundle ?? ""), "result": .string($0.message)])
         })])
     }
-    func begin(app: String?) { initialApp = app ?? ""; selectedID = nil; speech.begin() }
+    func begin(app: String?, captureID: UUID = UUID()) { initialApp = app ?? ""; selectedID = nil; speech.begin(captureID: captureID) }
     func update(_ text: String, final: Bool) { speech.update(text, final: final); onChange() }
     func cancelCapture() { speech.cancel() }
     func cancelSelected() { if let id = selectedID { cancel(id) } }
@@ -63,7 +63,7 @@ final class CuaVoiceRuntime {
         resolveApproval(id, approved: false)
         work.status = "Stopping"; work.message = "Stopping; already dispatched effects may finish."; work.worker?.cancel(); onChange()
     }
-    func stopAll() { speech.cancel(); for work in tasks where work.active { cancel(work.id) } }
+    func stopAll() { speech.cancel(); for work in tasks where work.active { cancel(work.id) }; onChange() }
     func resolveApproval(_ id: UUID, approved: Bool) {
         guard let work = tasks.first(where: { $0.id == id }), let continuation = work.approvalContinuation else { return }
         work.approvalContinuation = nil; work.approval = nil
