@@ -4,6 +4,40 @@ import JevVoiceCore
 
 @MainActor
 final class CuaTaskAgentTests: XCTestCase {
+    func testAddressedTextInsertionDoesNotPredictAnotherWindow() async throws {
+        var inserted = "", mutations = 0
+        let agent = CuaTaskAgent(call: { tool, args in
+            switch tool {
+            case "list_apps", "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture"), "pid": .number(42)])])])
+            case "list_windows": return .object(["windows": .array([.object(["window_id": .number(7)])])])
+            case "get_browser_state": throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
+            case "get_window_state": return .object(["elements": .array([.object(["element_index": .number(0), "role": .string("AXTextArea"), "label": .string("Body"), "element_token": .string("body"), "value": .string(inserted)])])])
+            case "type_text":
+                XCTAssertEqual(args["window_id"], .number(7))
+                mutations += 1; inserted = args["text"]?.string ?? ""
+                return .object([:])
+            default: throw DriverConnectionError.malformed
+            }
+        }, judge: { state, questions in
+            if questions["risk"] != nil {
+                XCTAssertNil(questions["windowEffect"], "Addressed insertion must not ask a model to invent another destination")
+                return ["risk": .choice(choice: "ordinary", confidence: 1, probabilities: [:]),
+                        "windowEffect": .choice(choice: "new", confidence: 1, probabilities: [:])]
+            }
+            if questions["next"] != nil {
+                if mutations > 0 { XCTAssertEqual(state["selected_window_id"], .number(7)) }
+                return ["next": .choice(choice: mutations == 0 ? "action_0" : "done", confidence: 1, probabilities: [:])]
+            }
+            return ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+                    "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+                    "visibility": .choice(choice: "background", confidence: 1, probabilities: [:])]
+        }, windowID: 7, payload: { _, _ in "copper lantern" })
+        _ = try await agent.run(goal: "Type copper lantern into this document", context: "", progress: { _ in })
+        XCTAssertEqual(inserted, "copper lantern")
+        XCTAssertEqual(mutations, 1)
+    }
+
     func testCancellationDuringWindowSelectionCannotActivateTheWindow() async throws {
         var activations = 0
         let agent = CuaTaskAgent(call: { tool, _ in
