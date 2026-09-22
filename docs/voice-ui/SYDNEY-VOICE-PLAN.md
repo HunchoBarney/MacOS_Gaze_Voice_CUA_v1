@@ -1,6 +1,6 @@
 # Sydney Voice Reliability and Natural Understanding — Execution Plan
 
-**Status:** Implementation authorized and started on 2026-09-21, including scoped live checks and real-Jev evaluation. Physical trials require user participation. Acceptance remains open.
+**Status (reconciled 2026-09-22):** Core voice implementation and the authorized simplification are integrated in the Sydney branch. Current-version semantic evaluation, performance evidence and physical acceptance remain open. Section 16 separates completed work, agent-owned next steps and user participation. No new physical trials are requested until the agent prepares an identified candidate and trial sheet.
 
 **Workspace:** `/Users/karanvirkang/conductor/workspaces/JarvisMacOSv1/sydney`
 
@@ -218,7 +218,7 @@ Implement the smallest fix supported by the reproduction. Do not assume a timeou
 
 Preserve:
 
-- No recording while idle.
+- No retention or transcription of idle audio. Under the authorized simplification, microphone hardware remains active while ready; only in-hold audio enters recognition.
 - No delayed startup after release.
 - Bounded buffering and explicit overflow failure.
 - Correct teardown on cancellation and device interruption.
@@ -388,7 +388,7 @@ git diff --check
 git diff origin/main...
 ```
 
-Review the complete affected voice path, including production wiring. Include uncommitted and untracked work in the review: the three-dot branch comparison alone does not show it. Preserve useful legacy regression coverage; this plan does not authorize broad legacy removal.
+Review the complete affected voice path, including production wiring. Include uncommitted and untracked work in the review: the three-dot branch comparison alone does not show it. Preserve useful behavioral regression coverage. The subsequently authorized [VOICE-SIMPLIFICATION-PLAN.md](VOICE-SIMPLIFICATION-PLAN.md) removed the obsolete legacy route and migrated relevant lifecycle checks to production interfaces; do not restore that route or count its retired fixtures as production acceptance.
 
 Do not replace an installed bundle merely to complete packaging. Physical acceptance uses an identified build and the shared-desktop procedure.
 
@@ -469,20 +469,43 @@ Maintain these records as execution proceeds:
 - **Next action:** one concrete step a fresh session can perform.
 - **Outcome:** what works, what remains, and which gates are still open.
 
-### Progress
+### Progress — current implementation versus acceptance
 
-- [x] User approved the plan and requested this worktree-specific document.
-- [x] Save the approved plan. This is documentation work only.
-- [x] V0 — Establish the baseline.
-- [x] V1 — Build the voice evaluation path.
-- [ ] V2 — Resolve capture and immediate-release failures, including physical evidence.
-- [x] V3 — Make interpretation revision-aware.
-- [x] V4 — Improve semantic understanding.
-- [x] V5 — Correct repair, cancellation, and failure behavior.
-- [ ] V6 — Improve bounded processing and speed.
-- [ ] V7 — Complete verification and delivery.
+Reference source: `6608d88` (`Preserve negated speech prefixes until release`),
+on `chore/review-voice-commands`. “Integrated” means present in this branch, not
+proof of merge into `origin/main`, installed-app identity or physical acceptance.
 
-V0 passed: make setup and 69 focused tests, zero failures. V1 manifest/scorer and non-executing real-Jev harness implemented; default tests skip before credential access. Baseline HEAD `d756cf37931d12a85d2e35aef45d9ff3dd7664b8`, branch `chore/review-voice-commands`; only initial local change was this untracked plan. See `.context/voice/baseline.md` and `baseline-tests.log`.
+- [x] V0 — Baseline and historical failures recorded.
+- [x] V1 — Development/held-out evaluation, revision timelines and non-executing submission sink implemented.
+- [ ] V2 — Capture implementation integrated; current-build physical acceptance remains open.
+- [x] V3 — Revision/finality-aware interpretation, stale-result rejection and no-replay implementation with deterministic coverage.
+- [ ] V4 — Semantic implementation integrated; refresh real-model acceptance for the latest fixes. The earlier checked gate described an older prompt/runtime revision.
+- [x] V5 — Scoped cancellation, failure isolation and manual-review behavior implemented with production-wiring coverage.
+- [ ] V6 — Bounded processing and ready-microphone improvements integrated; matched current-version performance evidence remains open.
+- [ ] V7 — Final candidate packaging, physical acceptance and delivery/handoff remain open.
+
+Completed implementation retained from the original Sydney execution:
+
+- [x] Distinct recognition finality, semantic completeness and capture completion.
+- [x] Before-release eligibility for complete requests; 350 ms unchanged-speech stability for volatile recognition, with finalized-prefix progress.
+- [x] Separate pending/consumed speech, intentional repetitions, stale-result rejection and no replay after uncertain handoff.
+- [x] Negation, conditions, incomplete/ambiguous requests, self-repair, literal/quoted content and source-preserving extraction.
+- [x] Bounded interpretation up to 2,048 words with recoverable larger-input feedback.
+- [x] Interpretation failures do not cancel unrelated tasks; manual mode and explicit cancellation remain supported.
+
+Completed simplification and subsequent fixes:
+
+- [x] One production route: SpeechAnalyzer → intent coordinator → Cua runtime; obsolete recognizer/parser/native-executor route removed.
+- [x] Capture owns transcript reconciliation and shares its identity/snapshots with coordination; task progress is separate from capture state.
+- [x] Long-lived serial microphone owner, idle-audio admission gate and fresh prepared recognition session per hold.
+- [x] Readiness UI and lifecycle suspension/recovery implementation; corrected configuration-notification restart loop and delayed microphone-test interruption ownership.
+- [x] Successful silent release dismisses without error or task; actual recognition failures remain visible.
+- [x] Non-action speech at the transcript edge remains pending until release, preserving “Don't” across a pause before later command words.
+- [x] Relevant lifecycle tests migrated to production interfaces. Retired legacy algorithm/live-dictation fixtures do not prove current Cua behavior; live dictation remains assigned elsewhere.
+
+These implementation checkmarks do not close V2/V4/V6/V7 acceptance. The
+simplification preserved the original interpretation work and changed its capture
+and controller interfaces; do not restart V0–V5 implementation from scratch.
 
 ### Discoveries
 
@@ -503,15 +526,75 @@ V0 passed: make setup and 69 focused tests, zero failures. V1 manifest/scorer an
 
 ### Verification record
 
-Implementation and automated verification are recorded in EVIDENCE.md under Sydney execution 2026-09-21. Fresh held-out round 2: 28/30 valid (93.3%), all 30 negative/scenario cases correct, zero critical; first failed held-out set retired into development before tuning. Six real-model delayed-response timelines passed. Thirty warm matched simple-command samples: revised median154ms/p95237ms versus baseline132ms/217ms. Interpretation target met, baseline improvement not established. Recorded synthetic immediate-EOF audio retained its final word; physical acceptance remains failed/unverified. V3–V5 checks mark owned implementation/semantic gates only, not physical or downstream execution acceptance.
+Build-specific details and artifact paths remain in [EVIDENCE.md](EVIDENCE.md).
+Do not combine measurements from different revisions into one accepted build.
+
+| Evidence | Recorded result | What it does not establish |
+| --- | --- | --- |
+| Latest negated-prefix fix, `6608d88` | 56 focused checks; final default rerun passed 2 tooling + 168 Swift tests, 22 skips, zero failures | Scripted judgments/simulated capture, not real-model or physical acceptance. First full run had a transient recording-limit test failure; its proposed timing cause is inferred. No packaging was performed for this fix. |
+| Earlier real-Jev held-out round 2 | 28/30 valid requests (93.3%); all 30 negative/scenario cases correct; zero observed critical violations; six delayed-response timelines passed | Predates subsequent conditional/extraction and coordinator fixes; current-version V4 needs refreshed evidence. |
+| Earlier matched interpretation benchmark | 30 warm samples: revised median154ms/p95237ms; baseline132ms/217ms | Meets the one-second target, but does not prove improvement over baseline or spoken-completion-to-action latency. |
+| Corrected ready-microphone candidate `459df5e…` | 13 observed holds: first-audio median58.144ms versus earlier254ms; no restart loop; two captures handed off while held | Small uncontrolled capture-stage samples, not a matched 30-sample benchmark or complete voice/desktop acceptance. |
+| Simplification packaging | Corrected candidate passed clean-checkout tests/build/signature checks; silent-release candidate `7aa42f74…` passed packaging/signature checks | These binaries predate the latest source fixes. Silent-release refinement has no recorded physical acceptance. |
+
+Older physical capture termination and post-handoff revision failures remain
+historical findings to assess against the current implementation. The user clarified
+that some empty holds were intentional UI experimentation without speaking; do not
+treat them as recognition failures or ask the user to reconstruct every silent hold.
+
+### Remaining work owned by the agent
+
+- [ ] Refresh development, held-out and delayed-revision real-Jev evaluation through the existing non-executing sink, using the latest implementation and existing scoped authorization. Preserve held-out separation; do not tune on held-out failures without retiring/replacing those cases.
+- [ ] Refresh matched cold/warm voice-stage latency evidence, including at least 30 warm samples, failures and model-call counts. Keep capture readiness, interpretation and downstream execution measurements separate.
+- [ ] Review current capture/revision behavior against the older nonterminal-capture and post-handoff revision findings. Reproduce or establish superseding evidence before proposing fixes; preserve no replay.
+- [ ] Prepare and identify one current candidate, complete required regression/build/signature checks and applicable clean-checkout verification, then provide a concise physical trial sheet. Do not replace the installed app merely to package it.
+- [ ] Correlate physical trial logs with the user's intended phrases and observations, classify voice versus execution outcomes, and update this plan and EVIDENCE.md.
+- [ ] Close owned gates only when evidence supports them; report external execution dependencies separately.
+
+### What is needed from the user
+
+**Nothing to test immediately.** The agent first completes independent evaluation
+and candidate preparation above. No repeated implementation approval is needed
+within the existing authorized Sydney scope.
+
+When the identified candidate and trial sheet are ready, participation is needed for:
+
+- [ ] **Five spoken immediate-release trials:** say the supplied short phrase and release Fn immediately after its final word. Confirm whether the displayed first/final words match what was spoken.
+- [ ] **Two spoken longer-hold trials:** finish the phrase while continuing to hold Fn. Confirm responsiveness and any unwanted repetition; the agent checks handoff timing and later recognition revisions separately from desktop success.
+- [ ] **Lifecycle checks:** coordinate sleep/wake, lock/unlock and an available microphone-device change/recovery, with the agent holding the shared desktop lock and recording readiness outcomes. Any unavailable hardware case remains explicitly untested.
+- [ ] Confirm whether the capsule behaves normally (including intentional silent release) and report what was actually spoken for any failed spoken trial. Renew macOS permissions only if the identified build requests it.
+
+The user does not need to diagnose Cua, inspect logs, or classify a task-routing
+failure as a voice failure. The agent owns that separation and records recognition,
+interpretation/handoff and desktop execution independently.
+
+### External execution dependencies — not Sydney voice implementation
+
+Saved Activity includes correctly recognized “Open calculator” requests failing
+with “pinned target window closed” or “prerequisite task did not complete.” These
+errors originate after voice handoff. Current execution routing can inherit a prior
+task's window ID and blocks tasks whose selected prerequisite failed. Stale inherited
+targets or inappropriate dependencies are supported hypotheses for the historical
+failures, not confirmed per-trial causes: route choices/window IDs were not retained.
+These mechanisms predate simplification. Cua ownership should investigate them;
+do not expand Sydney into task routing, target management or live dictation.
+Their presence does not block independent voice evaluation, but integrated desktop
+acceptance remains open until the corresponding execution outcomes are supported.
 
 ### Next action
 
-Final build6ce651ba…32d5646 was physically tested; user confirmed done. See EVIDENCE.md and .context/voice/physical-trials.md. Investigate capture25179426 (recognition updates but no terminal event/task) and post-handoff recognition revision to “Open calculatorcul”. Preserve no-replay behavior; do not suppress legitimate corrections to mask the issue. Four immediate-release transcripts retained their last word; both longer holds submitted before release, but end-to-end acceptance failed (three of six tasks completed, three downstream failures). No further physical participation request until these findings are addressed. V6 baseline speed improvement and V2/V7 physical/UI/integrated gates remain open. Shared desktop lock released after inspection.
+Run the existing current-version voice semantic evaluation with the non-executing
+sink, beginning with development cases and preserving the held-out set. Record the
+source revision and model identity; no desktop actions are required. Then perform
+the remaining agent-owned checks before requesting physical participation.
 
 ### Outcome
 
-Voice implementation, regression coverage, recorded-audio checks, held-out semantic evaluation and warm measurements are delivered. Overall execution is NOT COMPLETE: physical capture/early handoff/flicker and integrated action acceptance remain open, and matched baseline speed improvement is unproven.
+Core Sydney voice implementation and simplification are integrated. Latest recorded
+deterministic checks pass with the transient test issue noted above. Current-version
+semantic, performance and physical acceptance are unfinished; V2/V4/V6/V7 remain
+open. Cua, context delivery, gaze and live dictation remain outside this worktree's
+implementation scope.
 
 ### Resumption protocol
 
@@ -535,3 +618,5 @@ These references support the chosen approach; the required execution instruction
 ## Document revision record
 
 - **2026-09-21:** Saved the full chat-approved Sydney voice plan. Updated status to approved/saved with implementation unstarted, expanded abbreviated source paths, and initialized execution records. Added supporting references and clarified that final review includes uncommitted/untracked work. No product scope expansion or implementation change.
+
+- **2026-09-22:** Reconciled the original execution with authorized simplification and source through `6608d88`; distinguished implementation from acceptance, reopened current-version V4 evidence, superseded stale microphone/legacy instructions, and separated agent work, user participation and external execution dependencies. Documentation only; no new test, build or physical result claimed.
