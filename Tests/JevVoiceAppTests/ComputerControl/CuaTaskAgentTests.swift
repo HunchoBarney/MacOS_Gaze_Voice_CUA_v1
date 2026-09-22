@@ -4,6 +4,34 @@ import JevVoiceCore
 
 @MainActor
 final class CuaTaskAgentTests: XCTestCase {
+    func testCancellationDuringWindowSelectionCannotActivateTheWindow() async throws {
+        var activations = 0
+        let agent = CuaTaskAgent(call: { tool, _ in
+            switch tool {
+            case "list_apps", "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture"), "pid": .number(42)])])])
+            case "list_windows":
+                return .object(["windows": .array([.object(["window_id": .number(7)]), .object(["window_id": .number(8)])])])
+            case "bring_to_front":
+                activations += 1
+                return .object(["activated": .bool(true), "exact_window_effect": .object(["verified": .bool(true)])])
+            default: throw CancellationError()
+            }
+        }, judge: { _, questions in
+            if questions["window"] != nil {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return ["window": .choice(choice: "7", confidence: 1, probabilities: [:])]
+            }
+            return ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+                    "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+                    "visibility": .choice(choice: "foreground", confidence: 1, probabilities: [:])]
+        })
+        let task = Task { try await agent.run(goal: "Show the requested document", context: "", progress: { _ in }) }
+        do { _ = try await task.value; XCTFail("Cancelled selection completed") }
+        catch is CancellationError { }
+        XCTAssertEqual(activations, 0, "A late window decision must not steal focus after cancellation")
+    }
+
     func testConfirmedScrollsCanRepeatButTimeoutAndUnverifiableEffectsCannot() async throws {
         for (timeout, unverifiable, repeatAuthorized, uncertainSecond) in [(false, false, true, false), (true, false, true, false), (false, true, true, false), (false, false, false, false), (false, false, true, true)] {
             var effects = 0

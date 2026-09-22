@@ -129,6 +129,9 @@ final class CuaTaskAgent {
                     try await Task.sleep(for: .milliseconds(100))
                     continue
                 }
+                // Window observation/selection may finish after cancellation.
+                // Foreground activation is a mutation just like a catalog action.
+                try Task.checkCancellation()
                 let activation = try await call("bring_to_front", ["pid": .number(Double(pid)), "window_id": .number(Double(wid))])
                 guard activation["activated"] == .bool(true), activation["exact_window_effect"]?["verified"] == .bool(true) else {
                     throw DriverConnectionError.refused("The requested window could not be verified in front. Nothing will be repeated automatically.")
