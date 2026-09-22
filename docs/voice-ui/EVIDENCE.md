@@ -385,3 +385,91 @@ migration gate is closed. Logs below are under `.context/execution-simplificatio
   `development/JevVoice/verification/execution-simplification/resume-checkpoint-app.zip`.
   No installed bundle was replaced or launched. This is checkpoint recovery,
   not final packaged acceptance.
+
+### Execution simplification — permissions enabled retry, 2026-09-22
+
+- After the user enabled the bundled Codex executable, the hash-bound combined
+  candidate `a4fcfdd7a74c317ecd4a9364a59c745c1975c5c6262f5fafad6c31dcd3381624`
+  reports Accessibility=true and Screen Recording=true. Evidence:
+  `.context/execution-simplification/permissions-user-enabled.json`. This supersedes
+  the preceding permission blocker; it does not prove direct screen capture.
+- Serialized under the shared desktop lock, the immediate native
+  `CuaTaskAgentLiveTests/testNewDocumentFixtureOptIn` reaches verified foreground
+  activation, then fails with `invoke_menu` / `menu_path_unavailable` for File → New
+  (11.076s). The source fixture remains unchanged and the requested text is absent.
+  Evidence: `.context/execution-simplification/native-permission-enabled-live.log`.
+  The refusal's underlying cause is not established; native workflow acceptance
+  and the full watchdog proof remain open.
+- The same isolated candidate passes
+  `CuaBrowserLiveTests/testRepeatedScrollThroughAgentOptIn` (7.954s, one test,
+  zero failures). Assertions independently require exactly two `browser_pointer`
+  dispatches and fixture scroll positions `[500, 1000]`. Evidence:
+  `.context/execution-simplification/scroll-permission-enabled-live.log`.
+  This is one real Jev/browser fixture trial, not broad repetition or packaged
+  acceptance. Production suppression, runtime pin and installed bundles are unchanged.
+
+
+### Execution simplification — native menu diagnosis and repair, 2026-09-22
+
+Evidence paths below are relative to `.context/execution-simplification/`.
+
+- **Cause:** `menu-diagnosis.log` reports exact activation verified by live process,
+  AX focus and ordinary window order, while NSWorkspace still reports the prior
+  PID. `invoke_menu` then refuses before menu traversal because its readiness
+  check uses that stale value. The message is “did not become stably key and
+  frontmost”; `menu_path_unavailable` alone obscured this distinction.
+- **Candidate repair:** `ThirdParty/Cua/menu-focus-candidate.patch` preserves the
+  one-file native delta. `menu-red.log` fails the stale-workspace regression;
+  `menu-green.log` passes all 11 menu tests. `menu-build.log` records a locked
+  release build, with existing SDK warnings. Strict signature check passes.
+  SHA-256 `483b693060416b8cdd8088fde1140e6868d73dee72870b661f7efd4b7ec7cdf5`.
+  Forward/reverse patch application is byte-equal to preserved before/after source
+  in `menu-patch-recovery/`. Read-only review found no material introduced issue;
+  no-visible-window restoration still falls back to potentially stale NSWorkspace.
+- **Direct live effect:** `menu-candidate-proof.log` dispatched one accepted menu
+  action but checked for the asynchronous document too early. A separate fixture
+  with bounded read-only observation (`menu-candidate-observed-proof.log`) sees
+  exactly one new document and unchanged source content; no action is replayed.
+  `menu-restoration-proof.log` also sees a new document and restores Calculator's
+  foreground PID, checked from a fresh external NSWorkspace observer. All use the
+  shared desktop lock and the hash-bound direct embedded candidate.
+- **Follow-on host repair:** `native-menu-repaired-live.log` gets through New and
+  insertion, then fails (11.588s): Jev predicts `windowEffect=new` for addressed
+  text insertion, exhausting the loop waiting for another window. That question
+  is removed only for addressed text actions; an extraneous answer cannot switch
+  their destination. `text-window-red.log` reproduces it and
+  `text-window-green.log` passes 11 agent tests. Independent review found no
+  material issue; non-text creation handling stays intact.
+- **Native acceptance still fails:** `native-text-window-repaired-live.log`
+  (20.691s agent duration) inserts `copper lantern beside the`, then selects the
+  renamed field and inserts `copper lantern beside the window` again. Independent
+  exact-value assertion rejects the resulting 57-character text. This exposes
+  both payload truncation and description-based replay suppression failing when
+  the label changes. Model `done` is not accepted as proof. No further mutation
+  was used to repair this fixture.
+- **Payload experiment reverted:** whole-source-span options within the documented
+  255-choice limit pass six automated tests (`payload-whole-span-green.log`) after
+  a red regression. Real model corpus passes four cases but refuses the unquoted
+  copper query (`payload-whole-span-live.log`, seven model requests, 1.138s).
+  This is insufficient acceptance; all extraction/test changes were reverted and
+  saved in `payload-whole-span-experiment.patch`. Existing extraction remains.
+- **Watchdog evidence mixed:** `watchdog-live-proof.log` preserves background focus
+  initially but fails its sample after nine seconds; the gained PID was not
+  logged, so cause is unknown. An instrumented fresh fixture
+  (`watchdog-observed-proof.log`) preserves Calculator through all background
+  samples, then immediately verifies TextEdit and retains it through samples
+  beyond eight seconds with no repeated activation. This does not erase the
+  failed sample or establish unrelated-guard/packaged acceptance.
+- **Regression checkpoint:** `make test` passes 261 tests, 22 opt-in skips, zero
+  failures (10.634s bundle), plus tooling (`menu-checkpoint-regression.log`).
+  Installed runtime, dependency pin, credentials and unrelated migration gates
+  are unchanged. No full simplification completion is claimed.
+
+- **Package recovery:** `make app` and strict/deep signature verification pass
+  (`menu-checkpoint-package.log`). App executable SHA-256:
+  `4a9bb90ea15d8d180019058cb8bb93967b7c8ebc85712f6271928aefbce4219f`.
+  Workspace-local `development/JevVoice/verification/execution-simplification/menu-checkpoint-app.zip`
+  extracts with valid signature and identical executable; archive SHA-256
+  `ec7c987b81c49825d4ebdae4b3d3435b4373887610fa379a51e68956095d79a2`.
+  Metadata: `menu-package-recovery.json`. This is build/recovery validation;
+  neither app nor Driver was installed or promoted.

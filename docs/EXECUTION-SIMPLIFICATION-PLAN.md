@@ -3,9 +3,13 @@
 Status: 2026-09-22 reviewed candidate checkpoint. Baseline/replacement map and
 selected Swift/stdio boundary recorded; native and quoted browser workflows have
 limited live proofs. Scroll readback now has a separately preserved, offline-tested
-Driver candidate; repeated scrolling still needs live acceptance. TCC logs identify
-the bundled Codex CLI as the isolated Driver's permission owner. Unquoted payload
-selection remains unreliable. Production replacement/deletion remain incomplete.
+Driver candidate; one isolated repeated-scroll live trial now passes. The bundled
+Codex CLI's permissions now report granted. Immediate native activation passes,
+and a separately preserved menu-focus repair now creates a document and restores
+prior foreground ownership in scoped live checks. Full native acceptance still
+fails: payload truncation followed by a changed-label duplicate insertion. Payload
+selection and replay identity remain unreliable. Production replacement/deletion
+remain incomplete.
 See [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
 
 **Goal:** replace overlapping Jarvis execution machinery with existing Cua/Jev

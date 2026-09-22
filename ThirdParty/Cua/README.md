@@ -128,3 +128,26 @@ Its final isolated permission probe still reports both grants unavailable. TCC
 logs identify Conductor's bundled `codex/0.154.0/codex` executable as the responsible
 subject, despite Conductor itself having a visible Screen Recording grant. Do not
 infer TCC responsibility merely from process ancestry or Driver's parent-PID field.
+
+
+## Unaccepted menu-focus candidate
+
+`menu-focus-candidate.patch` is a one-file delta after the preserved integration
+snapshot, independent of the watchdog and scroll patches. An isolated embedded
+process reproduced a stale `NSWorkspace.frontmostApplication` value even after
+WindowServer and AX verified exact activation. Menu readiness now prefers the
+existing live process comparison (including a definite negative), while retaining
+exact AX focus and stability checks. Prior-owner capture uses the same live
+comparison over visible ordinary windows, falling back to existing NSWorkspace
+behavior when none can be found. That fallback remains a limitation.
+
+The combined release executable has SHA-256
+`483b693060416b8cdd8088fde1140e6868d73dee72870b661f7efd4b7ec7cdf5`.
+Eleven focused Rust menu tests, strict signature validation and byte-exact
+forward/reverse patch recovery pass. Isolated live checks observe a new document,
+unchanged source content, and cross-app focus restoration. Full native agent
+acceptance still fails on payload/replay behavior; this is not an installed or
+promoted runtime. The previous combined binary and menu source are preserved in
+`development/JevVoice/staging/menu-focus-baseline/`. The earlier permission-blocked
+results above are historical: the user-enabled Codex executable now reports both
+grants true. See scoped evidence for the complete checkpoint.

@@ -3,6 +3,14 @@
 2026-09-22 checkpoint; governed by [the approved plan](EXECUTION-SIMPLIFICATION-PLAN.md).
 This is investigation and isolated candidate work, not acceptance or a migration gate closure.
 
+Latest checkpoint: required host permissions are granted. A menu-focus candidate
+fixes a reproduced stale-NSWorkspace refusal; direct document creation and
+cross-app foreground restoration pass. Addressed text insertion no longer asks
+Jev to predict another window. Full native acceptance still fails due to truncated
+payload selection and a second insertion after the field label changes. The
+existing description-based replay protection therefore cannot be retired. See
+[scoped evidence](voice-ui/EVIDENCE.md) for successful and failed trials.
+
 ## Baseline and recovery — step 1
 
 Jarvis baseline: `d756cf37931d12a85d2e35aef45d9ff3dd7664b8`.
@@ -233,9 +241,17 @@ above supersedes the earlier Conductor-grant diagnosis.
   `development/JevVoice/staging/focus-only-candidate/cua-driver` with its original
   `b8be58db…` hash, separately from the newly built combined candidate.
 
-Next: reprobe the actual Codex CLI host grants; prove the hash-bound isolated
-watchdog/scroll candidate under the shared desktop lock, including two intentional
-scrolls, stale targets and uncertainty. Resolve payload selection using the saved
-regression cases. Production integration, deletion, matched performance evidence,
-and packaged-app acceptance remain blocked by unmet proofs; no net simplification
-or unrelated migration-gate closure is claimed.
+Next: resolve exact payload selection and the demonstrated changed-label replay
+gap before another native acceptance trial. The new
+`ThirdParty/Cua/menu-focus-candidate.patch` applies after the preserved baseline
+and coexists with the watchdog/scroll patches. It prefers live WindowServer
+process evidence for menu readiness, retains exact AX window/stability checks,
+and captures an observable foreground owner for restoration. A foreground app
+without an ordinary visible window retains the previous NSWorkspace fallback;
+universal restoration is not established. Candidate SHA-256 is
+`483b693060416b8cdd8088fde1140e6868d73dee72870b661f7efd4b7ec7cdf5`.
+One observed watchdog run preserves both background focus and explicitly requested
+foreground beyond eight seconds, but an earlier run lost background focus after
+that interval without recording the gained PID. Do not erase that failed sample
+or claim full watchdog acceptance. Production integration, deletion, matched
+performance evidence and packaged-app acceptance remain open.
