@@ -249,13 +249,7 @@ final class SpeechAnalyzerCapture: SpeechCapturing {
             try Task.checkCancellation()
             selectedUID = inputUID ?? ""; enabled = true
             let device = try MicrophoneCatalog.resolve(uid: inputUID)
-            let hardware = try await input.prepare(device: device) { [weak self] in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if self.active?.id == id { self.onEvent?(id, .failure("Microphone configuration changed.")) }
-                    await self.suspend()
-                }
-            }
+            let hardware = try await input.prepare(device: device, interrupted: microphoneTestInterruptionHandler(session: id))
             try Task.checkCancellation()
             session = Session(name: hardware.name, module: nil, analyzer: nil,
                               feed: try AnalyzerAudioFeed(input: hardware.format, output: hardware.format))
@@ -300,6 +294,19 @@ final class SpeechAnalyzerCapture: SpeechCapturing {
         }
         if let meterTimer { RunLoop.main.add(meterTimer, forMode: .common) }
         return session.name
+    }
+
+    func microphoneTestInterruptionHandler(session id: UUID) -> @Sendable () -> Void {
+        let token = preparationID
+        return { [weak self] in
+            Task { @MainActor in
+                // Recheck ownership after the queue-to-main-actor hop, before
+                // either publishing failure or tearing down a replacement input.
+                guard let self, self.preparationID == token else { return }
+                if self.active?.id == id { self.onEvent?(id, .failure("Microphone configuration changed.")) }
+                await self.suspend()
+            }
+        }
     }
 
     func finish() {
