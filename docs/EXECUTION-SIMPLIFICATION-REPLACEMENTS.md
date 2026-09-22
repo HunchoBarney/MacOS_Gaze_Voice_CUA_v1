@@ -166,3 +166,24 @@ prove the isolated watchdog repair once its actual host permissions are availabl
 Then rerun required workflows through the single production path before deletion
 or final package acceptance. Current archive/signature checks are checkpoint
 recovery only. No launched final-app acceptance has occurred.
+
+
+### Pinned browser verification gap
+
+Source review: `browser/tools.rs` semantic refs publish identity/actions/visibility,
+not scroll offsets. `browser/semantic.rs` uses internal DOMSnapshot scroll extents
+only to advertise scrollability. `browser/pointer.rs` compares `scrollLeft`/
+`scrollTop` for synthetic movement but returns a Boolean; the response publishes
+requested deltas, not observed positions. Public action projection reports this as
+unverifiable. `verify_state` has no browser-ref or scroll predicate. The fixture's
+`/state` endpoint is independent test evidence, never a production substitute.
+A narrow runtime contract enhancement is required before Driver can own this
+verification and the host suppression can be retired. No speculative implementation
+or pin update was made for this additional gap.
+
+The candidate process ancestry was Python → Codex → Conductor runtime → Conductor.
+Requested user-controlled Conductor Accessibility/Screen Recording grants to unblock
+the isolated repaired Driver proof; no settings were changed by automation. If a
+restart is required, resume from committed checkpoints `b119086` and `2b0caf1`,
+this record, and the build-specific evidence. Authorization for serialized desktop
+checks remains valid; permission readiness must be reprobed before mutation.
