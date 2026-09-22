@@ -89,3 +89,42 @@ new checkout. Reverse only this delta with `git apply -R` after checking it appl
 The baseline verifier intentionally reports these three changed files after the
 candidate patch. See [the scoped record](../../docs/EXECUTION-SIMPLIFICATION-REPLACEMENTS.md)
 for remaining acceptance requirements. No dependency versions were changed.
+
+## Unaccepted scroll-readback candidate
+
+`scroll-readback-candidate.patch` is a separate two-file delta after the preserved
+source snapshot; it can coexist with the three-file launch-watchdog delta. It is
+not installed and does not change the production executable pin. It carries the
+retained DOM scroll target's before/after offsets and unchanged bounds into Cua's
+existing closed action-result contract. Only exact requested movement (clipped to
+measured bounds) receives `confirmed` with readback evidence. No movement is
+`suspected_noop`; missing, partial, contradictory, disconnected or changed-bounds
+evidence is `unverifiable`. Numeric offsets and target IDs stay out of the public
+action result. Negative/RTL offsets and unsettled smooth scrolling are not
+confirmed by this candidate. Other pointer routes retain their existing behavior.
+
+The synthetic route still delivers its existing wheel event and `scrollBy` call;
+this delta includes wheel-handler movement in readback so an extra effect cannot
+silently confirm the requested displacement. It does not add mutation retries or
+claim that a confirmed single scroll proves an entire user goal.
+
+Apply with `git apply --check` then `git apply` in a reconstructed local snapshot.
+Focused checks, from the Rust workspace and Jarvis root respectively:
+
+```sh
+cargo test --locked -p cua-driver-core --lib browser::
+node ThirdParty/Cua/scroll-readback-candidate.test.mjs development/JevVoice/cua-source/libs/cua-driver/rust/crates/cua-driver-core/src/browser/pointer.rs
+```
+
+The JavaScript check uses a DOM test double and the actual producer source. These
+offline checks do not establish Chrome behavior or live Jev repeated-action
+acceptance. The isolated candidate must still pass its own permission probe and
+the serialized live workflows before any production integration or deletion.
+
+The reviewed combined watchdog/scroll release build passes strict binary signature
+verification and has SHA-256
+`a4fcfdd7a74c317ecd4a9364a59c745c1975c5c6262f5fafad6c31dcd3381624`.
+Its final isolated permission probe still reports both grants unavailable. TCC
+logs identify Conductor's bundled `codex/0.154.0/codex` executable as the responsible
+subject, despite Conductor itself having a visible Screen Recording grant. Do not
+infer TCC responsibility merely from process ancestry or Driver's parent-PID field.

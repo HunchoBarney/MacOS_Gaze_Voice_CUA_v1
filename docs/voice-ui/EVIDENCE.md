@@ -317,3 +317,71 @@ explicit authorization. No physical Fn/microphone acceptance is claimed.
 - Final **checkpoint**, not final delivery: `make app`, strict/deep bundle signature, ZIP extraction and recovered executable equality passed. Executable SHA-256 `5807825618178a022bbfa25a045786a40f0da7021e8aeb808739cdfd2ebba264`. Archive: `development/JevVoice/verification/execution-simplification/final-checkpoint-app.zip`; metadata/log: `.context/execution-simplification/final-recovery.json` and `final-checkpoint-package.log`. Installed app/Driver untouched; launched packaged behavior remains unverified.
 
 - Final bounded source review confirms no supported exact browser scroll offsets or scroll verification predicate in the pinned public API. Internal synthetic scroll compares offsets but exposes only movement Boolean/requested deltas; public effect remains unverifiable. A narrow runtime contract change is needed before replacing host repetition protection. User-controlled Conductor host grants were requested; no TCC modification attempted. Desktop tests ended and released their shared lock.
+
+### Execution simplification — resumed candidate proof, 2026-09-22
+
+Scope: simplification steps 4/6/7, starting at clean source `5e8a696`; no unrelated
+migration gate is closed. Logs below are under `.context/execution-simplification/`.
+
+- **Permission diagnosis corrected:** user screenshot confirms Conductor's Screen
+  Recording switch is enabled. Fresh hash-bound isolated probes still report both
+  grants false (`candidate-permissions-resume.json`,
+  `candidate-permissions-after-guidance.json`). Captured TCC attribution during the
+  exact probe (`candidate-tcc-probe.log`) identifies responsible process `codex`
+  at `~/Library/Application Support/com.conductor.app/agent-binaries/codex/0.154.0/codex`,
+  not Conductor. Accessibility is denied; ScreenCapture has no grant for that
+  subject. The earlier ancestry-based Conductor advice was wrong. User-controlled
+  grants for the actual executable were requested; no TCC setting, identity or
+  installed app was changed. No candidate desktop mutation was attempted.
+- **Payload experiment, not accepted:** original code failed a real model-only
+  unquoted-query probe (`query-resume-red.log`, extra comma). A sequential span
+  candidate passed one model probe and one serialized disposable browser trial
+  (`query-resume-candidate.log`, `search-unquoted-resume.log`; browser 12.603s,
+  exact query/tab/destination checks). Further runs failed by refusing/truncating
+  content (`query-varied-live.log`, `query-varied-complete-live.log`). Adding
+  explicit remainder context passed four of five cases but refused the Hello!
+  case (`query-remainder-live-2.log`); the first remainder run had a Swift
+  type-check failure, repaired before that trial. The final baseline corpus run
+  failed two of five cases (`query-varied-baseline-live.log`: river-stone query
+  includes following instructions; stop-all payload includes destination words).
+  All production extraction edits were reverted; experimental patch retained as
+  `payload-span-experiment.patch`. Counts: initial extraction 2 model requests,
+  candidate 3; final five-case baseline 9 requests versus remainder candidate 14.
+  Small stochastic samples establish failures, not a reliable performance or
+  accuracy comparison. `JevPayloadLiveTests` is opt-in via
+  `JARVIS_JEV_PAYLOAD_TEST=1`, uses disposable text and no desktop actions.
+- **Cancellation:** regression `testCancellationDuringWindowSelectionCannotActivateTheWindow`
+  fails before the guard (one callback after cancellation, `cancel-window-red.log`)
+  and passes after it (10 agent tests, `cancel-window-green.log`). Commit
+  `1bb3a15`. The transport already checks cancellation; this is an automated
+  agent-boundary test, not live late-action or physical-input proof.
+- **Scroll candidate:** the new two-file delta is preserved as
+  `ThirdParty/Cua/scroll-readback-candidate.patch`. Initial contract test fails
+  before readback promotion (`scroll-readback-red.log`); partial-displacement
+  rejection fails before exact-bound checks (`scroll-partial-red.log`). Read-only
+  review found preparatory scroll and stale origin/container gaps; both reproduce
+  in `scroll-visual-review-red.log` and `scroll-target-review-red.log`. Repairs
+  pass 164 Rust browser tests (`scroll-review-browser-tests.log`) and 11 offline
+  producer scenarios (`scroll-target-review-green.log`). Mock CDP and a DOM test
+  double do not establish actual browser behavior. Patch forward/reverse hashes
+  match in `scroll-source-recovery.json`. Trusted pointer routes and the existing
+  production suppression remain unchanged; no additional effect is authorized
+  solely by a per-dispatch ID.
+- **Reviewed Driver build:** `cargo build --release --locked -p cua-driver`
+  and strict binary signature verification pass (`scroll-reviewed-build.log`).
+  Combined watchdog/scroll candidate SHA-256:
+  `a4fcfdd7a74c317ecd4a9364a59c745c1975c5c6262f5fafad6c31dcd3381624`.
+  Build retains existing SDK dead-code/linker warnings. Runtime metadata is
+  `scroll-reviewed-runtime.json`. Its final isolated read-only permission probe
+  still reports Accessibility=false and Screen Recording=false
+  (`scroll-reviewed-permissions.json`); no mutation follows that result.
+  Installed Driver hash is rechecked and remains the pinned `699d330b…`.
+- **Swift checkpoint:** `make test` passes 260 tests, 22 skips, zero failures
+  (9.699s test bundle; `resume-regression.log`), tooling passes. `make app` and
+  strict/deep signature verification pass (`resume-package.log`). Executable
+  SHA-256 `5d83fafc3f8f9812c6736fdfc29440ff137fa2d7a3908e8c461dba4723a5c2ca`.
+  ZIP extraction, restored signature and executable equality pass; metadata is
+  `resume-package-recovery.json`, archive is workspace-local
+  `development/JevVoice/verification/execution-simplification/resume-checkpoint-app.zip`.
+  No installed bundle was replaced or launched. This is checkpoint recovery,
+  not final packaged acceptance.

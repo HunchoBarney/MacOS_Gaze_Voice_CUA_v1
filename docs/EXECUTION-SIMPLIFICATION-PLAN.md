@@ -1,9 +1,12 @@
 # Jarvis execution simplification plan
 
-Status: 2026-09-21 reviewed candidate checkpoint. Baseline/replacement map and
+Status: 2026-09-22 reviewed candidate checkpoint. Baseline/replacement map and
 selected Swift/stdio boundary recorded; native and quoted browser workflows have
-limited live proofs. Revised repeated scrolling fails acceptance; isolated Driver
-repair needs host permissions. Production replacement/deletion remain incomplete. See [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
+limited live proofs. Scroll readback now has a separately preserved, offline-tested
+Driver candidate; repeated scrolling still needs live acceptance. TCC logs identify
+the bundled Codex CLI as the isolated Driver's permission owner. Unquoted payload
+selection remains unreliable. Production replacement/deletion remain incomplete.
+See [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
 
 **Goal:** replace overlapping Jarvis execution machinery with existing Cua/Jev
 capabilities, keep one production execution loop, and preserve the existing

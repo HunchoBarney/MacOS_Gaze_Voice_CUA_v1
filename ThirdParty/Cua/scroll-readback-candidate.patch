@@ -1,0 +1,213 @@
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/browser/pointer.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/browser/pointer.rs
+@@ -12,6 +12,10 @@
+ use async_trait::async_trait;
+ use serde_json::{json, Value};
+
++use crate::action_record::{
++    ActionEffect, ActionEvidence, ActionExecutionRecord, ActionTransport, ActualDelivery,
++    EvidenceKind, RequestedDelivery,
++};
+ use crate::protocol::ToolResult;
+ use crate::tool::{ProtectedResourceOwnership, Tool, ToolDef};
+ use crate::tool_args::ArgsExt;
+@@ -23,6 +27,62 @@
+ use super::required_session_schema;
+ use super::store::{BrowserActionKind, FrameKind, FrameRef};
+ use super::tools::{browser_protected_resource_scope, browser_resource_ownership};
++
++// Measure the same retained DOM target around delivery. Include wheel-listener
++// effects in the measurement, so an unexpected extra movement cannot confirm
++// the requested delta. This does not turn a page handler's acknowledgement into
++// proof and does not retry a missing response.
++const DOM_SCROLL_FUNCTION: &str = r#"function(dx,dy) {
++    const doc=this.ownerDocument;
++    let n=this;
++    while (n && n !== doc.documentElement) {
++        const s=doc.defaultView.getComputedStyle(n);
++        if (/(auto|scroll)/.test(s.overflow+s.overflowX+s.overflowY)) break;
++        n=n.parentElement;
++    }
++    const target=n || doc.scrollingElement || doc.documentElement;
++    const belongs=()=>this.isConnected && target.isConnected && this.ownerDocument === doc
++        && target.ownerDocument === doc && (target === this || target.contains(this));
++    if (!belongs()) return {connected:false};
++    const beforeX=target.scrollLeft, beforeY=target.scrollTop;
++    const maxX=Math.max(0,target.scrollWidth-target.clientWidth), maxY=Math.max(0,target.scrollHeight-target.clientHeight);
++    const o={deltaX:dx,deltaY:dy,bubbles:true,cancelable:true,composed:true,view:doc.defaultView};
++    this.dispatchEvent(new WheelEvent('wheel',o));
++    if (!belongs()) return {connected:false};
++    target.scrollBy(dx,dy);
++    if (target.scrollLeft !== beforeX || target.scrollTop !== beforeY) target.dispatchEvent(new Event('scroll'));
++    return {connected:belongs()
++            && maxX === Math.max(0,target.scrollWidth-target.clientWidth) && maxY === Math.max(0,target.scrollHeight-target.clientHeight),
++        max_x:maxX,max_y:maxY,before_x:beforeX,before_y:beforeY,after_x:target.scrollLeft,after_y:target.scrollTop};
++}"#;
++
++fn scroll_readback_record(value: &Value, delta_x: f64, delta_y: f64) -> ActionExecutionRecord {
++    let offsets: Option<Vec<f64>> = ["before_x", "before_y", "after_x", "after_y", "max_x", "max_y"]
++        .iter().map(|key| value.get(key)?.as_f64().filter(|v| v.is_finite())).collect();
++    let effect = match offsets {
++        Some(v) if value.get("connected").and_then(Value::as_bool) == Some(true) => {
++            let x = v[2] - v[0];
++            let y = v[3] - v[1];
++            let in_bounds = |before: f64, after: f64, max: f64| max >= 0.0
++                && before >= 0.0 && before <= max && after >= 0.0 && after <= max;
++            let agrees = |before: f64, after: f64, requested: f64, max: f64|
++                after == (before + requested).clamp(0.0, max);
++            if !in_bounds(v[0], v[2], v[4]) || !in_bounds(v[1], v[3], v[5]) { ActionEffect::Unverifiable }
++            else if x == 0.0 && y == 0.0 { ActionEffect::SuspectedNoop }
++            else if agrees(v[0], v[2], delta_x, v[4]) && agrees(v[1], v[3], delta_y, v[5]) { ActionEffect::Confirmed }
++            else { ActionEffect::Unverifiable }
++        }
++        _ => ActionEffect::Unverifiable,
++    };
++    let mut record = ActionExecutionRecord::new(effect, ActionTransport::BrowserCdpRuntimeFunction,
++        RequestedDelivery::NotApplicable);
++    record.actual_delivery = Some(ActualDelivery::Background);
++    if effect == ActionEffect::Confirmed {
++        record.evidence.push(ActionEvidence { kind: EvidenceKind::BrowserReadback,
++            detail: "Retained DOM scroll target reached the requested offset, clipped only by measured unchanged bounds".into() });
++    }
++    record
++}
+
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ enum PointerAction {
+@@ -249,14 +309,17 @@
+     conn: &CdpConnection,
+     cdp_session: &str,
+     backend_node_id: i64,
++    reveal: bool,
+ ) -> Result<(f64, f64), ToolResult> {
+-    let _ = conn
++    if reveal {
++        let _ = conn
+         .call(
+             Some(cdp_session),
+             "DOM.scrollIntoViewIfNeeded",
+             json!({ "backendNodeId": backend_node_id }),
+         )
+         .await;
++    }
+     let model = conn
+         .call(
+             Some(cdp_session),
+@@ -407,7 +470,8 @@
+                 Err(result) => return result,
+             };
+
+-        if let Ok((x, y)) = point_for_ref(conn, &origin.cdp_session, origin.backend_node_id).await {
++        // Visualization must not scroll before the scroll actuator's baseline.
++        if let Ok((x, y)) = point_for_ref(conn, &origin.cdp_session, origin.backend_node_id, request.action != PointerAction::Scroll).await {
+             self.engine
+                 .visualize_browser_action(
+                     session,
+@@ -434,7 +498,7 @@
+                 json!([]),
+             ),
+             PointerAction::Scroll => (
+-                "function(dx,dy) { const o={deltaX:dx,deltaY:dy,bubbles:true,cancelable:true,composed:true,view:this.ownerDocument.defaultView}; this.dispatchEvent(new WheelEvent('wheel',o)); let n=this; while (n && n !== this.ownerDocument.documentElement) { const s=this.ownerDocument.defaultView.getComputedStyle(n); if (/(auto|scroll)/.test(s.overflow+s.overflowX+s.overflowY)) break; n=n.parentElement; } const target=n || this.ownerDocument.scrollingElement || this.ownerDocument.documentElement; const beforeX=target.scrollLeft; const beforeY=target.scrollTop; target.scrollBy(dx,dy); const changed=target.scrollLeft !== beforeX || target.scrollTop !== beforeY; if (changed) target.dispatchEvent(new Event('scroll')); return changed; }",
++                DOM_SCROLL_FUNCTION,
+                 json!([{ "value": request.delta_x }, { "value": request.delta_y }]),
+             ),
+             PointerAction::Drag => {
+@@ -482,6 +546,12 @@
+             )
+             .await
+         {
++            Ok(value) if request.action == PointerAction::Scroll && value.get("exceptionDetails").is_none() => {
++                let record = scroll_readback_record(value.pointer("/result/value").unwrap_or(&Value::Null), request.delta_x, request.delta_y);
++                ToolResult::text(format!("Synthetic scroll dispatched; observed effect: {:?}", record.effect))
++                    .with_structured(self.success_json(request, validated, origin, destination, None, None))
++                    .with_action_record(record)
++            }
+             Ok(value)
+                 if value.get("exceptionDetails").is_none()
+                     && (!matches!(request.action, PointerAction::Scroll | PointerAction::Drag)
+@@ -570,7 +640,7 @@
+         let origin = match (&request.origin, origin_ref) {
+             (Location::Coordinates(x, y), None) => (*x, *y),
+             (Location::Ref(_), Some(reference)) => {
+-                match point_for_ref(conn, &reference.cdp_session, reference.backend_node_id).await {
++                match point_for_ref(conn, &reference.cdp_session, reference.backend_node_id, true).await {
+                     Ok(point) => point,
+                     Err(result) => return result,
+                 }
+@@ -580,7 +650,7 @@
+         let destination = match (&request.destination, destination_ref) {
+             (Some(Location::Coordinates(x, y)), None) => Some((*x, *y)),
+             (Some(Location::Ref(_)), Some(reference)) => {
+-                match point_for_ref(conn, &reference.cdp_session, reference.backend_node_id).await {
++                match point_for_ref(conn, &reference.cdp_session, reference.backend_node_id, true).await {
+                     Ok(point) => Some(point),
+                     Err(result) => return result,
+                 }
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/browser/v2_tests.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/browser/v2_tests.rs
+@@ -63,6 +63,7 @@
+     viewport_css_width: f64,
+     viewport_css_height: f64,
+     tab_visible: bool,
++    dom_function_value: Value,
+     /// Every incoming CDP call: (sessionId, method, params).
+     calls: Vec<(Option<String>, String, Value)>,
+ }
+@@ -89,6 +90,7 @@
+             viewport_css_width: 800.0,
+             viewport_css_height: 600.0,
+             tab_visible: true,
++            dom_function_value: json!(true),
+             calls: Vec::new(),
+         }
+     }
+@@ -651,7 +653,7 @@
+             "DOM.resolveNode" => MockReply::ok(json!({
+                 "object": { "objectId": format!("obj-{}", call.params["backendNodeId"]) }
+             })),
+-            "Runtime.callFunctionOn" => MockReply::ok(json!({ "result": { "value": true } })),
++            "Runtime.callFunctionOn" => MockReply::ok(json!({ "result": { "value": st.dom_function_value.clone() } })),
+             other => MockReply::method_not_found(other),
+         }
+     })
+@@ -2408,3 +2410,40 @@
+     assert!(recorded_calls(&f, "Page.bringToFront").is_empty());
+     assert!(recorded_calls(&f, "Target.activateTarget").is_empty());
+ }
++
++#[tokio::test]
++async fn synthetic_scroll_publishes_only_measured_directional_effects() {
++    for (value, expected) in [
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 0, "after_x": 0, "after_y": 500}), "confirmed"),
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 0, "after_x": 0, "after_y": 100}), "unverifiable"),
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 900, "after_x": 0, "after_y": 1000}), "confirmed"),
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 1000, "after_x": 0, "after_y": 1000}), "suspected_noop"),
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 500, "after_x": 0, "after_y": 0}), "unverifiable"),
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 0, "after_x": 0, "after_y": 1000}), "unverifiable"),
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 0, "after_x": 10, "after_y": 500}), "unverifiable"),
++        (json!({"connected": true, "max_x": 1000, "max_y": 1000, "before_x": 0, "after_y": 500}), "unverifiable"),
++        (json!({"connected": false, "max_x": 1000, "max_y": 1000, "before_x": 0, "before_y": 0, "after_x": 0, "after_y": 500}), "unverifiable"),
++        (json!(true), "unverifiable"),
++        (Value::Null, "unverifiable"),
++    ] {
++        let f = fixture_with(|st| st.dom_function_value = value).await;
++        let (target, tab) = bind(&f).await;
++        let snap = snapshot(&f, &target, &tab).await;
++        let main_ref = ref_of(&snap, "main", "main-btn");
++        let args = json!({"target_id": target, "tab_id": tab, "ref": main_ref,
++            "session": SESSION, "action": "scroll", "input_route": "dom_event", "delta_y": 500});
++        let result = BrowserPointerTool::new(f.engine.clone()).invoke(args.clone()).await;
++        let record = result.action_record.clone().or_else(||
++            ActionExecutionRecord::from_legacy("browser_pointer", &args, structured(&result)))
++            .expect("scroll action record");
++        let public = serde_json::to_value(record.public_result().unwrap()).unwrap();
++        assert_eq!(public["effect"], expected, "{public}");
++        assert_eq!(public["route"], "dom");
++        assert_eq!(public["delivery"]["mode"], "background");
++        assert_eq!(public["evidence"].as_array().is_some_and(|e| !e.is_empty()), expected == "confirmed");
++        assert_eq!(recorded_calls(&f, "Runtime.callFunctionOn").len(), 1, "No mutation retry");
++        assert!(recorded_calls(&f, "DOM.scrollIntoViewIfNeeded").is_empty(), "Visual preparation must not introduce an unmeasured scroll");
++        assert!(recorded_calls(&f, "Page.bringToFront").is_empty());
++        assert!(recorded_calls(&f, "Target.activateTarget").is_empty());
++    }
++}

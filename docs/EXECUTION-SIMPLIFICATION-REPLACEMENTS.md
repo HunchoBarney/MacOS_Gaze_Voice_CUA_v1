@@ -1,6 +1,6 @@
 # Execution simplification replacement record
 
-2026-09-21 checkpoint; governed by [the approved plan](EXECUTION-SIMPLIFICATION-PLAN.md).
+2026-09-22 checkpoint; governed by [the approved plan](EXECUTION-SIMPLIFICATION-PLAN.md).
 This is investigation and isolated candidate work, not acceptance or a migration gate closure.
 
 ## Baseline and recovery — step 1
@@ -182,8 +182,60 @@ verification and the host suppression can be retired. No speculative implementat
 or pin update was made for this additional gap.
 
 The candidate process ancestry was Python → Codex → Conductor runtime → Conductor.
-Requested user-controlled Conductor Accessibility/Screen Recording grants to unblock
-the isolated repaired Driver proof; no settings were changed by automation. If a
-restart is required, resume from committed checkpoints `b119086` and `2b0caf1`,
-this record, and the build-specific evidence. Authorization for serialized desktop
-checks remains valid; permission readiness must be reprobed before mutation.
+The initial request for Conductor grants incorrectly inferred TCC responsibility
+from ancestry. On 2026-09-22, the user supplied a screenshot showing Conductor's
+Screen Recording grant enabled. A fresh candidate probe still returned false for
+both permissions. Capturing macOS TCC attribution during that exact probe identified
+the responsible subject as Conductor's bundled CLI executable:
+`~/Library/Application Support/com.conductor.app/agent-binaries/codex/0.154.0/codex`.
+Accessibility was denied and Screen Recording had no grant for that subject. The
+Driver's `responsible_ppid` field is only its parent PID, not an OS-verified host
+identity. Requested user-controlled grants for the actual subject; no settings
+were changed by automation. Authorization for serialized desktop checks remains
+valid; permission readiness must be reprobed before candidate mutation.
+
+### Resumed proof work — 2026-09-22
+
+Resumed from `5e8a696` with a clean tracked working tree. The actual TCC attribution
+above supersedes the earlier Conductor-grant diagnosis.
+
+- **Cancellation boundary:** `1bb3a15` checks cancellation immediately before
+  foreground activation, covering a late window-selection result. The new agent
+  test failed with one activation callback and passes with zero. The transport
+  already has its own cancellation check; this is an agent-boundary proof, not
+  evidence of an observed production focus theft or live cancellation acceptance.
+- **Payload selection:** a model-only probe reproduced the unquoted-query error.
+  A sequential source-span experiment passed one browser query/tab/destination
+  trial, but subsequent model trials truncated/refused legitimate content. The
+  experiment is reverted and preserved only as
+  `.context/execution-simplification/payload-span-experiment.patch`. The opt-in
+  five-case `JevPayloadLiveTests` retains the regression corpus. This gate remains
+  open; no phrase-specific parsing or extra model call entered production.
+- **Scroll outcome:** `ThirdParty/Cua/scroll-readback-candidate.patch` preserves a
+  two-file local runtime delta, separate from the existing watchdog repair.
+  Retained DOM target offsets and unchanged bounds feed Cua's existing action
+  result: exact clamped movement is confirmed, no movement is suspected no-op,
+  and missing/contradictory/partial readback remains unverifiable. The public
+  result carries readback evidence without exposing raw offsets or identities.
+  Review repairs prevent unmeasured reveal-scrolling during visualization and
+  reject an origin moved out of the original document/container by a page handler.
+  Both findings have failed-before/passed-after tests. No supported tool schema,
+  dependency version, installed runtime, or production pin changed.
+- **Proof limits:** 164 Rust browser tests and 11 offline JavaScript producer
+  scenarios pass. These use mock CDP/a DOM test double and do not prove Chrome,
+  live Jev repetition, or goal completion. Negative/RTL offsets and unsettled
+  smooth scrolling remain unconfirmed. The existing wheel-event plus scrollBy
+  delivery behavior is retained, with its combined movement now measured.
+- **Checkpoint verification:** `make test` passes 260 tests, 22 opt-in skips,
+  zero failures; tooling passes. `make app`, strict signature verification and
+  ZIP extraction/hash recovery pass. The app was neither installed nor launched.
+  The focus-only Driver remains preserved at
+  `development/JevVoice/staging/focus-only-candidate/cua-driver` with its original
+  `b8be58db…` hash, separately from the newly built combined candidate.
+
+Next: reprobe the actual Codex CLI host grants; prove the hash-bound isolated
+watchdog/scroll candidate under the shared desktop lock, including two intentional
+scrolls, stale targets and uncertainty. Resolve payload selection using the saved
+regression cases. Production integration, deletion, matched performance evidence,
+and packaged-app acceptance remain blocked by unmet proofs; no net simplification
+or unrelated migration-gate closure is claimed.
