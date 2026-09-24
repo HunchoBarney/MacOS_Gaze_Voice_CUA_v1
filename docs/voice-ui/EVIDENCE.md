@@ -936,6 +936,16 @@ This scoped evidence does not change the unrelated voice migration gates.
   `.context/execution-simplification/make-test-workspace-scratch-2026-09-24.log`.
   A direct unwrapped `make test` still fails before Swift compilation because the
   preserved `.build` cache points at the prior checkout; it was not changed.
+- **Static maintenance inventory:** baseline `d756cf3` versus implementation
+  commit `5bec4a6`, counted with tracked Git source files: `ComputerControl` plus
+  core `Models` grew from 17 Swift files / 1,883 physical lines to 19 / 3,083
+  (+1,200, about 64%; counts include comments and blank lines). The implementation
+  diff adds 2,589 net Swift test lines, 139 fixture lines, 117 workspace-tooling
+  lines, and three uninstalled Cua patch candidates (684 patch lines) plus a
+  54-line JavaScript candidate test. `Package.swift`, `Package.resolved`, and
+  `Makefile` are unchanged. This scoped inventory excludes prose and ignored
+  development assets, and is not a matched runtime comparison. No production
+  protection was retired, so the inventory does not establish net simplification.
 - **Final package:** `make dist` built the arm64 0.1.5 (build 6) app with bundle
   ID `com.chriswozniczek.jevvoice`. Strict ad hoc signature verification,
   `unzip -t`, extracted signature verification, and byte-for-byte executable

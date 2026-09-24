@@ -38,6 +38,19 @@ Steps 4, 6, 7, or 8.
   `.context/execution-simplification/make-test-workspace-scratch-2026-09-24.log`.
   A direct unwrapped `make test` still encounters the preserved prior-workspace
   `.build` cache before Swift compilation; that cache was left unchanged.
+- **Static maintenance inventory:** comparing baseline `d756cf3` with scoped
+  implementation commit `5bec4a6`, the tracked production Swift scope
+  (`Sources/JevVoice/ComputerControl` and `Sources/JevVoiceCore/Models`) grows
+  from 17 files / 1,883 physical lines to 19 files / 3,083 lines (+1,200, about
+  64%; physical counts include comments and blank lines). The implementation
+  diff adds 2,589 net Swift test lines, 139 fixture lines, 117 workspace-tooling
+  lines, and three uninstalled Cua patch candidates totaling 684 patch lines,
+  plus a 54-line JavaScript candidate test. `Package.swift`, `Package.resolved`,
+  and `Makefile` are unchanged; production retains the existing Swift-to-pinned-
+  Cua boundary. This inventory excludes prose and generated/ignored development
+  assets and does not measure behavioral complexity or prove simplification.
+  Since no production protection has been retired, current evidence shows added
+  implementation and proof coverage rather than a net maintenance reduction.
 - **Final package:** `make dist` produced the r2 arm64 app and ZIP under
   `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-24-final-r2/`.
   Bundle ID is `com.chriswozniczek.jevvoice`; executable SHA-256 is

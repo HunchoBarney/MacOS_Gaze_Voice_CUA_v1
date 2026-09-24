@@ -375,6 +375,18 @@ mechanism has a specific responsibility.
   Cua supports background input; serialize actual focus, menu, clipboard and
   same-document conflicts. Visible cursors alone do not prove safe concurrency.
 - [ ] Compare baseline and candidate using matched fixtures and initial states.
+  A static inventory against baseline `d756cf3` and implementation commit
+  `5bec4a6` is recorded on 2026-09-24 below. In the tracked production Swift
+  scope (`ComputerControl` plus core `Models`), physical source lines grew from
+  1,883 across 17 files to 3,083 across 19 (+1,200, about 64%; comments and blank
+  lines included). The implementation diff also adds 2,589 net Swift test lines,
+  139 fixture lines, 117 workspace-tooling lines, and three uninstalled Cua
+  patch candidates totaling 684 patch lines plus a 54-line JavaScript test.
+  `Package.swift`, `Package.resolved`, and `Makefile` are unchanged; the existing
+  Swift-to-pinned-Cua process boundary remains. This is a scoped code inventory,
+  not a matched behavior or simplification result. No old production protection
+  has been retired, so these counts show current implementation growth rather
+  than a demonstrated reduction in maintenance burden.
 
 | Measure | Reporting rule |
 | --- | --- |
