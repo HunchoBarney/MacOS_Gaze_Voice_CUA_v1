@@ -21,6 +21,7 @@ struct CuaUncertainOutcome: Error, LocalizedError, Sendable {
 actor CuaConnection {
     private let executable: URL
     private let arguments: [String]
+    private let onToolCall: (@Sendable (String, Int?) -> Void)?
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
@@ -34,9 +35,11 @@ actor CuaConnection {
     private(set) var serverVersion: String?
 
     init(executable: URL = CuaDependency.executable,
-         arguments: [String] = ["mcp"]) {
+         arguments: [String] = ["mcp"],
+         onToolCall: (@Sendable (String, Int?) -> Void)? = nil) {
         self.executable = executable
         self.arguments = arguments
+        self.onToolCall = onToolCall
     }
 
     deinit {
@@ -120,6 +123,8 @@ actor CuaConnection {
 
     func callResult(_ name: String, arguments: [String: JSONValue], timeout: TimeInterval = 30) async throws -> CuaToolResult {
         guard initialized else { throw DriverConnectionError.closed }
+        try Task.checkCancellation()
+        onToolCall?(name, arguments["text"]?.string?.count)
         let value = try await request("tools/call", params: .object([
             "name": .string(name), "arguments": .object(arguments)
         ]), timeout: timeout)

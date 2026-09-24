@@ -473,3 +473,485 @@ Evidence paths below are relative to `.context/execution-simplification/`.
   `ec7c987b81c49825d4ebdae4b3d3435b4373887610fa379a51e68956095d79a2`.
   Metadata: `menu-package-recovery.json`. This is build/recovery validation;
   neither app nor Driver was installed or promoted.
+
+### Execution simplification — action-choice expansion priority, 2026-09-22
+
+- User clarified that broad, grounded Jev access to Cua actions comes before
+  further executor deletion. The scoped plan now requires an installed-tool
+  disposition inventory and capability-based candidate expansion first. This
+  does not close any migration or simplification gate.
+- Read-only `cua-driver-local list-tools` on the installed pinned Driver advertises
+  58 tools. `describe browser_pointer` confirms that ref-based hover,
+  right-click and double-click require the exact browser target, tab, session,
+  and a ref advertising `pointer`. The action catalog now offers these three
+  actions only for visible, enabled, pointer-capable refs, preserving the
+  observed target/tab/ref and selecting background `dom_event` delivery.
+- The focused `swift test --filter CuaBrowserTests` run passed 5 tests, zero
+  failures. `make test` passed six tooling tests and 262 Swift tests, with 22
+  opt-in skips and zero failures. These are automated catalog/contracts checks;
+  no new live Jev/browser effect, installed-app behavior or physical input was
+  observed. The existing text/replay failure remains open. Dense snapshots can
+  exceed Jev Choice's 255-option limit and need relevant grouping before broad
+  action coverage is accepted.
+
+### Execution simplification — candidate integration checkpoint, 2026-09-22
+
+All live commands below were serialized with
+`python3 scripts/with-desktop-lock.py` and used disposable fixtures. Fresh
+permission probes reported Accessibility and Screen Recording enabled for the
+selected test process. These scoped results do not close P0–P5 or another voice
+migration gate.
+
+- **Bounded choices and exact user content:** `CuaActionChoiceBook` keeps IDs
+  bound to a task UUID/revision outside Jev's answer, groups and pages dense
+  choices without exceeding 255 options, and refuses beyond 32 observed actions.
+  Automated coverage includes 600 observed actions. Quoted literal content is
+  copied from one exact quoted span and masked in the control instruction; unclear
+  payloads do not go through model extraction. New parser/catalog/task tests are
+  included in the regression suite. This does not prove every installed action
+  family live.
+- **Navigation review correction:** `CuaActionCatalogTests` now refuses a quoted
+  URL followed by an unsupported “new tab” instruction, because the candidate
+  can only navigate the current tab. The regression failed before the parser
+  guard and passed after it; all 19 catalog tests passed.
+- **Reproducible live commands:** the passing disposable tests were run one at a
+  time under the shared lock using these invocations (the test environment's
+  existing TypeSafe credential was not copied into logs):
+
+  ```sh
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_RUNTIME_LITERAL_TEST=1 swift test --filter CuaVoiceRuntimeLiveTests/testNativeExecutionPostconditionsOptIn
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_AGENT_TEST=1 swift test --filter CuaTaskAgentLiveTests/testNewDocumentFixtureOptIn
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_SEARCH_TEST=1 swift test --filter CuaBrowserLiveTests/testDirectNavigationCandidateThroughAgentOptIn
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_UPLOAD_TEST=1 swift test --filter CuaBrowserLiveTests/testFileUploadCandidateThroughAgentOptIn
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_POINTER_TEST=1 swift test --filter CuaBrowserLiveTests/testPointerHoverCandidateThroughAgentOptIn
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_SEARCH_TEST=1 swift test --filter CuaBrowserLiveTests/testRepeatedScrollThroughAgentOptIn
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_RUNTIME_KEY_TEST=1 swift test --filter CuaVoiceRuntimeLiveTests/testNativeExecutionPostconditionsOptIn
+  python3 scripts/with-desktop-lock.py env JARVIS_CUA_RUNTIME_CONCURRENCY_TEST=1 swift test --filter CuaVoiceRuntimeLiveTests/testIndependentBackgroundTasksProgressInParallelOptIn
+  ```
+
+- **Native exact text:** `CuaVoiceRuntimeLiveTests/testNativeExecutionPostconditionsOptIn`
+  passed against a disposable AppKit text fixture in 16.280s. Production runtime
+  used five Jev requests and one `type_text` call; the exact 32-character quoted
+  phrase appeared once and the 47-character seed remained intact. Log:
+  `.context/execution-simplification/production-literal-isolated-live.log`.
+  `CuaTaskAgentLiveTests/testNewDocumentFixtureOptIn` also passed in 14.664s:
+  Jev created a genuinely new TextEdit window, inserted the exact quoted phrase
+  once, and preserved the original 51-character source. Log:
+  `.context/execution-simplification/native-new-document-final-live.log`.
+  This is one current quoted-text new-document sample; it does not erase the
+  earlier 57-character truncated-plus-duplicate failure or establish unquoted
+  extraction reliability.
+- **Browser effects:** the candidate navigation trial observed the quoted URL
+  in the requested tab; the upload trial used one quoted canonical file, host
+  approval, and post-dispatch name/size/SHA-256 checks. Logs:
+  `.context/execution-simplification/direct-navigation-candidate-live-followup.log`
+  and `.context/execution-simplification/browser-upload-candidate-live-followup.log`.
+  `CuaBrowserLiveTests/testPointerHoverCandidateThroughAgentOptIn` passed in
+  10.552s after the harness was corrected to assert the agent's rebound target.
+  The disposable `/state` endpoint observed exactly one `mouseenter`; log:
+  `.context/execution-simplification/browser-pointer-hover-live-final-retry.log`.
+  `CuaBrowserLiveTests/testRepeatedScrollThroughAgentOptIn` observed two dispatches
+  and scroll positions `[500, 1000]` in one live trial; log:
+  `.context/execution-simplification/scroll-permission-enabled-live.log`.
+  These single-sample results do not establish broad browser action reliability.
+- **Refusal:** the candidate Return-key request dispatched once. Cua returned
+  `confirmed`, but exact native readback showed no newline; Jarvis refused and
+  did not retry. Log:
+  `.context/execution-simplification/foreground-return-candidate-isolated-live.log`.
+  This is the expected conservative outcome for an unobserved effect.
+- **Open native/browser behavior:** earlier native menu and new-document trials
+  include failed foreground/menu attempts and one truncated-plus-duplicate text
+  result. Recent quoted trials pass, but the earlier unquoted failure has not had
+  a matched repeat. JavaScript dialog trials failed before the dialog action:
+  `bring_to_front` reported the target window visible but not focused/frontmost,
+  and a separate attempt was refused by `browser_click`. Logs are under
+  `.context/execution-simplification/browser-dialog-candidate-live-*.log`.
+  No result is claimed for dialog accept/dismiss, native drag, broad keyboard or
+  popup value actions.
+- **Concurrent tasks:**
+  `CuaVoiceRuntimeLiveTests/testIndependentBackgroundTasksProgressInParallelOptIn`
+  passed in 14.803s using the actual production runtime and Jev, with two
+  disposable app bundles and separate Cua sessions. The test observed both work
+  items in `Working` simultaneously, then independently read back each exact
+  insertion in its named window. Queue waits were 0.125s and 0.019s; Jev made
+  11 requests total. The original foreground Chrome PID 67737 was preserved.
+  Fixture bundle IDs ended in `.a` and `.b`, with windows 24863 and 24874. Log:
+  `.context/execution-simplification/two-task-background-live.log`. This proves
+  progress across two app processes; the app-level queue still serializes tasks
+  for one app. Cursor identities and global menu/focus/clipboard conflicts were
+  not exercised.
+- **Automated regression:** `make test` passed 299 Swift tests, 28 opt-in skips,
+  zero failures, plus six tooling tests. Exact log:
+  `.context/execution-simplification/final-make-test-final.log`.
+- **Package and recovery:** final `make app` built the reviewed candidate bundle
+  at `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-22/candidate-app-reviewed/Jev Voice.app`.
+  Bundle ID is still `com.chriswozniczek.jevvoice`; strict/deep signature passes;
+  executable SHA-256 is
+  `62f61d416ee3eb85735a3d2bb696a63029c0279a23036a683742e49063b12e7d`.
+  Its archive SHA-256 is
+  `cee3323ce12f7f332e7daa57985271fca7ade70f84877a66b81863cd1b15bedb`.
+  ZIP extraction and recovered executable equality passed. The earlier candidate
+  package hashes below are superseded by this reviewed build.
+  The previous workspace app was archived, restored, and verified with executable
+  SHA-256 `4a9bb90ea15d8d180019058cb8bb93967b7c8ebc85712f6271928aefbce4219f`;
+  recovery archive SHA-256 is
+  `52e7a1759d11397b7cabc3711cd9991e478df5be40ced8682906cacfb20f1361`.
+  The existing build and installed app were not replaced. Direct executable
+  launch showed an off-screen window. LaunchServices launch of the reviewed bundle
+  exposed its setup overlay and Voice settings tree. The first tree showed the
+  microphone permission selected and Accessibility missing. I mistakenly clicked
+  the app-owned Accessibility `Allow` button; code review confirms it calls
+  `Permission.request()`. The app's next permission read reported Accessibility
+  selected too. No voice task or microphone capture was started. This was an
+  unintended permission action: review the Accessibility grant for this candidate
+  in System Settings and revoke it if you did not intend to grant it. I did not
+  attempt to change or revoke TCC state. I terminated the candidate process and
+  verified it was absent from the desktop app inventory. Packaged voice-task
+  behavior remains unverified. Final package metadata and this UI observation are
+  in `.context/execution-simplification/final-package-reviewed.json`.
+  The prior package UI observation remains in
+  `.context/execution-simplification/launchservices-package-smoke-2026-09-22.json`.
+  Direct-launch logs:
+  `.context/execution-simplification/candidate-package-direct-launch.json`,
+  `.context/execution-simplification/candidate-package-window-exercise.json`, and
+  `.context/execution-simplification/candidate-package-background-readback.json`.
+- **Measurement and simplification status:** available baseline and candidate
+  native samples are not controlled matches (the baseline included a test-only
+  settle delay); baseline model/Driver call counts were not captured. One cannot
+  infer a reliable latency distribution or lower maintenance burden from these
+  samples. The production loop and overlapping safeguards remain, so no net code
+  simplification is claimed. Physical Fn/microphone and user-installed-app
+  acceptance were not tested.
+
+
+### Execution simplification — continued verification, 2026-09-23
+
+All paths below are workspace-local or relative to the repository root. The
+installed Cua pin remains
+`699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a`.
+No Driver runtime, dependency pin, TCC database, preference, credential, shared
+reference, or legacy cache path was changed.
+
+- **Production runtime / native literal:** under the shared desktop lock,
+  `CuaVoiceRuntimeLiveTests/testNativeExecutionPostconditionsOptIn` passed once
+  (10.071 s). Real Jev selected the exact observed TextEdit fixture field; the
+  32-character literal was dispatched once, independently read back once, and
+  the prior 47-character seed remained byte-for-byte intact. Five Jev requests;
+  one `type_text`; 3 `get_window_state`, 2 `list_windows`, and one each of
+  `list_apps`, `get_accessibility_tree`, `get_browser_state`, `start_session`,
+  and `end_session`. Log:
+  `.context/execution-simplification/production-runtime-literal-live-2026-09-23.log`.
+  This is the normal `CuaVoiceRuntime` path with fixture-injected transcript input,
+  not a packaged-app or physical microphone/Fn check.
+- **Browser search/navigation:** quoted search passed once (11.537 s), observing
+  query `copper lantern`, the bound tab, and the exact local destination. Log:
+  `.context/execution-simplification/search-quoted-live-2026-09-23.log`.
+  Direct quoted URL navigation passed once (4.883 s), with exact URL/tab readback;
+  log `.context/execution-simplification/direct-navigation-live-2026-09-23.log`.
+- **Candidate browser families:** upload passed once (4.328 s), after explicit
+  disposable-fixture approval, with matching file name, 32-byte length, and
+  SHA-256 `3efe82d9d4c64e017a0919949907918fa6da2f49ccdd5307815afe2105fe2b2f`.
+  Log `.context/execution-simplification/browser-upload-live-2026-09-23.log`.
+  Hover passed once (7.209 s), recorded exactly one `mouseenter`, and did not
+  click; log `.context/execution-simplification/browser-pointer-hover-live-2026-09-23.log`.
+  JavaScript confirm acceptance passed once (15.078 s) after inspecting the
+  modal before page snapshots; the fixture recorded `accepted`. Log
+  `.context/execution-simplification/browser-dialog-live-2026-09-23.log`.
+  These are isolated candidate-surface effects on the installed pinned Driver,
+  not production promotion.
+- **Repeated scroll — current installed-pin failure:** the opt-in trial was
+  repeated with fresh fixture state. It dispatched one downward scroll, and the
+  independent local fixture observed position `[500]`; after reobservation no
+  second scroll choice was offered. Jev selected a page click, which the runtime
+  dispatched, then returned `Completed in Google Chrome; checked the resulting
+  app state.` The fixture rejected expected positions `[500, 1000]`. One test,
+  two failed assertions, 8.905 s. Log
+  `.context/execution-simplification/scroll-installed-live-2026-09-23.log`.
+  This is a false-completion failure, not a conservative refusal.
+  `CuaTaskAgent` now retains an unresolved scroll outcome and refuses the task
+  after a fresh app observation, before accepting Jev's next choice or dispatching
+  another action. New red/green unit coverage exercises both a model `done`
+  choice and a later action choice after an `unverifiable` scroll; neither can
+  return success or dispatch again. The live workflow was not repeated because
+  desktop interaction had stopped with the earlier package in a listening state.
+  The underlying installed-pin scroll postcondition and two-scroll workflow remain
+  unproven. The preserved combined local source candidate at
+  `development/JevVoice/cua-source/libs/cua-driver/rust/target/release/cua-driver`
+  has SHA-256 `483b693060416b8cdd8088fde1140e6868d73dee72870b661f7efd4b7ec7cdf5`.
+  Its embedded `check_permissions(prompt:false)` reports Accessibility=false and
+  Screen Recording=false for the current host. The installed Driver status probe
+  reports both grants true (direct ScreenCaptureKit readiness not checked).
+  No prompt, mutation through the candidate, install, or runtime change followed.
+- **Payload and modal safety:** explicit `dictate`/`say` prefixes now take
+  precedence over quote scanning, preserving the entire literal suffix even
+  when it contains multiple quoted phrases. Quoted text is bound only after an
+  explicit text-entry/search phrase; a quote after `into` is not used as the
+  payload, and a quoted destination is retained in the control instruction when
+  the payload is separately quoted. Unquoted `Type`/`Write` content that could
+  contain control instructions still refuses before Cua dispatch. Failing-first
+  regressions cover quoted dictation, quoted destinations, and the actual insert
+  argument. Browser text readback now
+  rebinds only to one same-semantic editable control when snapshot ref ordinals
+  move; duplicate controls refuse. During dialogs, the agent skips page snapshots
+  and verifies the exact current dialog ID before resolving it. The dialog mock
+  asserts no page snapshot is requested while a modal is present.
+- **No implicit TCC prompt in setup tests:** `CuaPermissionProbe` always sends
+  a schema-bound `check_permissions` call with `prompt:false`; the setup API has
+  no session-argument path. Installed `describe check_permissions` reports
+  `additionalProperties:false`, accepting only `prompt` and
+  `probe_direct_capture`. The focused setup and connection-fixture tests pass.
+  The schema audit found and removed the old setup caller's unsupported
+  `session` field; no permission prompt was issued. The focused connection test
+  failed with a mock Driver refusal when the adapter was deliberately given an
+  unsupported `session` field, then passed after that field was removed.
+  `swift test --filter CuaSetupTests` and
+  `swift test --filter CuaConnectionTests/testSetupPermissionProbeMatchesTheInstalledToolInputSchema`
+  pass.
+- **Ignored Cua source overlays:** `verify-cua-source.py` reports six changed
+  files in the ignored development checkout, exactly the files touched by the
+  three preserved local candidate patches. Read-only
+  `git apply --reverse --check --directory=development/JevVoice/cua-source`
+  passes separately for `launch-watchdog-candidate.patch` (SHA-256
+  `b33d9aeab382f20f97960dbaba229a99a060b45a5c2feb0605dfe910125a4fda`),
+  `scroll-readback-candidate.patch` (`af8a5d3718ea81c2864601484150b9bfcba87f960f9750d25716a4f8d2684a79`),
+  and `menu-focus-candidate.patch`
+  (`b1e5e8b8a0d1467973bdc011896b0b6b36f328ec0d83b2c2a7b8e98d7ce8dd60`).
+  The overlay remains uninstalled; the runtime pin and ignored sources were not
+  changed by verification.
+- **Fresh whole-branch review and material fixes:** a read-only review of
+  `99d66cf..1d8d841` found no Critical issues, three Important findings and three
+  Minor findings. The Important findings covered AXPress target semantics,
+  literal payload/destination binding, and false completion after an unresolved
+  scroll. New regression tests failed before production changes and passed after
+  the fixes. Native action refresh now compares a canonical per-control
+  precondition (role, label, actions, state and geometry) while duplicate
+  suppression keeps its separate stable identity. The revised literal parser
+  preserves full explicit dictation and binds only an unambiguous quoted
+  payload. The scroll guard blocks subsequent choices after fresh observation
+  when Driver does not confirm the effect. Focused command
+  `swift test --filter 'CuaTaskAgentTests|JevSpeechIntentTests'` passes 40 tests.
+  No second review was requested. The three Minor findings are deferred in the
+  ignored SDD progress ledger: browser drag snapshot-ref rebinding, unbounded
+  action-choice paging, and one historical evidence entry that names the wrong
+  fixture app. Their limitations remain open.
+- **Full automated regression after review fixes:** `make test` passes 313 Swift
+  tests, 28 opt-in skips, zero failures, plus six tooling tests. Log:
+  `.context/execution-simplification/review-fixes-make-test-2026-09-23.log`.
+- **Earlier 2026-09-23 package, superseded by the schema audit build:** app
+  identity remained
+  `com.chriswozniczek.jevvoice`; executable SHA-256 is
+  `6bee072d302a76a84d017381d1bdc1c697c1302dd1d22f70c821956c7d83f549`.
+  Bundle path:
+  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-23/candidate-app-reviewed/Jev Voice.app`.
+  `codesign --verify --deep --strict` passes; the ZIP archive SHA-256 is
+  `9711432c2b0f93185d4cba84fd6cc7eb7be9290717129a23bae3c676e81a9024`.
+  ZIP extraction, signature verification, and executable `cmp` pass. The
+  previous `build/Jev Voice.app` was restored from the verified
+  `scoped-delivery-2026-09-22/previous-workspace-app.zip`; old executable hash
+  `4a9bb90ea15d8d180019058cb8bb93967b7c8ebc85712f6271928aefbce4219f` and
+  archive hash `52e7a1759d11397b7cabc3711cd9991e478df5be40ced8682906cacfb20f1361`
+  match the preserved recovery record. The first environment-form `APP` setting
+  did not override Makefile's default; the output was captured, then the previous
+  app was restored. The successful final command used
+  `make APP="development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-23/candidate-app-reviewed/Jev Voice.app" app`.
+  Build logs:
+  `.context/execution-simplification/package-build-2026-09-23.log` and
+  `.context/execution-simplification/package-build-unique-path-2026-09-23.log`.
+- **Final package after the permission-schema audit:** bundle path
+  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-23-permission-schema/candidate-app-reviewed/Jev Voice.app`;
+  bundle ID remains `com.chriswozniczek.jevvoice`; executable SHA-256 is
+  `f7ac3b8648b3a834b3f9944ab389746e6b3505cebf35039a90593e8c048fadec`.
+  `make APP="development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-23-permission-schema/candidate-app-reviewed/Jev Voice.app" app`
+  and strict/deep signature validation pass. Final archive SHA-256 is
+  `202a0ddacfa0e4e92366b5d46eb4c9fccd31ffb2ed13628eb880e704ce0afd41`;
+  extracted bundle signature passes and its executable matches with `cmp`.
+  Build log: `.context/execution-simplification/package-build-schema-fix-2026-09-23.log`.
+- **Review-fixes package:** the latest bundle path is
+  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-23-review-fixes/candidate-app-reviewed/Jev Voice.app`;
+  app identity remains `com.chriswozniczek.jevvoice`. Executable SHA-256 is
+  `3d3a70a7487831e45cd6e8cc328112f47a383aed17cf7ed56798d8f72707bc4c`; ZIP
+  SHA-256 is
+  `4bf04259d94d3edf192f6063be1abdf6940891a8f2c6223027eae694cf40e547`.
+  `make APP="development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-23-review-fixes/candidate-app-reviewed/Jev Voice.app" ZIP="development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-23-review-fixes/candidate-app-reviewed-final.zip" dist`
+  completed. Both packaged bundles pass `codesign --verify --deep --strict`;
+  extracted and source executables match with `cmp`. The existing `build/Jev Voice.app`
+  remains at its recovered SHA-256
+  `4a9bb90ea15d8d180019058cb8bb93967b7c8ebc85712f6271928aefbce4219f`.
+  Build log: `.context/execution-simplification/package-review-fixes-2026-09-23.log`.
+- **Packaged UI limitation:** the earlier candidate package opened and its setup
+  UI showed Accessibility missing while Microphone was selected. No permission
+  control was clicked in that check. The UI changed to `Listening fn`, so all
+  further desktop interaction stopped. The final review-fixes package was built
+  afterward and was not opened. No packaged task, physical Fn acceptance,
+  microphone capture, or user-installed-app acceptance is claimed.
+- **Comparison and simplification:** one production-runtime live sample and five
+  browser live samples are not a matched baseline/candidate set. Browser test
+  durations above are full test times; only the native runtime fixture records
+  exact Jev/Driver counts. There is no broad latency distribution, controlled
+  baseline call count, or demonstrated maintenance-burden reduction. No
+  production protection was retired.
+- **Scroll outcome follow-up:** a fresh `mcp --direct --embedded`
+  `check_permissions(prompt:false)` against the isolated combined Driver candidate
+  returned Accessibility=false and Screen Recording=false. Exact executable SHA-256
+  is `483b693060416b8cdd8088fde1140e6868d73dee72870b661f7efd4b7ec7cdf5`;
+  result: `.context/execution-simplification/scroll-candidate-permissions-2026-09-23.json`.
+  No prompt, action, installation, pin change, or TCC change followed. The offline
+  producer check passes 11 scenarios, the Rust browser slice passes 164 tests, and
+  `CuaTaskAgentTests` passes 28 tests, including the unresolved-scroll guard; logs:
+  `.context/execution-simplification/scroll-producer-2026-09-23.log`,
+  `scroll-rust-tests-2026-09-23.log`, and `scroll-host-tests-2026-09-23.log`.
+  The default Swift scratch cache referenced the previous worktree path, so the
+  focused test was rerun in a new workspace-local scratch directory without
+  deleting the existing cache. A new live two-effect trial through the current
+  candidate remains pending user-controlled host grants. The earlier
+  permission-enabled candidate fixture pass with independent `[500, 1000]`
+  readback remains one supporting sample, not fresh acceptance of this host/build.
+
+Step 4 remains open on repeated-scroll postcondition, browser changed-tab proof,
+native key/value/menu/drag coverage, and live cancellation/timeout workflows.
+The unresolved-scroll guard prevents the prior false `Completed` outcome, but it
+does not make the one-scroll live trial pass or supply the missing readback.
+Step 5's integration contract is covered by source, automated tests, and one
+production-runtime live text proof; broader live follow-up/correction/provider
+behavior remains unverified. Step 6 has no accepted deletion because equivalent
+evidence is missing. Step 7 matched measurements and broader live workflows remain
+open. Step 8 still needs final-package UI/task acceptance. The focused local
+source/test/evidence commit is complete and was not pushed; the fresh review is
+complete, with no re-review after its material fixes.
+Rollback instructions are recorded below.
+Unrelated migration gates remain unchanged.
+
+Rollback and delivery notes: the focused source commit can be reversed with
+`git revert <focused-commit>`; it was not pushed. The installed Driver
+pin was never changed, so no runtime downgrade is needed. The recoverable prior
+workspace app is preserved in
+`development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-22/previous-workspace-app.zip`
+and extracted at
+`development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-22/previous-workspace-app-restored/Jev Voice.app`.
+Before any deliberate package replacement, verify the extracted app with
+`codesign --verify --deep --strict` and confirm its `Contents/MacOS/JevVoice`
+SHA-256 is
+`4a9bb90ea15d8d180019058cb8bb93967b7c8ebc85712f6271928aefbce4219f`; restore
+from the archive into a new staging directory first so the recovery copy remains
+untouched. No recorded-audio or physical Fn/microphone test was performed.
+
+### Execution simplification — fresh proof continuation, 2026-09-23
+
+This addendum supersedes the earlier statements above that the post-guard pinned
+scroll workflow had not been rerun and that a fresh candidate two-scroll proof
+was waiting on permissions. It does not close unrelated migration gates.
+
+- **Pinned scroll refusal:**
+  `python3 scripts/with-desktop-lock.py env JARVIS_CUA_SCROLL_GUARD_TEST=1 python3 .context/execution-simplification/run-scroll-installed-live.py`
+  passed the new expected-refusal test in 8.356 s. The pinned Driver dispatched
+  one `browser_pointer` scroll; the independent loopback fixture observed exactly
+  `[500]`. After reobservation, the task reported that the result was
+  unconfirmed and no further action was dispatched. There was no second mutation
+  or false `Completed` result. Log:
+  `.context/execution-simplification/scroll-installed-guard-live-2026-09-23.log`.
+  This proves the host guard's live failure behavior; it does not supply the
+  missing pinned-runtime scroll postcondition or make two-scroll work pass.
+- **Isolated scroll-readback candidate:**
+  `python3 scripts/with-desktop-lock.py python3 .context/execution-simplification/run-scroll-candidate-live.py`
+  passed one real Jev/Cua loopback workflow in 5.527 s through the direct,
+  SHA-256-bound combined candidate binary
+  `483b693060416b8cdd8088fde1140e6868d73dee72870b661f7efd4b7ec7cdf5`. The
+  fixture independently observed positions `[500, 1000]` after exactly two
+  `browser_pointer` effects. Log:
+  `.context/execution-simplification/scroll-candidate-live-reviewed-harness-2026-09-23.log`.
+  The candidate's read-only embedded permission probe still reports
+  Accessibility=false and Screen Recording=false; this DOM-only browser trial
+  succeeded despite that result. Do not infer readiness for native desktop
+  mutations. The binary remains uninstalled; the pin, TCC, and installed runtime
+  are unchanged.
+- **Native new-document fixture:** under the shared desktop lock,
+  `python3 scripts/with-desktop-lock.py env JARVIS_CUA_AGENT_TEST=1 JARVIS_CUA_SETTLED_FIXTURE=1 swift test --scratch-path .context/execution-simplification/swift-scratch-native-new-document --filter CuaTaskAgentLiveTests/testNewDocumentFixtureOptIn`
+  passed once (28.170 s total, 12.391 s in the agent). The pinned installed
+  Driver's read-only permission check returned Accessibility=true and
+  Screen Recording=true. Jev selected TextEdit, used `Menu File → New`, entered
+  `copper lantern beside the window` exactly once in a new window, and the
+  existing seed remained unchanged. The nine-second test-only setup settle is
+  diagnostic; immediate launch/foreground behavior and production packaged
+  acceptance remain open. Log:
+  `.context/execution-simplification/native-new-document-diagnostics-2026-09-23.log`.
+- **Suite verification after the new live guards:** the six tooling tests passed.
+  Default `make test` then failed before Swift compilation because the preserved
+  `.build` PCH refers to the prior worktree path and reports missing
+  `SwiftShims`; it was not cleaned. Using a fresh workspace-local SwiftPM scratch
+  directory, the complete suite passed 314 Swift tests, 29 opt-in skips, zero
+  failures, in 10.585 s. Logs:
+  `.context/execution-simplification/make-test-final-2026-09-23.log` and
+  `.context/execution-simplification/swift-test-final-2026-09-23.log`.
+- **Packaged-app signal:** the review-fixes package remains identified by
+  executable SHA-256
+  `3d3a70a7487831e45cd6e8cc328112f47a383aed17cf7ed56798d8f72707bc4c`. Its
+  Activity view previously showed a failed TextEdit new-document request and a
+  dependent request that did not run. The isolated live fixture above is not a
+  pass for that packaged path. Visible setup-state verification and a successful
+  desktop task through the package remain open; no physical Fn/microphone
+  acceptance is claimed.
+
+No Step 6 protection was removed. Step 4 still lacks sufficient live evidence
+for stale browser tabs, several native key/value/drag families, and cancellation
+or timeout recovery. Step 7 has no controlled matched baseline/candidate sample
+for model/Driver call counts or maintenance reduction. Step 8 still lacks a
+successful packaged task. Keep the repetition guard and app-specific content
+postconditions until their replacement evidence passes.
+
+### Execution simplification — package and locked-desktop checkpoint, 2026-09-24
+
+This scoped evidence does not change the unrelated voice migration gates.
+
+- **Setup fixture safety:** `CuaSetupFixture.documentURL()` now creates unique
+  files under `FileManager.default.temporaryDirectory`. The production setup
+  call to `launch_app` omits the unsupported `session` field. Setup requires a
+  confirmed exact-window foreground effect before observing or typing, and
+  reobserves a bounded number of times for an editable body. The two focused
+  `CuaSetupTests` pass in the integrated suite.
+- **Live setup result:** the opt-in setup trial used the corrected temp path and
+  schema. It did not type because Cua returned no editable body. A separate
+  read-only inspection of three exact disposable setup windows returned zero AX
+  elements and `ax_window_unresolved`; a direct focus probe returned
+  `process_activated=false`, with the exact target not verified in front. Logs:
+  `.context/execution-simplification/package-setup-flow-pinned-live-2026-09-24.log`,
+  `package-setup-flow-pinned-live-2026-09-24-retry.log`,
+  `package-setup-open-window-observation-2026-09-24.log`, and
+  `package-setup-foreground-observation-2026-09-24.log`.
+- **External condition:** `ps` and `ioreg` showed the console owned by
+  `loginwindow` and `CGSSessionScreenIsLocked=Yes`. Cua's permission check still
+  returned Accessibility=true and Screen Recording=true. `System Events` denied
+  assistive access to the `osascript` query, and the computer-use app lookup
+  timed out. No permissions were changed. Further live UI attempts stopped here.
+  The captured observations are in
+  `.context/execution-simplification/desktop-lock-check-2026-09-24.txt`.
+- **Candidate keyboard trial:** the opt-in native key trial stopped before
+  dispatch because its disposable window had no editable AX controls in the
+  locked session. No key was sent. Log:
+  `.context/execution-simplification/native-keyboard-candidate-diagnostics-2026-09-24.log`.
+- **Automated verification:**
+  `swift test --scratch-path .context/execution-simplification/swift-scratch-native-new-document`
+  passed 317 tests, 31 opt-in skips, zero failures. Six tooling tests passed via
+  `python3 -B -m unittest discover -s Tests/Tooling -v`. The preserved default
+  `.build` cache still points at the prior checkout, so `make test` cannot be
+  used without replacing that cache; it was preserved.
+- **Final package:** `make dist` built the arm64 0.1.5 (build 6) app with bundle
+  ID `com.chriswozniczek.jevvoice`. Strict ad hoc signature verification,
+  `unzip -t`, extracted signature verification, and byte-for-byte executable
+  comparison all pass. App executable SHA-256:
+  `476ce17968443f35566f66641308b54a40bcaaf58136bdc9c5e99806f5d7559b`; ZIP
+  SHA-256: `07858bd753c5d43eadec8c7b2a058d36a4927fc498a5c890f11400579059ea2b`.
+  Files are in
+  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-24-final-r2/`.
+  The r2 bundle was not launched while the session was locked. Its visible setup
+  state and packaged desktop task are unverified.
+- **Preserved side effect:** the earlier pre-fix package check created one
+  zero-byte setup fixture at
+  `~/Library/Caches/JevVoice/verification/setup/Jarvis-Check-7F3ECAB1-8B43-4469-9D76-1E6193EDC0E4.txt`.
+  That cache link resolves into another checkout's ignored development assets.
+  The file was left untouched. The corrected code no longer writes through that
+  link.
+
+The Cua pinned-scroll postcondition, required action-family coverage, lifecycle
+proofs, matched baseline/candidate measurements, and packaged-app acceptance
+remain open. No production safeguard was deleted, and no physical Fn/microphone
+result is claimed.

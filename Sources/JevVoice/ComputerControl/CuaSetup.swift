@@ -2,6 +2,28 @@ import Foundation
 import Combine
 import JevVoiceCore
 
+protocol CuaPermissionStatusClient {
+    func checkPermissions(prompt: Bool) async throws -> JSONValue
+}
+
+extension CuaConnection: CuaPermissionStatusClient {
+    func checkPermissions(prompt: Bool) async throws -> JSONValue {
+        try await call("check_permissions", arguments: ["prompt": .bool(prompt)])
+    }
+}
+
+enum CuaPermissionProbe {
+    static func read(using client: CuaPermissionStatusClient) async throws -> JSONValue {
+        try await client.checkPermissions(prompt: false)
+    }
+}
+
+enum CuaSetupFixture {
+    static func documentURL(in directory: URL = FileManager.default.temporaryDirectory) -> URL {
+        directory.appendingPathComponent("Jarvis-Check-\(UUID().uuidString).txt")
+    }
+}
+
 /// Visible setup proof uses only its own disposable document, never the user's open document.
 @MainActor
 final class CuaSetup: ObservableObject {
@@ -21,7 +43,7 @@ final class CuaSetup: ObservableObject {
             let label = "Jarvis setup \(UUID().uuidString.prefix(6))"
             do {
                 try await connection.connect()
-                let permissions = try await connection.call("check_permissions", arguments: [:])
+                let permissions = try await CuaPermissionProbe.read(using: connection)
                 guard permissions["accessibility"] == .bool(true), permissions["screen_recording"] == .bool(true) else {
                     throw DriverConnectionError.refused("Enable CuaDriverLocal in macOS Accessibility and Screen Recording settings.")
                 }
@@ -44,80 +66,102 @@ final class CuaSetup: ObservableObject {
         }
     }
     private func verifyDocument(_ connection: CuaConnection, label: String, apiKey: String) async throws {
-                let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("JevVoice/verification/setup", isDirectory: true)
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let fixture = folder.appendingPathComponent("Jarvis-Check-\(UUID().uuidString).txt")
-                try "".write(to: fixture, atomically: true, encoding: .utf8)
-                message = "Opening a disposable TextEdit document…"
-                let opened = try await connection.call("launch_app", arguments: [
-                    "bundle_id": .string("com.apple.TextEdit"), "urls": .array([.string(fixture.path)]), "session": .string(label)
-                ])
-                guard let pid = opened["pid"]?.integer else { throw DriverConnectionError.malformed }
-                let windows = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(label)])
-                let matches = (windows["windows"]?.array ?? []).filter { $0["title"]?.string?.contains(fixture.lastPathComponent) == true }
-                guard matches.count == 1, let wid = matches[0]["window_id"]?.integer else {
-                    throw DriverConnectionError.refused("Cua could not identify the disposable document. Nothing was typed.")
-                }
-                let target: [String: JSONValue] = ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-                    "session": .string(label), "include_screenshot": .bool(false), "max_elements": .number(150)]
-                let snapshot = try await connection.call("get_window_state", arguments: target)
-                let fields = (snapshot["elements"]?.array ?? []).filter { ["AXTextArea", "AXTextField"].contains($0["role"]?.string ?? "") }
-                var candidates: [String: JSONValue] = [:]
-                var criteria: [String: String?] = ["abstain": "No editable document body is observed."]
-                for (index, field) in fields.enumerated() {
-                    let id = "field_\(index)"
-                    candidates[id] = field
-                    criteria[id] = String(data: try JSONEncoder().encode(field), encoding: .utf8)
-                }
-                message = "Jev is choosing the observed document field…"
-                let started = ContinuousClock.now
-                let state: JSONValue = .object([
-                    "goal": .string("Insert setup text into the newly created document body."),
-                    "document_is_new_empty_fixture": .bool(true), "observed_fields": .array(fields)
-                ])
-                let chosen = try await JevClient(apiKey: apiKey).systemOne(state: state, questions: [
-                    "field": .choice(instructions: "Select the editable document body for the requested insertion. Abstain if absent or ambiguous.", criteria: criteria)
-                ])
-                guard case let .choice(id, confidence, probabilities) = chosen.response.answers["field"],
-                      confidence.isFinite, (0...1).contains(confidence),
-                      probabilities.keys.allSatisfy({ criteria.keys.contains($0) }),
-                      probabilities.values.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else {
-                    throw DriverConnectionError.malformed
-                }
-                guard id != "abstain" else {
-                    throw DriverConnectionError.refused("Jev abstained from choosing among \(candidates.count) observed text fields. Nothing was typed.")
-                }
-                guard let field = candidates[id], field["element_token"]?.string != nil else {
-                    throw DriverConnectionError.malformed
-                }
-                guard (field["value"]?.string ?? "").isEmpty else {
-                    throw DriverConnectionError.refused("The selected field is not blank. Nothing was typed.")
-                }
-                try Task.checkCancellation()
-                // A model request creates a race with user edits. Reobserve before insertion.
-                let fresh = try await connection.call("get_window_state", arguments: target)
-                let freshFields = (fresh["elements"]?.array ?? []).filter {
-                    $0["role"] == field["role"] && $0["label"] == field["label"] &&
-                    ($0["value"]?.string ?? "").isEmpty
-                }
-                guard freshFields.count == 1, let freshToken = freshFields[0]["element_token"]?.string else {
-                    throw DriverConnectionError.refused("The disposable field changed while Jev was deciding. Nothing was typed.")
-                }
-                try Task.checkCancellation()
-                let text = "Jarvis connected through Cua and Jev."
-                message = "Writing and checking the disposable document…"
-                _ = try await connection.call("type_text", arguments: ["pid": .number(Double(pid)),
-                    "window_id": .number(Double(wid)), "element_token": .string(freshToken), "text": .string(text),
-                    "delivery_mode": .string("background"), "session": .string(label)])
-                let result = try await connection.call("get_window_state", arguments: target)
-                guard (result["elements"]?.array ?? []).contains(where: { $0["value"]?.string == text }) else {
-                    throw DriverConnectionError.refused("The document did not match the expected text. The action will not be repeated.")
-                }
-                try Task.checkCancellation()
-                verified = true
-                let elapsed = started.duration(to: .now)
-                message = "Verified: Jev selected a field, Cua wrote the setup text, and fresh readback matched. Decision + write + readback: \(elapsed)."
+        let fixture = CuaSetupFixture.documentURL()
+        try "".write(to: fixture, atomically: true, encoding: .utf8)
+        message = "Opening a disposable TextEdit document…"
+        // `launch_app` has no session field in the installed schema. Keep the
+        // lifecycle label on later calls that actually accept it.
+        let opened = try await connection.call("launch_app", arguments: [
+            "bundle_id": .string("com.apple.TextEdit"), "urls": .array([.string(fixture.path)])
+        ])
+        guard let pid = opened["pid"]?.integer else { throw DriverConnectionError.malformed }
+        var matches: [JSONValue] = []
+        for _ in 0..<50 {
+            let windows = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(label)])
+            matches = (windows["windows"]?.array ?? []).filter { $0["title"]?.string?.contains(fixture.lastPathComponent) == true }
+            if !matches.isEmpty { break }
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard matches.count == 1, let wid = matches[0]["window_id"]?.integer else {
+            throw DriverConnectionError.refused("Cua could not identify the disposable document. Nothing was typed.")
+        }
+        let target: [String: JSONValue] = ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+            "session": .string(label), "include_screenshot": .bool(false), "max_elements": .number(150)]
+        let foreground = try await connection.call("bring_to_front", arguments: [
+            "pid": .number(Double(pid)), "window_id": .number(Double(wid)), "session": .string(label)
+        ])
+        guard foreground["activated"] == .bool(true), foreground["exact_window_effect"]?["verified"] == .bool(true) else {
+            throw DriverConnectionError.refused("Cua could not verify the disposable document in front. Nothing was typed.")
+        }
+        var fields: [JSONValue] = []
+        // TextEdit may create the URL-backed window before its editable AX body
+        // is ready. Reobserve for a bounded settling window; never infer a target.
+        for _ in 0..<150 {
+            let snapshot = try await connection.call("get_window_state", arguments: target)
+            fields = (snapshot["elements"]?.array ?? []).filter { ["AXTextArea", "AXTextField"].contains($0["role"]?.string ?? "") }
+            if !fields.isEmpty { break }
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard !fields.isEmpty else {
+            throw DriverConnectionError.refused("Cua did not expose an editable document body. Nothing was typed.")
+        }
+        var candidates: [String: JSONValue] = [:]
+        var criteria: [String: String?] = ["abstain": "No editable document body is observed."]
+        for (index, field) in fields.enumerated() {
+            let id = "field_\(index)"
+            candidates[id] = field
+            criteria[id] = String(data: try JSONEncoder().encode(field), encoding: .utf8)
+        }
+        message = "Jev is choosing the observed document field…"
+        let started = ContinuousClock.now
+        let state: JSONValue = .object([
+            "goal": .string("Insert setup text into the newly created document body."),
+            "document_is_new_empty_fixture": .bool(true), "observed_fields": .array(fields)
+        ])
+        let chosen = try await JevClient(apiKey: apiKey).systemOne(state: state, questions: [
+            "field": .choice(instructions: "Select the editable document body for the requested insertion. Abstain if absent or ambiguous.", criteria: criteria)
+        ])
+        guard case let .choice(id, confidence, probabilities) = chosen.response.answers["field"],
+              confidence.isFinite, (0...1).contains(confidence),
+              probabilities.keys.allSatisfy({ criteria.keys.contains($0) }),
+              probabilities.values.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else {
+            throw DriverConnectionError.malformed
+        }
+        guard id != "abstain" else {
+            throw DriverConnectionError.refused("Jev abstained from choosing among \(candidates.count) observed text fields. Nothing was typed.")
+        }
+        guard let field = candidates[id], field["element_token"]?.string != nil else {
+            throw DriverConnectionError.malformed
+        }
+        guard (field["value"]?.string ?? "").isEmpty else {
+            throw DriverConnectionError.refused("The selected field is not blank. Nothing was typed.")
+        }
+        try Task.checkCancellation()
+        // A model request creates a race with user edits. Reobserve before insertion.
+        let fresh = try await connection.call("get_window_state", arguments: target)
+        let freshFields = (fresh["elements"]?.array ?? []).filter {
+            $0["role"] == field["role"] && $0["label"] == field["label"] &&
+            ($0["value"]?.string ?? "").isEmpty
+        }
+        guard freshFields.count == 1, let freshToken = freshFields[0]["element_token"]?.string else {
+            throw DriverConnectionError.refused("The disposable field changed while Jev was deciding. Nothing was typed.")
+        }
+        try Task.checkCancellation()
+        let text = "Jarvis connected through Cua and Jev."
+        message = "Writing and checking the disposable document…"
+        _ = try await connection.call("type_text", arguments: ["pid": .number(Double(pid)),
+            "window_id": .number(Double(wid)), "element_token": .string(freshToken), "text": .string(text),
+            "delivery_mode": .string("background"), "session": .string(label)])
+        let result = try await connection.call("get_window_state", arguments: target)
+        guard (result["elements"]?.array ?? []).contains(where: { $0["value"]?.string == text }) else {
+            throw DriverConnectionError.refused("The document did not match the expected text. The action will not be repeated.")
+        }
+        try Task.checkCancellation()
+        verified = true
+        let elapsed = started.duration(to: .now)
+        message = "Verified: Jev selected a field, Cua wrote the setup text, and fresh readback matched. Decision + write + readback: \(elapsed)."
     }
 
     private func verifyBrowser(_ connection: CuaConnection, label: String, apiKey: String) async throws {

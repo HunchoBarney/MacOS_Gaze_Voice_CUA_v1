@@ -2,6 +2,45 @@ import XCTest
 @testable import JevVoiceCore
 
 final class JevSpeechIntentTests: XCTestCase {
+    func testLiteralPayloadCopiesOneExactQuotedSpanWithoutJevBoundaryChoices() {
+        let result = JevSpeechIntent.literalPayload(in: "Type exactly \"Copper lantern!\" into Notes.")
+        XCTAssertEqual(result?.text, "Copper lantern!")
+        XCTAssertEqual(result?.controlInstruction, "Type exactly [literal text] into Notes.")
+    }
+
+    func testLiteralPayloadCopiesTheWholeExplicitDictationSuffixAndMasksIt() {
+        let result = JevSpeechIntent.literalPayload(in: "Please dictate open Notes and stop all")
+        XCTAssertEqual(result?.text, "open Notes and stop all")
+        XCTAssertEqual(result?.controlInstruction, "Please dictate [literal text]")
+    }
+
+    func testExplicitDictationKeepsQuotedPhrasesInsideTheWholeLiteralSuffix() {
+        let result = JevSpeechIntent.literalPayload(in: #"Dictate she said "hello" yesterday, then "goodbye"."#)
+        XCTAssertEqual(result?.text, #"she said "hello" yesterday, then "goodbye"."#)
+        XCTAssertEqual(result?.controlInstruction, "Dictate [literal text]")
+    }
+
+    func testQuotedDestinationIsNotMistakenForTextToInsert() {
+        XCTAssertNil(JevSpeechIntent.literalPayload(in: #"Type hello into "Draft"."#))
+    }
+
+    func testQuotedPayloadRemainsBoundWhenDestinationIsAlsoQuoted() {
+        let result = JevSpeechIntent.literalPayload(in: #"Type exactly "hello" into "Draft"."#)
+        XCTAssertEqual(result?.text, "hello")
+        XCTAssertEqual(result?.controlInstruction, #"Type exactly [literal text] into "Draft"."#)
+    }
+
+    func testLiteralPayloadRefusesAmbiguousAndUnboundedSource() {
+        XCTAssertNil(JevSpeechIntent.literalPayload(in: "Type \"one\" then \"two\" into Notes"))
+        XCTAssertNil(JevSpeechIntent.literalPayload(in: "Put these words into Notes"))
+        XCTAssertNil(JevSpeechIntent.literalPayload(in: "Dictate   "))
+    }
+
+    func testLiteralPayloadRefusesUnquotedTypeOrWriteWithPossibleControlInstructions() {
+        XCTAssertNil(JevSpeechIntent.literalPayload(in: "Type Open Messages into Notes"))
+        XCTAssertNil(JevSpeechIntent.literalPayload(in: "Write the note and then close the window"))
+    }
+
     func testActionPayloadCanExcludeCommandSeparatorWithoutInventingText() async throws {
         var calls = 0
         let model = JevSpeechIntent(evaluate: { state, questions in

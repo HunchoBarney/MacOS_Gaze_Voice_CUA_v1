@@ -177,6 +177,20 @@ for line in sys.stdin:
         await controller.shutdown()
     }
 
+    func testAmbiguousUnquotedTextEntryIsRefusedBeforeCuaExecution() async throws {
+        let (controller, capture, file, _) = try setup(intentKind: "textEntry")
+        defer { try? FileManager.default.removeItem(at: file) }
+        controller.begin(); try await until { controller.status == .listening }
+        capture.emit(.partial("Type Open Messages into Notes"))
+        controller.finish(); capture.emit(.final("Type Open Messages into Notes"))
+        try await until { controller.cuaTasks.first?.active == false }
+        let work = try XCTUnwrap(controller.cuaTasks.first)
+        XCTAssertEqual(work.status, "Failed")
+        XCTAssertTrue(work.message.contains("quoted span"))
+        XCTAssertFalse(work.dispatchedEffect)
+        await controller.shutdown()
+    }
+
     func testCorrectionBeforeDispatchCancelsThenRunsReplacement() async throws {
         let (_, _, fixture, _) = try setup()
         defer { try? FileManager.default.removeItem(at: fixture) }

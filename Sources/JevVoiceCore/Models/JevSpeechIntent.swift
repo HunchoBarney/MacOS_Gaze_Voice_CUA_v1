@@ -74,6 +74,73 @@ public final class JevSpeechIntent {
         public let text: String
         public let controlInstruction: String
     }
+
+    /// Copy literal text from an unambiguous source span. This intentionally does
+    /// not ask a model to infer start and end words; an unclear request returns
+    /// nil so the caller can ask the user to restate it.
+    public static func literalPayload(in request: String) -> ExtractedText? {
+        // Explicit dictation makes the whole suffix literal, including quotes
+        // which happen to occur inside the spoken content.
+        let prefixPattern = "^\\s*" + SlotExtractor.literalPrefixPattern
+        guard let expression = try? NSRegularExpression(pattern: prefixPattern, options: .caseInsensitive),
+              let match = expression.firstMatch(in: request, range: NSRange(request.startIndex..., in: request)),
+              let prefixRange = Range(match.range, in: request) else { return quotedTextPayload(in: request) }
+        let prefix = request[prefixRange].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard prefix.hasSuffix("dictate") || prefix.hasSuffix("say") else { return quotedTextPayload(in: request) }
+        let suffix = request[prefixRange.upperBound...]
+        let leading = suffix.prefix { $0.isWhitespace }
+        let trailing = suffix.reversed().prefix { $0.isWhitespace }.reversed()
+        let contentStart = suffix.index(suffix.startIndex, offsetBy: leading.count)
+        let contentEnd = suffix.index(suffix.endIndex, offsetBy: -trailing.count)
+        guard contentStart < contentEnd else { return nil }
+        let content = String(suffix[contentStart..<contentEnd])
+        let control = String(request[..<prefixRange.upperBound]) + String(leading) + "[literal text]" + String(trailing)
+        return ExtractedText(text: content, controlInstruction: control)
+    }
+
+    private static func quotedTextPayload(in request: String) -> ExtractedText? {
+        var quoted: [(text: String, fullRange: Range<String.Index>)] = []
+        var cursor = request.startIndex
+        while cursor < request.endIndex {
+            let opening = request[cursor]
+            let closing: Character
+            switch opening {
+            case "\"": closing = "\""
+            case "“": closing = "”"
+            default:
+                cursor = request.index(after: cursor)
+                continue
+            }
+            let contentStart = request.index(after: cursor)
+            var end = contentStart
+            while end < request.endIndex, request[end] != closing { end = request.index(after: end) }
+            guard end < request.endIndex else { return nil }
+            let text = String(request[contentStart..<end])
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            quoted.append((text, cursor..<request.index(after: end)))
+            cursor = request.index(after: end)
+        }
+        guard let payload = quoted.first else { return nil }
+
+        let prefix = String(request[..<payload.fullRange.lowerBound])
+        let textEntryPrefix = #"(?i)^\s*(?:please\s+)?(?:(?:can|could|would|will)\s+you|I\s+(?:want|would\s+like)\s+you\s+to|I['’]d\s+like\s+you\s+to)?\s*(?:please\s+)?(?:type|write|enter|insert|paste|dictate|say)\b(?:\s+exactly)?\s*$"#
+        let embeddedTextEntryPrefix = #"(?i)\b(?:type|write|enter|insert|paste)\s+exactly\s*$"#
+        let searchPrefix = #"(?i)^\s*(?:please\s+)?(?:search(?:\s+the\s+web)?(?:\s+for)?|find(?:\s+for)?)\s*$"#
+        let isTextEntry = prefix.range(of: textEntryPrefix, options: .regularExpression) != nil
+            || prefix.range(of: embeddedTextEntryPrefix, options: .regularExpression) != nil
+        let isSearchQuery = prefix.range(of: searchPrefix, options: .regularExpression) != nil
+        guard isTextEntry || isSearchQuery else { return nil }
+
+        if quoted.count > 1 {
+            guard quoted.count == 2 else { return nil }
+            let between = String(request[quoted[0].fullRange.upperBound..<quoted[1].fullRange.lowerBound])
+            guard between.range(of: #"(?i)^\s*(?:in|into|at|to)\s+(?:the\s+)?$"#, options: .regularExpression) != nil else { return nil }
+        }
+
+        let control = String(request[..<payload.fullRange.lowerBound]) + "[literal text]" + String(request[payload.fullRange.upperBound...])
+        return ExtractedText(text: payload.text, controlInstruction: control)
+    }
+
     public func textPayload(request: String, purpose: String) async throws -> String {
         let source = try await extractText(request: request, purpose: purpose).text
         // Word boundaries cannot distinguish a command's separator comma from

@@ -1,23 +1,52 @@
 # Jarvis execution simplification plan
 
-Status: 2026-09-22 reviewed candidate checkpoint. Baseline/replacement map and
-selected Swift/stdio boundary recorded; native and quoted browser workflows have
-limited live proofs. Scroll readback now has a separately preserved, offline-tested
-Driver candidate; one isolated repeated-scroll live trial now passes. The bundled
-Codex CLI's permissions now report granted. Immediate native activation passes,
-and a separately preserved menu-focus repair now creates a document and restores
-prior foreground ownership in scoped live checks. Full native acceptance still
-fails: payload truncation followed by a changed-label duplicate insertion. Payload
-selection and replay identity remain unreliable. Production replacement/deletion
-remain incomplete.
-See [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
+Status: 2026-09-24, updated after final scoped packaging and the locked-session
+check. Steps 1–2 have a recoverable baseline and installed-contract inventory for
+all 58 Driver tools. Step 3 provisionally selects Swift/stdio. One bounded
+observe–choose–act–verify loop serves normal runtime requests; new action
+families remain behind an isolated candidate surface. Real Jev/Cua evidence
+includes exact native text with preserved seed content, quoted browser
+search/navigation, direct quoted navigation, an approved single-file upload,
+hover, an accepted JavaScript dialog, a native new-document workflow, and the
+pinned-scroll refusal after one observed 500 px effect.
+
+The pinned Driver still cannot verify repeated browser scrolling; the isolated,
+uninstalled candidate passes two effects with independent positions `[500,
+1000]`. The latest setup code writes its disposable fixture under the system
+temporary directory, follows the installed `launch_app` schema, and requires an
+exact verified foreground window before reading or typing. The final opt-in
+setup check could not be completed because macOS reports the console session is
+locked: Cua listed the disposable TextEdit windows, returned an empty AX tree,
+and could not bring the exact window forward. No text or key was sent. The Cua
+permission probe itself reports Accessibility and Screen Recording granted.
+
+The final release app and archive are built and signature/extraction verified,
+but packaged UI and task acceptance remain open. The full Swift suite passes 317
+tests with 31 opt-in skips, and all six tooling tests pass in workspace-local
+verification. Default `make test` remains blocked before compilation by the
+preserved `.build` cache pointing at the prior workspace. No retired production
+path or protection has been removed. Steps 4, 6, 7, 8 and the final gates remain
+open; see [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
 
 **Goal:** replace overlapping Jarvis execution machinery with existing Cua/Jev
 capabilities, keep one production execution loop, and preserve the existing
 voice/UI system. Prove replacements before removing current protections.
 
-**First implementation deliverable:** a replacement map, a selected integration,
-and a proven native/browser execution path with failure-path evidence.
+**Next deliverable:** with the Mac unlocked, finish the exact packaged-app setup
+and task checks plus the remaining live native/browser and lifecycle proofs.
+Separately establish a supported pinned-runtime scroll postcondition or keep the
+refusal guard, and collect matched measurements. Do not retire a protection until
+its replacement passes the corresponding success and failure checks.
+
+**Current priority:** the installed Cua pin cannot independently confirm the
+browser scroll outcome required for safe repetition. The preserved local
+scroll-readback patch is uninstalled. Its embedded candidate reports current
+Accessibility and Screen Recording grants as false, but a fresh loopback DOM
+scroll proof succeeded; this does not establish candidate native-action
+readiness. Do not change the pin or automate TCC. Continue independent proofs and
+keep candidate routes isolated until representative action families and packaged
+acceptance meet their gates. Treat setup/diagnostic tools and exact user-supplied
+arguments separately from ready-to-dispatch observed actions.
 
 **Final result:** a smaller Jarvis that delegates everything Cua/Jev can reliably
 own, with custom code retained only for evidenced gaps.
@@ -79,19 +108,19 @@ These are planning findings, not live validation of the installed runtime.
 
 ## 1. Establish scope, baseline, and Conductor workspace
 
-- [ ] Define success as a smaller production execution system that delegates
+- [x] Define success as a smaller production execution system that delegates
   proven responsibilities to Cua/Jev while retaining existing voice, UI, settings,
   credentials, authorization, and task behavior.
-- [ ] Record the current source revision, tracked/untracked changes, local Cua
+- [x] Record the current source revision, tracked/untracked changes, local Cua
   modifications, selected Driver identity, packaged app identity, and recoverable
   baseline. Preserve existing uncommitted workspace-setup work.
-- [ ] Use the configured Conductor setup and verify supporting source and generated
+- [x] Use the configured Conductor setup and verify supporting source and generated
   outputs are workspace-local. A setup command that skips missing assets is not
   proof that the workspace can build the selected integration.
-- [ ] Keep shared reference assets read-only. Never use the legacy cache path for
+- [x] Keep shared reference assets read-only. Never use the legacy cache path for
   workspace outputs. Preserve ignored Cua source changes as a reviewed patch when
   sharing or backing them up in Git.
-- [ ] Run relevant baseline checks and record known failures separately from
+- [x] Run relevant baseline checks and record known failures separately from
   regressions. Preserve secrets in place rather than exporting them into evidence.
 
 **Deliverable:** a reproducible baseline, scoped acceptance checklist, and recovery
@@ -111,7 +140,7 @@ Inspect the complete execution path, starting with:
 - The pinned `development/JevVoice/cua-source/libs/cua-driver/examples/jev-use/`
   implementation, its tests, and selected upstream changes.
 
-- [ ] Give every candidate replacement a row with the following fields.
+- [x] Give every candidate replacement a row with the following fields.
 
 | Field | Required content |
 | --- | --- |
@@ -123,10 +152,10 @@ Inspect the complete execution path, starting with:
 | Deletion evidence | What must pass before the Jarvis mechanism can go |
 | Remaining host work | Any evidenced gap and why it remains necessary |
 
-- [ ] Distinguish available upstream, present in our source, installed, and verified
+- [x] Distinguish available upstream, present in our source, installed, and verified
   through Jarvis. Do not assume current upstream documentation describes the pinned
   runtime.
-- [ ] Investigate candidates until the evidence supports a decision. Keep the
+- [x] Investigate candidates until the evidence supports a decision. Keep the
   inventory bounded to responsibilities this task can replace.
 
 **Gate:** each proposed deletion has a named replacement and a concrete proof
@@ -134,7 +163,7 @@ requirement.
 
 ## 3. Select one reusable execution integration
 
-- [ ] Evaluate the full external `jev-use` approach first, including useful
+- [x] Evaluate the full external `jev-use` approach first, including useful
   mechanisms from the upstream proposal. Compare implementation boundaries using
   the same requirements below.
 
@@ -149,26 +178,67 @@ requirement.
 | Packaging | Runs from the packaged app without a developer-shell dependency |
 | Maintenance | Less custom code and coordination across the entire system |
 
-- [ ] Choose the language/process boundary after this comparison. Preserve upstream
+- [x] Choose the language/process boundary after this comparison. Preserve upstream
   code directly where practical. If a native adaptation is smaller overall,
   document what is adapted, why, and which upstream tests/contracts transfer.
-- [ ] Count custom code, local upstream patches, runtime dependencies,
+- [x] Count custom code, local upstream patches, runtime dependencies,
   startup/shutdown handling, IPC, and packaging effort together. A reduction in
   Swift files alone does not establish simplification.
-- [ ] Compare another framework only when a specific capability demonstrably
+- [x] Compare another framework only when a specific capability demonstrably
   replaces additional machinery. Changing Jev remains a separate product decision.
-- [ ] Pin the selected revisions and dependencies. Do not blindly adopt the
+- [x] Record the selected Driver pin and the current `jev-latest` model alias;
+  the alias is not an immutable revision. Do not blindly adopt the
   restricted chooser CLI, rewrite everything in Swift, or add a Python service
   before assessing the integration boundary.
 
-**Gate:** one selected approach, pinned dependencies, a short decision record, and
-explicit remaining gaps.
+**Checkpoint:** the Swift/stdio boundary is provisionally selected and its
+dependencies and remaining gaps are recorded. Final adoption still requires the
+live integration, reliability, and packaging gates below; do not describe the
+Jev alias as a pinned model revision.
 
-## 4. Prove native and browser replacement workflows
+## 4. Expand grounded Cua choices and prove native/browser workflows
 
-- [ ] Build an isolated candidate using existing seams where possible. Keep
-  candidate selection explicit during development; failures must not silently
-  fall back to another executor.
+- [x] List the installed pinned Driver's 58 advertised tool names and assign
+  preliminary dispositions in the replacement record. This is not a validated
+  contract or complete action-coverage inventory.
+- [x] Check the installed input/output, targeting, refusal, background/focus,
+  session and verification contracts for each applicable family. Record whether
+  it has a grounded route, a required integration gap, or a justified exclusion.
+  Distinguish explicit user-directed window changes from excluded automatic
+  arrangement. Browser preparation/attachment is a lifecycle prerequisite for
+  normal browser work, not merely a setup diagnostic. Include session/cursor
+  controls in the host capability map even where they are not Jev choices.
+- [x] Stage new choices in an isolated candidate before promoting them to the
+  normal execution path. Move the current browser pointer additions behind the
+  candidate seam before packaging or releasing the app: they currently sit in the
+  same catalog source but are visible only on the candidate surface. The runtime
+  defaults to production; candidate effects require an explicit live-test route.
+  Candidate failures must not silently fall back to another executor.
+- [x] Add immutable task/revision-bound candidate IDs, grouped/paged choices,
+  typed observed arguments, and exact-span binding for quoted literal payloads.
+  Automated catalog and parser tests cover the candidate seam; they do not
+  establish all live action-family effects.
+- [x] Expand native and browser choices using the Driver's actual capability and
+  observation contracts. Present only actions with a resolved target and typed
+  arguments. Jev selects one immutable candidate ID, reobserve or abstain;
+  Jarvis validates task authority and Cua validates the supplied target at dispatch.
+  Bind URLs, keys, values, file paths, coordinates and dialog decisions from an
+  unambiguous user-owned span or current observation, with the originating task
+  revision. Ambiguous or truncated payloads abstain or ask for clarification.
+  Apply the existing confirmation and privacy rules before dispatch, including
+  exact confirmation for destructive operations. Do not enable high-impact or
+  ungrounded calls through model-produced tool JSON.
+- [x] Keep choices manageable. Jev Choice accepts at most 255 options; when a
+  snapshot has more candidates, count action and control choices together, then
+  select a relevant target/group before its action without silently discarding
+  controls. Automated coverage of 600 actions proves every target remains
+  reachable through paging and preserves no-match/reobserve paths. Dense live
+  snapshots and candidate/context-size comparisons remain unmeasured.
+- [ ] Prove representative actions and refusals from the selected native and
+  browser families, including keyboard/value, pointer/drag, menu, navigation,
+  text, dialog and file operations where the installed contract supports them.
+  Record supported background routing and the cases that visibly wait for
+  foreground participation. Tool advertisement alone is not effect proof.
 - [ ] Prove the following workflows sequentially against disposable content.
 
 | Workflow | Observable proof |
@@ -179,6 +249,19 @@ explicit remaining gaps.
 | Changed target | Stale references are rejected or refreshed without switching destinations |
 | Cancellation | No further dispatch after cancellation is acknowledged; in-flight effects are reported accurately |
 | Timeout after dispatch | State is inspected; the action is not automatically repeated |
+
+Current evidence: exact quoted browser search, direct navigation, upload, hover,
+and dialog each have one real Jev/Cua trial on the pinned installed Driver. Exact
+native text passed once through the production runtime with the seed preserved;
+a separate native new-document trial also passed after a test-only nine-second
+settle, preserving its seed. On the pinned Driver, a repeated-scroll trial now
+ends with one observed 500 px effect and an explicit incomplete refusal before
+any later mutation. The same workflow passed on the isolated patched Driver with
+positions `[500, 1000]`; the patch is not installed or enabled in production.
+Browser stale-tab live behavior, live cancellation/timeout inspection, and broad
+native key/value/drag proof remain open. The older unquoted write form is now
+refused unless it is one quoted span or explicitly begins with `dictate`/`say`;
+unquoted browser search extraction is not established.
 
 The execution sequence is: accept the request → observe → obtain a grounded Jev
 decision → validate authority and arguments → dispatch through Cua → consume the
@@ -192,9 +275,13 @@ outcome → verify or reobserve → continue or finish.
   desktop lock described in DEVELOPMENT.md. One agent owns live desktop testing
   at a time.
 
-**First implementation deliverable:** the replacement map, selected integration,
-native/browser proofs, and failure-path evidence. Report this checkpoint and
-continue within the authorized scope.
+**Step 4 gate:** the coverage map distinguishes working routes, required blockers,
+and justified exclusions. An unresolved required action family does not pass this
+gate. Selected IDs resolve to original Cua arguments; representative native and
+browser effects, refusals, and background/focus behavior have live evidence;
+dense candidate sets do not silently hide controls. The exact native text/replay
+workflow must pass before production promotion. Report interim checkpoints without
+claiming this gate has passed.
 
 ## 5. Connect the existing Jarvis system to the single loop
 
@@ -210,21 +297,30 @@ Keep ownership explicit:
 | Minimal host coordination | Conflicts and lifecycle obligations not covered underneath |
 | Existing optional provider | Requested text generation and existing advisory behavior |
 
-- [ ] Define the integration contract using existing types where possible. Preserve
+- [x] Define the integration contract using existing types where possible. Preserve
   task identity, request revisions, cancellation, approval scope, and terminal
-  outcomes.
-- [ ] Keep one authority over desktop execution. The loop can make several bounded
+  outcomes. `CuaVoiceRuntime.Work.id` and speech revisions remain host-owned;
+  `CuaActionOwner` binds candidate IDs to the work UUID and revision. Existing
+  runtime/controller, cancellation, correction, provider, and approval tests pass
+  in the 2026-09-23 full suite.
+- [x] Keep one authority over desktop execution. The loop can make several bounded
   judgments and perform necessary verification. Jarvis must not independently
   maintain another planner deciding the next desktop action or declaring the same
-  goal complete.
-- [ ] Preserve working speech behavior at this boundary. Adapt how completed
+  goal complete. Normal runtime work is delegated to one `CuaTaskAgent` loop;
+  task relationship routing remains a host boundary decision.
+- [x] Preserve working speech behavior at this boundary. Adapt how completed
   requests and corrections enter execution without redesigning capture or the UI.
-- [ ] Preserve provider configuration and credential handling. Generated plans or
+- [x] Preserve provider configuration and credential handling. Generated plans or
   advice remain data subject to the same execution and authorization checks.
 
-**Gate:** normal Jarvis requests reach the candidate path, and progress,
-clarification, cancellation, follow-ups, and provider results remain correctly
-associated with their task.
+**Gate status (2026-09-23):** normal `CuaVoiceRuntime` requests use the selected
+observe–choose–act–verify integration, not a second desktop planner. Here,
+“candidate path” means that selected integration; experimental action families
+remain isolated behind `CuaActionSurface.candidate`. One live Jev/Cua runtime
+trial verified exact native text with the seed preserved, and automated runtime,
+controller, correction, cancellation, approval, and provider suites pass. Broader
+live follow-up/correction/provider behavior and packaged-app acceptance remain
+Step 7/8 validation work.
 
 ## 6. Replace overlapping mechanisms with proof attached to each removal
 
@@ -238,7 +334,7 @@ Use the following order where dependencies permit:
 | Predicted window creation/window-set tracking | Rediscovery identifies the requested new document without selecting unrelated windows |
 | Ad hoc outcome handling | Structured outcomes preserve refusal, partial effect, uncertainty, and required recovery |
 | Custom polling | Supported verification expresses the same condition and preserves its failure semantics |
-| Completed-action descriptions | Dispatch identity prevents replay while allowing intentional repeated actions |
+| Completed-action descriptions | An observed outcome plus explicit additional intent permits repetition; uncertain dispatch remains suppressed until state is inspected. A dispatch UUID labels history but does not prevent replay |
 | Duplicated Jev plumbing | The selected integration owns the same decision and retains relevant evidence |
 | Whole-app locking | Narrower resources are independently addressable and global focus/clipboard conflicts remain protected |
 
@@ -257,15 +353,25 @@ mechanism has a specific responsibility.
 
 ## 7. Validate behavior and measure simplification
 
-- [ ] Start with relevant existing suites for task execution, action catalogs,
+- [x] Start with relevant existing suites for task execution, action catalogs,
   browser targeting, voice-controller integration, generation, approval, launch
   correction, and task coordination. Carry over useful upstream contract tests.
   Add coverage for actual gaps discovered during replacement.
-- [ ] Exercise the changed production path explicitly. Injected callbacks and mock
-  decisions do not establish live Jev behavior or packaged application acceptance.
+- [x] Exercise the changed production path explicitly. A real Jev decision through
+  `CuaVoiceRuntime` and installed Cua inserted one exact quoted native literal and
+  preserved the seed. This proves one runtime workflow; it does not establish
+  packaged application acceptance.
+- [x] Prove two unrelated background text tasks can progress at once in distinct
+  disposable app windows; both addressed bodies were checked and foreground stayed
+  on the prior app. This does not prove same-app window concurrency or visible
+  cursor identity.
 - [ ] Cover native documents, browser navigation and repeated actions, follow-ups,
   corrections, cancellation, drafts remaining unsent, stale observations,
-  uncertain outcomes, and concurrent tasks preserving user focus/text.
+  uncertain outcomes, and concurrent tasks preserving user focus/text. For shared
+  desktop work, show two distinct Jarvis tasks with matching Cua session/cursor
+  identities. Prove independent addressed windows can progress concurrently where
+  Cua supports background input; serialize actual focus, menu, clipboard and
+  same-document conflicts. Visible cursors alone do not prove safe concurrency.
 - [ ] Compare baseline and candidate using matched fixtures and initial states.
 
 | Measure | Reporting rule |
@@ -279,36 +385,72 @@ mechanism has a specific responsibility.
 - [ ] Repeat representative workflows and report sample counts. Small samples
   support a preliminary comparison, not a reliable p95. Explain increases in calls
   or latency necessary for correctness.
-- [ ] Distinguish automated simulations, recorded-audio checks, observed app
+- [x] Distinguish automated simulations, recorded-audio checks, observed app
   behavior, and user-reported physical input. Preserve pre-existing failures as
-  separate evidence.
-- [ ] Run `make test` for the integrated change. Broaden or repeat checks when
-  edits, failures, or unresolved risks justify it.
+  separate evidence. Current evidence labels automated and live-fixture results;
+  no recorded-audio or physical Fn/microphone result is claimed.
+- [x] Run the current integrated Swift and tooling suites. On 2026-09-24, all six
+  tooling tests passed; the default `make test` Swift invocation failed before
+  compilation because `.build` contains a module cache from the prior workspace
+  path. Without deleting that preserved cache, `swift test --scratch-path
+  .context/execution-simplification/swift-scratch-native-new-document` passed 317
+  tests, 31 opt-in skips, zero failures. The new setup-flow opt-in is among the
+  skipped desktop checks. Broaden or repeat checks when edits, failures, or
+  unresolved risks justify it.
 
 **Gate:** agreed changed behaviors pass, existing supported behavior is preserved,
 and reduced complexity is demonstrated without hiding failures.
 
 ## 8. Review, remove the retired path, and deliver
 
-- [ ] Review the complete change against the preserved baseline, including ignored
-  Cua source patches and packaging changes.
-- [ ] Prioritize late actions after cancellation, duplicate mutations, incorrect
+- [x] Review the complete change against the preserved baseline, including ignored
+  Cua source patches and packaging changes. A fresh read-only review of
+  `99d66cf..1d8d841` found no Critical, three Important and three Minor issues.
+  All three Important findings received failing-first regressions and focused fixes;
+  the full regression suite passes. Per the review workflow, no second review was
+  requested. Deferred Minor findings and the reviewer’s Declined-to-judge rulings
+  are recorded in the ignored SDD progress ledger.
+- [x] Prioritize late actions after cancellation, duplicate mutations, incorrect
   destinations, false completion, and interference with user focus or edits.
-- [ ] Resolve material findings and rerun affected checks.
+  The review-fixed native rebind preserves selected-control semantics; unresolved
+  scroll outcomes stop the task before any subsequent action or success claim.
+- [x] Resolve material findings and rerun affected checks. The three Important
+  regressions passed in the focused suites and `make test` passed afterward.
 - [ ] Remove the superseded production loop, duplicate state, and unused
   dependencies after replacement proof. Preserve useful regression coverage and
   recovery artifacts. Finish with one production execution path.
-- [ ] Build with `make app`, verify the bundle signature, and exercise affected
-  behavior from the packaged app. If the selected approach adds a helper, prove
-  startup, shutdown, credential handling, and dependencies without relying on the
-  development shell.
-- [ ] Record adopted revisions, local repairs, test commands/results, measured
-  comparisons, retained gaps, and rollback instructions.
-- [ ] Commit focused changes without absorbing unrelated work.
+- [x] Build with `make dist`, verify the candidate bundle signature, and preserve
+  an archive plus prior packages for recovery. The final r2 package uses the
+  unchanged app identity `com.chriswozniczek.jevvoice`, executable SHA-256
+  `476ce17968443f35566f66641308b54a40bcaaf58136bdc9c5e99806f5d7559b`, and ZIP
+  SHA-256 `07858bd753c5d43eadec8c7b2a058d36a4927fc498a5c890f11400579059ea2b`.
+  Strict signature verification, archive integrity, extraction, and executable
+  comparison pass. It is under
+  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-24-final-r2/`.
+- [ ] Open the exact final package and inspect its visible setup state. An earlier
+  same-day bundle was launched from its exact path, but CUA app lookup timed out
+  and `System Events` denied assistive access. The final r2 package was not
+  launched after macOS reported the console session locked.
+- [ ] Verify setup and pass a desktop task through the exact packaged app. The
+  setup-flow live test on the corrected temp-path/schema code found TextEdit
+  windows but no resolvable AX window; it sent no text. A direct exact-window
+  focus probe returned an unverified partial result. The macOS session was
+  locked, so final-code setup and package task acceptance remain unproven.
+- [ ] Record matched baseline/candidate comparisons and explain their limits. No
+  controlled matched set exists yet; current samples and the missing baseline
+  model/Driver counts are recorded in `docs/voice-ui/EVIDENCE.md`.
+- [x] Record build identity, local repairs, test commands/results, retained gaps,
+  and rollback instructions in the scoped evidence. The prior app recovery archive
+  and verified extraction are documented there. The false-completion finding and
+  its host refusal fix are included; matched performance comparison remains open.
+- [ ] Commit focused changes without absorbing unrelated work after final review.
+  No push is authorized. Package UI/task acceptance and the other open gates below
+  remain incomplete.
 
-**Completion:** the selected replacement is integrated and verified, superseded
-production machinery is removed, packaging works, and evidence explains what
-became simpler. Unrelated migration requirements retain their existing status.
+**Completion criteria:** the selected replacement is integrated and verified,
+superseded production machinery is removed, packaging and packaged-task checks
+pass, and evidence explains what became simpler. These criteria are not yet met.
+Unrelated migration requirements retain their existing status.
 
 ## Conductor operating arrangement
 
@@ -333,29 +475,91 @@ record; they do not replace it.
 
 ## Execution prompt
 
-> Implement the approved Jarvis execution simplification. Preserve the existing
-> voice/UI system and use the broader migration specification as a behavioral
-> constraint.
+Copy the prompt below into a local Conductor implementation session containing
+this workspace's changes. The document alone does not start an agent. The
+prompt authorizes completion of this **scoped simplification**, with the active
+voice specification as a constraint; it does not close unrelated migration gates.
+
+> Complete the approved Jarvis execution simplification end to end in this local
+> workspace. Work autonomously through implementation, verification, review,
+> packaging, and delivery while I am away. Do not stop at milestones for routine
+> decisions or return a partial implementation as if it were finished. Keep me
+> informed of material findings, then give a final report when the scoped outcome
+> is achieved or a genuine external prerequisite prevents further useful work.
 >
-> Start by producing the replacement map and proving one native and one browser
-> workflow through the selected Cua/Jev integration. Choose the integration
-> boundary from actual source, runtime contracts, and total maintenance cost.
+> Read `AGENTS.md`, `README.md`, relevant `docs/ARCHITECTURE.md`,
+> `docs/DEVELOPMENT.md`, this plan, its replacement record, and the applicable
+> `docs/voice-ui/SPEC.md` requirements. Review the current working tree and
+> preserve every existing tracked, untracked, and ignored change, credential,
+> setting, app identity, Driver pin, and recovery artifact. Use the recorded
+> baseline and setup rather than restarting the investigation. The Swift/stdio
+> integration choice is provisional until integrated evidence supports it.
 >
-> Continue through integration, focused verification, review repairs, removal of
-> proven duplicate machinery, and packaged delivery. Make routine reversible
-> implementation decisions without milestone approval requests. Report material
-> decisions and evidence as you proceed.
+> First complete action coverage. Check the installed pinned Driver's actual
+> contracts, then make applicable native and browser actions available to Jev as
+> bounded, grounded choices. Each choice must carry its original Cua tool,
+> arguments, exact observed target, relevant preconditions, and task/revision
+> ownership outside the model answer. Bind text, URLs, keys, coordinates, paths,
+> dialogs, and other arguments from unambiguous user input or current observation;
+> ask or abstain on missing, conflicting, or truncated input. Handle more than
+> 255 potential choices without silently hiding controls. Include browser
+> preparation, session/cursor lifecycle, and explicit user-directed window
+> changes in the appropriate host paths. Stage unproven choices behind the
+> isolated candidate seam before packaging. Apply the existing confirmation,
+> privacy, focus, and cancellation rules to every new action family.
 >
-> Preserve protections until their replacements are proven. Keep one production
-> execution loop. Retain custom code only for demonstrated gaps. Do not expand
-> this task into unrelated migration work.
+> Prove the expanded choices with real Cua/Jev effects and refusals using
+> disposable native and browser content. Resolve the recorded truncated-text,
+> changed-label duplicate-insertion, repetition, stale-target, and uncertain-
+> outcome failures. A dispatch ID, accepted call, or model completion claim is
+> not proof of the requested effect. Never automatically repeat an uncertain
+> mutation. Review the current 16-pass loop as an implementation limit, measure
+> real workflows, and retain a bounded stopping policy that does not silently
+> truncate valid work.
 >
-> Keep live desktop checks explicitly authorized and serialized. If an external
-> prerequisite blocks a check, continue independent work and identify precisely
-> what remains unverified.
+> Integrate one production observe–choose–act–verify loop. Keep Cua responsible
+> for supported observation, targeting, actions, verification, sessions, and
+> visual cursors; Jev chooses from grounded options and judges progress; Jarvis
+> retains voice/UI, exact user content, goal/task identity, authorization,
+> cancellation, and conflicts. Preserve follow-ups, corrections, optional text
+> generation, unsent drafts, and provider credentials. Prove two distinct tasks
+> can progress in independently addressable windows when Cua supports background
+> input, while focus, menus, clipboard, and same-document conflicts wait or
+> serialize. Multiple visible cursors alone are insufficient proof.
 >
-> Finish when the scoped acceptance criteria pass, the retired production path is
-> removed, and packaging and recovery are verified.
+> For every proposed deletion in Step 6, name its replacement, prove the relevant
+> success and failure behavior, remove only the superseded production mechanism,
+> and rerun affected checks. Keep request-specific protections that Cua cannot
+> express. Finish with one production desktop executor and no silent fallback.
+> Do not resume unrelated P0–P5 migration work merely to enlarge this task.
+>
+> Check your own work adversarially: inspect complete affected paths and the
+> final diff for duplicate effects, incorrect destinations, false success,
+> late actions after cancellation, lost user text, focus theft, credential leaks,
+> and concurrency conflicts. Run focused tests as changes land, `make test` for
+> the integrated result, and the Step 4/7 disposable live workflows through the
+> changed production path. Compare baseline and final task success, failures,
+> latency, model/Driver calls, and total maintenance burden using matched
+> fixtures; state sample sizes and limits. Build the packaged app with `make app`,
+> verify its signature, launch and exercise the affected path from that bundle,
+> and preserve a recoverable previous package before any replacement. Record
+> exact commands, build identities, observed results, regressions, unresolved
+> gaps, and rollback steps in the scoped evidence ledger. Fix material findings
+> and repeat only checks affected by the fix.
+>
+> The replacement record documents prior authorization for serialized live
+> desktop checks. Use the shared desktop lock, disposable content, and a fresh
+> permission probe. Never send real messages, purchase, or alter personal
+> content as a test. If macOS requires a new user-controlled grant or another
+> external prerequisite blocks a check, continue all independent work first.
+> Do not treat silence, elapsed time, or a failed check as approval or success.
+>
+> Stop only when the scoped acceptance gates pass, the retired production path
+> is removed, the packaged app and recovery path are verified, and evidence
+> supports a finished result. If an external prerequisite still prevents
+> completion after all independent work is exhausted, report the exact blocker,
+> what passed and failed, and the one action needed from me. Do not claim the
+> broader migration or physical Fn/microphone acceptance without its own proof.
 
 ## Research references
 

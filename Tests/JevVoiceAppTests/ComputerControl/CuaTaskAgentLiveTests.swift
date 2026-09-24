@@ -89,13 +89,21 @@ final class CuaTaskAgentLiveTests: XCTestCase {
         let label = "Jarvis agent fixture \(UUID().uuidString.prefix(8))"
         _ = try await connection.call("start_session", arguments: ["session": .string(label)])
         do {
+            let permissions = try await connection.call("check_permissions", arguments: ["prompt": .bool(false), "session": .string(label)])
+            print("Native fixture Driver permissions:", permissions["accessibility"]?.bool ?? false, permissions["screen_recording"]?.bool ?? false)
             let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("Jarvis-Agent-\(UUID()).txt")
             let originalText = createDocument ? "Existing disposable document must remain unchanged." : ""
             try originalText.write(to: fixture, atomically: true, encoding: .utf8)
             let launched = try await connection.call("launch_app", arguments: ["bundle_id": .string("com.apple.TextEdit"), "urls": .array([.string(fixture.path)]), "session": .string(label)])
             let pid = try XCTUnwrap(launched["pid"]?.integer)
-            let listed = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(label)])
-            let matches = (listed["windows"]?.array ?? []).filter { $0["title"]?.string?.contains(fixture.lastPathComponent) == true }
+            var matches: [JSONValue] = []
+            for _ in 0..<50 {
+                let listed = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(label)])
+                matches = (listed["windows"]?.array ?? []).filter { $0["title"]?.string?.contains(fixture.lastPathComponent) == true }
+                if matches.count == 1 { break }
+                guard matches.isEmpty else { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
             guard matches.count == 1 else { throw DriverConnectionError.refused("Disposable native fixture window is ambiguous.") }
             let window = try XCTUnwrap(matches.first?["window_id"]?.integer)
             if ProcessInfo.processInfo.environment["JARVIS_CUA_SETTLED_FIXTURE"] == "1" {
@@ -105,10 +113,46 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                 try await Task.sleep(for: .seconds(9))
             }
             if createDocument {
-                let initial = try await connection.call("get_window_state", arguments: ["pid": .number(Double(pid)), "window_id": .number(Double(window)), "include_screenshot": .bool(false), "session": .string(label)])
-                let fields = (initial["elements"]?.array ?? []).filter { $0["role"] == .string("AXTextArea") }
+                var fields: [JSONValue] = []
+                var lastInitial: JSONValue?
+                for _ in 0..<150 {
+                    let initial = try await connection.call("get_window_state", arguments: ["pid": .number(Double(pid)), "window_id": .number(Double(window)), "include_screenshot": .bool(false), "session": .string(label)])
+                    lastInitial = initial
+                    fields = (initial["elements"]?.array ?? []).filter { $0["role"] == .string("AXTextArea") }
+                    if fields.count == 1, fields[0]["value"] == .string(originalText) { break }
+                    let currentValue = fields.first?["value"]?.string
+                    guard currentValue == nil || currentValue?.isEmpty == true else {
+                        throw DriverConnectionError.refused("The disposable source contains unexpected content; the agent will not run.")
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
                 guard fields.count == 1, fields[0]["value"] == .string(originalText) else {
-                    throw DriverConnectionError.refused("The disposable source changed during setup; the agent will not run.")
+                    let lengths = fields.map { $0["value"]?.string?.count ?? -1 }
+                    let elements = lastInitial?["elements"]?.array ?? []
+                    let roleCounts = Dictionary(grouping: elements.compactMap { $0["role"]?.string }, by: { $0 })
+                        .mapValues(\.count)
+                        .sorted { $0.key < $1.key }
+                        .map { "\($0.key):\($0.value)" }
+                    let windowSummary = matches.first.map {
+                        let onScreen = $0["is_on_screen"]?.bool.map { String($0) } ?? "<missing>"
+                        return "id=\($0["window_id"]?.integer ?? -1), title=\($0["title"]?.string ?? "<missing>"), onScreen=\(onScreen)"
+                    } ?? "<missing>"
+                    let stateKeys = lastInitial?.object.map { Array($0.keys).sorted() } ?? []
+                    let degraded = lastInitial?["degraded_reason"]?.string ?? "<none>"
+                    let complete = lastInitial?["elements_complete"]?.bool.map { String($0) } ?? "<missing>"
+                    let safeElements = elements.prefix(30).map { element -> String in
+                        let role = element["role"]?.string ?? "?"
+                        let labelLength = element["label"]?.string?.count ?? -1
+                        let identifierLength = element["identifier"]?.string?.count ?? -1
+                        let valueLength = element["value"]?.string?.count ?? -1
+                        return "\(role){labelLength:\(labelLength),identifierLength:\(identifierLength),valueLength:\(valueLength)}"
+                    }
+                    print("Native fixture initial-state diagnostic:",
+                          "window=\(windowSummary)", "stateKeys=\(stateKeys)",
+                          "degraded=\(degraded)", "complete=\(complete)",
+                          "elementCount=\(elements.count)", "roles=\(roleCounts)",
+                          "safeElements=\(safeElements)")
+                    throw DriverConnectionError.refused("The disposable source did not reach the exact initial state; the agent will not run (fields: \(fields.count), value lengths: \(lengths), element count: \(elements.count)).")
                 }
             }
             let client = JevClient(apiKey: key)
@@ -149,7 +193,7 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                 try await JevSpeechIntent(client: client).textPayload(request: request, purpose: purpose)
             })
             let start = ContinuousClock.now
-            _ = try await agent.run(goal: createDocument ? "Open TextEdit, create a new document, and insert exactly \"copper lantern beside the window\"." : "In TextEdit, please type copper lantern beside the window into the blank document.", context: "The provided window is the existing starting document. If asked to create a new document, do not reuse this one. It is a disposable fixture.", progress: { print("Fixture step:", $0) })
+            _ = try await agent.run(goal: createDocument ? "In TextEdit in the background, create a new document and insert exactly \"copper lantern beside the window\"." : "In TextEdit, please type copper lantern beside the window into the blank document.", context: "The provided window is the existing starting document. If asked to create a new document, do not reuse this one. It is a disposable fixture.", progress: { print("Fixture step:", $0) })
             let resultWindow = try XCTUnwrap(agent.windowID)
             if createDocument { XCTAssertNotEqual(resultWindow, window, "The request requires a new document, not an edit to the fixture") }
             let observed = try await connection.call("get_window_state", arguments: ["pid": .number(Double(pid)), "window_id": .number(Double(resultWindow)), "include_screenshot": .bool(false), "session": .string(label)])
