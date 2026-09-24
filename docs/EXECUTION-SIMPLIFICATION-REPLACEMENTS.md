@@ -43,6 +43,10 @@ Steps 4, 6, 7, or 8.
   executable comparison pass. The final r2 app was not launched because the
   console session was locked. Packaged setup state and task acceptance remain
   open; `DELIVERY.md` records the artifact.
+- **Focused source delivery:** commit `5bec4a6` contains the scoped source,
+  regression tests, and implementation/evidence documents. It was not pushed.
+  Ignored `.context/` logs and `development/` source, recovery, and package
+  outputs remain local.
 - **Preserved side effect:** an earlier, pre-fix package setup invocation created
   a zero-byte `Jarvis-Check-7F3ECAB1-8B43-4469-9D76-1E6193EDC0E4.txt` through the
   legacy `~/Library/Caches/JevVoice` link into the other checkout's development

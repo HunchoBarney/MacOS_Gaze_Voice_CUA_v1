@@ -443,8 +443,10 @@ and reduced complexity is demonstrated without hiding failures.
   and rollback instructions in the scoped evidence. The prior app recovery archive
   and verified extraction are documented there. The false-completion finding and
   its host refusal fix are included; matched performance comparison remains open.
-- [ ] Commit focused changes without absorbing unrelated work after final review.
-  No push is authorized. Package UI/task acceptance and the other open gates below
+- [x] Commit focused changes without absorbing unrelated work after final review.
+  Commit `5bec4a6` contains the source, regression coverage, plan, and scoped
+  evidence. No push was made; ignored `.context/` and `development/` recovery
+  assets remain local. Package UI/task acceptance and the other open gates below
   remain incomplete.
 
 **Completion criteria:** the selected replacement is integrated and verified,

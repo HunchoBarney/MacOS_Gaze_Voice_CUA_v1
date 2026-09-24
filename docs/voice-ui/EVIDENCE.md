@@ -944,6 +944,9 @@ This scoped evidence does not change the unrelated voice migration gates.
   `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-24-final-r2/`.
   The r2 bundle was not launched while the session was locked. Its visible setup
   state and packaged desktop task are unverified.
+- **Focused source delivery:** commit `5bec4a6` contains only the scoped
+  implementation, tests, and evidence/docs listed in its summary; it was not
+  pushed. Ignored `.context/` and `development/` assets remain local.
 - **Preserved side effect:** the earlier pre-fix package check created one
   zero-byte setup fixture at
   `~/Library/Caches/JevVoice/verification/setup/Jarvis-Check-7F3ECAB1-8B43-4469-9D76-1E6193EDC0E4.txt`.
