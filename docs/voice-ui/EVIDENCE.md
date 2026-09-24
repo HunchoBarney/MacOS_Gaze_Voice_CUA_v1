@@ -928,12 +928,14 @@ This scoped evidence does not change the unrelated voice migration gates.
   dispatch because its disposable window had no editable AX controls in the
   locked session. No key was sent. Log:
   `.context/execution-simplification/native-keyboard-candidate-diagnostics-2026-09-24.log`.
-- **Automated verification:**
-  `swift test --scratch-path .context/execution-simplification/swift-scratch-native-new-document`
-  passed 317 tests, 31 opt-in skips, zero failures. Six tooling tests passed via
-  `python3 -B -m unittest discover -s Tests/Tooling -v`. The preserved default
-  `.build` cache still points at the prior checkout, so `make test` cannot be
-  used without replacing that cache; it was preserved.
+- **Automated verification:** the Makefile `make test` target passed through a
+  workspace-local `swift` shim, which adds
+  `--scratch-path .context/execution-simplification/swift-scratch-native-new-document`
+  and preserves the existing `.build` cache. It ran the tooling suite (six
+  passed) and Swift suite (317 passed, 31 opt-in skips, zero failures). Log:
+  `.context/execution-simplification/make-test-workspace-scratch-2026-09-24.log`.
+  A direct unwrapped `make test` still fails before Swift compilation because the
+  preserved `.build` cache points at the prior checkout; it was not changed.
 - **Final package:** `make dist` built the arm64 0.1.5 (build 6) app with bundle
   ID `com.chriswozniczek.jevvoice`. Strict ad hoc signature verification,
   `unzip -t`, extracted signature verification, and byte-for-byte executable

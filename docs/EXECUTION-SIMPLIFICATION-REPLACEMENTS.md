@@ -30,10 +30,14 @@ Steps 4, 6, 7, or 8.
   Cua exposed no editable controls for the disposable fixture while the session
   was locked. Its diagnostic log is
   `.context/execution-simplification/native-keyboard-candidate-diagnostics-2026-09-24.log`.
-- **Verification:** all six tooling tests pass. The complete Swift suite passes
-  317 tests, 31 opt-in skips, zero failures using the workspace-local scratch
-  path. Default `make test` still encounters the preserved prior-workspace
-  `.build` cache before Swift compilation.
+- **Verification:** the Makefile `make test` target passes through a
+  workspace-local `swift` shim that adds the scratch path
+  `.context/execution-simplification/swift-scratch-native-new-document`. All six
+  tooling tests pass; Swift reports 317 tests, 31 opt-in skips, and zero
+  failures. The exact run is logged at
+  `.context/execution-simplification/make-test-workspace-scratch-2026-09-24.log`.
+  A direct unwrapped `make test` still encounters the preserved prior-workspace
+  `.build` cache before Swift compilation; that cache was left unchanged.
 - **Final package:** `make dist` produced the r2 arm64 app and ZIP under
   `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-24-final-r2/`.
   Bundle ID is `com.chriswozniczek.jevvoice`; executable SHA-256 is

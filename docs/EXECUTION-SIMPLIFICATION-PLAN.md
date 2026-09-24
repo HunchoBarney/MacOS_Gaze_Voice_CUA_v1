@@ -23,10 +23,12 @@ permission probe itself reports Accessibility and Screen Recording granted.
 The final release app and archive are built and signature/extraction verified,
 but packaged UI and task acceptance remain open. The full Swift suite passes 317
 tests with 31 opt-in skips, and all six tooling tests pass in workspace-local
-verification. Default `make test` remains blocked before compilation by the
-preserved `.build` cache pointing at the prior workspace. No retired production
-path or protection has been removed. Steps 4, 6, 7, 8 and the final gates remain
-open; see [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
+verification. The Makefile `make test` target now passes when run through a
+workspace-local `swift` shim that directs SwiftPM to a fresh scratch directory;
+an unwrapped invocation still hits the preserved `.build` cache from the prior
+workspace. No retired production path or protection has been removed. Steps 4,
+6, 7, 8 and the final gates remain open; see
+[the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
 
 **Goal:** replace overlapping Jarvis execution machinery with existing Cua/Jev
 capabilities, keep one production execution loop, and preserve the existing
@@ -389,14 +391,17 @@ mechanism has a specific responsibility.
   behavior, and user-reported physical input. Preserve pre-existing failures as
   separate evidence. Current evidence labels automated and live-fixture results;
   no recorded-audio or physical Fn/microphone result is claimed.
-- [x] Run the current integrated Swift and tooling suites. On 2026-09-24, all six
-  tooling tests passed; the default `make test` Swift invocation failed before
-  compilation because `.build` contains a module cache from the prior workspace
-  path. Without deleting that preserved cache, `swift test --scratch-path
-  .context/execution-simplification/swift-scratch-native-new-document` passed 317
-  tests, 31 opt-in skips, zero failures. The new setup-flow opt-in is among the
-  skipped desktop checks. Broaden or repeat checks when edits, failures, or
-  unresolved risks justify it.
+- [x] Run the current integrated Swift and tooling suites. On 2026-09-24, the
+  Makefile `make test` target passed through a workspace-local `swift` shim,
+  invoking `swift test --scratch-path
+  .context/execution-simplification/swift-scratch-native-new-document`; all six
+  tooling tests passed, as did 317 Swift tests with 31 opt-in skips and zero
+  failures. The new setup-flow opt-in is among the skipped desktop checks. A
+  direct unwrapped `make test` still fails before compilation because `.build`
+  contains a module cache from the prior workspace path. The preserved cache was
+  not changed. The exact wrapper run is logged at
+  `.context/execution-simplification/make-test-workspace-scratch-2026-09-24.log`.
+  Broaden or repeat checks when edits, failures, or unresolved risks justify it.
 
 **Gate:** agreed changed behaviors pass, existing supported behavior is preserved,
 and reduced complexity is demonstrated without hiding failures.
