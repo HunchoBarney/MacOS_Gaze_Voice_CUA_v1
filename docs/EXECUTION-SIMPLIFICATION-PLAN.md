@@ -265,6 +265,13 @@ native key/value/drag proof remain open. The older unquoted write form is now
 refused unless it is one quoted span or explicitly begins with `dictate`/`say`;
 unquoted browser search extraction is not established.
 
+Source review confirms the production `CuaVoiceRuntime` leaves
+`CuaTaskAgent.allowConfirmedRepetition` at its initializer default `false`; only
+test harnesses enable it. The production loop therefore suppresses a previously
+completed effect identity from later choices even when the dispatch result
+contains confirmation evidence. Keep this protection until the pinned runtime
+passes the live repeated-action and postcondition checks.
+
 The execution sequence is: accept the request → observe → obtain a grounded Jev
 decision → validate authority and arguments → dispatch through Cua → consume the
 outcome → verify or reobserve → continue or finish.

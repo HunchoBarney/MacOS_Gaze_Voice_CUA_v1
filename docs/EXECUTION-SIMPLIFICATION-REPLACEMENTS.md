@@ -38,6 +38,14 @@ Steps 4, 6, 7, or 8.
   `.context/execution-simplification/make-test-workspace-scratch-2026-09-24.log`.
   A direct unwrapped `make test` still encounters the preserved prior-workspace
   `.build` cache before Swift compilation; that cache was left unchanged.
+- **Production repetition gate:** `CuaVoiceRuntime` does not override
+  `CuaTaskAgent.allowConfirmedRepetition`, whose initializer default is `false`;
+  only test harnesses opt in. The production loop filters completed effect
+  identities from later choices, so the same effect cannot be selected again
+  within one task even when a result contains confirmation evidence. Retain this
+  protection until the pinned runtime passes live outcome and repeated-action
+  proofs; the uninstalled scroll patch's two-position sample does not authorize
+  production enablement.
 - **Static maintenance inventory:** comparing baseline `d756cf3` with scoped
   implementation commit `5bec4a6`, the tracked production Swift scope
   (`Sources/JevVoice/ComputerControl` and `Sources/JevVoiceCore/Models`) grows

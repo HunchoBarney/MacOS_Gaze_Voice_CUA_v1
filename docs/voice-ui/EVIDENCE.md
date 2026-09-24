@@ -946,6 +946,13 @@ This scoped evidence does not change the unrelated voice migration gates.
   `Makefile` are unchanged. This scoped inventory excludes prose and ignored
   development assets, and is not a matched runtime comparison. No production
   protection was retired, so the inventory does not establish net simplification.
+- **Production repetition gate:** source review confirms `CuaVoiceRuntime` uses
+  the `CuaTaskAgent` default `allowConfirmedRepetition=false`; only test
+  harnesses explicitly enable repetition. Completed effect identities are
+  filtered from subsequent production choices, even when dispatch evidence is
+  positive. The pinned scroll workflow lacks the required live postcondition,
+  so the guard remains. The isolated patch's two-position sample is not
+  production proof.
 - **Final package:** `make dist` built the arm64 0.1.5 (build 6) app with bundle
   ID `com.chriswozniczek.jevvoice`. Strict ad hoc signature verification,
   `unzip -t`, extracted signature verification, and byte-for-byte executable
