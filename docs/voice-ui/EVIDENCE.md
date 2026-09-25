@@ -1217,3 +1217,7 @@ also rose by 2,821. `Package.swift`, `Package.resolved`, `Makefile`, and
 `ThirdParty/Cua/pin.json` are byte-identical at both revisions. This is a
 static tracked-code inventory; ignored local Cua source and generated assets
 are preserved outside the count. It does not establish lower maintenance cost.
+
+The user reported they cannot perform the requested physical Fn/Calculator
+check now. This records availability only, not a pass or failure. The exact
+reviewed bundle remains open for a later user-controlled observation.
