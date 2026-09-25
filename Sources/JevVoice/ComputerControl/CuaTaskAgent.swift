@@ -84,7 +84,26 @@ final class CuaTaskAgent {
                 history.append(.string("Prepared a new isolated browser profile after approval."))
             } else {
                 progress("Opening \(name)…")
-                let opened = try await call("launch_app", ["bundle_id": .string(bundle)])
+                let opened: JSONValue
+                do {
+                    opened = try await call("launch_app", ["bundle_id": .string(bundle)])
+                } catch DriverConnectionError.timedOut {
+                    try Task.checkCancellation()
+                    let inspection: String
+                    do {
+                        let observed = try await call("get_accessibility_tree", [:])
+                        let matches = (observed["apps"]?.array ?? []).filter { $0["bundle_id"]?.string == bundle && ($0["pid"]?.integer ?? 0) > 0 }
+                        inspection = matches.count == 1 ? "The app was observed running after the timeout."
+                            : matches.isEmpty ? "The app was not observed running at inspection time."
+                            : "Several matching processes made the launch result ambiguous."
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        inspection = "The app could not be inspected after the timeout."
+                    }
+                    try Task.checkCancellation()
+                    throw DriverConnectionError.refused("Cua launch timed out after dispatch. \(inspection) The launch remains uncertain and was not repeated; inspect the app before another request.")
+                }
                 guard let process = opened["pid"]?.integer, process > 0 else { throw DriverConnectionError.malformed }
                 pid = process; launchedPID = process
                 // The lightweight running-process snapshot avoids scanning installed bundles again.
@@ -469,7 +488,36 @@ final class CuaTaskAgent {
             let createsWindow = try !action.requiresText && JevSelection.read(risk["windowEffect"], allowed: ["new", "same"]) == "new"
             guard literal == nil || !createsWindow else { throw DriverConnectionError.malformed }
             let dispatchID = UUID().uuidString
-            let outcome = try await call(action.tool, action.arguments)
+            let outcome: JSONValue
+            do {
+                outcome = try await call(action.tool, action.arguments)
+            } catch DriverConnectionError.timedOut {
+                // The mutation may still have happened. Inspect only the pinned
+                // destination, then stop; neither a fresh choice nor a replay is safe.
+                try Task.checkCancellation()
+                let inspection: String
+                do {
+                    if let browser {
+                        let current = try await browser.observe(call: call)
+                        inspection = CuaBrowserTarget.identity(current) == CuaBrowserTarget.identity(page)
+                            ? "The addressed browser page was readable and unchanged at inspection time."
+                            : "The addressed browser page changed by inspection time."
+                    } else if let wid = windowID {
+                        let current = try await call("get_window_state", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)), "include_screenshot": .bool(false), "max_elements": .number(220)])
+                        inspection = Self.contentIdentity(current["elements"]?.array ?? []) == Self.contentIdentity(elements)
+                            ? "The addressed window was readable and its observed content was unchanged at inspection time."
+                            : "The addressed window's observed content changed by inspection time."
+                    } else {
+                        inspection = "No exact window was available for readback."
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    inspection = "The addressed target could not be read after the timeout."
+                }
+                try Task.checkCancellation()
+                throw DriverConnectionError.refused("Cua timed out after dispatch of the selected action. \(inspection) The effect remains uncertain and was not repeated; inspect the app before another request.")
+            }
             dispatchedActionEffects.insert(action.effectIdentity)
             if let explicitKeyboardTool, action.tool == explicitKeyboardTool {
                 guard let keyboardTarget else {

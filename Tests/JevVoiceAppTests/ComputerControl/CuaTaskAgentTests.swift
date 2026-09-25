@@ -868,12 +868,15 @@ final class CuaTaskAgentTests: XCTestCase {
     func testConfirmedScrollsCanRepeatButTimeoutAndUnverifiableEffectsCannot() async throws {
         for (timeout, unverifiable, repeatAuthorized, uncertainSecond) in [(false, false, true, false), (true, false, true, false), (false, true, true, false), (false, false, false, false), (false, false, true, true)] {
             var effects = 0
+            var postTimeoutInspections = 0
             let agent = CuaTaskAgent(call: { tool, _ in
                 switch tool {
                 case "list_apps", "get_accessibility_tree": return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture"), "pid": .number(42)])])])
                 case "list_windows": return .object(["windows": .array([.object(["window_id": .number(7)])])])
                 case "get_browser_state": throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
-                case "get_window_state": return .object(["elements": .array([.object(["role": .string("AXScrollArea"), "label": .string("Document"), "element_token": .string("scroll-\(effects)")])])])
+                case "get_window_state":
+                    if timeout && effects > 0 { postTimeoutInspections += 1 }
+                    return .object(["elements": .array([.object(["role": .string("AXScrollArea"), "label": .string("Document"), "element_token": .string("scroll-\(effects)")])])])
                 case "scroll":
                     effects += 1
                     if timeout { throw DriverConnectionError.timedOut }
@@ -916,12 +919,16 @@ final class CuaTaskAgentTests: XCTestCase {
                 _ = try await agent.run(goal: "Scroll this document down one page, then down one more page", context: "", progress: { _ in })
                 XCTAssertFalse(timeout || unverifiable || !repeatAuthorized || uncertainSecond)
             } catch {
-                if timeout { XCTAssertEqual(error as? DriverConnectionError, .timedOut) }
+                if timeout {
+                    XCTAssertTrue(error.localizedDescription.contains("timed out after dispatch"))
+                    XCTAssertTrue(error.localizedDescription.contains("effect remains uncertain"))
+                }
                 else if unverifiable || uncertainSecond { XCTAssertTrue(error.localizedDescription.localizedCaseInsensitiveContains("incomplete")) }
                 else if !repeatAuthorized { XCTAssertTrue(error.localizedDescription.contains("No additional effect")) }
                 else { throw error }
             }
             XCTAssertEqual(effects, timeout || unverifiable || !repeatAuthorized ? 1 : 2)
+            if timeout { XCTAssertEqual(postTimeoutInspections, 1, "A timed-out dispatched effect needs one read-only inspection before reporting uncertainty") }
         }
     }
     func testDecisionContextPreservesAppStateAndExcludesUnrelatedSystemMenuSubtree() {
@@ -1103,16 +1110,21 @@ final class CuaTaskAgentTests: XCTestCase {
     }
     func testUncertainLaunchIsNotRetried() async throws {
         var mutations = 0
+        var postTimeoutInspections = 0
         let agent = CuaTaskAgent(call: { name, _ in
-            if ["list_apps", "get_accessibility_tree"].contains(name) { return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("test.fixture"), "pid": .number(0), "running": .bool(false)])])]) }
+            if ["list_apps", "get_accessibility_tree"].contains(name) {
+                if name == "get_accessibility_tree" && mutations > 0 { postTimeoutInspections += 1 }
+                return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("test.fixture"), "pid": .number(mutations > 0 ? 42 : 0), "running": .bool(mutations > 0)])])])
+            }
             if name == "launch_app" { mutations += 1; throw DriverConnectionError.timedOut }
             return .object([:])
         }, judge: { _, questions in
             Dictionary(uniqueKeysWithValues: questions.keys.map { ($0, Answer.choice(choice: $0 == "visibility" ? "background" : $0 == "app" ? "app_0" : $0 == "scope" ? "launch" : "ordinary", confidence: 1, probabilities: [:])) })
         })
         do { _ = try await agent.run(goal: "open Fixture", context: "", progress: { _ in }); XCTFail("Accepted uncertain mutation") }
-        catch { XCTAssertEqual(error as? DriverConnectionError, .timedOut) }
+        catch { XCTAssertTrue(error.localizedDescription.contains("launch timed out")) }
         XCTAssertEqual(mutations, 1)
+        XCTAssertEqual(postTimeoutInspections, 1, "A timed-out launch must be inspected without retrying")
     }
     func testQueuedLaunchReobservesAndCannotClaimAnotherTasksProcess() async throws {
         var running = false, launches = 0

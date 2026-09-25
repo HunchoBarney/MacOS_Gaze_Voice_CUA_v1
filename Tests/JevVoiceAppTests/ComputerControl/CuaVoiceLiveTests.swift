@@ -41,10 +41,10 @@ final class CuaVoiceLiveTests: XCTestCase {
         XCTAssertFalse(app.isHidden)
     }
     private func workflow(request: String, bundle: String, newDocument: Bool = false) async throws {
-        guard ProcessInfo.processInfo.environment["JARVIS_CUA_VOICE_TEST"] == "1",
-              let key = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"], !key.isEmpty else {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_VOICE_TEST"] == "1" else {
             throw XCTSkip("Opt-in simulated transcript with real Jev/Cua/macOS")
         }
+        let key = try CuaLiveCredential.jev()
         let suite = "JarvisVoiceLive-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

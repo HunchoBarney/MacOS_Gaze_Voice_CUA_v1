@@ -78,8 +78,15 @@ final class CuaTaskAgentLiveTests: XCTestCase {
     }
     func testNativeFixtureOptIn() async throws { try await fixture(createDocument: false) }
     func testNewDocumentFixtureOptIn() async throws { try await fixture(createDocument: true) }
+    func testPostDispatchTimeoutInspectsNativeTargetOptIn() async throws {
+        try await fixture(createDocument: true, simulatePostDispatchTimeout: true)
+    }
+    func testCancellationAfterNativeDispatchLeavesOneEffectOptIn() async throws {
+        try await fixture(createDocument: true, cancelAfterDispatch: true)
+    }
 
-    private func fixture(createDocument: Bool) async throws {
+    private func fixture(createDocument: Bool, simulatePostDispatchTimeout: Bool = false,
+                         cancelAfterDispatch: Bool = false) async throws {
         guard ProcessInfo.processInfo.environment["JARVIS_CUA_AGENT_TEST"] == "1" else {
             throw XCTSkip("Opt-in real Cua/Jev native fixture check")
         }
@@ -156,7 +163,15 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                 }
             }
             let client = JevClient(apiKey: key)
+            var timedOutDispatches = 0
+            var postTimeoutReadbacks = 0
+            var textDispatches = 0
+            var lateMutations = 0
             let agent = CuaTaskAgent(call: { tool, args in
+                if cancelAfterDispatch, textDispatches > 0,
+                   !["list_apps", "get_accessibility_tree", "list_windows", "get_window_state", "get_browser_state", "parse_visual_regions"].contains(tool) {
+                    lateMutations += 1
+                }
                 var beforeActivation: [JSONValue]?
                 let readArgs = args.merging(["include_screenshot": .bool(false), "session": .string(label)]) { _, b in b }
                 if tool == "bring_to_front" {
@@ -178,8 +193,19 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                     }
                 }
                 if tool == "get_window_state" {
+                    if timedOutDispatches > 0 { postTimeoutReadbacks += 1 }
                     let fields = (result["elements"]?.array ?? []).filter { $0["role"] == .string("AXTextArea") }
                     print("Fixture observation window:", args["window_id"]?.integer ?? -1, "body lengths:", fields.map { $0["value"]?.string?.count ?? -1 }, "expected text present:", fields.contains { $0["value"]?.string?.lowercased().contains("copper lantern beside the window") == true })
+                }
+                if tool == "type_text", simulatePostDispatchTimeout {
+                    // Cua has already returned from one real insertion. Simulate
+                    // losing that response to the host after the effect.
+                    timedOutDispatches += 1
+                    throw DriverConnectionError.timedOut
+                }
+                if tool == "type_text", cancelAfterDispatch {
+                    textDispatches += 1
+                    withUnsafeCurrentTask { $0?.cancel() }
                 }
                 return result
             }, judge: { state, questions in
@@ -193,7 +219,27 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                 try await JevSpeechIntent(client: client).textPayload(request: request, purpose: purpose)
             })
             let start = ContinuousClock.now
-            _ = try await agent.run(goal: createDocument ? "In TextEdit in the background, create a new document and insert exactly \"copper lantern beside the window\"." : "In TextEdit, please type copper lantern beside the window into the blank document.", context: "The provided window is the existing starting document. If asked to create a new document, do not reuse this one. It is a disposable fixture.", progress: { print("Fixture step:", $0) })
+            let operation = Task {
+                try await agent.run(goal: createDocument ? "In TextEdit in the background, create a new document and insert exactly \"copper lantern beside the window\"." : "In TextEdit, please type copper lantern beside the window into the blank document.", context: "The provided window is the existing starting document. If asked to create a new document, do not reuse this one. It is a disposable fixture.", progress: { print("Fixture step:", $0) })
+            }
+            do {
+                _ = try await operation.value
+                XCTAssertFalse(simulatePostDispatchTimeout || cancelAfterDispatch, "A stopped or uncertain task must not report completion")
+            } catch {
+                if simulatePostDispatchTimeout {
+                    XCTAssertTrue(error.localizedDescription.contains("effect remains uncertain"), error.localizedDescription)
+                } else if cancelAfterDispatch {
+                    XCTAssertTrue(error is CancellationError, error.localizedDescription)
+                } else { throw error }
+            }
+            if simulatePostDispatchTimeout {
+                XCTAssertEqual(timedOutDispatches, 1, "The real insertion must not be repeated")
+                XCTAssertEqual(postTimeoutReadbacks, 1, "The pinned target must be read once before reporting uncertainty")
+            }
+            if cancelAfterDispatch {
+                XCTAssertEqual(textDispatches, 1, "The fixture needs exactly one real insertion")
+                XCTAssertEqual(lateMutations, 0, "No mutation may follow acknowledged cancellation")
+            }
             let resultWindow = try XCTUnwrap(agent.windowID)
             if createDocument { XCTAssertNotEqual(resultWindow, window, "The request requires a new document, not an edit to the fixture") }
             let observed = try await connection.call("get_window_state", arguments: ["pid": .number(Double(pid)), "window_id": .number(Double(resultWindow)), "include_screenshot": .bool(false), "session": .string(label)])

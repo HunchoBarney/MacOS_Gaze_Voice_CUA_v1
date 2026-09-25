@@ -182,7 +182,7 @@ enum CuaActionCatalog {
                             tool: "browser_pointer",
                             arguments: base.merging(["action": .string("drag"), "destination_ref": destinationRef,
                                                      "input_route": .string("dom_event")]) { _, b in b },
-                            targetIdentity: targetIdentity + ":to:\(destinationRef.string ?? "")",
+                            targetIdentity: targetIdentity + ":to:\(destinations[0]["role"]?.string ?? ""):\(destinations[0]["name"]?.string ?? ""):\(sourceFrame.string ?? "")",
                             effectTargetIdentity: effectTargetIdentity + ":to:\(destinations[0]["role"]?.string ?? ""):\(destinations[0]["name"]?.string ?? ""):\(sourceFrame.string ?? "")"))
                     }
                 }
@@ -559,7 +559,7 @@ enum CuaActionCatalog {
     }
 
     private static func exactBrowserDragLabels(in goal: String) -> (source: String, destination: String)? {
-        let pattern = #"(?i)^\s*drag\s+\"([^\"]+)\"\s+to\s+\"([^\"]+)\"\s*[.!?]?\s*$"#
+        let pattern = #"(?i)^\s*(?:in\s+(?:Google\s+)?Chrome(?:\s+in\s+the\s+background)?\s*,\s*)?drag\s+\"([^\"]+)\"\s+to\s+\"([^\"]+)\"\s*[.!?]?\s*$"#
         guard let expression = try? NSRegularExpression(pattern: pattern),
               let match = expression.firstMatch(in: goal, range: NSRange(goal.startIndex..., in: goal)),
               let sourceRange = Range(match.range(at: 1), in: goal), let destinationRange = Range(match.range(at: 2), in: goal) else { return nil }

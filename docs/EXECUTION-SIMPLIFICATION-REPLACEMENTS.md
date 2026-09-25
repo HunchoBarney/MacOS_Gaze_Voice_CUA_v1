@@ -3,6 +3,76 @@
 2026-09-25 checkpoint; governed by [the approved plan](EXECUTION-SIMPLIFICATION-PLAN.md).
 This is investigation and isolated candidate work, not acceptance or a migration gate closure.
 
+## Unlocked continuation — 2026-09-25, timeout and drag build
+
+The installed daemon again reported Accessibility=true and Screen Recording=true
+under the shared desktop lock. An opt-in `VoiceController` simulated-transcript
+trial used the existing noninteractive Keychain Jev key and real installed Cua:
+it completed a TextEdit new-document request in 5.113 seconds from transcript
+to observed result. A separate seeded native agent fixture passed a background
+new-document plus exact-text check; its existing 51-character document remained
+unchanged. These are one sample each, not physical Fn/microphone or packaged
+production-task acceptance.
+
+An action timeout had stopped without reading the pinned target. The production
+loop now performs one read-only exact native-window or bound browser-tab
+inspection after a timed-out selected action; a timed-out launch gets one
+running-app observation. Both remain uncertain and never replay. Failing-first
+unit checks and a live TextEdit trial passed: one real insertion, a deliberately
+lost response, one post-timeout readback of the new window, no repeated insertion,
+and untouched seeded content. A second live trial cancelled the task immediately
+after one real insertion and observed zero later mutations and untouched seed.
+The tests inject timeout/cancellation at the host boundary after a real Cua
+effect; they do not claim the pinned Driver itself timed out or a user pressed
+Escape. Other post-dispatch uncertain forms and launch/focus timeout routes need
+further live coverage.
+
+An isolated browser drag probe first exposed an exact-grammar gap, then a
+destination-ref rebinding defect: fresh snapshot refs made the candidate's
+binding identity change before dispatch. The candidate now accepts a bounded
+Chrome-prefixed drag request and rebinds one unique same-frame destination by
+role/name/frame while dispatching the fresh original Cua refs. One loopback
+live trial passed with a Jev-selected `browser_pointer drag`, matching target
+and tab IDs, exactly one dispatch, and one independent page `drop` event.
+Earlier attempts failed before any drag dispatch. This action remains on the
+candidate surface; same-frame uniqueness and a single successful effect are
+insufficient for general production promotion.
+
+The integrated suite passed six tooling tests and 320 Swift tests with 34
+opt-in skips, zero failures, using the workspace-local scratch shim. A new
+signed/extracted release app at `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-25-timeout-drag/`
+has executable SHA-256 `e3bfdba9e4c522b9e5be7f6b6020ed9313112e6fc471b4ad52de2b48301360f3`
+and ZIP SHA-256 `86eb937380bcf12555b19a46ec79fb52cbba326e592300e01485cc89ac29c1a6`.
+It launched from its exact path; its visible setup check passed a disposable
+Jev-selected Cua insertion with 3.277 seconds decision/write/readback. Its Voice
+pane initially showed both app grants missing, then both checked without an
+agent grant. No normal production voice task was completed through this bundle.
+The prior 2026-09-25 bundle remains signature- and byte-verified for rollback.
+
+No Step 6 protection was removed. The timeout inspection adds a necessary
+recovery behavior, while the candidate drag repair adds candidate code. The
+tracked production Swift inventory is now 19 files / 3,150 physical lines
+versus baseline `d756cf3` at 17 / 1,883 (+1,267, about 67%). No dependency or
+process boundary changed. There is still no matched baseline/final sample set,
+verified reduction in total maintenance burden, or production repeated-scroll
+postcondition. Keep the production refusal and `allowConfirmedRepetition=false`.
+Steps 4, 6, 7 and 8 remain open.
+
+Final review removed an untrusted action label from the new timeout message.
+The integrated suite passed again (six tooling tests, 320 Swift tests, 34
+opt-in skips). The **latest** exact bundle is now
+`development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-25-reviewed/Jev Voice.app`,
+executable SHA-256 `c219fe6f7ae6635eabeb0039cbc7f75a4af97873bba693671c8445a14bd08320`,
+ZIP SHA-256 `77206e9d2cd84535e7e266989dd84bb4e7f7e219a7ec4393874b14182df20003`.
+Strict bundle and extracted signatures, archive integrity, and executable identity
+passed. The previous timeout-drag package was reverified as rollback. Exact
+bundle PID `47660` opened; its first setup attempt reported an uncertain
+`bring_to_front` while its app grant state was changing. A settled second
+attempt passed the visible disposable Jev/Cua setup insertion and readback in
+3.260 seconds decision/write/readback. Both Microphone and Accessibility later
+showed checked, with no agent grant. Packaged production voice-task acceptance
+is still open.
+
 ## Fresh verification — 2026-09-25
 
 The console is now unlocked. The installed Driver hash remains

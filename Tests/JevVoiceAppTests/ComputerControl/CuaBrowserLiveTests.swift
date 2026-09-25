@@ -37,6 +37,10 @@ final class CuaBrowserLiveTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["JARVIS_CUA_POINTER_TEST"] == "1" else { throw XCTSkip("Opt-in disposable browser pointer hover") }
         try await runFixture(generatedDraft: false, pointerHover: true)
     }
+    func testPointerDragCandidateThroughAgentOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_POINTER_TEST"] == "1" else { throw XCTSkip("Opt-in disposable browser pointer drag") }
+        try await runFixture(generatedDraft: false, pointerDrag: true)
+    }
     func testGeneratedDraftDoesNotSubmitOptIn() async throws {
         guard ProcessInfo.processInfo.environment["JARVIS_CUA_GENERATION_TEST"] == "1" else { throw XCTSkip("Opt-in configured provider fixture") }
         try await runFixture(generatedDraft: true)
@@ -44,7 +48,7 @@ final class CuaBrowserLiveTests: XCTestCase {
     private func runFixture(generatedDraft: Bool, searchNavigation: Bool = false, repeatedScrolling: Bool = false,
                             expectUnverifiableScroll: Bool = false,
                             directNavigation: Bool = false, uploadFile: Bool = false, dialogResolution: Bool = false,
-                            pointerHover: Bool = false) async throws {
+                            pointerHover: Bool = false, pointerDrag: Bool = false) async throws {
         let env = ProcessInfo.processInfo.environment
         guard env["JARVIS_CUA_BROWSER_TEST"] == "1",
               let url = env["JARVIS_FIXTURE_URL"], URL(string: url)?.host == "127.0.0.1" else {
@@ -74,7 +78,7 @@ final class CuaBrowserLiveTests: XCTestCase {
                 try await connection.call(tool, arguments: arguments.merging(["session": .string(label)]) { _, b in b })
             }
             let target = try await CuaBrowserTarget.bind(pid: pid, window: window, call: call)
-            let startURL = repeatedScrolling ? url + "scrolling" : uploadFile ? url + "upload" : dialogResolution ? url + "dialog" : pointerHover ? url + "pointer" : searchNavigation ? url + "?fixture=prefilled" : url
+            let startURL = repeatedScrolling ? url + "scrolling" : uploadFile ? url + "upload" : dialogResolution ? url + "dialog" : pointerHover ? url + "pointer" : pointerDrag ? url + "drag" : searchNavigation ? url + "?fixture=prefilled" : url
             if dialogResolution {
                 // Match the recorded Driver activation watchdog settlement used
                 // by the native disposable-window proof.
@@ -145,13 +149,15 @@ final class CuaBrowserLiveTests: XCTestCase {
                    return true
                } : nil,
                payload: { request, purpose in try await JevSpeechIntent(client: JevClient(apiKey: key)).textPayload(request: request, purpose: purpose) },
-               actionSurface: directNavigation || uploadFile || dialogResolution || pointerHover ? .candidate : .production)
+               actionSurface: directNavigation || uploadFile || dialogResolution || pointerHover || pointerDrag ? .candidate : .production)
             let goal = repeatedScrolling
                 ? "In Google Chrome in the background, scroll the Scrollable guide down once, then scroll it down one more time. Make exactly two downward scroll actions."
                 : directNavigation
                 ? "In Google Chrome in the background, open \"\(url)destination?q=copper%20lantern\"."
                 : pointerHover
                 ? "In Google Chrome in the background, hover over the Pointer target link without clicking."
+                : pointerDrag
+                ? "In Google Chrome in the background, drag \"Start\" to \"Finish\"."
                 : uploadFile
                 ? "Upload the file \"\(uploadedFile!.path)\" in Google Chrome in the background."
                 : dialogResolution
@@ -184,7 +190,7 @@ final class CuaBrowserLiveTests: XCTestCase {
             } else {
                 if let taskFailure { throw taskFailure }
                 guard let result = taskResult else { throw DriverConnectionError.malformed }
-                if !repeatedScrolling && !directNavigation && !uploadFile && !dialogResolution && !pointerHover { XCTAssertTrue(mutations.contains("browser_type")) }
+                if !repeatedScrolling && !directNavigation && !uploadFile && !dialogResolution && !pointerHover && !pointerDrag { XCTAssertTrue(mutations.contains("browser_type")) }
                 if dialogResolution {
                     XCTAssertEqual(mutations.filter { $0 == "browser_click" }.count, 0)
                     XCTAssertEqual(mutations.filter { $0 == "browser_dialog" }.count, 1)
@@ -221,6 +227,16 @@ final class CuaBrowserLiveTests: XCTestCase {
                     XCTAssertEqual(dispatch["input_route"], .string("dom_event"))
                     XCTAssertNotNil(dispatch["ref"]?.string)
                     XCTAssertEqual(state["pointer_events"], .array([.string("mouseenter")]))
+                } else if pointerDrag {
+                    XCTAssertEqual(mutations.filter { $0 == "browser_pointer" }.count, 1)
+                    let dispatch = try XCTUnwrap(mutationArguments.first { $0.0 == "browser_pointer" }?.1)
+                    XCTAssertEqual(dispatch["target_id"], agentTargetID)
+                    XCTAssertEqual(dispatch["tab_id"], agentTabID)
+                    XCTAssertEqual(dispatch["action"], .string("drag"))
+                    XCTAssertEqual(dispatch["input_route"], .string("dom_event"))
+                    XCTAssertNotNil(dispatch["ref"]?.string)
+                    XCTAssertNotNil(dispatch["destination_ref"]?.string)
+                    XCTAssertEqual(state["pointer_events"], .array([.string("drop")]))
                 } else if searchNavigation {
                     XCTAssertEqual(state["query"], .string("copper lantern"))
                     XCTAssertEqual(state["destination_query"], .string("copper lantern"))

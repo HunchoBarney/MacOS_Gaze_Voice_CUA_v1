@@ -102,6 +102,18 @@ final class CuaActionCatalogTests: XCTestCase {
         XCTAssertEqual(drag?.arguments["ref"], .string("p1:0"))
         XCTAssertEqual(drag?.arguments["destination_ref"], .string("p1:1"))
         XCTAssertEqual(drag?.arguments["input_route"], .string("dom_event"))
+        XCTAssertEqual(CuaActionCatalog.browser(snapshot: snapshot,
+                         goal: "In Google Chrome in the background, drag \"Start\" to \"Finish\".",
+                         surface: .candidate).first { $0.arguments["action"] == .string("drag") }?.arguments["destination_ref"], .string("p1:1"))
+        let refreshed: JSONValue = .object(["target_id": .string("target"), "tab_id": .string("tab"), "refs": .array([
+            .object(["ref": .string("p2:0"), "role": .string("button"), "name": .string("Start"),
+                     "actions": .array([.string("pointer")]), "visibility": .string("in_viewport"), "frame": .string("main")]),
+            .object(["ref": .string("p2:1"), "role": .string("button"), "name": .string("Finish"),
+                     "actions": .array([.string("pointer")]), "visibility": .string("in_viewport"), "frame": .string("main")])
+        ])])
+        let rebound = CuaActionCatalog.browser(snapshot: refreshed, goal: "Drag \"Start\" to \"Finish\".", surface: .candidate).first { $0.arguments["action"] == .string("drag") }
+        XCTAssertEqual(rebound?.bindingIdentity, drag?.bindingIdentity, "A fresh snapshot may retire both refs while retaining one exact semantic pair")
+        XCTAssertEqual(rebound?.arguments["destination_ref"], .string("p2:1"))
 
         let ambiguous = JSONValue.object(["target_id": .string("target"), "tab_id": .string("tab"), "refs": .array([
             .object(["ref": .string("p1:0"), "role": .string("button"), "name": .string("Start"), "actions": .array([.string("pointer")]), "visibility": .string("in_viewport"), "frame": .string("main")]),

@@ -8,7 +8,11 @@ families remain behind an isolated candidate surface. Real Jev/Cua evidence
 includes exact native text with preserved seed content, quoted browser
 search/navigation, direct quoted navigation, an approved single-file upload,
 hover, an accepted JavaScript dialog, a native new-document workflow, and the
-pinned-scroll refusal after one observed 500 px effect.
+pinned-scroll refusal after one observed 500 px effect. The latest continuation
+also passed a simulated-transcript production new-document task, real-effect
+post-dispatch timeout inspection and cancellation fixtures, and one isolated
+browser drag/drop candidate. Sample sizes and failures are in the newest
+replacement and scoped evidence entries.
 
 The pinned Driver still cannot verify repeated browser scrolling; the isolated,
 uninstalled candidate passes two effects with independent positions `[500,
@@ -20,11 +24,11 @@ one check completed after a bounded wait for the pinned Driver's launch
 watchdog. The Cua permission probe reports Accessibility and Screen Recording
 granted. Immediate production opening remains unproven.
 
-The final-code release app and archive are built and signature/extraction
+The latest release app and archive are built and signature/extraction
 verified. Its visible packaged setup check passed a disposable Cua/Jev
 insertion, but a normal production voice task through that package remains
-unverified. The full Swift suite passes 317
-tests with 31 opt-in skips, and all six tooling tests pass in workspace-local
+unverified. The full Swift suite passes 320
+tests with 34 opt-in skips, and all six tooling tests pass in workspace-local
 verification. The Makefile `make test` target now passes when run through a
 workspace-local `swift` shim that directs SwiftPM to a fresh scratch directory;
 an unwrapped invocation still hits the preserved `.build` cache from the prior

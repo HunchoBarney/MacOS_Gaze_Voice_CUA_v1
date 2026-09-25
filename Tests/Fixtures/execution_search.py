@@ -37,6 +37,10 @@ class Handler(BaseHTTPRequestHandler):
             body = '<h1>Scroll fixture</h1><div role="region" aria-label="Scrollable guide" tabindex="0" style="height:240px;overflow:auto" onscroll="fetch(\'/scroll?top=\'+this.scrollTop)"><div style="height:5000px">Disposable guide content</div></div>'
         elif url.path == "/pointer":
             body = '<h1>Pointer fixture</h1><a href="#" aria-label="Pointer target" onmouseenter="fetch(\'/pointer-event?event=mouseenter\')" onclick="event.preventDefault()">Pointer target</a>'
+        elif url.path == "/drag":
+            body = ('<h1>Drag fixture</h1><button draggable="true" aria-label="Start">Start</button>'
+                    '<button aria-label="Finish" ondragover="event.preventDefault()" '
+                    'ondrop="event.preventDefault(); this.textContent=\'Dropped\'; fetch(\'/pointer-event?event=drop\')">Finish</button>')
         elif url.path == "/upload":
             body = '<h1>Disposable upload fixture</h1><input type="file" aria-label="verification file"><output>waiting</output><script>document.querySelector("input").addEventListener("change", async event => { const file = event.target.files[0]; if (file) await fetch("/upload?name=" + encodeURIComponent(file.name), {method:"POST", body:file}); });</script>'
         elif url.path == "/dialog":

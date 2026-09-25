@@ -1077,3 +1077,131 @@ Accessibility=true and Screen Recording=true. No permission was changed.
   pin, and the existing Swift/stdio boundary did not change. Total maintenance
   burden has not decreased. Steps 4/6/7/8 and the scoped completion criteria
   remain open.
+
+### Execution simplification — timeout/drag continuation, 2026-09-25
+
+Scoped Steps 4/6/7/8 only; this does not close P0–P5 migration acceptance.
+Source started at `2cbecaa` with `.context/` untracked and ignored `.build/`,
+`build/`, and `development/` preserved. The installed Driver remained the
+unchanged daemon-attributed pin
+`699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a`.
+`python3 scripts/with-desktop-lock.py python3
+.context/execution-simplification/installed-mcp-permission-probe.py` returned
+Accessibility=true and Screen Recording=true, with direct ScreenCaptureKit
+readiness unprobed. No grant or credential was changed by this agent.
+
+- **Production route and native outcome:** The opt-in command
+  `JARVIS_CUA_VOICE_TEST=1 python3 scripts/with-desktop-lock.py swift test
+  --scratch-path .context/execution-simplification/swift-scratch-native-new-document
+  --filter CuaVoiceLiveTests/testNewTextEditDocumentThroughVoiceControllerOptIn`
+  passed one real Jev/Cua `VoiceController → CuaVoiceRuntime` simulated-transcript
+  request. A File → New action yielded window `34625`, absent from its initial
+  window-ID set. The task status was Completed, the selected TextEdit app was
+  foreground, and transcript-to-observed-result was 5.113 seconds (test 5.971
+  seconds). Stage measurements: transcript-to-submission 319 ms, first dispatch
+  1,208 ms, Jev execution 816 ms, Cua `get_window_state` 1,165 ms,
+  `bring_to_front` 721 ms, `invoke_menu` 443 ms, queue wait 0.055 ms. The
+  preexisting live harness now reads the stored Jev credential noninteractively
+  via `CuaLiveCredential` when the environment lacks `TYPESAFE_API_KEY`; it
+  prints neither value. Log:
+  `.context/execution-simplification/voice-new-document-live-2026-09-25.log`.
+  A separate seeded agent fixture passed in 18.868 seconds, including its
+  deliberate nine-second launch settlement: new window `34635` contained exact
+  `copper lantern beside the window`, while starting window `34631` retained its
+  51-character seed. Log: `agent-new-document-live-2026-09-25.log` in the same
+  `.context/execution-simplification/` directory. One sample each; neither is
+  physical speech or packaged production-task proof.
+- **Post-dispatch uncertainty and cancellation:** The timeout tests first
+  failed because there were zero post-timeout inspections. After the production
+  change, `swift test --scratch-path
+  .context/execution-simplification/swift-scratch-native-new-document --filter
+  CuaTaskAgentTests` passed 28 checks, including one pinned-target inspection
+  and no replay after a selected action timeout, plus one running-app inspection
+  after a launch timeout. The live command
+  `JARVIS_CUA_AGENT_TEST=1 JARVIS_CUA_SETTLED_FIXTURE=1 python3
+  scripts/with-desktop-lock.py swift test --scratch-path
+  .context/execution-simplification/swift-scratch-native-new-document --filter
+  CuaTaskAgentLiveTests/testPostDispatchTimeoutInspectsNativeTargetOptIn`
+  passed in 17.966 seconds: Cua made one real insertion, the host deliberately
+  discarded its response as a timeout, the loop read the exact new window once,
+  refused completion as uncertain, and independent readback found the exact text
+  with the starting seed untouched. This simulates a lost response after the
+  effect, not an observed Driver transport timeout. The analogous cancellation
+  fixture passed twice, most recently in 22.780 seconds after adding a late
+  mutation counter: one insertion, zero later mutations, a cancelled task, and
+  preserved seed. Logs:
+  `.context/execution-simplification/live-post-dispatch-timeout-2026-09-25.log`
+  and `.context/execution-simplification/live-post-dispatch-cancel-2026-09-25-final.log`.
+  User Escape/Fn cancellation and other partial-outcome routes remain unproved.
+- **Candidate browser drag:** `python3 scripts/with-desktop-lock.py python3
+  .context/execution-simplification/run-drag-proof.py` runs one isolated Chrome
+  loopback fixture. The first attempt failed app selection before drag dispatch;
+  the second selected ordinary clicks/hover after the strict drag grammar did
+  not match the Chrome-prefixed request; the third selected drag but refused at
+  preflight because a refreshed destination ref changed its binding identity.
+  No failed attempt dispatched a drag. After the candidate-only grammar and
+  semantic destination rebind fixes, the fourth run passed in 6.829 seconds:
+  one Jev-selected `browser_pointer` drag with `dom_event`, original target/tab,
+  two fresh same-frame refs, and one independent `drop` event in `/state`.
+  Logs: `browser-drag-candidate-live-2026-09-25{,-retry,-final,-rebound}.log`
+  under `.context/execution-simplification/`. This does not promote drag to
+  production. Native coordinate drag remains excluded.
+- **Integrated check and package:**
+  `JARVIS_LOCAL_SWIFT_SCRATCH="$PWD/.context/execution-simplification/swift-scratch-native-new-document"
+  PATH="$PWD/.context/execution-simplification/bin:$PATH" make test` passed six
+  tooling tests and 320 Swift tests, 34 opt-in skips, zero failures. Log:
+  `.context/execution-simplification/make-test-2026-09-25-post-timeout-drag.log`.
+  `make dist` used the same shim plus `APP=.../scoped-delivery-2026-09-25-timeout-drag/Jev Voice.app`,
+  `ZIP=.../scoped-delivery-2026-09-25-timeout-drag/Jev-Voice-verified.zip`, and
+  `BINARY=$PWD/.context/execution-simplification/swift-scratch-native-new-document/release/JevVoice`.
+  Build log: `.context/execution-simplification/make-dist-2026-09-25-timeout-drag.log`.
+  Final arm64 0.1.5 (build 6), bundle ID `com.chriswozniczek.jevvoice`,
+  executable SHA-256
+  `e3bfdba9e4c522b9e5be7f6b6020ed9313112e6fc471b4ad52de2b48301360f3`,
+  ZIP SHA-256
+  `86eb937380bcf12555b19a46ec79fb52cbba326e592300e01485cc89ac29c1a6`.
+  Strict signature, ZIP integrity, extraction, extracted signature, and binary
+  comparison passed. Exact bundle process PID `36657` was observed. Its Voice
+  pane initially showed both app grants missing, then both checked after an
+  environmental/user state change that this agent did not perform. Its Commands
+  pane showed the stored Jev key masked. The visible `Test Cua + Jev` check
+  passed with fresh TextEdit readback in 3.277 seconds decision/write/readback.
+  This is setup, not a normal packaged voice task. A physical or other normal
+  task through this exact package remains unverified.
+- **Rollback and limits:** The prior `scoped-delivery-2026-09-25-final/` bundle
+  and ZIP were strictly signature-checked, extracted, and byte-compared again:
+  executable `75fa830ff445610ebda7b1ab928bdc5782f46a9279c0074025caf4f98602507f`,
+  ZIP `b5f609180132a00ef03aef4f6ff44cc64328a7c41bb18fa699085e2fd31687d3`.
+  It can be reopened by exact path; no installed location or Driver changed.
+  The current production Swift inventory is 19 files / 3,150 physical lines
+  versus baseline `d756cf3` at 17 / 1,883 (+1,267, about 67%). No Step 6
+  protection was retired, no dependency changed, and matched baseline/final
+  fixtures, initial states, task-success rates, model/Driver-call counts, and
+  latency samples are absent. The pinned repeated-scroll effect remains
+  unverifiable in production and the refusal/repetition guard stays enabled.
+  Steps 4/6/7/8 and scoped completion remain open.
+
+**Final review and latest package addendum, 2026-09-25:** A source review
+removed the selected action's potentially untrusted label from the new
+post-timeout UI message. This was the last production code edit. The exact
+`JARVIS_LOCAL_SWIFT_SCRATCH="$PWD/.context/execution-simplification/swift-scratch-native-new-document"
+PATH="$PWD/.context/execution-simplification/bin:$PATH" make test` rerun passed
+six tooling tests and 320 Swift tests with 34 opt-in skips, zero failures
+(`.context/execution-simplification/make-test-2026-09-25-reviewed.log`).
+`make dist` with the same shim and the scratch release `BINARY`, targeting
+`development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-25-reviewed/`,
+passed (`.context/execution-simplification/make-dist-2026-09-25-reviewed.log`).
+The **latest** signed bundle executable SHA-256 is
+`c219fe6f7ae6635eabeb0039cbc7f75a4af97873bba693671c8445a14bd08320`;
+its sibling `Jev-Voice-verified.zip` SHA-256 is
+`77206e9d2cd84535e7e266989dd84bb4e7f7e219a7ec4393874b14182df20003`.
+Strict signatures on bundle and extraction, ZIP integrity, and extracted binary
+identity passed. The previous `scoped-delivery-2026-09-25-timeout-drag/` bundle
+and ZIP were reverified for rollback with their hashes unchanged. The exact
+latest bundle ran as PID `47660`. Its Voice pane initially showed both app
+grants missing; they later displayed checked without an agent grant. Its first
+disposable setup attempt reported an uncertain `bring_to_front` during that
+permission/UI transition, with no completion claim. A later settled attempt
+visibly passed Jev field choice, Cua insertion, and fresh readback in 3.260
+seconds decision/write/readback. It did not complete a normal production voice
+task. All Step 4/6/7/8 and maintenance-reduction gates remain open.
