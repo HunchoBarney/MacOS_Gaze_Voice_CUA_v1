@@ -142,7 +142,7 @@ actor CuaConnection {
         }
         guard let body = value["structuredContent"], body.object != nil else { throw DriverConnectionError.malformed }
         guard body["code"] != .string("tool_output_invalid") else { throw DriverConnectionError.malformed }
-        if body["status"] == .string("refused") || body["refusal"] != nil {
+        if body["status"] == .string("refused") || body["effect"] == .string("refused") || body["refusal"] != nil {
             if safeCode { throw DriverConnectionError.toolRefused(tool: name, code: code) }
             throw DriverConnectionError.refused(body["refusal"]?["message"]?.string ?? "Cua refused this action.")
         }

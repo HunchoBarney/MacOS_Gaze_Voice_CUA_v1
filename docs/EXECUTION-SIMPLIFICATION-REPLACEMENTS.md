@@ -1,7 +1,60 @@
 # Execution simplification replacement record
 
-2026-09-23 checkpoint; governed by [the approved plan](EXECUTION-SIMPLIFICATION-PLAN.md).
+2026-09-25 checkpoint; governed by [the approved plan](EXECUTION-SIMPLIFICATION-PLAN.md).
 This is investigation and isolated candidate work, not acceptance or a migration gate closure.
+
+## Fresh verification — 2026-09-25
+
+The console is now unlocked. The installed Driver hash remains
+`699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a`;
+its read-only permission probe returned Accessibility and Screen Recording granted.
+No grant, Driver binary, pin, preference, or credential was changed by this work.
+
+- The installed Driver's launch watchdog again made an immediate setup
+  `bring_to_front` outcome uncertain. A nine-second wait before the first
+  explicit activation, with cancellation, unchanged requesting-foreground PID,
+  and exact disposable window rechecks, let the setup fixture complete. This is
+  a pin-specific setup accommodation, not proof that ordinary immediate app
+  opening works. A shared-desktop-lock native trial passed in 16.761 seconds; the visible
+  check in the exact final package reported a verified Jev-selected field,
+  insertion, and fresh readback (3.421 seconds from decision to readback).
+- A stale browser ref from an isolated loopback search page was used after
+  navigation to the fixture root. The pinned Driver returned
+  `effect=refused`, `reason=route_unavailable`; the page stayed at the root and
+  the independent destination state stayed null. This proves one stale-page
+  refusal, not a changed-tab or changed-frame contract. It exposed a host bug:
+  `CuaConnection` accepted an effect-only refusal when MCP `isError` was absent.
+  The transport now refuses that shape, with a failing-first regression and a
+  focused passing rerun. It closes no Step 6 replacement row.
+- Native `verify_state` confirmed a nonempty TextEdit value before and after
+  `set_value`, preserved the token during verification, and the installed
+  Driver rejected the old token after a fresh snapshot. One native Return-key
+  candidate still produced no newline after one dispatch and was refused; it
+  remains candidate-only. The production repeated-scroll refusal and
+  `allowConfirmedRepetition=false` guard remain unchanged.
+- The integrated `make test` target passed with the workspace-local Swift
+  scratch shim: six tooling tests and 317 Swift tests, 31 opt-in skips, zero
+  failures. An unwrapped release build encountered the preserved prior-workspace
+  `.build` module cache; the final release build used the same scratch shim and
+  an explicit scratch-path `BINARY` override. The prior cache was retained.
+- The final 2026-09-25 bundle was built after the last code change, strictly
+  signature-checked, archived, extracted, and byte-compared. Executable SHA-256
+  `75fa830ff445610ebda7b1ab928bdc5782f46a9279c0074025caf4f98602507f`;
+  ZIP SHA-256
+  `b5f609180132a00ef03aef4f6ff44cc64328a7c41bb18fa699085e2fd31687d3`.
+  It opened from its exact path and its visible Commands setup check passed
+  through Jev/Cua. Its separate Voice pane showed Microphone and Accessibility
+  checked at the later inspection; their status changed during this session
+  without an agent action. No production voice task was completed through the
+  package, so the Step 8 packaged-task gate remains open.
+- The 2026-09-24 r2 package and extraction were rechecked for strict signatures
+  and byte identity, with the recorded hashes unchanged. They remain available
+  for rollback. No protection or production loop was retired. Matched
+  baseline/final samples and demonstrated maintenance reduction remain absent;
+  the tracked `ComputerControl` plus core `Models` scope is now 19 Swift files /
+  3,102 physical lines versus baseline 17 / 1,883 (+1,219, about 65%). No
+  package dependency or process boundary changed;
+  Steps 4, 6, 7 and 8 remain open.
 
 ## Fresh verification — 2026-09-24
 

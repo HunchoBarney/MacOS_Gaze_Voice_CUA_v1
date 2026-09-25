@@ -40,6 +40,7 @@ for line in sys.stdin:
     elif req['params']['name']=='partial_text': result={'structuredContent':{'effect':'partial','requested_chars':10,'delivered_chars':4}}
     elif req['params']['name']=='native_refusal': result={'isError':True,'structuredContent':{'status':'refused','refusal':{'code':'menu_path_unavailable','message':'private target contents'}}}
     elif req['params']['name']=='refuse_status': result={'structuredContent':{'status':'refused'}}
+    elif req['params']['name']=='effect_refusal': result={'structuredContent':{'effect':'refused','escalation':{'reason':'route_unavailable','target':'page'}}}
     elif req['params']['name']=='refuse': result={'structuredContent':{'refusal':{'message':'No target'}}}
     else: result={'structuredContent':{'echo':req['params']['arguments']}}
     print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}),flush=True)
@@ -58,6 +59,8 @@ for line in sys.stdin:
         do { _ = try await connection.call("refuse", arguments: [:]); XCTFail("Accepted refusal") }
         catch { XCTAssertEqual(error as? DriverConnectionError, .refused("No target")) }
         do { _ = try await connection.call("refuse_status", arguments: [:]); XCTFail("Accepted status-only refusal") }
+        catch { XCTAssertEqual(error as? DriverConnectionError, .refused("Cua refused this action.")) }
+        do { _ = try await connection.call("effect_refusal", arguments: [:]); XCTFail("Accepted effect-only refusal") }
         catch { XCTAssertEqual(error as? DriverConnectionError, .refused("Cua refused this action.")) }
         do { _ = try await connection.call("invalid_output", arguments: [:]); XCTFail("Accepted invalid upstream output") }
         catch {

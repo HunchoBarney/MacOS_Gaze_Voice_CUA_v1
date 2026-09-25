@@ -1,7 +1,7 @@
 # Jarvis execution simplification plan
 
-Status: 2026-09-24, updated after final scoped packaging and the locked-session
-check. Steps 1–2 have a recoverable baseline and installed-contract inventory for
+Status: 2026-09-25, updated after unlocked-session proof and exact-package
+setup verification. Steps 1–2 have a recoverable baseline and installed-contract inventory for
 all 58 Driver tools. Step 3 provisionally selects Swift/stdio. One bounded
 observe–choose–act–verify loop serves normal runtime requests; new action
 families remain behind an isolated candidate surface. Real Jev/Cua evidence
@@ -14,14 +14,16 @@ The pinned Driver still cannot verify repeated browser scrolling; the isolated,
 uninstalled candidate passes two effects with independent positions `[500,
 1000]`. The latest setup code writes its disposable fixture under the system
 temporary directory, follows the installed `launch_app` schema, and requires an
-exact verified foreground window before reading or typing. The final opt-in
-setup check could not be completed because macOS reports the console session is
-locked: Cua listed the disposable TextEdit windows, returned an empty AX tree,
-and could not bring the exact window forward. No text or key was sent. The Cua
-permission probe itself reports Accessibility and Screen Recording granted.
+exact verified foreground window before reading or typing. The 2026-09-24
+opt-in check stopped while the console was locked. With the console unlocked,
+one check completed after a bounded wait for the pinned Driver's launch
+watchdog. The Cua permission probe reports Accessibility and Screen Recording
+granted. Immediate production opening remains unproven.
 
-The final release app and archive are built and signature/extraction verified,
-but packaged UI and task acceptance remain open. The full Swift suite passes 317
+The final-code release app and archive are built and signature/extraction
+verified. Its visible packaged setup check passed a disposable Cua/Jev
+insertion, but a normal production voice task through that package remains
+unverified. The full Swift suite passes 317
 tests with 31 opt-in skips, and all six tooling tests pass in workspace-local
 verification. The Makefile `make test` target now passes when run through a
 workspace-local `swift` shim that directs SwiftPM to a fresh scratch directory;
@@ -34,11 +36,12 @@ workspace. No retired production path or protection has been removed. Steps 4,
 capabilities, keep one production execution loop, and preserve the existing
 voice/UI system. Prove replacements before removing current protections.
 
-**Next deliverable:** with the Mac unlocked, finish the exact packaged-app setup
-and task checks plus the remaining live native/browser and lifecycle proofs.
-Separately establish a supported pinned-runtime scroll postcondition or keep the
-refusal guard, and collect matched measurements. Do not retire a protection until
-its replacement passes the corresponding success and failure checks.
+**Next deliverable:** finish the remaining live native/browser and lifecycle
+proofs, run a normal production task through the exact package, establish matched
+measurements, and retire only mechanisms with proven Cua/Jev replacements.
+Keep the pinned-scroll refusal and repetition guard until a supported runtime
+postcondition passes. Do not retire a protection until its replacement passes
+the corresponding success and failure checks.
 
 **Current priority:** the installed Cua pin cannot independently confirm the
 browser scroll outcome required for safe repetition. The preserved local
@@ -265,6 +268,13 @@ native key/value/drag proof remain open. The older unquoted write form is now
 refused unless it is one quoted span or explicitly begins with `dictate`/`say`;
 unquoted browser search extraction is not established.
 
+The 2026-09-25 unlocked continuation added one isolated stale-page refusal after
+navigation, a native `verify_state`/`set_value`/retired-token proof, and a
+repeated native Return-key refusal with no newline. These samples do not prove
+changed-tab/frame behavior, native drag, cancellation after live dispatch, or
+timeout recovery. A structured `effect=refused` shape from the stale browser
+probe exposed and drove a host transport fix; no Step 6 protection was removed.
+
 Source review confirms the production `CuaVoiceRuntime` leaves
 `CuaTaskAgent.allowConfirmedRepetition` at its initializer default `false`; only
 test harnesses enable it. The production loop therefore suppresses a previously
@@ -444,22 +454,25 @@ and reduced complexity is demonstrated without hiding failures.
   dependencies after replacement proof. Preserve useful regression coverage and
   recovery artifacts. Finish with one production execution path.
 - [x] Build with `make dist`, verify the candidate bundle signature, and preserve
-  an archive plus prior packages for recovery. The final r2 package uses the
-  unchanged app identity `com.chriswozniczek.jevvoice`, executable SHA-256
-  `476ce17968443f35566f66641308b54a40bcaaf58136bdc9c5e99806f5d7559b`, and ZIP
-  SHA-256 `07858bd753c5d43eadec8c7b2a058d36a4927fc498a5c890f11400579059ea2b`.
+  an archive plus prior packages for recovery. The 2026-09-25 final-code
+  checkpoint uses unchanged app identity `com.chriswozniczek.jevvoice`,
+  executable SHA-256
+  `75fa830ff445610ebda7b1ab928bdc5782f46a9279c0074025caf4f98602507f`,
+  and ZIP SHA-256
+  `b5f609180132a00ef03aef4f6ff44cc64328a7c41bb18fa699085e2fd31687d3`.
   Strict signature verification, archive integrity, extraction, and executable
   comparison pass. It is under
-  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-24-final-r2/`.
-- [ ] Open the exact final package and inspect its visible setup state. An earlier
-  same-day bundle was launched from its exact path, but CUA app lookup timed out
-  and `System Events` denied assistive access. The final r2 package was not
-  launched after macOS reported the console session locked.
-- [ ] Verify setup and pass a desktop task through the exact packaged app. The
-  setup-flow live test on the corrected temp-path/schema code found TextEdit
-  windows but no resolvable AX window; it sent no text. A direct exact-window
-  focus probe returned an unverified partial result. The macOS session was
-  locked, so final-code setup and package task acceptance remain unproven.
+  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-25-final/`;
+  the verified 2026-09-24 r2 archive remains available for rollback.
+- [x] Open the exact final-code package and inspect its visible setup state.
+  The 2026-09-25 build was launched by exact path with `--settings`; its Voice
+  pane later displayed Microphone and Accessibility checked, and its Commands
+  pane displayed the stored Jev key without revealing it. No grant was
+  automated. The earlier r2 package remains the verified rollback.
+- [ ] Verify setup and pass a normal desktop task through the exact packaged
+  app. The final-code package's `Test Cua + Jev` button passed its disposable
+  TextEdit setup insertion and fresh readback. This is a setup workflow, not a
+  `CuaVoiceRuntime` voice task; packaged production-path acceptance is open.
 - [ ] Record matched baseline/candidate comparisons and explain their limits. No
   controlled matched set exists yet; current samples and the missing baseline
   model/Driver counts are recorded in `docs/voice-ui/EVIDENCE.md`.

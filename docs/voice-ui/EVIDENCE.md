@@ -977,3 +977,103 @@ The Cua pinned-scroll postcondition, required action-family coverage, lifecycle
 proofs, matched baseline/candidate measurements, and packaged-app acceptance
 remain open. No production safeguard was deleted, and no physical Fn/microphone
 result is claimed.
+
+### Execution simplification — unlocked desktop and final-code checkpoint, 2026-09-25
+
+This is scoped Steps 4/6/7/8 evidence, not a change to the P0–P5 migration gates.
+The starting tracked tree was clean at `6a734eb` after implementation commit
+`5bec4a6`; `.context/`, `.build/`, `build/`, and `development/` were preserved.
+The installed Driver still hashes to
+`699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a`.
+At the start, `/dev/console` belonged to the current user and `ioreg` did not
+report a locked session. Under `python3 scripts/with-desktop-lock.py`, the
+installed `mcp` `check_permissions` read returned daemon-attributed
+Accessibility=true and Screen Recording=true. No permission was changed.
+
+- **Step 4, native setup and key:**
+  `JARVIS_CUA_SETUP_TEST=1 swift test --scratch-path
+  .context/execution-simplification/swift-scratch-native-new-document --filter
+  CuaSetupTests/testDocumentSetupFlowThroughPinnedCuaOptIn` initially failed:
+  `bring_to_front` returned a partial/uncertain result after 8.817 seconds and
+  no text was typed. Source and earlier live evidence tie this to the pinned
+  launch watchdog's eight-second foreground restoration. The bounded
+  nine-second setup wait, exact window recheck, cancellation check and later
+  requesting-foreground check passed a later shared-desktop-lock trial in 16.761 seconds;
+  decision + insertion + readback took 3.345 seconds in that sample. This
+  accommodation is specific to setup and does not prove immediate production
+  launch. `JARVIS_CUA_RUNTIME_KEY_TEST=1 ... --filter
+  CuaVoiceRuntimeLiveTests/testNativeExecutionPostconditionsOptIn` passed its
+  expected refusal case in 14.317 seconds: three Jev requests, one `press_key`,
+  zero accidental `type_text`, and unchanged native text after Return. The
+  candidate key family stays isolated.
+- **Step 4, stale page and native verification:** Under the shared lock,
+  `python3 .context/execution-simplification/stale-browser-tab-live-2026-09-25.py`
+  used an isolated Chrome profile and loopback fixture. One probe using embedded
+  host permissions stopped before mutation because that host reported both
+  grants false. The first installed-daemon probe made the stale click and
+  observed a structured `effect=refused` but its harness expected an MCP error;
+  no destination changed. The corrected final probe recorded session
+  `Jarvis stale browser 01f8c21a`, PID `62065`, window `33819`, target
+  `bt-54894a6a-f7c4-4500-be79-e2da42093f2c`, tab
+  `tab-f73f9f56-9aee-4892-9e44-a0ab61d84e47`, stale ref `p178:0`, and
+  `effect=refused` with `route_unavailable`. The fresh page was the fixture
+  root and independent `destination_query` remained null. This is one stale-page
+  refusal; changed-tab/frame behavior is not proven. A separate installed
+  `CuaReplacementContractLiveTests` trial passed in 14.783 seconds: native
+  `verify_state` reported two stable satisfied samples before/after `set_value`,
+  and `set_value` rejected a token retired by fresh observation. The exact
+  disposable document held the expected text, with no second mutation.
+- **Step 6, outcome contract:** The pinned stale-page result lacked MCP
+  `isError` and had only `effect=refused`. Existing `CuaConnection.callResult`
+  accepted that shape. A focused regression failed first (`Accepted effect-only
+  refusal`), then passed after the transport classified `effect=refused` as
+  `DriverConnectionError.refused`. This fixes a false-success path; it does not
+  replace or retire any of the nine Step 6 production mechanisms. Request
+  destination, authorization, cancellation and uncertainty guards remain.
+- **Integrated checks:** A final
+  `JARVIS_LOCAL_SWIFT_SCRATCH="$PWD/.context/execution-simplification/swift-scratch-native-new-document"
+  PATH="$PWD/.context/execution-simplification/bin:$PATH" make test` passed all
+  six tooling tests and 317 Swift tests with 31 opt-in skips, zero failures.
+  Log: `.context/execution-simplification/make-test-2026-09-25-final.log`.
+  An unwrapped `make dist` failed at the known prior-workspace `.build` PCH
+  module-cache path before packaging; the cache was retained. The final
+  `make dist` used the same workspace-local `swift` shim and set `BINARY` to
+  that scratch directory's release executable. Build log:
+  `.context/execution-simplification/package-2026-09-25-final.log`.
+- **Step 8, exact package:** The final-code arm64 0.1.5 (build 6) bundle is
+  `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-25-final/Jev Voice.app`;
+  its archive is the sibling `Jev-Voice-0.1.5.zip`. Bundle ID remains
+  `com.chriswozniczek.jevvoice`. Executable SHA-256 is
+  `75fa830ff445610ebda7b1ab928bdc5782f46a9279c0074025caf4f98602507f`;
+  ZIP SHA-256 is
+  `b5f609180132a00ef03aef4f6ff44cc64328a7c41bb18fa699085e2fd31687d3`.
+  `codesign --verify --deep --strict`, `unzip -t`, extraction, extracted-bundle
+  strict signature, and executable `cmp` all passed. It was opened from that
+  exact path with `--settings`; `ps` confirmed that path as PID `81480`, after
+  the earlier package process was terminated. Its visible Commands pane showed
+  the stored Jev key without revealing it. Clicking `Test Cua + Jev` opened an
+  owned temporary TextEdit document, inserted setup text and showed a verified
+  fresh readback; the UI reported 3.421 seconds from decision to readback.
+  This is a packaged setup task, not a normal `CuaVoiceRuntime` request. At an
+  initial same-day inspection of an earlier package the Voice pane marked
+  Microphone and Accessibility missing; the final package later displayed both
+  checked. No grant was automated, and the change in permission state was not
+  attributed to this agent. No physical Fn/microphone test or production voice
+  desktop task through the final bundle was completed.
+- **Rollback and measurement:** The prior 2026-09-24 r2 app and extracted app
+  passed strict signatures and byte comparison again; its executable and ZIP
+  retained recorded SHA-256 hashes `476ce17968443f35566f66641308b54a40bcaaf58136bdc9c5e99806f5d7559b`
+  and `07858bd753c5d43eadec8c7b2a058d36a4927fc498a5c890f11400579059ea2b`.
+  Restore from that archive or its verified `package-extracted/Jev Voice.app`
+  under `development/JevVoice/verification/execution-simplification/scoped-delivery-2026-09-24-final-r2/`;
+  the installed location and Driver were untouched. New live samples are one
+  successful setup trial, one native key refusal, one native verification,
+  one final stale-page refusal, and one packaged setup result, with the failed
+  preliminary trials stated above. They do not match baseline fixtures or
+  initial states for a latency/model/Driver-call comparison. No production
+  protection was retired. The tracked `ComputerControl` plus core `Models` scope
+  is 19 Swift files / 3,102 physical lines versus baseline `d756cf3` at 17 /
+  1,883 (+1,219, about 65%). `Package.swift`, `Package.resolved`, the Driver
+  pin, and the existing Swift/stdio boundary did not change. Total maintenance
+  burden has not decreased. Steps 4/6/7/8 and the scoped completion criteria
+  remain open.

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 import JevVoiceCore
 
 protocol CuaPermissionStatusClient {
@@ -67,6 +68,7 @@ final class CuaSetup: ObservableObject {
     }
     private func verifyDocument(_ connection: CuaConnection, label: String, apiKey: String) async throws {
         let fixture = CuaSetupFixture.documentURL()
+        let requestingForegroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         try "".write(to: fixture, atomically: true, encoding: .utf8)
         message = "Opening a disposable TextEdit document…"
         // `launch_app` has no session field in the installed schema. Keep the
@@ -85,6 +87,23 @@ final class CuaSetup: ObservableObject {
         }
         guard matches.count == 1, let wid = matches[0]["window_id"]?.integer else {
             throw DriverConnectionError.refused("Cua could not identify the disposable document. Nothing was typed.")
+        }
+        // The installed Driver restores the previous foreground for eight seconds
+        // after launch_app opens a URL. Let that launch watchdog finish before the
+        // first explicit foreground request; an uncertain activation cannot be
+        // safely repeated. Recheck the exact window after the wait.
+        try await Task.sleep(for: .seconds(9))
+        try Task.checkCancellation()
+        guard let requestingForegroundPID,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == requestingForegroundPID else {
+            throw DriverConnectionError.refused("Another app took focus while the disposable document opened. Nothing was typed.")
+        }
+        let settled = try await connection.call("list_windows", arguments: [
+            "pid": .number(Double(pid)), "session": .string(label)
+        ])
+        guard (settled["windows"]?.array ?? []).filter({ $0["window_id"]?.integer == wid &&
+            $0["title"]?.string?.contains(fixture.lastPathComponent) == true }).count == 1 else {
+            throw DriverConnectionError.refused("The disposable document changed during launch. Nothing was typed.")
         }
         let target: [String: JSONValue] = ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
             "session": .string(label), "include_screenshot": .bool(false), "max_elements": .number(150)]
