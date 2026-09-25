@@ -1205,3 +1205,15 @@ permission/UI transition, with no completion claim. A later settled attempt
 visibly passed Jev field choice, Cua insertion, and fresh readback in 3.260
 seconds decision/write/readback. It did not complete a normal production voice
 task. All Step 4/6/7/8 and maintenance-reduction gates remain open.
+
+**Maintenance inventory method:** For `d756cf3` and the final source revision,
+`git ls-tree -r --name-only` selected tracked `.swift`, `.py`, `.rs`, `.js`, and
+`.patch` files under `Sources/`, `Tests/`, `ThirdParty/Cua/`, and `scripts/`;
+`git show` counted physical lines. Baseline → final: production source 51 files /
+6,708 lines → 53 / 7,975; tests 48 / 4,393 → 56 / 7,214; Cua patch source
+1 / 2,642 → 4 / 3,326; scripts 3 / 169 → 4 / 286. The production plus patch
+plus script total rose 9,519 → 11,587 lines (+2,068, about 22%). Test lines
+also rose by 2,821. `Package.swift`, `Package.resolved`, `Makefile`, and
+`ThirdParty/Cua/pin.json` are byte-identical at both revisions. This is a
+static tracked-code inventory; ignored local Cua source and generated assets
+are preserved outside the count. It does not establish lower maintenance cost.

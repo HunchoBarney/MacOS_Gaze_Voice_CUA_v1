@@ -58,6 +58,17 @@ verified reduction in total maintenance burden, or production repeated-scroll
 postcondition. Keep the production refusal and `allowConfirmedRepetition=false`.
 Steps 4, 6, 7 and 8 remain open.
 
+Broader tracked maintenance inventory at `d756cf3` versus this continuation:
+`Sources/` 51 files / 6,708 physical lines to 53 / 7,975; `Tests/` 48 /
+4,393 to 56 / 7,214; `ThirdParty/Cua/` patch source 1 / 2,642 to 4 /
+3,326; `scripts/` source 3 / 169 to 4 / 286. Counts cover tracked
+`.swift`, `.py`, `.rs`, `.js`, and `.patch` files in those directories,
+including comments and blanks. They exclude prose, generated artifacts, and
+ignored workspace-local Cua source. `Package.swift`, `Package.resolved`,
+`Makefile`, and `ThirdParty/Cua/pin.json` are byte-identical. The comparison
+shows growth across code, tests, and uninstalled patches; it does not measure
+runtime work or prove a maintenance reduction.
+
 Final review removed an untrusted action label from the new timeout message.
 The integrated suite passed again (six tooling tests, 320 Swift tests, 34
 opt-in skips). The **latest** exact bundle is now
