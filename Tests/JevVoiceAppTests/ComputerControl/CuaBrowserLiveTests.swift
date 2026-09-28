@@ -143,7 +143,8 @@ final class CuaBrowserLiveTests: XCTestCase {
                 return answers
             }, windowID: window, generate: generatedDraft ? { prompt, context, reasoning in
                 try await TextProviderSettings.shared.client().generate(prompt: prompt, context: context, reasoning: reasoning)
-            } : nil, allowConfirmedRepetition: env["JARVIS_CUA_SIMPLIFIED"] == "1",
+            } : nil, literal: (!generatedDraft && !repeatedScrolling && !directNavigation && !pointerHover && !pointerDrag && !uploadFile && !dialogResolution && !searchNavigation) ? "copper lantern" : nil,
+               allowConfirmedRepetition: env["JARVIS_CUA_SIMPLIFIED"] == "1",
                approve: uploadFile || dialogResolution ? { description in
                    print("Authorized disposable browser fixture action:", description)
                    return true

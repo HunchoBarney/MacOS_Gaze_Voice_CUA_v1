@@ -63,6 +63,25 @@ replacement. Never send real messages, purchase, or delete personal content as t
 Credentials belong in the app or an explicitly configured environment, not commands
 saved in the repository. Physical microphone/Fn checks require the user's input.
 
+The ready-input timing check is scoped to real microphone capture with programmatic
+hold admission; it does not call Jev/Cua or prove physical Fn behavior:
+
+```sh
+python3 scripts/with-desktop-lock.py env JARVIS_READY_MIC_TEST=1 swift test --filter ReadyMicrophoneLiveTests
+```
+
+It requires microphone permission for the test process (separate from the app),
+reports cold preparation and 30 warm holds, then checks suspend/recovery. No raw
+recording or transcript is saved. `JARVIS_TEST_MIC_UID` optionally selects a device.
+Physical acceptance still requires at least five immediate-release and two longer
+holds on the identified app build, with recognition and desktop outcomes separated.
+
+The existing short recorded-audio check accepts `JARVIS_SHORT_SPEECH_SAMPLES=31`
+(one first-use sample plus 30 warm repeats) together with
+`JARVIS_SHORT_SPEECH_TEST_FILE`. It reports input-start to first result, input-end
+to last result, and input-end to finalized timings separately. These are synthetic/
+recorded input boundaries, not physical speech completion or desktop-action latency.
+
 ## Prerequisites versus proof
 
 Default tests do not require a live Driver, microphone or model key. Full control

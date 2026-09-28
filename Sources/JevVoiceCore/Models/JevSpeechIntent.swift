@@ -1,34 +1,10 @@
 import Foundation
 
-public enum JevSelection {
-    public static func read(_ answer: Answer?, allowed: Set<String>) throws -> String {
-        guard case let .choice(value, confidence, probabilities) = answer,
-              allowed.contains(value), confidence.isFinite, (0...1).contains(confidence),
-              probabilities.allSatisfy({ allowed.contains($0.key) && $0.value.isFinite && (0...1).contains($0.value) }) else {
-            throw DriverConnectionError.malformed
-        }
-        return value
-    }
-}
-
 public enum SpeechSpan {
     /// End is exclusive. Copy text from speech, never ask Jev to invent a string.
     public static func copy(words: [String], start: Int, end: Int) throws -> String {
         guard start >= 0, end > start, end <= words.count else { throw SpeechConsumption.Failure.invalidBoundary }
         return words[start..<end].joined(separator: " ")
-    }
-}
-
-public struct SpeechIntent {
-    public enum Kind: String { case command, textEntry, dictate, stop, stopAll, correction, ignore }
-    public let kind: Kind
-    public let count: Int
-    public let text: String
-    public let provenance: SpeechProvenance?
-    public let transcriptReceivedAt: Double?
-    public init(kind: Kind, count: Int, text: String, provenance: SpeechProvenance? = nil, transcriptReceivedAt: Double? = nil) {
-        self.kind = kind; self.count = count; self.text = text; self.provenance = provenance
-        self.transcriptReceivedAt = transcriptReceivedAt
     }
 }
 
@@ -38,38 +14,6 @@ public final class JevSpeechIntent {
     public init(client: JevClient) { self.evaluate = { state, questions in try await client.systemOne(state: state, questions: questions).response.answers } }
     public init(evaluate: @escaping Evaluate) { self.evaluate = evaluate }
 
-    public func next(words: [String], final: Bool, context: JSONValue) async throws -> SpeechIntent? {
-        guard !words.isEmpty else { return nil }
-        guard words.count <= 128 else {
-            throw DriverConnectionError.refused("Too much uncommitted speech. Release Fn and give a shorter request.")
-        }
-        var boundaries: [String: String?] = ["wait": "No complete first request yet; or the intended action is conditional, negated, or ambiguous."]
-        for end in 1...words.count {
-            boundaries[String(end)] = words.prefix(end).joined(separator: " ")
-        }
-        let state: JSONValue = .object(["pending_speech": .string(words.joined(separator: " ")),
-            "released": .bool(final), "context": context])
-        let kinds: [String: String?] = [
-            "command": "A request to operate the computer or generate text, excluding text entry.",
-            "textEntry": "Request to type or insert supplied literal content into an application.",
-            "dictate": "Explicit request for a literal dictation mode for the rest of this hold.",
-            "stop": "Cancel one existing task, with its name or current contextual reference.",
-            "stopAll": "Cancel all agent tasks.",
-            "correction": "Revise or retract a previous computer request. A topic change with actually is not necessarily a correction.",
-            "ignore": "Filler or ordinary conversation without a computer request."
-        ]
-        let chosen = try await evaluate(state, [
-            "boundary": .choice(instructions: "Select the shortest prefix containing the FIRST complete actionable request or complete conversational filler. Include every argument belonging to that request, such as the whole search query or dictated content. Do not detach 'open browser' from its same-request search. Speech may continue: missing arguments or a trailing condition mean wait. Later independent requests are excluded. Released speech is not automatically complete. If unclear choose wait.", criteria: boundaries),
-            "kind": .choice(instructions: "Classify only the FIRST complete request in pending_speech. Content quoted or dictated for insertion stays literal, never a stop/correction to the assistant. Ignore subsequent requests when classifying this first one.", criteria: kinds)
-        ])
-        let id = try JevSelection.read(chosen["boundary"], allowed: Set(boundaries.keys))
-        guard id != "wait", let count = Int(id) else { return nil }
-        let text = try SpeechSpan.copy(words: words, start: 0, end: count)
-        let kind = try JevSelection.read(chosen["kind"], allowed: Set(kinds.keys))
-        guard let value = SpeechIntent.Kind(rawValue: kind) else { throw DriverConnectionError.malformed }
-        return SpeechIntent(kind: value, count: count, text: text)
-    }
-
     public struct ExtractedText {
         public let text: String
         public let controlInstruction: String
@@ -78,10 +22,12 @@ public final class JevSpeechIntent {
     /// Copy literal text from an unambiguous source span. This intentionally does
     /// not ask a model to infer start and end words; an unclear request returns
     /// nil so the caller can ask the user to restate it.
+    private static let literalPrefixPattern = #"(?:please(?:\s+|,\s*))?(?:(?:(?:can|could|would|will)\s+you|I\s+(?:want|would\s+like)\s+you\s+to|I['’]d\s+like\s+you\s+to)\s+(?:please(?:\s+|,\s*))?)?(?:type|write|dictate|say)\b"#
+
     public static func literalPayload(in request: String) -> ExtractedText? {
         // Explicit dictation makes the whole suffix literal, including quotes
         // which happen to occur inside the spoken content.
-        let prefixPattern = "^\\s*" + SlotExtractor.literalPrefixPattern
+        let prefixPattern = "^\\s*" + Self.literalPrefixPattern
         guard let expression = try? NSRegularExpression(pattern: prefixPattern, options: .caseInsensitive),
               let match = expression.firstMatch(in: request, range: NSRange(request.startIndex..., in: request)),
               let prefixRange = Range(match.range, in: request) else { return quotedTextPayload(in: request) }

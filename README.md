@@ -33,7 +33,10 @@ choose the microphone in Voice, and follow macOS permission prompts. Optional
 text generation has a separate provider/key configuration. Saved keys remain in
 Keychain; do not put them in repository files.
 
-Hold Fn/Globe, wait for Listening, speak, and release to finalize. The controller
+When Voice settings reports Ready, the microphone is already running. Idle audio is
+discarded; the macOS microphone indicator stays active. Hold Fn/Globe, speak, and
+release to finalize. A fresh recognition session receives only audio admitted during
+the hold. Cold startup or recovery can still require preparation; check readiness. The controller
 can dispatch completed commands during a hold; reliable behavior across the full
 acceptance matrix remains unfinished. Escape cancels the voice interaction;
 task Stop and Stop All controls handle task cancellation. Expand the capsule for

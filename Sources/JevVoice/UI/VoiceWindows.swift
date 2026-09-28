@@ -96,7 +96,8 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
         let size = overlay.fittingSize
         let frame = Self.frame(contentSize: size, visibleFrame: screen.visibleFrame)
         if panel.frame != frame { panel.setFrame(frame, display: true) }
-        panel.orderFrontRegardless()
+        // Meter updates arrive at 25Hz; they must not repeatedly reorder a visible panel.
+        if !panel.isVisible { panel.orderFrontRegardless() }
         panel.displayIfNeeded()
         controller.recordOverlayPresentation()
     }
