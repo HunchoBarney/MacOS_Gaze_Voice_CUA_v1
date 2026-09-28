@@ -51,6 +51,7 @@ boundaries in [architecture](docs/ARCHITECTURE.md).
 
 - [Architecture and source map](docs/ARCHITECTURE.md): responsibilities and ownership.
 - [Development and verification](docs/DEVELOPMENT.md): Conductor, tests, packaging, runtime prerequisites.
+- [Eye tracking trial](EyeTracking/README.md): standalone gaze overlay and its local macOS workflow.
 - [Behavior specification](docs/voice-ui/SPEC.md): active S1–S9 requirements.
 - [Migration plan](docs/voice-ui/PLAN.md): active P0–P5 gates and A1–A13 acceptance matrix.
 - [Migration execution instructions](docs/voice-ui/EXECUTION.md): use only when implementing that migration.

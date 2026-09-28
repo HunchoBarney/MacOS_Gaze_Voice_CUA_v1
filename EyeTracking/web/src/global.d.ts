@@ -1,0 +1,168 @@
+export {};
+
+declare global {
+  interface Window {
+    gazeBridge: {
+      getConfig: () => Promise<RendererConfig>;
+      readCalibration: (path: string) => Promise<{ ok: true; text: string | null } | { ok: false; error: string }>;
+      writeCalibration: (
+        path: string,
+        payload: unknown
+      ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
+      ready: () => void;
+      setOverlayRegions: (regions: OverlayRegion[]) => void;
+      publishBackendMessage: (payload: BackendMessage) => void;
+      onBackendMessage: (callback: (payload: BackendMessage) => void) => () => void;
+      sendCalibrationCapture: (target: [number, number], validation: boolean) => void;
+    };
+  }
+}
+
+export interface OverlayRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface RendererConfig {
+  calibrate: boolean;
+  displayIndex: number;
+  requestedDisplayIndex: number;
+  displayCount: number;
+  displayBounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  invalidDisplay: boolean;
+  cameraScreenX: number;
+  cameraScreenY: number;
+  enableInferenceTime: boolean;
+  runtime: RuntimeName;
+  webInference: WebInferenceConfig | null;
+}
+
+export type RuntimeName = "python" | "onnxweb" | "litert";
+export type GazeProjectionMode = "legacy" | "binocular-screen" | "binocular-convergence";
+export type AcceleratorName = "webgpu" | "wasm";
+export type WebAccelerator = AcceleratorName;
+export type WebInferenceWorkerMode = "off" | "ort-proxy" | "dedicated";
+
+export interface WebInferenceConfig {
+  runtime: Exclude<RuntimeName, "python">;
+  webInferenceWorker: WebInferenceWorkerMode;
+  detector: "retinaface" | "yolo";
+  backend: string;
+  camera: string;
+  cameraResolutionName?: string;
+  cameraWidth: number;
+  cameraHeight: number;
+  cameraFov: number;
+  scoreThreshold: number;
+  displaySizeInch: number;
+  displayWidth: number;
+  displayHeight: number;
+  calibrationFile: string;
+  detectorModel: string;
+  retinafaceModel: string;
+  yoloModel: string;
+  gazeModel: string;
+  lipMotionModel: string;
+  detectorModelUrl: string;
+  retinafaceModelUrl: string;
+  gazeModelUrl: string;
+  lipMotionModelUrl: string;
+  onnxWasmBaseUrl: string;
+  liteRtWasmBaseUrl: string;
+  assetBaseUrl?: string;
+  smoothingAlpha: number;
+  smoothingAlphaY: number;
+  previewFps: number;
+  hidePreview: boolean;
+  flipX: boolean;
+  flipY: boolean;
+  cameraScreenX: number;
+  cameraScreenY: number;
+  eyePositionWeightX: number;
+  eyePositionWeightY: number;
+  retinafaceHeadFaceRatio: number;
+  gazeProjectionMode: GazeProjectionMode;
+  enableLipMotion: boolean;
+}
+
+export type BackendMessage =
+  | {
+      type: "gaze";
+      x_norm: number;
+      y_norm: number;
+      raw_x_norm?: number;
+      raw_y_norm?: number;
+      confidence: number;
+      distance_m: number;
+      head_face_width_ratio?: number;
+      eye_position_weight_x?: number;
+      eye_position_weight_y?: number;
+      gaze_projection_mode?: GazeProjectionMode;
+      detect_inference_ms?: number;
+      gaze_inference_ms?: number;
+      lip_motion_inference_ms?: number;
+      inference_ms?: number;
+      capture_ms?: number;
+      preview_ms?: number;
+      frame_interval_ms?: number;
+      processed_fps?: number;
+      dropped_frames?: number;
+      main_thread_long_tasks?: number;
+      yaw_deg: number;
+      pitch_deg: number;
+      mouth_detected?: boolean;
+      mouth_open?: boolean;
+      mouth_open_probability?: number | null;
+    }
+  | {
+      type: "status";
+      level: "info" | "warning" | "error";
+      message: string;
+      runtime?: RuntimeName;
+      accelerator?: AcceleratorName;
+      logged?: boolean;
+      detector?: string;
+      detector_model?: string;
+      detector_providers?: string[];
+      head_face_width_ratio?: number;
+      camera_fov_deg?: number;
+      camera_resolution_name?: string;
+      camera_width?: number;
+      camera_height?: number;
+      camera_screen_x?: number;
+      camera_screen_y?: number;
+      eye_position_weight_x?: number;
+      eye_position_weight_y?: number;
+      gaze_projection_mode?: GazeProjectionMode;
+      gaze_providers?: string[];
+      lip_motion_enabled?: boolean;
+      lip_motion_model?: string;
+      lip_motion_providers?: string[];
+    }
+  | {
+      type: "preview";
+      image: string;
+      head_detected: boolean;
+      eye_count: number;
+      width_ratio?: number | null;
+    }
+  | {
+      type: "lip_click_effect";
+      effect: "single" | "double";
+      x?: number;
+      y?: number;
+    }
+  | {
+      type: "calibration";
+      status: string;
+      count?: number;
+      path?: string;
+      message?: string;
+    };

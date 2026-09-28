@@ -38,6 +38,46 @@ Git worktrees do not automatically contain another checkout's uncommitted files.
 See [Conductor scripts](https://www.conductor.build/docs/reference/scripts).
 No global settings changes or external-SSD moves are needed for these commands.
 
+## Eye tracking trial
+
+`EyeTracking/` is a separate Electron/Python project. Its package and model
+versions remain pinned in its own lockfiles. This workspace contains local copies
+of the ONNX models and web runtime assets under `EyeTracking/public/`; Git ignores
+those binaries, the calibration files, dependencies, and build output. They are
+unique workspace inputs, not disposable caches. For local Conductor workspaces,
+the repository's `.worktreeinclude` copies model files that exist in the main
+checkout into each new workspace. Seed the main checkout from the
+[trial's documented release](../EyeTracking/README.md#setup) before creating a
+workspace; non-Conductor worktrees still need their own model copies.
+
+From this workspace root, prepare and check the web runtime with:
+
+```sh
+cd EyeTracking
+corepack pnpm install --frozen-lockfile
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
+scripts/package-macos-trial.sh
+```
+
+The packager creates `build/Screen Eye Tracking Trial.app` under this workspace
+and refuses to overwrite an existing bundle. It retains the trial's bundle ID
+and ad-hoc signing; packaging does not launch the camera. For a live trial, use
+the Conductor **Eye tracking setup** action for a new workspace, then use
+**Eye tracking** or **Eye tracking calibrate** to run it. The live actions take
+the shared desktop lock and use this workspace's assigned port. From a terminal,
+the equivalent calibration command is:
+
+```sh
+python3 scripts/with-desktop-lock.py EyeTracking/scripts/run-macos-trial.sh --calibrate
+```
+
+The copied calibration files remain local. Older calibrations made from clipped
+raw gaze are preserved but ignored by the current trial, so calibration is needed
+before assessing the marker. Automated tests do not establish live camera or
+gaze accuracy on this Mac.
+
 ## Live checks and shared desktop
 
 Tests with names ending in `LiveTests`, plus some integration tests, gate themselves

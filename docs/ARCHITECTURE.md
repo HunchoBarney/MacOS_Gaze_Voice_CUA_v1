@@ -4,6 +4,10 @@ The package keeps two modules: `JevVoice` owns the macOS application and integra
 side effects; `JevVoiceCore` holds shared values, interpretation and model clients.
 Directory groups are navigation aids, not new packages or access-control boundaries.
 
+`EyeTracking/` is a separate Electron/Python trial in this repository. It owns its
+gaze overlay, calibration, tests, and model inputs. It is outside the two Swift
+modules and the active first-release voice behavior in `voice-ui/SPEC.md`.
+
 ## Normal control flow
 
 `main.swift` creates the menu-bar application, windows, microphone catalog and Fn

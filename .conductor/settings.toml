@@ -14,3 +14,23 @@ icon = "test-tube"
 command = "make app"
 available_in = ["local"]
 icon = "package"
+
+[scripts.run.eye_tracking_test]
+command = "cd EyeTracking && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build"
+available_in = ["local"]
+icon = "test-tube"
+
+[scripts.run.eye_tracking_setup]
+command = "cd EyeTracking && corepack pnpm install --frozen-lockfile && if [ ! -e ../build/'Screen Eye Tracking Trial.app' ]; then scripts/package-macos-trial.sh; fi"
+available_in = ["local"]
+icon = "download"
+
+[scripts.run.eye_tracking]
+command = "python3 scripts/with-desktop-lock.py EyeTracking/scripts/run-macos-trial.sh"
+available_in = ["local"]
+icon = "eye"
+
+[scripts.run.eye_tracking_calibrate]
+command = "python3 scripts/with-desktop-lock.py EyeTracking/scripts/run-macos-trial.sh --calibrate"
+available_in = ["local"]
+icon = "scan-eye"
