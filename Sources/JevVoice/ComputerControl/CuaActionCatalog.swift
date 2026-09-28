@@ -400,6 +400,18 @@ enum CuaActionCatalog {
         case hotkey([String])
     }
 
+    private static func explicitKeyboardClause(in goal: String) -> (text: String, negated: Bool)? {
+        guard let quoted = quotedSpan(in: goal),
+              let command = goal[..<quoted.opening].range(
+                of: #"(?i)\b(?:press|hit|type)\s+(?:the\s+)?(?:key|shortcut|hotkey)\s*$"#,
+                options: .regularExpression
+              ) else { return nil }
+        let beforeCommand = goal[..<command.lowerBound]
+        let clauseStart = beforeCommand.lastIndex(where: { ";.!?\n".contains($0) })
+            .map { goal.index(after: $0) } ?? goal.startIndex
+        return (quoted.text, containsExplicitNegation(in: goal[clauseStart..<command.lowerBound]))
+    }
+
     private static func explicitPopupValue(in goal: String) -> String? {
         guard let quoted = quotedSpan(in: goal),
               goal[..<quoted.opening].range(of: #"(?i)\b(?:choose|select|set)\s+(?:the\s+)?(?:value\s+)?$"#, options: .regularExpression) != nil,
@@ -449,9 +461,8 @@ enum CuaActionCatalog {
     }
 
     private static func explicitKeyboardInput(in goal: String) -> KeyboardInput? {
-        guard let quoted = quotedSpan(in: goal),
-              goal[..<quoted.opening].range(of: #"(?i)\b(?:press|hit|type)\s+(?:the\s+)?(?:key|shortcut|hotkey)\s*$"#, options: .regularExpression) != nil else { return nil }
-        let text = quoted.text
+        guard let clause = explicitKeyboardClause(in: goal), !clause.negated else { return nil }
+        let text = clause.text
         let normalized = text.lowercased().replacingOccurrences(of: " ", with: "")
         if normalized.contains("+") {
             let parts = normalized.split(separator: "+").map(String.init)
@@ -464,6 +475,10 @@ enum CuaActionCatalog {
         }
         guard Self.validKey(normalized) else { return nil }
         return .key(normalized)
+    }
+
+    static func isExplicitlyNegatedKeyboardRequest(in goal: String) -> Bool {
+        explicitKeyboardClause(in: goal)?.negated == true
     }
 
     static func explicitKeyboardTool(in goal: String) -> String? {

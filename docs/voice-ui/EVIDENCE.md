@@ -1221,3 +1221,90 @@ are preserved outside the count. It does not establish lower maintenance cost.
 The user reported they cannot perform the requested physical Fn/Calculator
 check now. This records availability only, not a pass or failure. The exact
 reviewed bundle remains open for a later user-controlled observation.
+
+**User-reported physical follow-up, 2026-09-26:** In response to that pending
+check, the user reported that they performed it and "it worked." This records a
+successful user-reported Fn/Calculator check for the reviewed bundle identified
+above. The agent did not independently inspect the resulting transcript,
+Activity entry, Calculator state, or timing. This single report does not close
+the remaining simplification gates or the broader voice migration matrix.
+
+**Real browser request follow-up, 2026-09-26:** The user reported that saying
+"Open Google and search for the weather today in Yuba City" failed while Google
+was still opening. Direct inspection of the running reviewed bundle's in-memory
+Activity showed the first `Open Google` task failed at the 32-action bound after
+one `launch_app` call (2,285 ms) and repeated `list_windows` observations. Later
+partial search tasks failed because they depended on that task; a complete retry
+also inherited the failed prerequisite, and a final fragment was classified as
+text entry and refused before typing. The Activity entries span several tasks;
+they do not prove one capture repeated a launch. A separate pill screenshot said
+Fn release was missed, but the latest captured request had finalized in 244 ms;
+the warning is not established as the cause of the browser failure.
+
+An initial candidate with speech stabilization and task-routing changes was
+packaged as executable SHA-256
+`9dce6e9193561ebc684088120f39eee7d6a1d5d64a59fed76bd171a153423556`.
+After the user explicitly opted in, it replaced the running reviewed bundle.
+Its new signing identity initially lacked Microphone and Accessibility grants;
+the app later showed both granted. On retry, the user reported "I need a clearer
+or more complete request," a voice interpretation failure before any confirmed
+browser action. The user directed that voice work remain in another worktree.
+The speech and task-routing edits were therefore reverted here; this checkpoint
+addresses only Cua execution's launched-window readiness.
+
+The remaining Cua change gives a newly launched foreground/work app up to ten
+seconds for an observable first window without repeating the launch. After the
+voice edits were reverted, the focused task-agent suite passed 29/0. An earlier
+full workspace-local scratch suite passed 323 tests, 34 opt-in skips, zero
+failures with the voice edits still present; tooling passed 6/0. The default
+`.build` cache contains an obsolete absolute path and failed before compilation,
+so Swift tests used `.context/real-task-debug-swift-build`.
+
+The execution-only release bundle at
+`development/JevVoice/verification/real-task-execution-only-2026-09-26/Jev Voice.app`
+builds and passes strict/deep signature verification; executable SHA-256
+`e1d95b2105f7adc975bc35bc2b3873c5ebf2df51c59cab56d4b8db61d892e6fe`.
+It is running as the sole Jev Voice process. Its Voice settings initially showed
+Microphone and Accessibility unavailable for the new bundle path, then both
+granted after user action. No Cua task or public Google search has been observed
+under this build. The former reviewed and interim bundles remain on disk for
+rollback. Unrelated migration gates remain open.
+
+**Execution-review repairs, 2026-09-26–27:** Nine review findings were reproduced
+and repaired without changing the Driver pin or enabling a candidate action.
+Repository ignore behavior now excludes `.context/`, so its recovery repositories
+do not enter Conductor checkpoints. The workspace setup test also proves that an
+individual manifest destination symlink is rejected instead of being preserved as
+a local edit. Local setup honors a configured `JARVIS_DEVELOPMENT_SOURCE` before
+the Conductor root and fails instead of silently succeeding when neither local
+source exists. The default root seed was restored from an independent copy that
+verified all 898 manifest hashes; a disposable fresh-workspace setup copied and
+reverified all 898 files and created the expected reference links. The Documents
+source remains unchanged, but its Cua files currently include undownloaded iCloud
+placeholders, so the root seed—not that unavailable copy—backs new workspaces.
+
+Task-agent regressions prove that choice paging/group navigation
+stops after a bounded 32 decisions per observation, an unverifiable scroll fails
+before another Jev decision, and the `browser_requires_setup` recovery records the
+prepared PID and launch receipt needed for unchanged-launch reversal. Browser
+dialog `inspect` remains read-only in runtime lifecycle accounting, while dialog
+mutations retain the normal effect path. A directly negated keyboard clause now
+produces no candidate and fails before app launch or any model/action dispatch;
+the distinct `Do not bring the app to the foreground; press ...` request remains
+a valid background key action.
+
+The exact-insertion check now uses one prefix/suffix pass and bounded KMP matching
+over `Character` arrays rather than rebuilding the full candidate string at every
+insertion point. In the focused 5,000-character append regression, the prior code
+took 1.809 seconds and failed the one-second responsiveness bound; the replacement
+passed in 0.004 seconds. The final focused run passed 34/0 task-agent, 20/0
+action-catalog, and 10/0 voice-controller checks. The repository command
+`JARVIS_LOCAL_SWIFT_SCRATCH="$PWD/.context/review-fixes-swift-scratch"
+PATH="$PWD/.context/execution-simplification/bin:$PATH" make test` passed 10
+tooling tests and 328 Swift tests with 34 opt-in skips and zero failures. A release
+build packaged at `.context/review-fixes-app/Jev Voice.app`; strict/deep signature
+verification passed and the arm64 executable SHA-256 is
+`31b7c6c9d39d526c319e33d8552d9ba35558787dc324ef49b82293aee6746892`.
+The package was not launched or installed. No live, recorded-audio, physical
+Fn/microphone, or app-acceptance check was run; no unrelated simplification or
+migration gate is closed by this evidence.

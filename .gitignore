@@ -3,6 +3,7 @@ build/
 *.xcodeproj
 .DS_Store
 .swiftpm
+/.context/
 /development
 
 # Per-workspace Conductor overrides can contain local paths/settings.

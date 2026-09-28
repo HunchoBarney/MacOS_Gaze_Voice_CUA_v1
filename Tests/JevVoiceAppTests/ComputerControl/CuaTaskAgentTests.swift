@@ -49,6 +49,115 @@ final class CuaTaskAgentTests: XCTestCase {
         XCTAssertEqual(textCalls, 0)
     }
 
+    func testNegatedExplicitKeyRequestNeverOffersOrDispatchesAnAction() async {
+        var body = "seed"
+        var mutations = 0
+        var nextDecisionCalls = 0
+        let agent = CuaTaskAgent(call: { tool, args in
+            switch tool {
+            case "list_apps", "get_accessibility_tree":
+                return .object(["apps": .array([.object([
+                    "name": .string("Fixture"), "bundle_id": .string("fixture"), "pid": .number(42)
+                ])])])
+            case "list_windows":
+                return .object(["windows": .array([.object(["window_id": .number(7)])])])
+            case "get_browser_state":
+                throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
+            case "get_window_state":
+                return .object(["elements": .array([.object([
+                    "element_index": .number(0), "role": .string("AXTextArea"),
+                    "label": .string("Body"), "element_token": .string("body"), "value": .string(body)
+                ])])])
+            case "press_key":
+                mutations += 1
+                body += "\n"
+                return .object(["effect": .string("confirmed"), "evidence": .array([.string("AX value changed")])])
+            case "type_text":
+                mutations += 1
+                body += args["text"]?.string ?? ""
+                return .object(["effect": .string("confirmed"), "evidence": .array([.string("AX value changed")])])
+            default:
+                throw DriverConnectionError.malformed
+            }
+        }, judge: { _, questions in
+            if questions["risk"] != nil {
+                return ["risk": .choice(choice: "ordinary", confidence: 1, probabilities: [:]),
+                        "windowEffect": .choice(choice: "same", confidence: 1, probabilities: [:])]
+            }
+            if case let .choice(_, choices) = questions["next"] {
+                nextDecisionCalls += 1
+                if mutations > 0 {
+                    return ["next": .choice(choice: "done", confidence: 1, probabilities: [:])]
+                }
+                let mutation = try XCTUnwrap(choices.first {
+                    $0.value?.hasPrefix("Press the requested key") == true
+                        || $0.value?.hasPrefix("Insert supplied text") == true
+                }?.key)
+                return ["next": .choice(choice: mutation, confidence: 1, probabilities: [:])]
+            }
+            return ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+                    "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+                    "visibility": .choice(choice: "background", confidence: 1, probabilities: [:])]
+        }, windowID: 7, actionSurface: .candidate)
+
+        do {
+            _ = try await agent.run(goal: "Do not press the key \"return\" in Body.", context: "", progress: { _ in })
+            XCTFail("A directly negated keyboard request must be refused")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.localizedCaseInsensitiveContains("negated"), error.localizedDescription)
+        }
+
+        XCTAssertEqual(nextDecisionCalls, 0)
+        XCTAssertEqual(mutations, 0)
+        XCTAssertEqual(body, "seed")
+    }
+
+    func testNegatedExplicitKeyRequestDoesNotLaunchItsTarget() async {
+        var running = false
+        var launchCalls = 0
+        let agent = CuaTaskAgent(call: { tool, _ in
+            switch tool {
+            case "list_apps", "get_accessibility_tree":
+                var app: [String: JSONValue] = [
+                    "name": .string("Fixture"), "bundle_id": .string("fixture")
+                ]
+                if running { app["pid"] = .number(42) }
+                return .object(["apps": .array([.object(app)])])
+            case "launch_app":
+                launchCalls += 1
+                running = true
+                return .object(["pid": .number(42)])
+            case "list_windows":
+                return .object(["windows": .array([.object([
+                    "window_id": .number(7), "title": .string("Fixture")
+                ])])])
+            case "get_window_state":
+                return .object(["elements": .array([.object([
+                    "element_index": .number(0), "role": .string("AXTextArea"),
+                    "label": .string("Body"), "element_token": .string("body"), "value": .string("seed")
+                ])])])
+            case "get_browser_state":
+                throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
+            default:
+                throw DriverConnectionError.malformed
+            }
+        }, judge: { _, _ in
+            ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+             "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+             "visibility": .choice(choice: "background", confidence: 1, probabilities: [:])]
+        }, actionSurface: .candidate)
+
+        do {
+            _ = try await agent.run(goal: "Do not press the key \"return\" in Body.", context: "", progress: { _ in })
+            XCTFail("A directly negated keyboard request must be refused")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.localizedCaseInsensitiveContains("negated"), error.localizedDescription)
+        }
+
+        XCTAssertEqual(launchCalls, 0)
+        XCTAssertFalse(running)
+    }
+
     func testAddressedTextInsertionDoesNotPredictAnotherWindow() async throws {
         var inserted = "", mutations = 0
         let agent = CuaTaskAgent(call: { tool, args in
@@ -256,6 +365,7 @@ final class CuaTaskAgentTests: XCTestCase {
         for nextAfterScroll in ["done", "click"] {
             var scrollCalls = 0
             var clickCalls = 0
+            var nextDecisionCalls = 0
             let agent = CuaTaskAgent(call: { tool, _ in
                 switch tool {
                 case "list_apps", "get_accessibility_tree":
@@ -281,6 +391,7 @@ final class CuaTaskAgentTests: XCTestCase {
                             "windowEffect": .choice(choice: "same", confidence: 1, probabilities: [:])]
                 }
                 if case let .choice(_, choices) = questions["next"] {
+                    nextDecisionCalls += 1
                     if scrollCalls == 0 {
                         let scroll = try XCTUnwrap(choices.first { $0.value == "Scroll Document down one page" }?.key)
                         return ["next": .choice(choice: scroll, confidence: 1, probabilities: [:])]
@@ -303,8 +414,63 @@ final class CuaTaskAgentTests: XCTestCase {
                 XCTAssertTrue(error.localizedDescription.localizedCaseInsensitiveContains("incomplete"))
             }
             XCTAssertEqual(scrollCalls, 1)
+            XCTAssertEqual(nextDecisionCalls, 1, "A known unresolved effect must surface before another Jev decision")
             XCTAssertEqual(clickCalls, 0, "A later action must not run before the uncertain scroll is resolved")
         }
+    }
+
+    func testPaginatedChoiceNavigationStopsWhenTheModelCyclesBetweenTargets() async throws {
+        let controls: [JSONValue] = (0..<300).map { index in
+            .object(["element_index": .number(Double(index)), "role": .string("AXButton"),
+                     "label": .string("Control \(index)"), "element_token": .string("control-\(index)"),
+                     "actions": .array([.string("AXPress")]), "enabled": .bool(true)])
+        }
+        var nextDecisionCalls = 0
+        let agent = CuaTaskAgent(call: { tool, _ in
+            switch tool {
+            case "list_apps", "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture"), "pid": .number(42)])])])
+            case "list_windows":
+                return .object(["windows": .array([.object(["window_id": .number(7)])])])
+            case "get_browser_state":
+                throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
+            case "get_window_state":
+                return .object(["elements": .array(controls)])
+            default:
+                XCTFail("Choice navigation dispatched unexpected tool \(tool)")
+                throw DriverConnectionError.malformed
+            }
+        }, judge: { state, questions in
+            if questions["app"] != nil {
+                return ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+                        "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+                        "visibility": .choice(choice: "background", confidence: 1, probabilities: [:])]
+            }
+            guard case let .choice(_, choices) = questions["next"] else {
+                throw DriverConnectionError.malformed
+            }
+            nextDecisionCalls += 1
+            if nextDecisionCalls > 40 {
+                throw DriverConnectionError.refused("test pagination sentinel")
+            }
+            XCTAssertEqual(state["candidate_action_count"], .number(300))
+            let choice: String
+            if choices[CuaActionChoiceBook.backToTargetsID] != nil {
+                choice = CuaActionChoiceBook.backToTargetsID
+            } else {
+                XCTAssertEqual(state["choice_grouping"], .string("target_groups"))
+                choice = try XCTUnwrap(choices.keys.first(where: { $0.hasPrefix("target_") }))
+            }
+            return ["next": .choice(choice: choice, confidence: 1, probabilities: [:])]
+        }, windowID: 7)
+
+        do {
+            _ = try await agent.run(goal: "Press one fixture control.", context: "", progress: { _ in })
+            XCTFail("A cycling model must not keep the task alive indefinitely")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("bounded decision limit"), error.localizedDescription)
+        }
+        XCTAssertLessThanOrEqual(nextDecisionCalls, 40)
     }
 
     func testBrowserTextInsertionRebindsUniqueTargetWhenSnapshotRefIndexMoves() async throws {
@@ -566,6 +732,71 @@ final class CuaTaskAgentTests: XCTestCase {
         XCTAssertEqual(navigations[0]["url"], .string("https://example.invalid/path?q=1"))
         XCTAssertEqual(approvals.count, 1)
         XCTAssertTrue(approvals[0].contains("isolated Chrome profile"))
+    }
+
+    func testBrowserSetupRecoveryTracksPreparedProcessForSafeReversal() async throws {
+        var prepareCalls = 0
+        let stableElements: [JSONValue] = [
+            .object(["element_index": .number(0), "role": .string("AXWindow"), "label": .string("Isolated browser")])
+        ]
+        let agent = CuaTaskAgent(call: { tool, args in
+            switch tool {
+            case "list_apps":
+                return .object(["apps": .array([.object(["name": .string("Google Chrome"), "bundle_id": .string("com.google.Chrome")])])])
+            case "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Google Chrome"), "bundle_id": .string("com.google.Chrome"), "pid": .number(41)])])])
+            case "list_windows":
+                if args["pid"] == .number(41) {
+                    return .object(["windows": .array([.object(["window_id": .number(7), "title": .string("Existing Chrome")])])])
+                }
+                XCTAssertEqual(args["pid"], .number(43))
+                return .object(["windows": .array([.object(["window_id": .number(9), "title": .string("Isolated Chrome"), "is_on_screen": .bool(true)])])])
+            case "get_window_state":
+                return .object(["elements": .array(stableElements)])
+            case "get_browser_state":
+                if args["target_id"] != nil {
+                    return .object(["target_id": .string("isolated-target"), "tab_id": .string("isolated-tab"),
+                                    "page": .object(["url": .string("about:blank")]), "refs": .array([])])
+                }
+                if args["pid"] == .number(41) {
+                    throw DriverConnectionError.toolRefused(tool: tool, code: "browser_requires_setup")
+                }
+                XCTAssertEqual(args["pid"], .number(43))
+                XCTAssertEqual(args["window_id"], .number(9))
+                return .object(["binding_quality": .string("exact"), "mutation_allowed": .bool(true),
+                                "target_id": .string("isolated-target"),
+                                "tabs": .array([.object(["tab_id": .string("isolated-tab"), "active": .bool(true)])])])
+            case "browser_prepare":
+                prepareCalls += 1
+                return .object(["prepared_pid": .number(43)])
+            case "browser_dialog":
+                return .object(["status": .string("ok"), "target_id": .string("isolated-target"),
+                                "tab_id": .string("isolated-tab"), "present": .bool(false)])
+            default: throw DriverConnectionError.malformed
+            }
+        }, judge: { _, questions in
+            if questions["app"] != nil {
+                return ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+                        "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+                        "visibility": .choice(choice: "background", confidence: 1, probabilities: [:])]
+            }
+            if questions["next"] != nil {
+                return ["next": .choice(choice: "blocked", confidence: 1, probabilities: [:])]
+            }
+            throw DriverConnectionError.malformed
+        }, approve: { _ in true }, actionSurface: .candidate)
+
+        do {
+            _ = try await agent.run(goal: "Inspect the current page in Chrome.", context: "", progress: { _ in })
+            XCTFail("The fixture has no safe page action")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("safe next action"), error.localizedDescription)
+        }
+
+        XCTAssertEqual(prepareCalls, 1)
+        XCTAssertEqual(agent.launchedPID, 43)
+        XCTAssertEqual(agent.launchReceipt?.pid, 43)
+        XCTAssertEqual(agent.launchReceipt?.window, 9)
     }
 
     func testBoundBrowserPageChoicesExcludeNativeChromeMenus() async throws {
@@ -1108,6 +1339,36 @@ final class CuaTaskAgentTests: XCTestCase {
         XCTAssertEqual(calls.filter { $0 == "launch_app" }.count, 1)
         XCTAssertTrue(calls.contains("get_accessibility_tree"), "Recheck live process state independently of the installed-app inventory")
     }
+    func testForegroundLaunchWaitsForSlowFirstWindowWithoutReplayingLaunch() async throws {
+        var running = false, launchCalls = 0, windowReads = 0
+        let agent = CuaTaskAgent(call: { name, _ in
+            switch name {
+            case "list_apps", "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("test.fixture"),
+                    "pid": .number(running ? 42 : 0)])])])
+            case "launch_app":
+                launchCalls += 1; running = true
+                return .object(["pid": .number(42)])
+            case "list_windows":
+                windowReads += 1
+                return .object(["windows": .array(windowReads > 35 ? [.object(["window_id": .number(7),
+                    "title": .string("Ready"), "is_on_screen": .bool(true)])] : [])])
+            case "bring_to_front":
+                return .object(["activated": .bool(true), "exact_window_effect": .object(["verified": .bool(true)])])
+            case "get_window_state": return .object(["elements": .array([])])
+            default: XCTFail("Unexpected tool \(name)"); return .object([:])
+            }
+        }, judge: { _, questions in
+            Dictionary(uniqueKeysWithValues: questions.keys.map { key in
+                let value = key == "app" ? "app_0" : key == "scope" ? "launch" : "foreground"
+                return (key, Answer.choice(choice: value, confidence: 1, probabilities: [value: 1]))
+            })
+        })
+        let result = try await agent.run(goal: "Open Fixture", context: "", progress: { _ in })
+        XCTAssertTrue(result.contains("verified its window in front"))
+        XCTAssertEqual(launchCalls, 1)
+        XCTAssertGreaterThan(windowReads, 35)
+    }
     func testUncertainLaunchIsNotRetried() async throws {
         var mutations = 0
         var postTimeoutInspections = 0
@@ -1175,6 +1436,60 @@ final class CuaTaskAgentTests: XCTestCase {
         _ = try await agent.run(goal: "Insert supplied literal text", context: "Fixture editor", progress: { _ in })
         XCTAssertEqual(inserted, literal)
         XCTAssertEqual(actions, ["type_text"])
+    }
+
+    func testExactInsertionVerificationDoesNotBlockOnALongAppend() async throws {
+        let payload = "z"
+        var body = String(repeating: "a", count: 5_000)
+        var typeCalls = 0
+        let agent = CuaTaskAgent(call: { tool, args in
+            switch tool {
+            case "list_apps", "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture"),
+                                                        "running": .bool(true), "pid": .number(42)])])])
+            case "list_windows":
+                return .object(["windows": .array([.object(["window_id": .number(7)])])])
+            case "get_browser_state":
+                throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
+            case "get_window_state":
+                return .object(["elements": .array([.object([
+                    "element_index": .number(0), "role": .string("AXTextArea"), "label": .string("Body"),
+                    "element_token": .string("body"), "value": .string(body)
+                ])])])
+            case "type_text":
+                typeCalls += 1
+                body += args["text"]?.string ?? ""
+                return .object([:])
+            default:
+                throw DriverConnectionError.malformed
+            }
+        }, judge: { _, questions in
+            if questions["app"] != nil {
+                return ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+                        "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+                        "visibility": .choice(choice: "background", confidence: 1, probabilities: [:])]
+            }
+            if questions["risk"] != nil {
+                return ["risk": .choice(choice: "ordinary", confidence: 1, probabilities: [:])]
+            }
+            guard case let .choice(_, choices) = questions["next"] else {
+                throw DriverConnectionError.malformed
+            }
+            if typeCalls > 0 {
+                return ["next": .choice(choice: "done", confidence: 1, probabilities: [:])]
+            }
+            let action = try XCTUnwrap(choices.first { $0.value == "Insert supplied text into AXTextArea Body" }?.key)
+            return ["next": .choice(choice: action, confidence: 1, probabilities: [:])]
+        }, literal: payload)
+
+        let start = ContinuousClock.now
+        _ = try await agent.run(goal: "Append the supplied literal text.", context: "", progress: { _ in })
+        let elapsed = start.duration(to: .now).components
+        let elapsedSeconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+
+        XCTAssertEqual(typeCalls, 1)
+        XCTAssertEqual(body, String(repeating: "a", count: 5_000) + payload)
+        XCTAssertLessThan(elapsedSeconds, 1, "Exact-insertion verification must remain responsive on the main actor")
     }
 
 }

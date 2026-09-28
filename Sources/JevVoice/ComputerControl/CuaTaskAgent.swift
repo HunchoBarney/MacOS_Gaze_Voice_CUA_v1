@@ -40,6 +40,9 @@ final class CuaTaskAgent {
 
     func run(goal: String, context: String, acquireApp: (String) async throws -> Void = { _ in }, progress: (String) -> Void) async throws -> String {
         try Task.checkCancellation()
+        if CuaActionCatalog.isExplicitlyNegatedKeyboardRequest(in: goal) {
+            throw DriverConnectionError.refused("The keyboard command is negated. No action was dispatched.")
+        }
         let inventory = try await call("list_apps", [:])
         let apps = inventory["apps"]?.array ?? []
         var options: [String: String?] = ["none": "No installed application matches; target is unclear."]
@@ -116,6 +119,9 @@ final class CuaTaskAgent {
         }
         guard pid > 0 else { throw DriverConnectionError.malformed }
         if scope == "launch", launchedPID == nil, !foreground { return "Observed \(name) already running in the background." }
+        if windowID == nil, foreground || scope != "launch", launchedPID != nil {
+            try await waitForLaunchWindow(pid: pid)
+        }
         var generatedText: String?
         var advice: String?
         var completed = Set<String>()
@@ -217,7 +223,7 @@ final class CuaTaskAgent {
                         progress("Preparing an isolated browser…")
                         let preparedPID = try await prepareIsolatedBrowser(name: name)
                         let preparedWindow = try await waitForBrowserWindow(pid: preparedPID)
-                        pid = preparedPID; windowID = preparedWindow
+                        pid = preparedPID; launchedPID = preparedPID; windowID = preparedWindow
                         previousWindowIDs = [preparedWindow]; initialWindowIDs = [preparedWindow]
                         awaitingNewWindow = false; activatedWindow = nil
                         browser = try await CuaBrowserTarget.bind(pid: preparedPID, window: preparedWindow, call: call)
@@ -285,11 +291,11 @@ final class CuaTaskAgent {
             if generate != nil {
                 nextInstructions += " For a summary choose summary; for original prose to insert choose draft before insertion."
             }
-            let selection = try await chooseActionOrControl(book: choiceBook, observation: observation,
-                                                            reservedChoices: choices, instructions: nextInstructions)
             if let unresolvedActionOutcome {
                 throw DriverConnectionError.refused("Cua could not confirm the result of \(unresolvedActionOutcome). The task is incomplete; no further action was dispatched. Inspect the app before retrying.")
             }
+            let selection = try await chooseActionOrControl(book: choiceBook, observation: observation,
+                                                            reservedChoices: choices, instructions: nextInstructions)
             let next = selection.choice
             if next == "inspectVisual" {
                 guard let wid = windowID else { throw DriverConnectionError.malformed }
@@ -584,6 +590,7 @@ final class CuaTaskAgent {
         throw DriverConnectionError.refused("The task reached its bounded limit of \(Self.maximumActionsPerTask) observed actions. Inspect the app before continuing; no further mutation was dispatched.")
     }
     static let maximumActionsPerTask = 32
+    static let maximumChoiceDecisionsPerObservation = 32
     static func decisionElements(_ elements: [JSONValue]) -> [JSONValue] {
         let indexed = Dictionary(elements.compactMap { e in e["element_index"]?.integer.map { ($0, e) } }, uniquingKeysWith: { a, _ in a })
         return elements.filter { element in
@@ -614,8 +621,9 @@ final class CuaTaskAgent {
         var page = book.rootPage(reservedChoices: reservedChoices, page: rootPageIndex)
         var actionReservedChoices = reservedChoices
         actionReservedChoices[CuaActionChoiceBook.backToTargetsID] = "Return to the observed target groups."
+        var choiceDecisions = 0
 
-        while true {
+        while choiceDecisions < Self.maximumChoiceDecisionsPerObservation {
             try Task.checkCancellation()
             guard page.choices.count <= CuaActionChoiceBook.maxChoices else {
                 throw DriverConnectionError.refused("The observed action set could not be represented safely. No action was dispatched.")
@@ -627,6 +635,7 @@ final class CuaTaskAgent {
                 "choice_page": .number(Double(page.page + 1)),
                 "choice_page_count": .number(Double(page.pageCount))
             ]) { _, fresh in fresh })
+            choiceDecisions += 1
             let result = try await judge(state, ["next": .choice(instructions: instructions + pageLabel, criteria: page.choices)])
             let selected = try JevSelection.read(result["next"], allowed: Set(page.choices.keys))
 
@@ -670,6 +679,7 @@ final class CuaTaskAgent {
             if reservedChoices.keys.contains(selected) { return (selected, nil) }
             throw DriverConnectionError.refused("The selected action is no longer in the current observed choice set. Nothing was dispatched.")
         }
+        throw DriverConnectionError.refused("The action choice reached its bounded decision limit without selecting an observed action. No action was dispatched.")
     }
 
     private func textInsertionVerificationFailure(tool: String, target: JSONValue, expected: String,
@@ -761,11 +771,47 @@ final class CuaTaskAgent {
     }
 
     private static func isExactInsertion(before: String, after: String, text: String) -> Bool {
-        guard before != after, after.count == before.count + text.count else { return false }
         let original = Array(before)
-        for insertionPoint in 0...original.count {
-            let expected = String(original[..<insertionPoint]) + text + String(original[insertionPoint...])
-            if expected == after { return true }
+        let result = Array(after)
+        let insertion = Array(text)
+        guard !insertion.isEmpty, result.count == original.count + insertion.count else { return false }
+
+        var matchingPrefix = 0
+        while matchingPrefix < original.count, original[matchingPrefix] == result[matchingPrefix] {
+            matchingPrefix += 1
+        }
+        var matchingSuffix = 0
+        while matchingSuffix < original.count,
+              original[original.count - matchingSuffix - 1] == result[result.count - matchingSuffix - 1] {
+            matchingSuffix += 1
+        }
+        let firstPossibleStart = original.count - matchingSuffix
+        let lastPossibleStart = matchingPrefix
+        guard firstPossibleStart <= lastPossibleStart else { return false }
+
+        var failure = Array(repeating: 0, count: insertion.count)
+        if insertion.count > 1 {
+            var matched = 0
+            for index in 1..<insertion.count {
+                while matched > 0, insertion[index] != insertion[matched] {
+                    matched = failure[matched - 1]
+                }
+                if insertion[index] == insertion[matched] { matched += 1 }
+                failure[index] = matched
+            }
+        }
+        var matched = 0
+        let scanEnd = min(result.count, lastPossibleStart + insertion.count)
+        for index in firstPossibleStart..<scanEnd {
+            while matched > 0, result[index] != insertion[matched] {
+                matched = failure[matched - 1]
+            }
+            if result[index] == insertion[matched] { matched += 1 }
+            if matched == insertion.count {
+                let start = index + 1 - insertion.count
+                if start <= lastPossibleStart { return true }
+                matched = failure[matched - 1]
+            }
         }
         return false
     }
@@ -801,6 +847,18 @@ final class CuaTaskAgent {
             try await Task.sleep(for: .milliseconds(100))
         }
         throw DriverConnectionError.refused("The isolated browser window did not become observable. No page action was dispatched.")
+    }
+
+    private func waitForLaunchWindow(pid: Int) async throws {
+        for _ in 0..<100 {
+            try Task.checkCancellation()
+            let result = try await call("list_windows", ["pid": .number(Double(pid))])
+            if (result["windows"]?.array ?? []).contains(where: {
+                $0["is_on_screen"] != .bool(false) || !($0["title"]?.string ?? "").isEmpty
+            }) { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw DriverConnectionError.refused("The launched app did not show an observable window within 10 seconds. The launch was not repeated; inspect the app before retrying.")
     }
 
     private func validatedDraft(goal: String, prompt: String, context: String, generate: Generate) async throws -> String {

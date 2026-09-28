@@ -1,11 +1,15 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('workspace_setup', Path(__file__).resolve().parents[2] / 'scripts/setup-workspace-development.py')
+SETUP_SCRIPT = Path(__file__).resolve().parents[2] / 'scripts/setup-workspace-development.py'
+spec = importlib.util.spec_from_file_location('workspace_setup', SETUP_SCRIPT)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
@@ -25,6 +29,15 @@ class WorkspaceDevelopmentTests(unittest.TestCase):
         manifest = self.workspace / 'ThirdParty/Cua/source-manifest.json'
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({'files': {'source.txt': hashlib.sha256(b'original').hexdigest()}}))
+
+    def test_conductor_context_is_ignored(self):
+        repository = Path(__file__).resolve().parents[2]
+        result = subprocess.run(
+            ['git', 'check-ignore', '--quiet', '--no-index', '.context/checkpoint-probe'],
+            cwd=repository,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
 
     def test_isolation_and_rerun_preserves_edits(self):
         (self.workspace / 'development').symlink_to(self.source.parent)
@@ -57,3 +70,52 @@ class WorkspaceDevelopmentTests(unittest.TestCase):
         (local / 'cua-source').symlink_to(self.source / 'cua-source')
         with self.assertRaises(RuntimeError):
             module.setup(self.workspace, self.source)
+
+    def test_seed_file_link_is_rejected(self):
+        target = self.workspace / 'development/JevVoice/cua-source/source.txt'
+        target.parent.mkdir(parents=True)
+        target.symlink_to(self.source / 'cua-source/source.txt')
+
+        with self.assertRaises(RuntimeError):
+            module.setup(self.workspace, self.source)
+
+        self.assertTrue(target.is_symlink())
+        self.assertEqual((self.source / 'cua-source/source.txt').read_text(), 'original')
+
+    def test_configured_asset_root_precedes_conductor_root(self):
+        environment = os.environ.copy()
+        environment.update({
+            'CONDUCTOR_IS_LOCAL': '1',
+            'CONDUCTOR_ROOT_PATH': str(self.root / 'missing-conductor-root'),
+            'JARVIS_DEVELOPMENT_SOURCE': str(self.source),
+        })
+        result = subprocess.run(
+            [sys.executable, str(SETUP_SCRIPT), '--workspace', str(self.workspace)],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        copied = self.workspace / 'development/JevVoice/cua-source/source.txt'
+        self.assertTrue(copied.is_file(), result.stdout)
+        self.assertEqual(copied.read_text(), 'original')
+
+    def test_missing_local_asset_root_is_an_error(self):
+        environment = os.environ.copy()
+        environment.pop('JARVIS_DEVELOPMENT_SOURCE', None)
+        environment.update({
+            'CONDUCTOR_IS_LOCAL': '1',
+            'CONDUCTOR_ROOT_PATH': str(self.root / 'missing-conductor-root'),
+        })
+        result = subprocess.run(
+            [sys.executable, str(SETUP_SCRIPT), '--workspace', str(self.workspace)],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('No local development assets', result.stderr)

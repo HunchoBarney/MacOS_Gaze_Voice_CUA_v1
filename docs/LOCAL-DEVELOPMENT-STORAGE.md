@@ -72,7 +72,17 @@ For manual setup, run from the desired workspace:
 python3 scripts/setup-workspace-development.py --source /absolute/path/to/main-checkout/development/JevVoice
 ```
 
-Missing local assets or cloud setup skip this optional seeding. Future workspaces
-need the shared setup change merged, or the repository-local Conductor setup
-override installed on this Mac. Existing workspaces are seeded independently;
-setup does not overwrite their source changes.
+When the preserved assets are outside `CONDUCTOR_ROOT_PATH`, configure their
+absolute path only in the machine-local repository override:
+
+```toml
+[environment_variables.local]
+JARVIS_DEVELOPMENT_SOURCE = "/absolute/path/to/development/JevVoice"
+```
+
+Local setup fails if that configured/default source is missing, rather than
+silently creating a workspace without its required isolated source. Cloud setup
+without a local asset root still skips this seeding. Future workspaces need the
+shared setup change merged and the repository-local override installed on each
+Mac whose preserved assets live elsewhere. Existing workspaces are seeded
+independently; setup does not overwrite their source changes.

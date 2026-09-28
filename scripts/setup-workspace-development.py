@@ -43,7 +43,9 @@ def setup(workspace, source):
         target = local / 'cua-source' / name
         if any(parent.is_symlink() for parent in target.parents if parent != workspace):
             raise RuntimeError('Source path traverses a symlink: ' + str(target))
-        if target.exists() or target.is_symlink():
+        if target.is_symlink():
+            raise RuntimeError('Workspace source file must not be a symlink: ' + str(target))
+        if target.exists():
             continue  # Preserve edits on repeated setup.
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source / 'cua-source' / name, target)
@@ -102,14 +104,17 @@ def main():
     args = parser.parse_args()
     source = args.source
     if source is None:
+        configured = os.environ.get('JARVIS_DEVELOPMENT_SOURCE')
+        if configured:
+            source = Path(configured)
+    if source is None:
         root = os.environ.get('CONDUCTOR_ROOT_PATH')
         if not root or os.environ.get('CONDUCTOR_IS_LOCAL') == '0':
             print('No local Conductor asset root; skipping development assets.')
             return
         source = Path(root) / 'development/JevVoice'
     if not source.is_dir():
-        print('No local development assets at ' + str(source) + '; skipping.')
-        return
+        raise RuntimeError('No local development assets at ' + str(source))
     setup(args.workspace, source)
 
 

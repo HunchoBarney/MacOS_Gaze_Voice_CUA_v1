@@ -308,6 +308,19 @@ final class CuaActionCatalogTests: XCTestCase {
         XCTAssertEqual(negated?.arguments["delivery_mode"], .string("background"))
     }
 
+    func testDirectlyNegatedKeyboardCommandHasNoCandidate() {
+        let elements: [JSONValue] = [.object([
+            "element_index": .number(2), "role": .string("AXTextArea"),
+            "label": .string("Body"), "element_token": .string("body"),
+            "value": .string("seed"), "actions": .array([])
+        ])]
+
+        let actions = CuaActionCatalog.native(elements: elements, pid: 12, window: 34,
+            goal: "Do not press the key \"return\" in Body.", surface: .candidate)
+
+        XCTAssertFalse(actions.contains { $0.tool == "press_key" })
+    }
+
     func testTextEffectIdentitySurvivesAChangedFieldLabelAndSnapshotToken() {
         let first = CuaObservedAction(description: "Insert supplied text into AXTextArea Draft",
                                       tool: "type_text",

@@ -3,6 +3,16 @@ import JevVoiceCore
 
 @MainActor
 final class CuaVoiceRuntime {
+    private static let observationTools: Set<String> = [
+        "list_apps", "get_accessibility_tree", "list_windows", "get_window_state",
+        "get_browser_state", "parse_visual_regions"
+    ]
+
+    private static func dispatchesEffect(tool: String, arguments: [String: JSONValue]) -> Bool {
+        if observationTools.contains(tool) { return false }
+        return tool != "browser_dialog" || arguments["action"] != .string("inspect")
+    }
+
     final class Work: Identifiable {
         let id = UUID()
         let label: String
@@ -143,7 +153,7 @@ final class CuaVoiceRuntime {
                             connectionStarted = true
                             _ = try await connection.call("start_session", arguments: ["session": .string(work.label)])
                             work.message = try await receipt.reverse(call: { tool, args in
-                                if !["list_apps", "get_accessibility_tree", "list_windows", "get_window_state", "get_browser_state", "parse_visual_regions"].contains(tool) { work.dispatchedEffect = true }
+                                if Self.dispatchesEffect(tool: tool, arguments: args) { work.dispatchedEffect = true }
                                 return try await connection.call(tool, arguments: args.merging(["session": .string(work.label)]) { _, b in b })
                             }, judge: self.judge, approveFocus: {
                                 try await self.requestApproval("Temporarily focus \(receipt.bundle) to normally quit the unchanged app launched by \(target.label). No work will be discarded.", for: work)
@@ -182,7 +192,7 @@ final class CuaVoiceRuntime {
                     }
                     let agent = CuaTaskAgent(call: { tool, arguments in
                         try Task.checkCancellation()
-                        if !["list_apps", "get_accessibility_tree", "list_windows", "get_window_state", "get_browser_state", "parse_visual_regions"].contains(tool) {
+                        if Self.dispatchesEffect(tool: tool, arguments: arguments) {
                             // Record before dispatch: a thrown transport error can still hide an effect.
                             work.dispatchedEffect = true
                             if work.timings["Transcript to first dispatch"] == nil {
