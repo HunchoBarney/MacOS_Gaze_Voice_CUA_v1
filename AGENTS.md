@@ -10,8 +10,15 @@ PLAN.md owns current gates; EVIDENCE.md records build-specific results; HISTORY.
 is reference-only. Follow EXECUTION.md only for an authorized migration task.
 Do not turn unrelated maintenance into migration implementation.
 
+For the approved execution simplification, follow
+docs/EXECUTION-SIMPLIFICATION-PLAN.md for scope, sequence and completion. Use the
+voice specification as a behavioral constraint; do not automatically resume P0–P5.
+Prove each Cua/Jev replacement before deleting a protection. Record scoped results
+as simplification evidence without closing unrelated migration gates.
+
 Preserve credentials, preferences, app identities, dependency pins, and unrelated
-work. development/ is ignored but contains unique source, evidence, models and
+work. Only development/JevVoice/cua-source/ is tracked; the rest of development/
+is ignored but contains unique evidence, models and
 recovery bundles; it is not a disposable cache. See ThirdParty/Cua/README.md before
 changing or rebuilding Driver. Never auto-upgrade the pinned runtime.
 
@@ -44,3 +51,10 @@ checks pass, and material review findings are resolved. Do not start another cle
 or verification cycle without a concrete reason. Report what changed, what was
 actually verified, and remaining limitations; if blocked, state the unmet requirement
 without claiming completion.
+
+For parallel worktrees, run `scripts/setup-workspace-development.py` through
+Conductor setup. `development/JevVoice/cua-source` and generated outputs must be
+workspace-local. Treat `development/JevVoice/reference/` as read-only shared inputs;
+never write through its links or the legacy `~/Library/Caches/JevVoice` path.
+Copy inputs locally before modifying them. Review Cua source edits before
+committing; preserve ignored assets separately. See docs/LOCAL-DEVELOPMENT-STORAGE.md.

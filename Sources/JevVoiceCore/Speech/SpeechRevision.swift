@@ -37,6 +37,20 @@ public struct RangedTranscript: Sendable {
         // SpeechTranscriber supplies language-specific separators and paragraphs.
         segments.map(\.text).joined()
     }
+    /// Conservative segment-level coverage; no invented word-level audio times.
+    public func isFinal(throughWord count: Int) -> Bool {
+        let source = text
+        let words = source.split(whereSeparator: \.isWhitespace)
+        guard count > 0, count <= words.count else { return false }
+        let requiredCharacters = source.distance(from: source.startIndex, to: words[count - 1].endIndex)
+        var covered = 0
+        for segment in segments {
+            guard segment.isFinal else { return false }
+            covered += segment.text.count
+            if covered >= requiredCharacters { return true }
+        }
+        return false
+    }
     public enum Failure: Error { case invalidRange, finalizedRange }
 }
 

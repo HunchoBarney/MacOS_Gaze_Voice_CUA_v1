@@ -3,8 +3,10 @@
 On 2026-09-20, the supporting directory previously stored at
 `/Users/karanvirkang/Library/Caches/JevVoice` was moved into this repository's
 `development/JevVoice/` directory at the user's request. Source, tests, and
-plans remain in their existing locations. `development/` is Git-ignored;
-it includes large build files and local verification artifacts, not just source.
+plans remain in their existing locations. The preserved 898-file Cua source tree
+under `development/JevVoice/cua-source/` is tracked by Git. Other
+`development/` assets, including large builds and local verification artifacts,
+remain ignored and require separate preservation.
 
 The old cache path is a symbolic link to the new directory, preserving existing
 script, environment, and app paths. This was a same-filesystem rename, not a
@@ -41,3 +43,76 @@ The original broken Cua worktree metadata is unchanged. Its local modifications
 are now preserved independently as a patch and 898-file manifest under
 [ThirdParty/Cua](../ThirdParty/Cua/README.md). Large generated outputs and model
 assets remain here; this does not make `development/` disposable.
+
+## Parallel workspaces
+
+Local Conductor setup runs `scripts/setup-workspace-development.py`. On current
+branches, Git checks out the 898 preserved Cua source files into each workspace;
+setup keeps those files and prepares local output paths and shared references. On
+older branches without tracked source, setup copies the manifest-listed files from
+the repository root after checking their historical hashes. The source is a sparse
+snapshot, not a complete reconstructed upstream checkout. Setup does not copy the
+broken `.git` pointer, existing builds, or dependency environments. Follow
+ThirdParty/Cua/README.md if a full checkout is needed for a build.
+
+Each workspace has its own source, build, staging, probe, verification and export
+paths. Setup preserves existing source edits on reruns. The original repository's
+assets are not modified. Models, sealed bundles, historical evidence and recovery
+copies are exposed under `development/JevVoice/reference/` as shared links.
+These are read-only by agent policy, not enforced filesystem permissions: all
+agents run under the same macOS user. Never direct outputs there; copy an input
+locally before changing it. Local quality config points model inputs at reference
+bundles; newly generated outputs belong outside `reference/`.
+
+The setup creates a local, ignored `development/AGENTS.md` with these rules.
+Changes to the tracked Cua source now appear in `git status` and need review before
+commit. Builds, evidence, models, recovery copies and reference links remain
+ignored; Git does not back them up. Do not use the legacy cache compatibility link
+for workspace outputs. Runtime installation and desktop use remain shared and
+require the existing coordination rules.
+
+For manual setup, run from the desired workspace:
+
+```sh
+python3 scripts/setup-workspace-development.py --source /absolute/path/to/main-checkout/development/JevVoice
+```
+
+When the preserved assets are outside `CONDUCTOR_ROOT_PATH`, configure their
+absolute path only in the machine-local repository override:
+
+```toml
+[environment_variables.local]
+JARVIS_DEVELOPMENT_SOURCE = "/absolute/path/to/development/JevVoice"
+```
+
+Local setup fails if that configured/default source is missing, rather than
+silently creating a workspace without its required isolated source. Cloud setup
+without a local asset root still skips this seeding. Future workspaces need the
+shared setup change merged and the repository-local override installed on each
+Mac whose preserved assets live elsewhere. Existing workspaces are seeded
+independently; setup does not overwrite their source changes.
+
+## Tel Aviv workspace retirement evidence
+
+The ignored, workspace-local execution evidence was preserved in the
+[private Tel Aviv evidence release](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-tel-aviv-evidence-2026-09-27)
+in preparation for retiring that Conductor workspace. Its archive contains 514 files:
+scoped logs and probes, recovery metadata, packaged app checkpoints, staged
+Driver candidates/source, and the local progress ledger. Download both archives
+and `SHA256SUMS`, then run `shasum -a 256 -c SHA256SUMS`. The included
+`manifest.json` records every relative path, size, and SHA-256. The release also
+preserves a copied setup fixture in `SetupReviewFixture-2026-09-27.tar.gz`, with
+its own manifest: 901 files, including six Cua source files that differ from the
+current tracked source. Extract into an empty
+directory and inspect before copying files into another workspace.
+
+Personal chat attachments and machine-local Conductor/quality settings were
+saved separately under
+`~/Library/Application Support/JarvisWorkspaceBackups/TelAviv-2026-09-27/`.
+That local backup includes its own manifest and checksum; it is outside the
+Conductor worktree and is not a GitHub asset. Generated Rust `target/`, Swift
+scratch/build directories, and a clean upstream research clone were excluded
+from the evidence release. The exact reviewed Driver executables are in the
+[candidate prerelease](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-cua-candidates-2026-09-27),
+and the pinned production runtime and models remain in the
+[development handoff release](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-handoff-2026-09-20).

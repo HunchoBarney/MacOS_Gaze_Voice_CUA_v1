@@ -15,7 +15,7 @@ Do not update the pin just to accept a different build.
   claim that a reconstructed checkout will have that commit ID.
 - `local-integration.patch`: the 30 changed/added files relative to that base,
   recovered by byte comparison with the pinned upstream archive.
-- `source-manifest.json`: hashes of all 898 preserved local source/config/fixture
+- `source-manifest.json`: historical hashes of all 898 preserved local source/config/fixture
   files, executable-file inventory, and the patch. The working tree is sparse; absent upstream paths are not
   treated as deletions. Generated builds, dependencies and models are excluded.
 - `LICENSE.md`: upstream license. Preserve upstream notices in reconstructed builds.
@@ -53,9 +53,12 @@ requires separate integration validation and an intentional pin update.
 The current source snapshot, pinned Driver and perception bundle are also shared
 as private release assets. See [collaborator handoff](../../docs/HANDOFF.md).
 
-The source patch preserves local artifact tooling/lock metadata. Large downloaded
-model/runtime assets, export environments and sealed perception bundles remain in
-`development/JevVoice/`, where present. They are not part of this Git repository.
+The source patch preserves local artifact tooling/lock metadata. The sparse source
+tree under `development/JevVoice/cua-source/` is now tracked by Git and includes
+later unaccepted candidate edits, so it does not match the historical manifest
+byte for byte. Large downloaded model/runtime assets, export environments and
+sealed perception bundles remain in `development/JevVoice/`, where present. Those
+assets are not part of this Git repository.
 Use the hash-verifying upstream tooling and recorded evidence to reconstruct them;
 do not claim a fresh source checkout is a fully configured runtime.
 
@@ -63,3 +66,91 @@ The existing source still lives at `development/JevVoice/cua-source`; its `.git`
 points to a missing worktree database. Nothing in this cleanup rewrites that pointer
 or deletes its builds. Run the verifier above against it to compare the preserved
 snapshot. See [storage and recovery](../../docs/LOCAL-DEVELOPMENT-STORAGE.md).
+
+
+## Unaccepted execution-simplification candidate
+
+`launch-watchdog-candidate.patch` is a separate, narrowly reviewed delta **after**
+the preserved `local-integration.patch` snapshot. It is not part of the installed
+runtime or baseline source manifest. It makes an explicit foreground request retire
+only that PID's detached background-launch watchdog, with synchronization against
+queued/in-flight restoration. Existing ordinary guards remain active.
+
+The workspace-local candidate passed 31 focused Rust tests, locked release build,
+strict binary signature verification, and forward/reverse patch recovery. Its
+executable SHA-256 is
+`b8be58db2df46c27486e66d2861a5ccd12fd06b350fbdc583057212320c7a6de`.
+Its own isolated `mcp --direct --embedded` permission probe reported Accessibility
+and Screen Recording unavailable under host attribution. Live repair acceptance
+is therefore outstanding; do not install it or change the production pin on the
+strength of these build/tests. Plain `mcp` would proxy to the installed broker and
+would not prove the candidate code.
+
+To reconstruct for review, first reconstruct and verify the baseline above, then
+run `git apply --check` followed by `git apply` with this candidate patch in the
+new checkout. Reverse only this delta with `git apply -R` after checking it applies.
+The baseline verifier intentionally reports these three changed files after the
+candidate patch. See [the scoped record](../../docs/EXECUTION-SIMPLIFICATION-REPLACEMENTS.md)
+for remaining acceptance requirements. No dependency versions were changed.
+
+## Unaccepted scroll-readback candidate
+
+`scroll-readback-candidate.patch` is a separate two-file delta after the preserved
+source snapshot; it can coexist with the three-file launch-watchdog delta. It is
+not installed and does not change the production executable pin. It carries the
+retained DOM scroll target's before/after offsets and unchanged bounds into Cua's
+existing closed action-result contract. Only exact requested movement (clipped to
+measured bounds) receives `confirmed` with readback evidence. No movement is
+`suspected_noop`; missing, partial, contradictory, disconnected or changed-bounds
+evidence is `unverifiable`. Numeric offsets and target IDs stay out of the public
+action result. Negative/RTL offsets and unsettled smooth scrolling are not
+confirmed by this candidate. Other pointer routes retain their existing behavior.
+
+The synthetic route still delivers its existing wheel event and `scrollBy` call;
+this delta includes wheel-handler movement in readback so an extra effect cannot
+silently confirm the requested displacement. It does not add mutation retries or
+claim that a confirmed single scroll proves an entire user goal.
+
+Apply with `git apply --check` then `git apply` in a reconstructed local snapshot.
+Focused checks, from the Rust workspace and Jarvis root respectively:
+
+```sh
+cargo test --locked -p cua-driver-core --lib browser::
+node ThirdParty/Cua/scroll-readback-candidate.test.mjs development/JevVoice/cua-source/libs/cua-driver/rust/crates/cua-driver-core/src/browser/pointer.rs
+```
+
+The JavaScript check uses a DOM test double and the actual producer source. These
+offline checks do not establish Chrome behavior or live Jev repeated-action
+acceptance. The isolated candidate must still pass its own permission probe and
+the serialized live workflows before any production integration or deletion.
+
+The reviewed combined watchdog/scroll release build passes strict binary signature
+verification and has SHA-256
+`a4fcfdd7a74c317ecd4a9364a59c745c1975c5c6262f5fafad6c31dcd3381624`.
+Its final isolated permission probe still reports both grants unavailable. TCC
+logs identify Conductor's bundled `codex/0.154.0/codex` executable as the responsible
+subject, despite Conductor itself having a visible Screen Recording grant. Do not
+infer TCC responsibility merely from process ancestry or Driver's parent-PID field.
+
+
+## Unaccepted menu-focus candidate
+
+`menu-focus-candidate.patch` is a one-file delta after the preserved integration
+snapshot, independent of the watchdog and scroll patches. An isolated embedded
+process reproduced a stale `NSWorkspace.frontmostApplication` value even after
+WindowServer and AX verified exact activation. Menu readiness now prefers the
+existing live process comparison (including a definite negative), while retaining
+exact AX focus and stability checks. Prior-owner capture uses the same live
+comparison over visible ordinary windows, falling back to existing NSWorkspace
+behavior when none can be found. That fallback remains a limitation.
+
+The combined release executable has SHA-256
+`483b693060416b8cdd8088fde1140e6868d73dee72870b661f7efd4b7ec7cdf5`.
+Eleven focused Rust menu tests, strict signature validation and byte-exact
+forward/reverse patch recovery pass. Isolated live checks observe a new document,
+unchanged source content, and cross-app focus restoration. Full native agent
+acceptance still fails on payload/replay behavior; this is not an installed or
+promoted runtime. The previous combined binary and menu source are preserved in
+`development/JevVoice/staging/menu-focus-baseline/`. The earlier permission-blocked
+results above are historical: the user-enabled Codex executable now reports both
+grants true. See scoped evidence for the complete checkpoint.

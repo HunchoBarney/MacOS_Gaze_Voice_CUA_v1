@@ -28,16 +28,6 @@ struct OverlayView: View {
                     .lineLimit(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if controller.status == .awaitingConfirm {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(controller.decisions.filter { $0.action != .none }.enumerated()), id: \.offset) { index, decision in
-                            Text("\(index + 1). \(decision.displaySummary)").font(.system(size: 12))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }.frame(maxHeight: 110)
-            }
             if !message.isEmpty {
                 Text(message).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(3)
             }
@@ -157,12 +147,6 @@ struct ActivityView: View {
                             Button("Cancel", action: controller.cancel)
                         }
                     }
-                    if !controller.decisions.isEmpty {
-                        Divider()
-                        ForEach(Array(controller.decisions.enumerated()), id: \.offset) { index, decision in
-                            Text("\(index + 1). \(decision.displaySummary)").textSelection(.enabled)
-                        }
-                    }
                     if controller.status == .awaitingConfirm {
                         HStack {
                             Button("Run", action: controller.confirm).buttonStyle(.borderedProminent)
@@ -178,23 +162,8 @@ struct ActivityView: View {
                     }
                 }
             }
-            if !controller.history.isEmpty {
-                Text("RECENT DECISIONS").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                VoiceCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(controller.history.enumerated()), id: \.offset) { index, decision in
-                            if index > 0 { Divider() }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(decision.displaySummary).font(.system(size: 13, weight: .medium))
-                                Text(decision.clause).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                            }
-                        }
-                    }
-                }
-            }
             DisclosureGroup("Diagnostics", isExpanded: $showDiagnostics) {
                 VStack(alignment: .leading, spacing: 8) {
-                    if !controller.model.isEmpty { Text("Model: \(controller.model)") }
                     Text("Latest voice capture").fontWeight(.medium)
                     ForEach(controller.measurements.keys.sorted(), id: \.self) { key in
                         Text("\(key): \(Int(controller.measurements[key] ?? 0)) ms")
@@ -205,10 +174,6 @@ struct ActivityView: View {
                         ForEach(task.timings.keys.sorted(), id: \.self) { key in
                             Text("\(key): \(Int(task.timings[key] ?? 0)) ms")
                         }
-                    }
-                    ForEach(Array(controller.decisions.enumerated()), id: \.offset) { _, decision in
-                        Text("\(decision.action.rawValue): \(Int(decision.confidence * 100))% confidence")
-                        if let explanation = decision.planExplanation { Text(explanation) }
                     }
                     Text("Dispatch results reflect OS/API responses, not independent verification inside every app.")
                 }.font(.caption).foregroundStyle(.secondary).padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)

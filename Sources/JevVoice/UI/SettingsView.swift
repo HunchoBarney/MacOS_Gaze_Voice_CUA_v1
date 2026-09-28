@@ -131,8 +131,9 @@ struct SettingsView: View {
                             Text("Selected microphone unavailable").tag(config.microphoneUID)
                         }
                     }.labelsHidden()
-                    Text("Your choice applies to Jev Voice only. Changes take effect on the next recording.")
+                    Text("The microphone stays ready while the app is active. Only Fn-held audio is transcribed; idle audio is discarded. Changing input ends the current hold.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Text(controller.microphoneReadiness).font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button(controller.isMicrophoneTest ? "Stop test" : "Test microphone") {
                             controller.isMicrophoneTest ? controller.stopMicrophoneTest() : controller.startMicrophoneTest()

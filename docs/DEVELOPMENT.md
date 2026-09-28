@@ -29,9 +29,12 @@ Ad-hoc rebuilding can prompt macOS to recheck permissions or Keychain access.
 ## Conductor
 
 The checked-in `.conductor/settings.toml` exposes local setup, test and package
-commands. It intentionally does not copy `development/`, dependency environments
-or build caches. Each workspace owns its `.build` and `build` directories. Setup
-checks prerequisites; packaging does not launch or install anything.
+commands. Local setup seeds isolated supporting source and shared reference links
+using `scripts/setup-workspace-development.py`; it never links the whole
+`development/` folder or copies dependency environments or build caches.
+See [local storage](LOCAL-DEVELOPMENT-STORAGE.md) for the isolation rules.
+Spotlight testing is disabled so commands run in their own workspaces. Each
+workspace owns its `.build` and `build` directories. Setup checks prerequisites; packaging does not launch or install anything.
 
 Verify the branch/revision and any uncommitted work before using a new workspace.
 Git worktrees do not automatically contain another checkout's uncommitted files.
@@ -100,6 +103,25 @@ replacement. Never send real messages, purchase, or delete personal content as t
 Credentials belong in the app or an explicitly configured environment, not commands
 saved in the repository. Physical microphone/Fn checks require the user's input.
 
+The ready-input timing check is scoped to real microphone capture with programmatic
+hold admission; it does not call Jev/Cua or prove physical Fn behavior:
+
+```sh
+python3 scripts/with-desktop-lock.py env JARVIS_READY_MIC_TEST=1 swift test --filter ReadyMicrophoneLiveTests
+```
+
+It requires microphone permission for the test process (separate from the app),
+reports cold preparation and 30 warm holds, then checks suspend/recovery. No raw
+recording or transcript is saved. `JARVIS_TEST_MIC_UID` optionally selects a device.
+Physical acceptance still requires at least five immediate-release and two longer
+holds on the identified app build, with recognition and desktop outcomes separated.
+
+The existing short recorded-audio check accepts `JARVIS_SHORT_SPEECH_SAMPLES=31`
+(one first-use sample plus 30 warm repeats) together with
+`JARVIS_SHORT_SPEECH_TEST_FILE`. It reports input-start to first result, input-end
+to last result, and input-end to finalized timings separately. These are synthetic/
+recorded input boundaries, not physical speech completion or desktop-action latency.
+
 ## Prerequisites versus proof
 
 Default tests do not require a live Driver, microphone or model key. Full control
@@ -111,6 +133,15 @@ For cleanup/refactors: compare baseline and affected tests, review resource path
 validate `make app` and its signature, and check a clean disposable checkout. Preserve
 existing acceptance failures. Full migration acceptance is tracked separately in
 [PLAN.md](voice-ui/PLAN.md), with observations in [EVIDENCE.md](voice-ui/EVIDENCE.md).
+
+For the approved [execution simplification](EXECUTION-SIMPLIFICATION-PLAN.md), use
+its scoped replacement proofs and workflow checks. Compare task success, latency,
+model calls and Driver calls against a preserved baseline; exercise the changed
+production path rather than relying only on injected callbacks. Record results in
+the evidence ledger with the simplification step and tested build identified.
+Passing these checks does not close unrelated migration gates. Live checks remain
+opt-in and use the shared desktop lock; documentation alignment alone needs
+content/diff review, not app tests.
 
 ## Distribution
 

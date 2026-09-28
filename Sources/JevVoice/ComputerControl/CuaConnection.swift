@@ -7,10 +7,21 @@ struct CuaToolResult: Sendable {
     let content: [JSONValue]
 }
 
+/// A dispatched effect may exist even when Driver reports an error. Keep its
+/// evidence available to the task owner without reflecting observed content in UI.
+struct CuaUncertainOutcome: Error, LocalizedError, Sendable {
+    let tool: String
+    let result: JSONValue
+    var errorDescription: String? {
+        "Cua reported a partial or uncertain outcome for \(tool). An effect may have occurred; inspect the target before retrying."
+    }
+}
+
 /// One persistent MCP transport per task. Never reconnects or retries a mutation.
 actor CuaConnection {
     private let executable: URL
     private let arguments: [String]
+    private let onToolCall: (@Sendable (String, Int?) -> Void)?
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
@@ -24,9 +35,11 @@ actor CuaConnection {
     private(set) var serverVersion: String?
 
     init(executable: URL = CuaDependency.executable,
-         arguments: [String] = ["mcp"]) {
+         arguments: [String] = ["mcp"],
+         onToolCall: (@Sendable (String, Int?) -> Void)? = nil) {
         self.executable = executable
         self.arguments = arguments
+        self.onToolCall = onToolCall
     }
 
     deinit {
@@ -110,9 +123,15 @@ actor CuaConnection {
 
     func callResult(_ name: String, arguments: [String: JSONValue], timeout: TimeInterval = 30) async throws -> CuaToolResult {
         guard initialized else { throw DriverConnectionError.closed }
+        try Task.checkCancellation()
+        onToolCall?(name, arguments["text"]?.string?.count)
         let value = try await request("tools/call", params: .object([
             "name": .string(name), "arguments": .object(arguments)
         ]), timeout: timeout)
+        if let body = value["structuredContent"],
+           body["status"] == .string("partial") || ["partial", "indeterminate"].contains(body["effect"]?.string ?? "") || body["execution_state"] == .string("unknown") {
+            throw CuaUncertainOutcome(tool: name, result: body)
+        }
         // Retain typed refusal codes without reflecting arbitrary tool/page text into error UI.
         let code = value["structuredContent"]?["refusal"]?["code"]?.string
             ?? value["structuredContent"]?["code"]?.string ?? ""
@@ -123,7 +142,7 @@ actor CuaConnection {
         }
         guard let body = value["structuredContent"], body.object != nil else { throw DriverConnectionError.malformed }
         guard body["code"] != .string("tool_output_invalid") else { throw DriverConnectionError.malformed }
-        if body["status"] == .string("refused") || body["refusal"] != nil {
+        if body["status"] == .string("refused") || body["effect"] == .string("refused") || body["refusal"] != nil {
             if safeCode { throw DriverConnectionError.toolRefused(tool: name, code: code) }
             throw DriverConnectionError.refused(body["refusal"]?["message"]?.string ?? "Cua refused this action.")
         }

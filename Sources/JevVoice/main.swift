@@ -10,6 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let input = FnInputMonitor()
     private var subscriptions: Set<AnyCancellable> = []
     private var terminating = false
+    private var sessionActive = true
+    private var sleeping = false
+    private var screenLocked = false
+    private var canPrepareMicrophone: Bool { sessionActive && !sleeping && !screenLocked && !terminating }
+    private var permissionTimer: Timer?
+    private var microphonePermissionGranted = Permission.microphone.isGranted
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -26,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Quit Jev Voice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
 
+        if let session = CGSessionCopyCurrentDictionary() as? [String: Any] {
+            sessionActive = session[kCGSessionOnConsoleKey as String] as? Bool ?? false
+            screenLocked = session["CGSSessionScreenIsLocked"] as? Bool ?? false
+        }
+
         input.canBegin = { [weak self] in self?.controller.canBegin ?? false }
         input.operationActive = { [weak self] in self?.controller.operationActive ?? false }
         input.onAction = { [weak self] action in
@@ -39,15 +50,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         input.onInterruption = { [weak self] reason in self?.controller.interruptCapture(reason) }
+        input.$ready.removeDuplicates().sink { [weak self] ready in
+            guard let self, self.canPrepareMicrophone else { return }
+            if ready { self.controller.prepareMicrophone() }
+            else { self.controller.suspendMicrophone("Fn input is unavailable.") }
+        }.store(in: &subscriptions)
         input.start()
-        for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
-            NSWorkspace.shared.notificationCenter.publisher(for: name)
-                .receive(on: RunLoop.main)
-                .sink { [weak self] _ in self?.controller.interruptCapture("Recording stopped because the session became inactive.") }.store(in: &subscriptions)
+        controller.config.$microphoneUID.dropFirst().removeDuplicates().sink { [weak self] _ in
+            guard let self, self.canPrepareMicrophone else { return }
+            // @Published emits before storage changes; read the selection on the next main turn.
+            Task { @MainActor in
+                guard self.canPrepareMicrophone else { return }
+                self.controller.prepareMicrophone(deviceChanged: true)
+            }
+        }.store(in: &subscriptions)
+        microphones.$devices.combineLatest(microphones.$defaultHardwareID)
+            .dropFirst().sink { [weak self] _ in
+                guard let self, self.canPrepareMicrophone else { return }
+                Task { @MainActor in
+                guard self.canPrepareMicrophone else { return }
+                self.controller.prepareMicrophone(deviceChanged: true)
+            }
+            }.store(in: &subscriptions)
+        // Loginwindow posts these notifications on supported macOS builds. They
+        // are not an AppKit contract; physical lock/unlock remains an acceptance check.
+        for (name, locked) in [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false)] {
+            DistributedNotificationCenter.default().publisher(for: Notification.Name(name))
+                .receive(on: RunLoop.main).sink { [weak self] _ in
+                    self?.screenLocked = locked
+                    self?.refreshMicrophoneLifecycle()
+                }.store(in: &subscriptions)
         }
-        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.input.refresh(); self?.microphones.refresh() }.store(in: &subscriptions)
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification,
+                     NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
+            NSWorkspace.shared.notificationCenter.publisher(for: name)
+                .receive(on: RunLoop.main).sink { [weak self] _ in
+                    guard let self else { return }
+                    switch name {
+                    case NSWorkspace.willSleepNotification: self.sleeping = true
+                    case NSWorkspace.didWakeNotification: self.sleeping = false
+                    case NSWorkspace.sessionDidResignActiveNotification: self.sessionActive = false
+                    default: self.sessionActive = true
+                    }
+                    self.refreshMicrophoneLifecycle()
+                }.store(in: &subscriptions)
+        }
+        refreshMicrophoneLifecycle()
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let granted = Permission.microphone.isGranted
+                if granted != self.microphonePermissionGranted {
+                    self.microphonePermissionGranted = granted
+                    if granted { self.refreshMicrophoneLifecycle() }
+                    else { self.controller.suspendMicrophone("Microphone permission was removed.") }
+                }
+                self.controller.refreshPermissions()
+            }
+        }
         controller.refreshPermissions()
         Task { await SpeechAssets.shared.refresh() }
         if ProcessInfo.processInfo.arguments.contains("--settings") {
@@ -57,13 +117,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func refreshMicrophoneLifecycle() {
+        guard canPrepareMicrophone else {
+            controller.suspendMicrophone("Microphone paused while the session is inactive.")
+            return
+        }
+        input.refresh(); microphones.refresh()
+        if input.ready { controller.prepareMicrophone() }
+    }
+
     func applicationDidBecomeActive(_ notification: Notification) {
         controller.refreshPermissions(); input.refresh(); microphones.refresh()
+        if canPrepareMicrophone, input.ready { controller.prepareMicrophone() }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateLater }
         terminating = true
+        permissionTimer?.invalidate()
         input.stop()
         Task {
             await controller.shutdown()
@@ -101,25 +172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
-#if SPEECH_FIXTURE_PROBE
-if let index = CommandLine.arguments.firstIndex(of: "--voice-workflow-fixture"), CommandLine.arguments.count > index + 2 {
-    let fixture = MainActor.assumeIsolated {
-        SpeechFixtureWindow(input: URL(fileURLWithPath: CommandLine.arguments[index + 1]),
-            output: URL(fileURLWithPath: CommandLine.arguments[index + 2]))
-    }
-    withExtendedLifetime(fixture) { app.run() }
-    exit(0)
-}
-if let index = CommandLine.arguments.firstIndex(of: "--speech-fixture"), CommandLine.arguments.count > index + 2 {
-    Task { @MainActor in
-        await SpeechFixtureProbe.run(input: URL(fileURLWithPath: CommandLine.arguments[index + 1]),
-            output: URL(fileURLWithPath: CommandLine.arguments[index + 2]))
-        NSApp.terminate(nil)
-    }
-    app.run()
-    exit(0)
-}
-#endif
 let delegate = MainActor.assumeIsolated { AppDelegate() }
 app.delegate = delegate
 app.run()

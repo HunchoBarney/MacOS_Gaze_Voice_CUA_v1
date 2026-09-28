@@ -1,7 +1,7 @@
 # Architecture and source map
 
 The package keeps two modules: `JevVoice` owns the macOS application and integration
-side effects; `JevVoiceCore` holds shared values, interpretation and model clients.
+side effects; `JevVoiceCore` holds shared values and model clients.
 Directory groups are navigation aids, not new packages or access-control boundaries.
 
 `EyeTracking/` is a separate Electron/Python trial in this repository. It owns its
@@ -12,15 +12,40 @@ modules and the active first-release voice behavior in `voice-ui/SPEC.md`.
 
 `main.swift` creates the menu-bar application, windows, microphone catalog and Fn
 monitor. `VoiceController` owns capture/session state and defaults to
-`SpeechAnalyzerCapture`. Speech events include revisions, finalization and timing.
-`ContinuousIntentCoordinator` coordinates decisions over changing speech.
-`CuaVoiceRuntime` owns task contexts and connects them to `CuaTaskAgent` and
-`CuaWorkQueue`. `CuaConnection` transports MCP to the pinned local Driver.
-Cua owns desktop observation, native actions and cursor feedback. Jev chooses
-structured decisions; the optional text provider generates prose/advisory reasoning.
+`SpeechAnalyzerCapture`. Speech events include authoritative transcript snapshots, finalization and timing.
+`MicrophoneInput` owns the long-lived engine on a serial queue. Its admission gate
+drops idle buffers and strips any pre-hold prefix from a straddling buffer.
+`SpeechAnalyzerCapture` owns a fresh prepared analyzer and bounded feed per hold;
+it alone reconciles recognition ranges. Capture IDs, revisions, audio ranges and
+finality pass through `ContinuousIntentCoordinator` in a transcript handoff, along
+with the exact text and current task context. The coordinator owns speculative
+handoff cancellation and consumed-span bookkeeping, not speech meaning. Fn release
+closes admission and drains accepted audio, while the next analyzer prepares
+independently of the still-running hardware.
+
+For each pending source span, `CuaVoiceRuntime` starts a Cua session and sends the
+original transcript and task context to `CuaTaskAgent.decide`, together with the
+installed-app inventory. Jev makes the first operation, span, task relationship,
+application and literal-payload decision there. The runtime creates task records
+only after that decision and mechanically applies selected stop, stop-all or
+correction mechanics. Selected execution continues through that same
+`CuaTaskAgent`'s bounded observe/choose/act loop; later Jev calls use fresh Cua
+observations inside that execution workflow. `CuaWorkQueue` owns app leases and
+`CuaConnection` transports MCP to the pinned local Driver. Cua observations and
+supported tools ground desktop targets and effects. The optional text provider
+generates requested prose/advisory reasoning.
 
 This describes wiring, not acceptance of every behavior. See
 [the migration gates](voice-ui/PLAN.md) for remaining work.
+
+The approved [execution simplification](EXECUTION-SIMPLIFICATION-PLAN.md) evaluates
+which responsibilities the existing Cua/Jev integration can replace. The flow
+above describes the current implementation, not a requirement to retain each
+class or the present language/process boundary. Select that boundary from verified
+contracts and total maintenance cost. The intended result has one desktop decision
+and execution loop, Cua-owned supported observation/actions/verification, and only
+the necessary Jarvis task/UI integration. No replacement is implemented or proven
+by this architecture note.
 
 ## Source ownership
 
@@ -30,11 +55,8 @@ This describes wiring, not acceptance of every behavior. See
 | `Sources/JevVoice/UI` | Settings, capsule/Activity windows, styling and provider controls |
 | `Sources/JevVoice/Settings` | Preferences, Keychain and permission/provider configuration |
 | `Sources/JevVoice/ComputerControl` | Cua transport, dependency verification, observations, action catalog, task execution and scheduling |
-| `Sources/JevVoice/Legacy` | Older recognizer/native executor and app discovery retained for regression comparisons and opt-in fixtures |
-| `Sources/JevVoice/Testing` | Conditional `SPEECH_FIXTURE_PROBE` harness; not enabled in normal builds |
-| `Sources/JevVoiceCore/Speech` | Transcript/range consumption and owned dictation values |
+| `Sources/JevVoiceCore/Speech` | Recognition ranges, consumed spans and capture provenance |
 | `Sources/JevVoiceCore/Models` | JSON/typed Jev contracts and network clients for Jev and text generation |
-| `Sources/JevVoiceCore/Commands` | Command values, matching, interpretation/planning and comparison-path coordination |
 | `Tests/JevVoiceAppTests` | App integration contracts and explicitly gated live checks, grouped by responsibility |
 | `Tests/JevVoiceTests` | Core logic/model tests, grouped by responsibility |
 | `Tests/Fixtures` | Disposable external application fixtures |
@@ -44,14 +66,30 @@ their task and target ownership. The UI/controller uses the main actor; network,
 Driver and audio work have their own existing lifecycles. Consult implementation
 before changing isolation. No new global coordinator is implied by these groups.
 
-## Legacy boundaries
+## Capture lifecycle
 
-Production defaults to Cua. Injected interpreter/executor seams still exercise
-older behavior in regression tests; Driver failure does not select them as a
-fallback. The old recognizer supports historical fixture/policy checks, while the
-shared `SpeechCapturing` contract lives with current voice code. `ExecutorError`
-remains a shared error type despite its historical name. Removing these paths
-requires replacement evidence under the migration, not only an unused-code scan.
+There is one production voice route: SpeechAnalyzer → transcript/revision transport →
+the Cua task executor's first Jev decision → Cua observation and action. There is no
+preceding speech interpreter, task-routing call or spoken-text extraction call.
+Capture state and task progress have separate owners. Cancellation and session
+identity reject late results; consumed-span tracking prevents replay while preserving
+intentional repetitions. Manual mode still requires explicit submission. Legacy
+recognizer, parser/planner, native executor, dictation helper and conditional probe
+were removed under the authorized simplification plan. Live owned-range dictation
+remains an open migration gate, not a replaced capability.
+
+Ready hardware keeps the macOS microphone indicator active. Idle audio is discarded,
+never retained or transcribed. Quit, sleep, session inactivity, permission loss and
+input interruption stop hardware. Recovery prepares fresh input without resuming a
+hold. Screen-lock notifications use loginwindow's installed notification names, an
+undocumented OS integration that requires physical verification on supported builds.
+
+The merged Cua executor retains the observed-action catalog, target and outcome
+verification, timeout inspection, authorization, and guarded repetition from main.
+The execution simplification candidate remains separately scoped and does not
+close the migration's application acceptance gates. The standalone Cua agent keeps
+a literal-payload utility for non-voice callers; production voice carries the
+Jev-selected exact source span and does not run a preceding speech interpreter.
 
 ## Runtime and data boundaries
 

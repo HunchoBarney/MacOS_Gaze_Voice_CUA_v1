@@ -42,19 +42,48 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testPreparedAnalyzerCanAttachResultsBeforeFirstCaptureInputOptIn() async throws {
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_SPEECH_TEST_FILE"] else {
+            throw XCTSkip("Opt-in prerecorded capture-lifecycle check; no microphone or model call in the normal suite.")
+        }
+        try await recognizeFixture(path: path, requireStreaming: false, finalizationLimit: nil,
+                                   resultsConsumerAfterAnalyzerStarts: true)
+    }
+
+    @MainActor
     func testShortUtteranceFinalizesWithinCurrentVoiceDeadlineOptIn() async throws {
         guard let path = ProcessInfo.processInfo.environment["JARVIS_SHORT_SPEECH_TEST_FILE"] else {
             throw XCTSkip("Opt-in short recorded utterance with immediate end of input")
         }
-        try await recognizeFixture(path: path, requireStreaming: false, finalizationLimit: VoiceTimings().finalization)
+        let samples = Int(ProcessInfo.processInfo.environment["JARVIS_SHORT_SPEECH_SAMPLES"] ?? "1") ?? 0
+        guard (1...100).contains(samples) else { return XCTFail("Requested recorded sample count must be 1...100") }
+        for sample in 0..<samples {
+            print("RECORDED_SAMPLE", sample, "cold", sample == 0)
+            try await recognizeFixture(path: path, requireStreaming: false, finalizationLimit: VoiceTimings().finalization)
+        }
     }
 
     @MainActor
-    private func recognizeFixture(path: String, requireStreaming: Bool, finalizationLimit: Double?) async throws {
+    func testCompareFastResultsOnSameRecordedAudioOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_SPEECH_COMPARE_FAST"] == "1",
+              let path = ProcessInfo.processInfo.environment["JARVIS_SHORT_SPEECH_TEST_FILE"] else {
+            throw XCTSkip("Opt-in matched recorded-audio fastResults comparison")
+        }
+        for fast in [true, false, false, true] {
+            try await recognizeFixture(path: path, requireStreaming: false, finalizationLimit: VoiceTimings().finalization, fast: fast)
+        }
+    }
+
+    @MainActor
+    private func recognizeFixture(path: String, requireStreaming: Bool, finalizationLimit: Double?, fast: Bool = true,
+                                  resultsConsumerAfterAnalyzerStarts: Bool = false) async throws {
         if ProcessInfo.processInfo.environment["JARVIS_PREPARE_SPEECH"] == "1" {
             await SpeechAssets.shared.refresh(install: true)
         }
-        let module = try await SpeechAssets.transcriber()
+        let prepared = try await SpeechAssets.transcriber()
+        let supported = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current)
+        let locale = try XCTUnwrap(supported)
+        let module = fast ? prepared : SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [.audioTimeRange])
         let status = await AssetInventory.status(forModules: [module])
         XCTAssertEqual(status, .installed, "Prepare speech assets in the app's Voice settings.")
         guard status == .installed else { return }
@@ -65,18 +94,25 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
         let feed = try AnalyzerAudioFeed(input: file.processingFormat, output: format)
         try await analyzer.prepareToAnalyze(in: format)
         let observation = StreamingObservation()
-        let collection = Task { () throws -> String in
+        let inputStarted = ProcessInfo.processInfo.systemUptime
+        let collectResults = { Task { () throws -> String in
             var transcript = RangedTranscript()
             for try await result in module.results {
+                let now = ProcessInfo.processInfo.systemUptime
+                if observation.firstResultAt == nil { observation.firstResultAt = now }
+                observation.lastResultAt = now
                 if !observation.inputEnded { observation.observedBeforeEnd = true }
                 try transcript.apply(.init(start: result.range.start.seconds,
                     end: CMTimeRangeGetEnd(result.range).seconds,
                     text: String(result.text.characters), isFinal: result.isFinal))
             }
             return transcript.text
-        }
+        } }
+        var collection: Task<String, Error>?
         do {
+            if !resultsConsumerAfterAnalyzerStarts { collection = collectResults() }
             try await analyzer.start(inputSequence: feed.stream)
+            if collection == nil { collection = collectResults() }
             while file.framePosition < file.length {
                 let count = AVAudioFrameCount(min(1024, file.length - file.framePosition))
                 let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: count))
@@ -88,15 +124,18 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
             let finishStarted = ProcessInfo.processInfo.systemUptime
             feed.finish()
             try await analyzer.finalizeAndFinishThroughEndOfInput()
-            let text = try await collection.value
+            let text = try await collection!.value
             let finalization = ProcessInfo.processInfo.systemUptime - finishStarted
-            print("Recorded speech finalization ms:", finalization * 1000)
+            print("RECORDED_TIMING input_start_to_first_result_ms", (observation.firstResultAt.map { $0 - inputStarted } ?? -1) * 1000,
+                  "input_end_to_last_result_ms", (observation.lastResultAt.map { $0 - finishStarted } ?? -1) * 1000,
+                  "input_end_to_finalized_ms", finalization * 1000)
+            print("Recorded speech fastResults:", fast, "finalization ms:", finalization * 1000, "transcript:", text)
             if let finalizationLimit { XCTAssertLessThanOrEqual(finalization, finalizationLimit, "The current live deadline would discard this utterance") }
             XCTAssertTrue(text.lowercased().contains("blue notebook"), "Recorded fixture content missing: \(text)")
             XCTAssertTrue(text.lowercased().contains("desk"), "Final word missing: \(text)")
             if requireStreaming { XCTAssertTrue(observation.observedBeforeEnd, "No streaming result before audio ended") }
         } catch {
-            feed.finish(); collection.cancel(); await analyzer.cancelAndFinishNow(); throw error
+            feed.finish(); collection?.cancel(); await analyzer.cancelAndFinishNow(); throw error
         }
     }
 }
@@ -105,4 +144,6 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
 private final class StreamingObservation {
     var inputEnded = false
     var observedBeforeEnd = false
+    var firstResultAt: Double?
+    var lastResultAt: Double?
 }

@@ -1,0 +1,77 @@
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/invoke_menu.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/invoke_menu.rs
+@@ -568,6 +568,7 @@
+             pid,
+             crate::ax::bindings::focused_window_id_of_pid(pid),
+             window_id,
++            crate::input::skylight::front_process_matches(pid, window_id),
+         ) {
+             let since = stable_since.get_or_insert(now);
+             if now.duration_since(*since) >= Duration::from_millis(120) {
+@@ -590,8 +591,13 @@
+     target_pid: i32,
+     focused_window_id: Option<u32>,
+     target_window_id: u32,
++    front_process_matches_target: Option<bool>,
+ ) -> bool {
+-    frontmost_pid == Some(target_pid) && focused_window_id == Some(target_window_id)
++    // NSWorkspace can retain the previous app in an embedded process without
++    // AppKit activation updates. Prefer the live WindowServer process evidence,
++    // including a definite negative, as bring_to_front already does.
++    front_process_matches_target.unwrap_or(frontmost_pid == Some(target_pid))
++        && focused_window_id == Some(target_window_id)
+ }
+
+ fn refusal(details: MenuRefusal) -> ToolResult {
+@@ -678,7 +684,17 @@
+         let resolved_path = path.clone();
+
+         let outcome = tokio::task::spawn_blocking(move || {
+-            let prior_frontmost = crate::apps::frontmost_pid();
++            // Capture the actual foreground owner for restoration as well as
++            // readiness. A stale NSWorkspace value must not steal focus back
++            // from an already-foreground target after its menu action.
++            let prior_frontmost = crate::windows::visible_windows()
++                .iter()
++                .find(|window| {
++                    crate::input::skylight::front_process_matches(window.pid, window.window_id)
++                        == Some(true)
++                })
++                .map(|window| window.pid)
++                .or_else(crate::apps::frontmost_pid);
+             let prior_frontmost_window =
+                 prior_frontmost.and_then(crate::ax::bindings::focused_window_id_of_pid);
+             let needs_activation = prior_frontmost != Some(pid);
+@@ -721,6 +737,16 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    #[test]
++    fn exact_menu_focus_uses_live_process_evidence_over_stale_workspace() {
++        assert!(exact_window_is_ready(Some(8), 7, Some(42), 42, Some(true)));
++        assert!(!exact_window_is_ready(Some(7), 7, Some(42), 42, Some(false)));
++        assert!(!exact_window_is_ready(Some(8), 7, Some(41), 42, Some(true)));
++        assert!(!exact_window_is_ready(Some(8), 7, None, 42, Some(true)));
++        assert!(exact_window_is_ready(Some(7), 7, Some(42), 42, None));
++        assert!(!exact_window_is_ready(Some(8), 7, Some(42), 42, None));
++    }
+
+     #[test]
+     fn path_normalization_rejects_empty_segments() {
+@@ -891,9 +917,9 @@
+
+     #[test]
+     fn menu_focus_requires_the_exact_frontmost_app_and_window() {
+-        assert!(exact_window_is_ready(Some(7), 7, Some(42), 42));
+-        assert!(!exact_window_is_ready(Some(8), 7, Some(42), 42));
+-        assert!(!exact_window_is_ready(Some(7), 7, Some(41), 42));
+-        assert!(!exact_window_is_ready(Some(7), 7, None, 42));
+-    }
+-}
++        assert!(exact_window_is_ready(Some(7), 7, Some(42), 42, None));
++        assert!(!exact_window_is_ready(Some(8), 7, Some(42), 42, None));
++        assert!(!exact_window_is_ready(Some(7), 7, Some(41), 42, None));
++        assert!(!exact_window_is_ready(Some(7), 7, None, 42, None));
++    }
++}
