@@ -1,0 +1,5 @@
+# Preserve Conductor's default environment-file behavior.
+.env*
+
+# Required local inference inputs are intentionally gitignored.
+/EyeTracking/public/models/**
