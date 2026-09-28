@@ -23,6 +23,13 @@ not needed. Compiler output, Python virtualenvs, package caches, old app builds,
 rollback snapshots, personal screenshots/transcripts and local session state are
 excluded. Useful source fixtures remain in the source archives/repository.
 
+The three exact, unaccepted Cua Driver candidates used in the later execution
+simplification review are preserved in a [separate private prerelease](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-cua-candidates-2026-09-27).
+Download its archive and `SHA256SUMS` together, then verify with
+`shasum -a 256 -c SHA256SUMS`. The archive includes an individual hash manifest.
+These candidates are for review and recovery only; they do not replace the pinned
+installed Driver or close the [remaining acceptance gates](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
+
 ## Get the files
 
 Clone the repository normally. Download all release assets using the GitHub UI or:
