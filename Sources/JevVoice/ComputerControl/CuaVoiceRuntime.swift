@@ -3,6 +3,16 @@ import JevVoiceCore
 
 @MainActor
 final class CuaVoiceRuntime {
+    private static let observationTools: Set<String> = [
+        "list_apps", "get_accessibility_tree", "list_windows", "get_window_state",
+        "get_browser_state", "parse_visual_regions"
+    ]
+
+    private static func dispatchesEffect(tool: String, arguments: [String: JSONValue]) -> Bool {
+        if observationTools.contains(tool) { return false }
+        return tool != "browser_dialog" || arguments["action"] != .string("inspect")
+    }
+
     final class Work: Identifiable {
         let id = UUID()
         let label: String
@@ -250,7 +260,7 @@ final class CuaVoiceRuntime {
         { tool, arguments in
             try Task.checkCancellation()
             if let work = invocation.work,
-               !["list_apps", "get_accessibility_tree", "list_windows", "get_window_state", "get_browser_state", "parse_visual_regions"].contains(tool) {
+               Self.dispatchesEffect(tool: tool, arguments: arguments) {
                 work.dispatchedEffect = true
                 if work.timings["Transcript to first dispatch"] == nil {
                     let elapsed = (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
@@ -340,6 +350,7 @@ final class CuaVoiceRuntime {
         work.status = "Working"
         onChange()
         work.message = try await agent.execute(decision, context: context, windowID: dependency?.window,
+            actionOwner: CuaActionOwner(taskID: work.id, revision: work.provenance?.revision ?? 0),
             acquireApp: { app in
                 work.bundle = app
                 work.status = "Waiting"

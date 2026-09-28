@@ -20,6 +20,12 @@ for line in sys.stdin:
             result={'tools':[{'name':'screenshot','inputSchema':{'type':'object','properties':{'description':{'type':'string'}}}}],'nextCursor':'second'}
     elif req['params']['name']=='capture':
         result={'structuredContent':{'capture_id':'capture-one'},'content':[{'type':'image','mimeType':'image/png','data':'aW1hZ2U='},{'type':'text','text':'capture metadata'}]}
+    elif req['params']['name']=='check_permissions':
+        arguments=req['params']['arguments']
+        if not set(arguments).issubset({'prompt','probe_direct_capture'}):
+            result={'isError':True,'structuredContent':{'refusal':{'message':'unknown permission field'}}}
+        else:
+            result={'structuredContent':{'accessibility':False,'screen_recording':False}}
     elif req['params']['name']=='bad_content': result={'structuredContent':{},'content':{}}
     elif req['params']['name']=='die': sys.exit(0)
     elif req['params']['name']=='wait':
@@ -29,8 +35,12 @@ for line in sys.stdin:
         print('invalid-json',flush=True)
         continue
     elif req['params']['name']=='invalid_output': result={'structuredContent':{'code':'tool_output_invalid','execution_state':'unknown','invalid_output':{}}}
+    elif req['params']['name']=='partial_effect': result={'isError':True,'structuredContent':{'status':'partial','observed':{'focused':False},'private':'fixture content'}}
+    elif req['params']['name']=='indeterminate_text': result={'isError':True,'structuredContent':{'effect':'indeterminate','code':'type_text_synthesis_budget_exceeded','retryable':False,'escalation':{'recommended':'verify_state'}}}
+    elif req['params']['name']=='partial_text': result={'structuredContent':{'effect':'partial','requested_chars':10,'delivered_chars':4}}
     elif req['params']['name']=='native_refusal': result={'isError':True,'structuredContent':{'status':'refused','refusal':{'code':'menu_path_unavailable','message':'private target contents'}}}
     elif req['params']['name']=='refuse_status': result={'structuredContent':{'status':'refused'}}
+    elif req['params']['name']=='effect_refusal': result={'structuredContent':{'effect':'refused','escalation':{'reason':'route_unavailable','target':'page'}}}
     elif req['params']['name']=='refuse': result={'structuredContent':{'refusal':{'message':'No target'}}}
     else: result={'structuredContent':{'echo':req['params']['arguments']}}
     print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}),flush=True)
@@ -50,13 +60,48 @@ for line in sys.stdin:
         catch { XCTAssertEqual(error as? DriverConnectionError, .refused("No target")) }
         do { _ = try await connection.call("refuse_status", arguments: [:]); XCTFail("Accepted status-only refusal") }
         catch { XCTAssertEqual(error as? DriverConnectionError, .refused("Cua refused this action.")) }
+        do { _ = try await connection.call("effect_refusal", arguments: [:]); XCTFail("Accepted effect-only refusal") }
+        catch { XCTAssertEqual(error as? DriverConnectionError, .refused("Cua refused this action.")) }
         do { _ = try await connection.call("invalid_output", arguments: [:]); XCTFail("Accepted invalid upstream output") }
-        catch { XCTAssertEqual(error as? DriverConnectionError, .malformed) }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.result["execution_state"], .string("unknown"))
+        }
+        do { _ = try await connection.call("partial_effect", arguments: [:]); XCTFail("Accepted partial effect") }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.tool, "partial_effect")
+            XCTAssertEqual(uncertain.result["observed"]?["focused"], .bool(false))
+            XCTAssertFalse(error.localizedDescription.contains("fixture content"))
+        }
+        do { _ = try await connection.call("partial_text", arguments: [:]); XCTFail("Accepted partial text as success") }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.result["delivered_chars"], .number(4))
+        }
+        do { _ = try await connection.call("indeterminate_text", arguments: [:]); XCTFail("Accepted indeterminate text") }
+        catch {
+            let uncertain = try XCTUnwrap(error as? CuaUncertainOutcome)
+            XCTAssertEqual(uncertain.result["retryable"], .bool(false))
+            XCTAssertEqual(uncertain.result["escalation"]?["recommended"], .string("verify_state"))
+        }
         do { _ = try await connection.call("native_refusal", arguments: [:]); XCTFail("Accepted native refusal") }
         catch {
             XCTAssertTrue(error.localizedDescription.contains("menu_path_unavailable"))
             XCTAssertFalse(error.localizedDescription.contains("private target contents"))
         }
+        await connection.close()
+    }
+
+    func testSetupPermissionProbeMatchesTheInstalledToolInputSchema() async throws {
+        let (connection, path) = try fixture()
+        defer { try? FileManager.default.removeItem(at: path) }
+        try await connection.connect()
+
+        let permissions = try await CuaPermissionProbe.read(using: connection)
+
+        XCTAssertEqual(permissions["accessibility"], .bool(false))
+        XCTAssertEqual(permissions["screen_recording"], .bool(false))
         await connection.close()
     }
 
@@ -121,9 +166,71 @@ for line in sys.stdin:
         }
         let connection = CuaConnection()
         try await connection.connect()
-        let permissions = try await connection.call("check_permissions", arguments: [:])
+        let permissions = try await connection.call("check_permissions", arguments: ["prompt": .bool(false)])
         XCTAssertEqual(permissions["accessibility"], .bool(true))
         XCTAssertEqual(permissions["screen_recording"], .bool(true))
+        await connection.close()
+    }
+
+    func testInstalledSetupTargetWindowInventoryOptIn() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["JARVIS_CUA_SETUP_WINDOW_INVENTORY"] == "1",
+              let titleFragment = environment["JARVIS_CUA_SETUP_WINDOW_TITLE_FRAGMENT"],
+              !titleFragment.isEmpty else {
+            throw XCTSkip("Opt-in read-only inventory for one disposable setup window")
+        }
+        let connection = CuaConnection()
+        try await connection.connect()
+        let session = "Jarvis setup inventory \(UUID().uuidString.prefix(8))"
+        _ = try await connection.call("start_session", arguments: ["session": .string(session)])
+        do {
+            let definitions = try await connection.tools()
+            let launchSchema = definitions.first { $0["name"] == .string("launch_app") }?["inputSchema"]
+            let launchProperties = launchSchema?["properties"]?.object?.keys.sorted() ?? []
+            print("Installed launch_app contract:", launchProperties, "session:", launchProperties.contains("session"),
+                  "additionalProperties:", launchSchema?["additionalProperties"]?.bool ?? true)
+            let inventory = try await connection.call("get_accessibility_tree", arguments: ["session": .string(session)])
+            let pid = try XCTUnwrap(inventory["apps"]?.array?.first { $0["bundle_id"] == .string("com.apple.TextEdit") }?["pid"]?.integer)
+            let listed = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(session)])
+            let matches = (listed["windows"]?.array ?? []).filter { $0["title"]?.string?.contains(titleFragment) == true }
+            print("Read-only setup target windows:", matches.map { "\($0["title"]?.string ?? "<missing>") id=\($0["window_id"]?.integer ?? -1)" })
+            XCTAssertLessThanOrEqual(matches.count, 1, "A disposable setup URL must not match multiple TextEdit windows")
+            if let windowID = matches.first?["window_id"]?.integer {
+                let state = try await connection.call("get_window_state", arguments: [
+                    "pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+                    "include_screenshot": .bool(false), "session": .string(session)
+                ])
+                let fields = (state["elements"]?.array ?? []).filter {
+                    ["AXTextArea", "AXTextField"].contains($0["role"]?.string ?? "")
+                }
+                let lengths = fields.map { $0["value"]?.string?.count ?? -1 }
+                print("Read-only setup target editable fields:", fields.count, "value lengths:", lengths)
+                if environment["JARVIS_CUA_SETUP_CLOSE_WINDOW"] == "1" {
+                    let fieldsAreBlank = !fields.isEmpty && fields.allSatisfy {
+                        $0["value"] == nil || $0["value"] == .string("")
+                    }
+                    guard matches.count == 1, fieldsAreBlank else {
+                        throw DriverConnectionError.refused("The exact setup target is not a single blank disposable document; it will not be closed.")
+                    }
+                    _ = try await connection.call("invoke_menu", arguments: [
+                        "pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+                        "path": .array([.string("File"), .string("Close")]), "session": .string(session)
+                    ])
+                    var remaining = [JSONValue.object(["title": .string(titleFragment)])]
+                    for _ in 0..<20 where !remaining.isEmpty {
+                        let fresh = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(session)])
+                        remaining = (fresh["windows"]?.array ?? []).filter { $0["title"]?.string?.contains(titleFragment) == true }
+                        if !remaining.isEmpty { try await Task.sleep(for: .milliseconds(100)) }
+                    }
+                    XCTAssertTrue(remaining.isEmpty, "Only the exact disposable setup target should have closed")
+                }
+            }
+            _ = try await connection.call("end_session", arguments: ["session": .string(session)])
+        } catch {
+            _ = try? await connection.call("end_session", arguments: ["session": .string(session)])
+            await connection.close()
+            throw error
+        }
         await connection.close()
     }
 }

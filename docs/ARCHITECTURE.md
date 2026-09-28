@@ -34,6 +34,15 @@ generates requested prose/advisory reasoning.
 This describes wiring, not acceptance of every behavior. See
 [the migration gates](voice-ui/PLAN.md) for remaining work.
 
+The approved [execution simplification](EXECUTION-SIMPLIFICATION-PLAN.md) evaluates
+which responsibilities the existing Cua/Jev integration can replace. The flow
+above describes the current implementation, not a requirement to retain each
+class or the present language/process boundary. Select that boundary from verified
+contracts and total maintenance cost. The intended result has one desktop decision
+and execution loop, Cua-owned supported observation/actions/verification, and only
+the necessary Jarvis task/UI integration. No replacement is implemented or proven
+by this architecture note.
+
 ## Source ownership
 
 | Directory | Responsibility |
@@ -70,6 +79,13 @@ never retained or transcribed. Quit, sleep, session inactivity, permission loss 
 input interruption stop hardware. Recovery prepares fresh input without resuming a
 hold. Screen-lock notifications use loginwindow's installed notification names, an
 undocumented OS integration that requires physical verification on supported builds.
+
+The merged Cua executor retains the observed-action catalog, target and outcome
+verification, timeout inspection, authorization, and guarded repetition from main.
+The execution simplification candidate remains separately scoped and does not
+close the migration's application acceptance gates. The standalone Cua agent keeps
+a literal-payload utility for non-voice callers; production voice carries the
+Jev-selected exact source span and does not run a preceding speech interpreter.
 
 ## Runtime and data boundaries
 

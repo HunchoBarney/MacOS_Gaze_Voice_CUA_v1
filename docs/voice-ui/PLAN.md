@@ -4,13 +4,21 @@ Status: approved revision recorded 2026-09-19. **Implementation resumed; migrati
 
 **Contract:** [SPEC.md S1–S9](SPEC.md). **Execution entry:** [EXECUTION.md](EXECUTION.md). Read the current phase and relevant evidence, not the historical plans. Required behavior is firm; implementation choices may change with recorded evidence. The approved direct-transcript voice implementation plan and copy-ready execution prompt are in [2026-09-22-direct-transcript-to-cua.md](../superpowers/plans/2026-09-22-direct-transcript-to-cua.md).
 
+**Scoped execution simplification:** follow
+[EXECUTION-SIMPLIFICATION-PLAN.md](../EXECUTION-SIMPLIFICATION-PLAN.md) when replacing
+overlapping Jarvis execution machinery with proven Cua/Jev capabilities. That plan
+owns its sequence, integration-boundary decision and completion criteria. This
+document retains the broader migration backlog; its P0–P5 sequence is not the
+simplification task's entry point. Scoped replacement evidence may inform a gate
+but does not close it unless that gate's full requirements are met.
+
 ## Scope and current progress
 
 | Phase | Existing evidence to preserve | Outstanding gate / dependency |
 | --- | --- | --- |
 | P0 — Cua foundation and perception | Recoverable snapshots, Swift MCP, Jev and packaged setup; some browser/native fixtures | Audit selected source/PR stack, full capability inventory, native perception and cross-app targeting. Resume here after checking actual code. |
 | P1 — Speech readiness and responsiveness | SpeechAnalyzer, ranged transcripts, physical Fn opening, prewarming and stage timings | Preserve implementation; finish lifecycle and cold/warm physical validation. Independent of P0 perception work. |
-| P2 — General actions and continuous voice | Normal voice routes to Cua; early opening, simulated revision/cancellation checks | Replace the separate speech-meaning pass with direct transcript handoff into the existing Jev/Cua execution workflow; complete generic controls, target freshness and owned live dictation. Depends on relevant P0 contracts and P1 events. |
+| P2 — General actions and continuous voice | Normal voice routes to Cua; early opening, simulated revision/cancellation checks | Direct transcript handoff is implemented; complete generic controls, target freshness and owned live dictation. Depends on relevant P0 contracts and P1 events. |
 | P3 — Concurrent tasks | Task UI, queue and initial app leases | Persistent contexts, finer conflict coordination, actual two-task progress while user types. Depends on P2 identity/cancellation. |
 | P4 — Optional generation/reasoning | Groq configuration, real summary and isolated draft fixtures | Normal-voice source/destination, cancellation and send-boundary acceptance. Reuse configuration; depends on P2 task ownership. |
 | P5 — Cleanup and delivery | Staged package and regression evidence | All required acceptance, measured performance, legacy removal, installed package and rollback. Depends on P0–P4. |

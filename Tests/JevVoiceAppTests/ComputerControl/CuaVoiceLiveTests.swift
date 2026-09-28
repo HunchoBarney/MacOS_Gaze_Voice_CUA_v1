@@ -9,7 +9,12 @@ final class CuaVoiceLiveTests: XCTestCase {
     private final class Capture: SpeechCapturing {
         var onEvent: ((UUID, SpeechEvent) -> Void)?
         var id: UUID?
-        func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String { id = session; return "Simulated transcript; real Jev/Cua" }
+        var snapshot = RangedTranscript()
+        func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String { id = session; snapshot = RangedTranscript(); return "Simulated transcript; real Jev/Cua" }
+        func emitRevision(_ revision: SpeechRevision) throws {
+            try snapshot.apply(revision)
+            emit(.transcript(snapshot))
+        }
         func finish() {}
         func cancel() {}
         func emit(_ event: SpeechEvent) { if let id { onEvent?(id, event) } }
@@ -41,10 +46,10 @@ final class CuaVoiceLiveTests: XCTestCase {
         XCTAssertFalse(app.isHidden)
     }
     private func workflow(request: String, bundle: String, newDocument: Bool = false) async throws {
-        guard ProcessInfo.processInfo.environment["JARVIS_CUA_VOICE_TEST"] == "1",
-              let key = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"], !key.isEmpty else {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_VOICE_TEST"] == "1" else {
             throw XCTSkip("Opt-in simulated transcript with real Jev/Cua/macOS")
         }
+        let key = try CuaLiveCredential.jev()
         let suite = "JarvisVoiceLive-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -82,7 +87,7 @@ final class CuaVoiceLiveTests: XCTestCase {
             for _ in 0..<100 where controller.status != .listening { try await Task.sleep(for: .milliseconds(10)) }
             XCTAssertEqual(controller.status, .listening)
             let start = ContinuousClock.now
-            capture.emit(.partial(request))
+            try capture.emitRevision(.init(start: 0, end: 1, text: request, isFinal: true))
             for _ in 0..<600 {
                 if controller.cuaTasks.count > priorTaskCount, controller.cuaTasks.last?.active == false { break }
                 try await Task.sleep(for: .milliseconds(50))

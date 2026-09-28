@@ -1,7 +1,8 @@
 "$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+spotlight_testing = false
 
 [scripts]
-setup = "make setup"
+setup = "make setup && python3 scripts/setup-workspace-development.py"
 run_mode = "concurrent"
 
 [scripts.run.test]

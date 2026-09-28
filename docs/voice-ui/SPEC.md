@@ -2,7 +2,14 @@
 
 Status: approved revision recorded on 2026-09-19; direct-transcript execution addendum approved and implemented on 2026-09-22. Existing migration work is partially implemented; full acceptance remains outstanding. The implementation evidence and unverified acceptance gates are recorded in [EVIDENCE.md](EVIDENCE.md). Preserve verified current UI, speech and integration work.
 
-[EXECUTION.md](EXECUTION.md) is the implementing agent's entry point. [PLAN.md](PLAN.md) owns current progress; [EVIDENCE.md](EVIDENCE.md) owns recorded build evidence. **S1–S9 below are the active contract.** Earlier specifications retained in HISTORY.md are historical only, including their incompatible macOS 13, no-Cua, serial-only, and legacy-parser constraints. Later explicit user instructions take precedence subject to system/developer constraints.
+[EXECUTION.md](EXECUTION.md) is the entry point for implementing the full migration. [PLAN.md](PLAN.md) owns migration progress; [EVIDENCE.md](EVIDENCE.md) owns recorded build evidence. **S1–S9 below are the active contract.** Earlier specifications retained in HISTORY.md are historical only, including their incompatible macOS 13, no-Cua, serial-only, and legacy-parser constraints. Later explicit user instructions take precedence subject to system/developer constraints.
+
+For the approved [execution simplification](../EXECUTION-SIMPLIFICATION-PLAN.md),
+that plan owns the scoped sequence and completion criteria. S1–S9 constrain the
+affected behavior without expanding the task to all unfinished migration work.
+Existing gaps remain open. Its integration-boundary evaluation is consistent with
+S7's allowance for a simpler verified alternative; the current Swift MCP wiring
+does not mandate retaining duplicated host machinery.
 
 ## S1 — Product and scope
 

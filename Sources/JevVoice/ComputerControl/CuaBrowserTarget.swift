@@ -34,10 +34,46 @@ struct CuaBrowserTarget {
         return result
     }
 
+    func inspectDialog(call: CuaTaskAgent.Call) async throws -> JSONValue {
+        let result = try await call("browser_dialog", [
+            "target_id": target, "tab_id": tab, "action": .string("inspect")
+        ])
+        guard result["status"] == .string("ok"), result["target_id"] == target,
+              result["tab_id"] == tab, result["present"]?.bool != nil else {
+            throw DriverConnectionError.malformed
+        }
+        if result["present"] == .bool(true),
+           (result["dialog_id"]?.string?.isEmpty != false || result["kind"]?.string?.isEmpty != false) {
+            throw DriverConnectionError.malformed
+        }
+        return result
+    }
+
     static func identity(_ snapshot: JSONValue) -> JSONValue {
         .object(["page": snapshot["page"] ?? .null, "refs": .array(((snapshot["content_refs"]?.array ?? []) + (snapshot["refs"]?.array ?? [])).map { ref in
             .object(Dictionary(uniqueKeysWithValues: ["role", "name", "value", "states", "actions", "visibility", "frame"].compactMap { key in ref[key].map { (key, $0) } }))
         })])
+    }
+
+    static func uniqueTextTarget(matching original: JSONValue, in snapshot: JSONValue) -> JSONValue? {
+        guard let role = original["role"]?.string, !role.isEmpty,
+              let name = original["name"]?.string, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let frame = original["frame"]?.string, !frame.isEmpty,
+              original["actions"]?.array?.contains(.string("type")) == true else { return nil }
+        var refsByID: [String: JSONValue] = [:]
+        for ref in (snapshot["content_refs"]?.array ?? []) + (snapshot["refs"]?.array ?? []) {
+            guard let id = ref["ref"]?.string, !id.isEmpty else { continue }
+            if let previous = refsByID[id], previous != ref { return nil }
+            refsByID[id] = ref
+        }
+        let matches = refsByID.values.filter { ref in
+            ref["role"]?.string == role && ref["name"]?.string == name && ref["frame"]?.string == frame
+                && ref["actions"]?.array?.contains(.string("type")) == true
+                && ["in_viewport", "near_viewport"].contains(ref["visibility"]?.string ?? "")
+                && ref["states"]?["disabled"] != .bool(true)
+                && (original["states"]?["editable"] == nil || ref["states"]?["editable"] == original["states"]?["editable"])
+        }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     static func textElements(_ snapshot: JSONValue) -> [JSONValue] {

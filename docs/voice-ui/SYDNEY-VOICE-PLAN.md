@@ -10,6 +10,12 @@
 
 **Architecture:** Retain the native Swift capture pipeline and Jev interpretation. Improve the existing voice components and their integration. Preserve the `JevVoice` and `JevVoiceCore` module boundaries. Astra is the development agent executing this plan; Apple SpeechAnalyzer and Jev remain the app's voice stack.
 
+The direct-transcript executor change later replaced this plan's separate Jev
+speech-interpretation route. Section 16's model evaluations and candidate hashes
+are historical results for that earlier route; they do not validate the merged
+executor. Physical capture, real-model semantics, timing, and full application
+acceptance remain open under [PLAN.md](PLAN.md) and [EVIDENCE.md](EVIDENCE.md).
+
 ## 1. Authority and execution instructions
 
 This document contains the complete work plan for voice development in the Sydney worktree.
