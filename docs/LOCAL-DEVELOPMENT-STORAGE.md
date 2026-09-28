@@ -98,18 +98,21 @@ The ignored, workspace-local execution evidence was preserved in the
 [private Tel Aviv evidence release](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-tel-aviv-evidence-2026-09-27)
 in preparation for retiring that Conductor workspace. Its archive contains 514 files:
 scoped logs and probes, recovery metadata, packaged app checkpoints, staged
-Driver candidates/source, and the local progress ledger. Download the archive
-and `SHA256SUMS` together and run `shasum -a 256 -c SHA256SUMS`. The included
-`manifest.json` records every relative path, size, and SHA-256. Extract into an
-empty directory and inspect before copying files into another workspace.
+Driver candidates/source, and the local progress ledger. Download both archives
+and `SHA256SUMS`, then run `shasum -a 256 -c SHA256SUMS`. The included
+`manifest.json` records every relative path, size, and SHA-256. The release also
+preserves a copied setup fixture in `SetupReviewFixture-2026-09-27.tar.gz`, with
+its own manifest: 901 files, including six Cua source files that differ from the
+current tracked source. Extract into an empty
+directory and inspect before copying files into another workspace.
 
 Personal chat attachments and machine-local Conductor/quality settings were
 saved separately under
 `~/Library/Application Support/JarvisWorkspaceBackups/TelAviv-2026-09-27/`.
 That local backup includes its own manifest and checksum; it is outside the
 Conductor worktree and is not a GitHub asset. Generated Rust `target/`, Swift
-scratch/build directories, a clean upstream research clone, and copied setup
-fixtures were excluded from the evidence release. The exact reviewed Driver
-executables are in the [candidate prerelease](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-cua-candidates-2026-09-27),
+scratch/build directories, and a clean upstream research clone were excluded
+from the evidence release. The exact reviewed Driver executables are in the
+[candidate prerelease](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-cua-candidates-2026-09-27),
 and the pinned production runtime and models remain in the
 [development handoff release](https://github.com/HunchoBarney/MacOS_Gaze_Voice_CUA_v1/releases/tag/dev-handoff-2026-09-20).
