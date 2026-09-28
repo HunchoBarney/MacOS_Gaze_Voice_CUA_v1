@@ -18,6 +18,15 @@ structured decisions; the optional text provider generates prose/advisory reason
 This describes wiring, not acceptance of every behavior. See
 [the migration gates](voice-ui/PLAN.md) for remaining work.
 
+The approved [execution simplification](EXECUTION-SIMPLIFICATION-PLAN.md) evaluates
+which responsibilities the existing Cua/Jev integration can replace. The flow
+above describes the current implementation, not a requirement to retain each
+class or the present language/process boundary. Select that boundary from verified
+contracts and total maintenance cost. The intended result has one desktop decision
+and execution loop, Cua-owned supported observation/actions/verification, and only
+the necessary Jarvis task/UI integration. No replacement is implemented or proven
+by this architecture note.
+
 ## Source ownership
 
 | Directory | Responsibility |
@@ -47,7 +56,9 @@ older behavior in regression tests; Driver failure does not select them as a
 fallback. The old recognizer supports historical fixture/policy checks, while the
 shared `SpeechCapturing` contract lives with current voice code. `ExecutorError`
 remains a shared error type despite its historical name. Removing these paths
-requires replacement evidence under the migration, not only an unused-code scan.
+requires behavior-specific replacement evidence under the applicable approved
+plan, not only an unused-code scan. The scoped simplification does not authorize
+removing unrelated speech or legacy fixtures merely to reduce file count.
 
 ## Runtime and data boundaries
 

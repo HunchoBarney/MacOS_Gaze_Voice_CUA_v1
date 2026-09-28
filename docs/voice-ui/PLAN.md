@@ -4,6 +4,14 @@ Status: approved revision recorded 2026-09-19. **Implementation resumed; migrati
 
 **Contract:** [SPEC.md S1–S9](SPEC.md). **Execution entry:** [EXECUTION.md](EXECUTION.md). Read the current phase and relevant evidence, not the historical plans. Required behavior is firm; implementation choices may change with recorded evidence.
 
+**Scoped execution simplification:** follow
+[EXECUTION-SIMPLIFICATION-PLAN.md](../EXECUTION-SIMPLIFICATION-PLAN.md) when replacing
+overlapping Jarvis execution machinery with proven Cua/Jev capabilities. That plan
+owns its sequence, integration-boundary decision and completion criteria. This
+document retains the broader migration backlog; its P0–P5 sequence is not the
+simplification task's entry point. Scoped replacement evidence may inform a gate
+but does not close it unless that gate's full requirements are met.
+
 ## Scope and current progress
 
 | Phase | Existing evidence to preserve | Outstanding gate / dependency |

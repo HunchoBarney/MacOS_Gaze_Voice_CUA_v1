@@ -47,6 +47,10 @@ boundaries in [architecture](docs/ARCHITECTURE.md).
 
 ## Find your way
 
+- [Approved execution simplification](docs/EXECUTION-SIMPLIFICATION-PLAN.md): replace
+  overlapping execution machinery with proven Cua/Jev capabilities while preserving
+  voice/UI behavior. This scoped work does not restart the broader migration.
+
 - [Collaborator handoff](docs/HANDOFF.md): the current source and downloadable runtime/model packages.
 
 - [Architecture and source map](docs/ARCHITECTURE.md): responsibilities and ownership.

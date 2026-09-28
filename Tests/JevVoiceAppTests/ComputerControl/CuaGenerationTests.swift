@@ -114,7 +114,15 @@ final class CuaGenerationTests: XCTestCase {
                 case "scope": choice = "work"
                 case "source": choice = "none"
                 case "draftQuality": choice = "acceptable"
-                case "next": choice = inserted ? "done" : generated ? "action_0" : "draft"
+                case "next":
+                    if inserted {
+                        choice = "done"
+                    } else if generated, case let .choice(_, criteria)? = questions["next"],
+                              let action = criteria.first(where: { $0.value?.hasPrefix("Insert supplied text") == true })?.key {
+                        choice = action
+                    } else {
+                        choice = "draft"
+                    }
                 case "risk": choice = "ordinary"
                 case "windowEffect": choice = "same"
                 default: throw DriverConnectionError.malformed

@@ -41,3 +41,48 @@ The original broken Cua worktree metadata is unchanged. Its local modifications
 are now preserved independently as a patch and 898-file manifest under
 [ThirdParty/Cua](../ThirdParty/Cua/README.md). Large generated outputs and model
 assets remain here; this does not make `development/` disposable.
+
+## Parallel workspaces
+
+Local Conductor setup runs `scripts/setup-workspace-development.py`. It copies the
+898 manifest-listed Cua source files from the repository root's development folder
+into each workspace, checking their hashes first. It does not copy the broken
+`.git` pointer, existing builds, or dependency environments. This is the preserved
+sparse source snapshot, not a complete reconstructed upstream checkout. Follow
+ThirdParty/Cua/README.md if a full checkout is needed for a build.
+
+Each workspace has its own source, build, staging, probe, verification and export
+paths. Setup preserves existing source edits on reruns. The original repository's
+assets are not modified. Models, sealed bundles, historical evidence and recovery
+copies are exposed under `development/JevVoice/reference/` as shared links.
+These are read-only by agent policy, not enforced filesystem permissions: all
+agents run under the same macOS user. Never direct outputs there; copy an input
+locally before changing it. Local quality config points model inputs at reference
+bundles; newly generated outputs belong outside `reference/`.
+
+The setup creates a local `development/AGENTS.md` with these rules. Everything in
+`development/` remains Git-ignored; source changes there need an explicit reviewed
+patch to be shared or backed up in Git. Do not use the legacy cache compatibility
+link for workspace outputs. Runtime installation and desktop use remain shared
+and require the existing coordination rules.
+
+For manual setup, run from the desired workspace:
+
+```sh
+python3 scripts/setup-workspace-development.py --source /absolute/path/to/main-checkout/development/JevVoice
+```
+
+When the preserved assets are outside `CONDUCTOR_ROOT_PATH`, configure their
+absolute path only in the machine-local repository override:
+
+```toml
+[environment_variables.local]
+JARVIS_DEVELOPMENT_SOURCE = "/absolute/path/to/development/JevVoice"
+```
+
+Local setup fails if that configured/default source is missing, rather than
+silently creating a workspace without its required isolated source. Cloud setup
+without a local asset root still skips this seeding. Future workspaces need the
+shared setup change merged and the repository-local override installed on each
+Mac whose preserved assets live elsewhere. Existing workspaces are seeded
+independently; setup does not overwrite their source changes.
