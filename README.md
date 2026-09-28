@@ -61,7 +61,7 @@ boundaries in [architecture](docs/ARCHITECTURE.md).
 - [Behavior specification](docs/voice-ui/SPEC.md): active S1–S9 requirements.
 - [Migration plan](docs/voice-ui/PLAN.md): active P0–P5 gates and A1–A13 acceptance matrix.
 - [Migration execution instructions](docs/voice-ui/EXECUTION.md): use only when implementing that migration.
-- [Local storage](docs/LOCAL-DEVELOPMENT-STORAGE.md): ignored supporting files and compatibility paths.
+- [Local storage](docs/LOCAL-DEVELOPMENT-STORAGE.md): tracked Cua source, local assets and compatibility paths.
 - [Cleanup record](docs/CLEANUP.md): changes, verification and recovery.
 
 This project originated from [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).

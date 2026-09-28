@@ -127,8 +127,8 @@ These are planning findings, not live validation of the installed runtime.
   outputs are workspace-local. A setup command that skips missing assets is not
   proof that the workspace can build the selected integration.
 - [x] Keep shared reference assets read-only. Never use the legacy cache path for
-  workspace outputs. Preserve ignored Cua source changes as a reviewed patch when
-  sharing or backing them up in Git.
+  workspace outputs. Review tracked Cua source changes before sharing them in Git;
+  preserve ignored development assets separately.
 - [x] Run relevant baseline checks and record known failures separately from
   regressions. Preserve secrets in place rather than exporting them into evidence.
 

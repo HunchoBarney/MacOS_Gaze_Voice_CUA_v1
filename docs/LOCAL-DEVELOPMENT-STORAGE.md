@@ -3,8 +3,10 @@
 On 2026-09-20, the supporting directory previously stored at
 `/Users/karanvirkang/Library/Caches/JevVoice` was moved into this repository's
 `development/JevVoice/` directory at the user's request. Source, tests, and
-plans remain in their existing locations. `development/` is Git-ignored;
-it includes large build files and local verification artifacts, not just source.
+plans remain in their existing locations. The preserved 898-file Cua source tree
+under `development/JevVoice/cua-source/` is tracked by Git. Other
+`development/` assets, including large builds and local verification artifacts,
+remain ignored and require separate preservation.
 
 The old cache path is a symbolic link to the new directory, preserving existing
 script, environment, and app paths. This was a same-filesystem rename, not a
@@ -44,11 +46,13 @@ assets remain here; this does not make `development/` disposable.
 
 ## Parallel workspaces
 
-Local Conductor setup runs `scripts/setup-workspace-development.py`. It copies the
-898 manifest-listed Cua source files from the repository root's development folder
-into each workspace, checking their hashes first. It does not copy the broken
-`.git` pointer, existing builds, or dependency environments. This is the preserved
-sparse source snapshot, not a complete reconstructed upstream checkout. Follow
+Local Conductor setup runs `scripts/setup-workspace-development.py`. On current
+branches, Git checks out the 898 preserved Cua source files into each workspace;
+setup keeps those files and prepares local output paths and shared references. On
+older branches without tracked source, setup copies the manifest-listed files from
+the repository root after checking their historical hashes. The source is a sparse
+snapshot, not a complete reconstructed upstream checkout. Setup does not copy the
+broken `.git` pointer, existing builds, or dependency environments. Follow
 ThirdParty/Cua/README.md if a full checkout is needed for a build.
 
 Each workspace has its own source, build, staging, probe, verification and export
@@ -60,11 +64,12 @@ agents run under the same macOS user. Never direct outputs there; copy an input
 locally before changing it. Local quality config points model inputs at reference
 bundles; newly generated outputs belong outside `reference/`.
 
-The setup creates a local `development/AGENTS.md` with these rules. Everything in
-`development/` remains Git-ignored; source changes there need an explicit reviewed
-patch to be shared or backed up in Git. Do not use the legacy cache compatibility
-link for workspace outputs. Runtime installation and desktop use remain shared
-and require the existing coordination rules.
+The setup creates a local, ignored `development/AGENTS.md` with these rules.
+Changes to the tracked Cua source now appear in `git status` and need review before
+commit. Builds, evidence, models, recovery copies and reference links remain
+ignored; Git does not back them up. Do not use the legacy cache compatibility link
+for workspace outputs. Runtime installation and desktop use remain shared and
+require the existing coordination rules.
 
 For manual setup, run from the desired workspace:
 
