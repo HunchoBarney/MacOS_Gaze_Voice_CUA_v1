@@ -1,0 +1,11 @@
+{
+  "upstream_recipe": "conversion-recipe.json",
+  "upstream_sha256": "d8a876bf7f9fb73d7da9432904ade7fa78e092e9a91674e5a2806b45562a9ab2",
+  "local_sha256": "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac",
+  "local_size": 80906060,
+  "python": "3.12.12",
+  "platform": "macOS arm64",
+  "command": "python models/export_omniparser_detector.py INPUT OUTPUT --local-canonical",
+  "change": "Normalize exporter date metadata to SOURCE_DATE_EPOCH:0. Upstream artifact not reproduced; local export independently pinned, not claimed identical to upstream.",
+  "evidence": "Two independent exports have identical canonical SHA256. PyTorch equivalence log: /tmp/jarvis-detector-equivalence.log."
+}
