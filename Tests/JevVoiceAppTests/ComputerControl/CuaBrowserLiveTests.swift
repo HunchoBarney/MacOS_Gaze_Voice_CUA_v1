@@ -63,7 +63,7 @@ final class CuaBrowserLiveTests: XCTestCase {
             }, windowID: window, generate: generatedDraft ? { prompt, context, reasoning in
                 try await TextProviderSettings.shared.client().generate(prompt: prompt, context: context, reasoning: reasoning)
             } : nil,
-               payload: { request, purpose in try await JevSpeechIntent(client: JevClient(apiKey: key)).textPayload(request: request, purpose: purpose) })
+               literal: generatedDraft ? nil : "copper lantern")
             let goal = generatedDraft
                 ? "In Google Chrome in the background, write an original five-word friendly greeting in the verification value field. Leave it as a draft; do not submit."
                 : "In Google Chrome in the background, type copper lantern in the verification value field and submit this local test form."

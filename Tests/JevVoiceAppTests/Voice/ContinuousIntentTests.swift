@@ -4,290 +4,306 @@ import JevVoiceCore
 
 @MainActor
 final class ContinuousIntentTests: XCTestCase {
-    func testDictatedCorrectionWaitsForReleaseAndRetainsLiteralContinuation() async throws {
-        var requests: [SpeechIntent] = []
-        var calls = 0
-        let model = JevSpeechIntent(evaluate: { state, _ in
-            calls += 1
-            return Dictionary(uniqueKeysWithValues: [
-                "kind": "correction", "mode": "dictate", "purpose": "request",
-                "extent": "whole", "polarity": "notProhibited",
-                "boundary": String(state["pending_speech"]!.string!.split(separator: " ").count)
-            ].map { ($0.key, Answer.choice(choice: $0.value, confidence: 1, probabilities: [:])) })
-        })
-        let coordinator = ContinuousIntentCoordinator(interpret: { try await model.understand(words: $0, final: $1, context: $2) }, submit: { requests.append($0) })
-        coordinator.begin()
-        let prefix = "Actually, dictate blue notebook"
-        coordinator.record(.init(start: 0, end: 1, text: prefix, isFinal: true))
-        coordinator.update(prefix, final: false)
+    func testTranscriptHandoffPreservesOriginalTextRangesAndTaskContext() async throws {
+        let captureID = UUID()
+        let original = "open Notes\nthen type  café stop"
+        let context: JSONValue = .object(["tasks": .array([.object(["id": .string("task-1"), "status": .string("Working")])])])
+        var handoffs: [TranscriptHandoff] = []
+        let coordinator = ContinuousIntentCoordinator(submit: { handoffs.append($0) })
+        coordinator.context = { context }
+        coordinator.begin(captureID: captureID)
+        var audio = RangedTranscript()
+        try audio.apply(.init(start: 0, end: 1.8, text: original, isFinal: true))
+        coordinator.record(audio)
+        coordinator.update(original, final: false)
         await coordinator.waitForPending()
-        XCTAssertTrue(requests.isEmpty, "Literal replacements must not hand off while held")
-        let initialCalls = calls
-        let complete = prefix + " stop all"
-        coordinator.record(.init(start: 1, end: 2, text: " stop all", isFinal: true))
-        coordinator.update(complete, final: false)
-        await coordinator.waitForPending()
-        XCTAssertTrue(requests.isEmpty)
-        coordinator.update(complete, final: true)
-        await coordinator.waitForPending()
-        XCTAssertEqual(requests.map(\.kind), [.correction])
-        XCTAssertEqual(requests.map(\.text), [complete])
-        XCTAssertEqual(calls, initialCalls, "Dictation continuation must remain literal without reclassification")
+
+        let handoff = try XCTUnwrap(handoffs.first)
+        XCTAssertEqual(handoff.transcript, original)
+        XCTAssertEqual(handoff.captureID, captureID)
+        XCTAssertEqual(handoff.revision, audio.revision)
+        XCTAssertEqual(handoff.audioRanges, audio.segments)
+        XCTAssertEqual(handoff.pendingWordStart, 0)
+        XCTAssertEqual(handoff.pendingWordEnd, 6)
+        XCTAssertFalse(handoff.final)
+        XCTAssertEqual(handoff.taskContext, context)
+        XCTAssertGreaterThan(handoff.receivedAt, 0)
     }
 
-    func testPartialDispatchReleaseNoReplayAndNewHold() async throws {
-        var requests: [String] = []
-        let coordinator = ContinuousIntentCoordinator(decide: { words, _, _ in
-            SpeechIntent(kind: .command, count: words.count, text: words.joined(separator: " "))
-        }, submit: { intent in requests.append(intent.text) })
+    func testStableCompleteTranscriptIsHandedOffWhileCaptureRemainsOpen() async throws {
+        var handoffs: [TranscriptHandoff] = []
+        let coordinator = ContinuousIntentCoordinator(submit: { handoffs.append($0) })
         coordinator.begin()
+        var audio = RangedTranscript()
+        try audio.apply(.init(start: 0, end: 1, text: "open Notes", isFinal: true))
+        coordinator.record(audio)
         coordinator.update("open Notes", final: false)
         await coordinator.waitForPending()
-        XCTAssertEqual(requests, ["open Notes"])
-        coordinator.update("open Notes", final: true)
-        await coordinator.waitForPending()
-        XCTAssertEqual(requests.count, 1)
-        coordinator.begin()
-        coordinator.update("open Notes", final: true)
-        await coordinator.waitForPending()
-        XCTAssertEqual(requests.count, 2)
+
+        XCTAssertEqual(handoffs.map(\.transcript), ["open Notes"])
+        XCTAssertFalse(handoffs[0].final)
     }
-    func testLateCancelledInterpretationCannotDispatch() async throws {
-        var requests: [String] = []
-        let coordinator = ContinuousIntentCoordinator(decide: { words, _, _ in
-            try? await Task.sleep(for: .milliseconds(40))
-            return SpeechIntent(kind: .command, count: words.count, text: words.joined(separator: " "))
-        }, submit: { requests.append($0.text) })
+
+    func testAcceptedSpanAdvancesWithinOriginalTranscriptAndFinalizationDoesNotReplayIt() async throws {
+        var handoffs: [TranscriptHandoff] = []
+        let coordinator = ContinuousIntentCoordinator(submit: { handoffs.append($0) })
         coordinator.begin()
-        coordinator.update("open Notes", final: false)
+        var audio = RangedTranscript()
+        let original = "open Notes then search for hiking"
+        try audio.apply(.init(start: 0, end: 2, text: original, isFinal: true))
+        coordinator.record(audio)
+        coordinator.update(original, final: false)
+        await coordinator.waitForPending()
+        let first = try XCTUnwrap(handoffs.first)
+
+        XCTAssertTrue(coordinator.consume(first, wordRange: 0..<2))
+        await coordinator.waitForPending()
+        XCTAssertEqual(handoffs.count, 2)
+        XCTAssertEqual(handoffs[1].transcript, original, "The executor receives source text, not a reconstructed remainder")
+        XCTAssertEqual(handoffs[1].pendingWordStart, 2)
+        XCTAssertEqual(handoffs[1].pendingWordEnd, 6)
+
+        coordinator.update(original, final: true)
+        await coordinator.waitForPending()
+        XCTAssertEqual(handoffs.count, 3, "Finalization rechecks only the still-pending remainder")
+        XCTAssertEqual(handoffs.map(\.pendingWordStart), [0, 2, 2], "The accepted first request never returns to the pending range")
+    }
+
+    func testWaitForPendingDrainsHandoffScheduledByConsumedSpan() async throws {
+        var releaseFirst: CheckedContinuation<Void, Never>?
+        var releaseSecond: CheckedContinuation<Void, Never>?
+        var waiterFinished = false
+        var coordinator: ContinuousIntentCoordinator!
+        coordinator = ContinuousIntentCoordinator(submit: { handoff in
+            if handoff.pendingWordStart == 0 {
+                await withCheckedContinuation { releaseFirst = $0 }
+                XCTAssertTrue(coordinator.consume(handoff, wordRange: 0..<2))
+            } else {
+                await withCheckedContinuation { releaseSecond = $0 }
+                coordinator.report(handoff, outcome: "incomplete", message: "Waiting")
+            }
+        })
+        coordinator.begin()
+        var audio = RangedTranscript()
+        try audio.apply(.init(start: 0, end: 1, text: "open Notes search again", isFinal: true))
+        coordinator.record(audio)
+        coordinator.update(audio.text, final: false)
+        for _ in 0..<100 where releaseFirst == nil { await Task.yield() }
+        XCTAssertNotNil(releaseFirst)
+
+        let waiter = Task {
+            await coordinator.waitForPending()
+            waiterFinished = true
+        }
+        let first = releaseFirst
+        releaseFirst = nil
+        first?.resume()
+        for _ in 0..<100 where releaseSecond == nil { await Task.yield() }
+        XCTAssertNotNil(releaseSecond)
         await Task.yield()
-        coordinator.cancel()
-        try await Task.sleep(for: .milliseconds(60))
-        XCTAssertTrue(requests.isEmpty)
-    }
-    func testLiteralHoldKeepsStopAsTextAndReportsDeferredInsertion() async throws {
-        var requests: [String] = []
-        let coordinator = ContinuousIntentCoordinator(decide: { words, _, _ in
-            SpeechIntent(kind: .dictate, count: words.count, text: words.joined(separator: " "))
-        }, submit: { requests.append($0.text) })
-        coordinator.begin()
-        coordinator.update("dictate blue", final: false)
-        await coordinator.waitForPending()
-        XCTAssertTrue(requests.isEmpty)
-        XCTAssertTrue(coordinator.message.contains("inserts on release"))
-        coordinator.update("dictate blue stop all", final: true)
-        await coordinator.waitForPending()
-        XCTAssertEqual(requests, ["dictate blue stop all"])
-    }
-    func testGrowingSpeechCoalescesAndRechecksIncompleteOldEdge() async throws {
-        var release: CheckedContinuation<Void, Never>?
-        var observations: [[String]] = []
-        var requests: [String] = []
-        let coordinator = ContinuousIntentCoordinator(decide: { words, _, _ in
-            observations.append(words)
-            if observations.count == 1 { await withCheckedContinuation { release = $0 } }
-            if words.first == "open" { return SpeechIntent(kind: .command, count: 2, text: "open Notes") }
-            return nil
-        }, submit: { requests.append($0.text) })
-        coordinator.begin(); coordinator.update("open Notes", final: false)
-        for _ in 0..<100 where release == nil { await Task.yield() }
-        XCTAssertNotNil(release)
-        coordinator.update("open Notes and", final: false)
-        coordinator.update("open Notes and create", final: false)
-        coordinator.update("open Notes and create a note", final: false)
+        XCTAssertFalse(waiterFinished, "Waiting for quiescence must include the replacement handoff")
+
+        let release = releaseSecond
+        releaseSecond = nil
         release?.resume()
+        await waiter.value
+        XCTAssertTrue(waiterFinished)
+        XCTAssertFalse(coordinator.busy)
+    }
+
+    func testRevisionRejectsStaleDecisionAndAcceptsLatestStableSpanOnce() async throws {
+        var handoffs: [TranscriptHandoff] = []
+        let coordinator = ContinuousIntentCoordinator(submit: { handoffs.append($0) })
+        let captureID = UUID()
+        coordinator.begin(captureID: captureID)
+        var audio = RangedTranscript()
+        try audio.apply(.init(start: 0, end: 1, text: "open Notes", isFinal: false))
+        coordinator.record(audio)
+        coordinator.update("open Notes", final: false)
         await coordinator.waitForPending()
-        XCTAssertEqual(observations.prefix(2).map { $0.joined(separator: " ") }, ["open Notes", "open Notes and create a note"])
-        XCTAssertEqual(requests, ["open Notes"])
-        XCTAssertEqual(coordinator.remainder, "and create a note")
-    }
+        let old = try XCTUnwrap(handoffs.first)
 
-}
+        try audio.apply(.init(start: 0, end: 1, text: "open Maps", isFinal: true))
+        coordinator.record(audio)
+        coordinator.update("open Maps", final: false)
+        await coordinator.waitForPending()
+        let latest = try XCTUnwrap(handoffs.last)
 
-extension ContinuousIntentTests {
-    func testVolatileCandidateWaitsForStabilityAndSameTextFinalizationDispatches() async throws {
-        var requests: [SpeechIntent] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
-            SpeechIntent(kind: .command, count: words.count, text: words.joined(separator: " "))
-        }, submit: { requests.append($0) })
-        c.begin()
-        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: false))
-        c.update("open Notes", final: false)
-        for _ in 0..<100 where c.outcome != "candidate" { await Task.yield() }
-        XCTAssertTrue(requests.isEmpty, "A fresh volatile candidate is not a handoff")
-        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: true))
-        c.update("open Notes", final: false)
-        await c.waitForPending()
-        XCTAssertEqual(requests.map(\.text), ["open Notes"])
-        XCTAssertEqual(requests.first?.provenance?.revision, 2)
-    }
-
-    func testVolatileApplicationRepairDoesNotSubmitOldApplication() async throws {
-        var requests: [String] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
-            SpeechIntent(kind: .command, count: words.count, text: words.joined(separator: " "))
-        }, submit: { requests.append($0.text) })
-        c.begin()
-        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: false))
-        c.update("open Notes", final: false)
-        for _ in 0..<100 where c.outcome != "candidate" { await Task.yield() }
-        c.record(.init(start: 0, end: 1, text: "open Maps", isFinal: true))
-        c.update("open Maps", final: false); await c.waitForPending()
-        XCTAssertEqual(requests, ["open Maps"])
-    }
-}
-
-extension ContinuousIntentTests {
-    func testDuplicateRevisionsAndIntentionalRepeatHaveDifferentSpans() async throws {
-        var submitted: [SpeechIntent] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in .init(kind: .command, count: words.count, text: "") }, submit: { submitted.append($0) })
-        c.begin()
-        let first = SpeechRevision(start: 0, end: 1, text: "open Notes", isFinal: true)
-        c.record(first); c.update("open Notes", final: false); await c.waitForPending()
-        c.record(first); c.update("open Notes", final: false); await c.waitForPending()
-        c.record(.init(start: 1, end: 2, text: " open Notes", isFinal: true))
-        c.update("open Notes open Notes", final: false); await c.waitForPending()
-        c.update("open Notes open Notes", final: true); await c.waitForPending()
-        XCTAssertEqual(submitted.map(\.text), ["open Notes", "open Notes"])
-        XCTAssertEqual(submitted.compactMap { $0.provenance?.wordStart }, [0, 2])
-    }
-    func testReleaseDuringPendingJudgmentRechecksAndPreservesParagraphs() async throws {
-        var release: CheckedContinuation<Void, Never>?, calls = 0
-        var submitted: [String] = []
-        let c = ContinuousIntentCoordinator(decide: { words, final, _ in
-            calls += 1
-            if calls == 1 { await withCheckedContinuation { release = $0 } }
-            return final ? .init(kind: .textEntry, count: words.count, text: "") : nil
-        }, submit: { submitted.append($0.text) })
-        c.begin(); c.update("type café\n\n👩🏽‍💻", final: false)
-        for _ in 0..<100 where release == nil { await Task.yield() }
-        c.update("type café\n\n👩🏽‍💻", final: true); release?.resume()
-        await c.waitForPending()
-        XCTAssertEqual(submitted, ["type café\n\n👩🏽‍💻"])
-        XCTAssertEqual(calls, 2)
-    }
-    func testUncertainSubmissionCannotReplayAfterServiceFailure() async throws {
-        var submissions = 0
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in .init(kind: .command, count: words.count, text: "") }, submit: { _ in
-            submissions += 1; throw URLError(.networkConnectionLost)
-        })
-        c.begin(); c.update("open Notes", final: true); await c.waitForPending()
-        c.update("open Notes", final: true); await c.waitForPending()
-        XCTAssertEqual(submissions, 1)
-        XCTAssertTrue(c.remainder.isEmpty)
-        XCTAssertNotNil(c.error)
-    }
-    func testIncompleteAndServiceFailureRetainPendingSpeech() async throws {
-        for service in [false, true] {
-            let c = ContinuousIntentCoordinator(interpret: { _, _, _ in
-                if service { throw URLError(.notConnectedToInternet) }
-                return .incomplete("What would you like to search for?")
-            }, submit: { _ in XCTFail("No handoff allowed") })
-            c.begin(); c.update("search for", final: true); await c.waitForPending()
-            XCTAssertEqual(c.remainder, "search for")
-            XCTAssertEqual(c.outcome, service ? "failure" : "incomplete")
-            XCTAssertTrue(c.error?.contains(service ? "Voice interpretation failed" : "search for") == true)
-        }
-    }
-    func testOldCaptureResponseDoesNotReviveAfterNewHold() async throws {
-        var release: CheckedContinuation<Void, Never>?, calls = 0
-        var submitted: [String] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
-            calls += 1
-            if calls == 1 { await withCheckedContinuation { release = $0 } }
-            return .init(kind: .command, count: words.count, text: "")
-        }, submit: { submitted.append($0.text) })
-        c.begin(); c.update("open Notes", final: true)
-        for _ in 0..<100 where release == nil { await Task.yield() }
-        c.begin(); c.update("open Maps", final: true)
-        release?.resume(); await c.waitForPending()
-        XCTAssertEqual(submitted, ["open Maps"])
-    }
-}
-
-extension ContinuousIntentTests {
-    func testStableVolatileCompleteRequestCanHandoffBeforeRelease() async throws {
-        var requests: [String] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in .init(kind: .command, count: words.count, text: "") }, submit: { requests.append($0.text) })
-        c.begin(); c.record(.init(start: 0, end: 1, text: "open Calculator", isFinal: false))
-        c.update("open Calculator", final: false); await c.waitForPending()
-        XCTAssertEqual(requests, ["open Calculator"], "Recognition finality must not become a release-only handoff gate")
-    }
-}
-
-extension ContinuousIntentTests {
-    func testNegatedPrefixRemainsInGrowingSpeechUntilRelease() async throws {
-        for recognitionFinal in [false, true] {
-            var submissions: [String] = []
-            let model = JevSpeechIntent(evaluate: { state, questions in
-                let text = try XCTUnwrap(state["pending_speech"]?.string)
-                let values = ["polarity": text.hasPrefix("Don't") ? "prohibited" : "notProhibited",
-                              "purpose": "request", "kind": "command", "mode": "control", "extent": "whole"]
-                return try questions.reduce(into: [:]) { answers, question in
-                    let value = try XCTUnwrap(values[question.key])
-                    answers[question.key] = .choice(choice: value, confidence: 1, probabilities: [:])
-                }
-            })
-            let c = ContinuousIntentCoordinator(interpret: {
-                try await model.understand(words: $0, final: $1, context: $2)
-            }, submit: { submissions.append($0.text) })
-            c.begin()
-            c.record(.init(start: 0, end: 1, text: "Don't", isFinal: recognitionFinal))
-            c.update("Don't", final: false); await c.waitForPending()
-            XCTAssertEqual(c.remainder, "Don't", "Recognition stability must not consume the governing negation")
-            c.record(.init(start: 1, end: 2, text: " open Safari", isFinal: recognitionFinal))
-            c.update("Don't open Safari", final: false); await c.waitForPending()
-            XCTAssertTrue(submissions.isEmpty)
-            XCTAssertEqual(c.remainder, "Don't open Safari")
-            c.update("Don't open Safari", final: true); await c.waitForPending()
-            XCTAssertTrue(submissions.isEmpty)
-            XCTAssertTrue(c.remainder.isEmpty)
-            XCTAssertEqual(c.outcome, "noRequest")
-            XCTAssertFalse(c.busy)
-            XCTAssertNil(c.error)
-        }
-    }
-
-    func testIgnoredTailCanBeRevisedIntoARequestWithoutCommittedRevisionFailure() async {
-        var submissions: [String] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
-            .init(kind: words == ["uh"] ? .ignore : .command, count: words.count, text: "")
-        }, submit: { submissions.append($0.text) })
-        c.begin(); c.update("uh", final: false); await c.waitForPending()
-        c.update("open Notes", final: true); await c.waitForPending()
-        XCTAssertEqual(submissions, ["open Notes"])
-        XCTAssertNil(c.error)
-    }
-
-    func testBoundedIgnoredPrefixStillAllowsFollowingCommandBeforeRelease() async {
-        var submissions: [String] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
-            if words.first == "thanks" { return .init(kind: .ignore, count: 1, text: "") }
-            return .init(kind: .command, count: words.count, text: "")
-        }, submit: { submissions.append($0.text) })
-        c.begin(); c.update("thanks open Notes", final: false); await c.waitForPending()
-        XCTAssertEqual(submissions, ["open Notes"])
-        c.update("thanks open Notes", final: true); await c.waitForPending()
-        XCTAssertEqual(submissions, ["open Notes"])
+        XCTAssertFalse(coordinator.consume(old, wordRange: 0..<2))
+        XCTAssertTrue(coordinator.consume(latest, wordRange: 0..<2))
+        XCTAssertFalse(coordinator.consume(latest, wordRange: 0..<2))
+        XCTAssertEqual(handoffs.map(\.transcript), ["open Notes", "open Maps"])
+        XCTAssertEqual(latest.captureID, captureID)
+        XCTAssertEqual(latest.revision, audio.revision)
     }
 
     func testStableFirstRequestDoesNotStarveBehindGrowingIndependentSpeech() async throws {
-        var release: CheckedContinuation<Void, Never>?, calls = 0
-        var submissions: [String] = []
-        let c = ContinuousIntentCoordinator(decide: { words, _, _ in
-            calls += 1
-            if calls == 1 { await withCheckedContinuation { release = $0 }; return .init(kind: .command, count: 2, text: "open Notes") }
-            return nil
-        }, submit: { submissions.append($0.text) })
-        c.begin()
-        c.record(.init(start: 0, end: 1, text: "open Notes", isFinal: true))
-        c.record(.init(start: 1, end: 2, text: " then search", isFinal: false))
-        c.update("open Notes then search", final: false)
+        var release: CheckedContinuation<Void, Never>?
+        var handoffs: [TranscriptHandoff] = []
+        var coordinator: ContinuousIntentCoordinator!
+        coordinator = ContinuousIntentCoordinator(submit: { handoff in
+            handoffs.append(handoff)
+            if handoffs.count == 1 {
+                await withCheckedContinuation { release = $0 }
+                XCTAssertTrue(coordinator.consume(handoff, wordRange: 0..<2), "A boundary inside the judged transcript survives a later suffix")
+            }
+        })
+        coordinator.begin()
+        var audio = RangedTranscript()
+        try audio.apply(.init(start: 0, end: 1, text: "open Notes then search", isFinal: true))
+        coordinator.record(audio)
+        coordinator.update(audio.text, final: false)
         for _ in 0..<100 where release == nil { await Task.yield() }
-        c.record(.init(start: 1, end: 3, text: " then search for hiking", isFinal: false))
-        c.update("open Notes then search for hiking", final: false)
-        release?.resume(); await c.waitForPending()
-        XCTAssertEqual(submissions, ["open Notes"])
-        XCTAssertEqual(c.remainder, "then search for hiking")
+        XCTAssertNotNil(release)
+
+        try audio.apply(.init(start: 1, end: 2, text: " for cats", isFinal: false))
+        coordinator.record(audio)
+        coordinator.update(audio.text, final: false)
+        release?.resume()
+        try await Task.sleep(for: .milliseconds(10))
+
+        await coordinator.waitForPending()
+        XCTAssertEqual(handoffs.map(\.pendingWordStart), [0, 2])
+        XCTAssertEqual(handoffs.last?.transcript, "open Notes then search for cats")
+    }
+
+    func testAppendedConditionRejectsOldEdgeDecisionAndRejudgesWholeRequest() async throws {
+        let started = expectation(description: "First decision pending")
+        let rejudged = expectation(description: "Updated request handed off")
+        var release: CheckedContinuation<Void, Never>?
+        var handoffs: [TranscriptHandoff] = []
+        var coordinator: ContinuousIntentCoordinator!
+        coordinator = ContinuousIntentCoordinator(submit: { handoff in
+            handoffs.append(handoff)
+            if handoffs.count == 1 {
+                await withCheckedContinuation { release = $0; started.fulfill() }
+                XCTAssertFalse(coordinator.consume(handoff, wordRange: 0..<2))
+            } else {
+                coordinator.report(handoff, outcome: "incomplete", message: "Conditional request")
+                rejudged.fulfill()
+            }
+        })
+        coordinator.begin()
+        var audio = RangedTranscript()
+        try audio.apply(.init(start: 0, end: 1, text: "open Notes", isFinal: true))
+        coordinator.record(audio)
+        coordinator.update(audio.text, final: false)
+        await fulfillment(of: [started], timeout: 1)
+
+        try audio.apply(.init(start: 1, end: 2, text: " if I ask later", isFinal: true))
+        coordinator.record(audio)
+        coordinator.update(audio.text, final: true)
+        release?.resume()
+        await fulfillment(of: [rejudged], timeout: 1)
+        await coordinator.waitForPending()
+
+        XCTAssertEqual(handoffs.map(\.pendingWordStart), [0, 0])
+        XCTAssertEqual(handoffs.last?.transcript, "open Notes if I ask later")
+        XCTAssertEqual(coordinator.remainder, "open Notes if I ask later")
+        XCTAssertFalse(coordinator.busy)
+    }
+
+    func testNonConsumingDecisionProcessesCoalescedFinalInputWithoutRetryingUnchangedInput() async throws {
+        for outcome in ["incomplete", "clarification", "dictationWaitingForFinal"] {
+            let started = expectation(description: "First decision pending: \(outcome)")
+            let rejudged = expectation(description: "Final input handed off: \(outcome)")
+            var release: CheckedContinuation<Void, Never>?
+            var handoffs: [TranscriptHandoff] = []
+            var coordinator: ContinuousIntentCoordinator!
+            coordinator = ContinuousIntentCoordinator(submit: { handoff in
+                handoffs.append(handoff)
+                if handoffs.count == 1 {
+                    await withCheckedContinuation { release = $0; started.fulfill() }
+                } else { rejudged.fulfill() }
+                coordinator.report(handoff, outcome: outcome, message: "Waiting")
+            })
+            coordinator.begin()
+            var audio = RangedTranscript()
+            try audio.apply(.init(start: 0, end: 1, text: "search for", isFinal: true))
+            coordinator.record(audio)
+            coordinator.update(audio.text, final: false)
+            await fulfillment(of: [started], timeout: 1)
+
+            try audio.apply(.init(start: 1, end: 2, text: " cats", isFinal: true))
+            coordinator.record(audio)
+            coordinator.update(audio.text, final: false)
+            coordinator.update(audio.text, final: true)
+            release?.resume()
+            await fulfillment(of: [rejudged], timeout: 1)
+            await coordinator.waitForPending()
+            coordinator.update(audio.text, final: true)
+            await coordinator.waitForPending()
+
+            XCTAssertEqual(handoffs.map(\.transcript), ["search for", "search for cats"])
+            XCTAssertEqual(handoffs.map(\.final), [false, true])
+            XCTAssertEqual(handoffs.map(\.pendingWordStart), [0, 0])
+            XCTAssertEqual(coordinator.remainder, "search for cats")
+            XCTAssertFalse(coordinator.busy)
+        }
+    }
+
+    func testProvisionalIgnoredTailRemainsRevisable() async throws {
+        var handoffs: [TranscriptHandoff] = []
+        var coordinator: ContinuousIntentCoordinator!
+        coordinator = ContinuousIntentCoordinator(submit: { handoff in
+            handoffs.append(handoff)
+            if handoffs.count == 1 {
+                _ = coordinator.consume(handoff, wordRange: 0..<1) // Jev selected the provisional filler as ignorable.
+            }
+        })
+        coordinator.begin()
+        var audio = RangedTranscript()
+        try audio.apply(.init(start: 0, end: 1, text: "uh", isFinal: false))
+        coordinator.record(audio)
+        coordinator.update("uh", final: false)
+        await coordinator.waitForPending()
+        XCTAssertEqual(coordinator.remainder, "uh", "An unstable ignored tail must not enter the consumed ledger")
+
+        try audio.apply(.init(start: 0, end: 1, text: "open Notes", isFinal: true))
+        coordinator.record(audio)
+        coordinator.update("open Notes", final: false)
+        await coordinator.waitForPending()
+
+        XCTAssertNil(coordinator.error)
+        let latest = try XCTUnwrap(handoffs.last)
+        XCTAssertEqual(latest.transcript, "open Notes")
+        XCTAssertTrue(coordinator.consume(latest, wordRange: 0..<2))
+    }
+
+    func testOldCaptureHandoffCannotBeAcceptedAfterNextHoldBegins() async throws {
+        var handoffs: [TranscriptHandoff] = []
+        let coordinator = ContinuousIntentCoordinator(submit: { handoffs.append($0) })
+        coordinator.begin()
+        coordinator.update("open Notes", final: true)
+        await coordinator.waitForPending()
+        let old = try XCTUnwrap(handoffs.first)
+
+        coordinator.begin()
+        coordinator.update("open Maps", final: true)
+        await coordinator.waitForPending()
+        let current = try XCTUnwrap(handoffs.last)
+
+        XCTAssertFalse(coordinator.consume(old, wordRange: 0..<2))
+        XCTAssertTrue(coordinator.consume(current, wordRange: 0..<2))
+        XCTAssertEqual(current.transcript, "open Maps")
+    }
+
+    func testCancellationInvalidatesPendingHandoffCallback() async throws {
+        var release: CheckedContinuation<Void, Never>?
+        var delivered: [TranscriptHandoff] = []
+        let coordinator = ContinuousIntentCoordinator(submit: { handoff in
+            await withCheckedContinuation { release = $0 }
+            try Task.checkCancellation()
+            delivered.append(handoff)
+        })
+        coordinator.begin()
+        coordinator.update("open Notes", final: true)
+        for _ in 0..<100 where release == nil { await Task.yield() }
+        XCTAssertNotNil(release)
+
+        coordinator.cancel()
+        release?.resume()
+        try await Task.sleep(for: .milliseconds(10))
+        XCTAssertTrue(delivered.isEmpty)
     }
 }

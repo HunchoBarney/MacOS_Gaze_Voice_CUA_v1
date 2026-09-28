@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Speech
+import OSLog
 import JevVoiceCore
 
 @MainActor
@@ -54,6 +55,7 @@ final class AnalyzerAudioFeed: @unchecked Sendable {
     private let continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation
     private let converter: AVAudioConverter
     private let outputFormat: AVAudioFormat
+    private let inputFormat: AVAudioFormat
     private let lock = NSLock()
     private let conversionLock = NSLock()
     private var ended = false
@@ -62,12 +64,15 @@ final class AnalyzerAudioFeed: @unchecked Sendable {
     private var inputSeconds = 0.0
     private var audibleSeconds = 0.0
     private var outputSeconds = 0.0
+    private var bufferCount = 0
+    private var peakRMS: Float = 0
+    private var hasFloatSamples = false
 
     init(input: AVAudioFormat, output: AVAudioFormat) throws {
         guard let converter = AVAudioConverter(from: input, to: output) else {
             throw VoiceError("The microphone format cannot be converted for SpeechAnalyzer.")
         }
-        self.converter = converter; self.outputFormat = output
+        self.converter = converter; self.inputFormat = input; self.outputFormat = output
         let pair = AsyncThrowingStream<AnalyzerInput, Error>.makeStream(bufferingPolicy: .bufferingOldest(128))
         stream = pair.stream; continuation = pair.continuation
     }
@@ -77,13 +82,16 @@ final class AnalyzerAudioFeed: @unchecked Sendable {
         guard !ended else { return }
         let duration = Double(buffer.frameLength) / buffer.format.sampleRate
         inputSeconds += duration
+        bufferCount += 1
         lock.lock()
         if firstBufferAt == nil { firstBufferAt = ProcessInfo.processInfo.systemUptime }
         lock.unlock()
         if let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 {
+            hasFloatSamples = true
             var sum: Float = 0
             for i in 0..<Int(buffer.frameLength) { sum += samples[i] * samples[i] }
             let rms = sqrt(sum / Float(buffer.frameLength))
+            peakRMS = max(peakRMS, rms)
             if rms > 0.0031623 { audibleSeconds += duration }
             lock.lock(); meter = max(0, min(1, (20 * log10(max(rms, 0.00001)) + 55) / 50)); lock.unlock()
         }
@@ -109,9 +117,16 @@ final class AnalyzerAudioFeed: @unchecked Sendable {
     }
     func level() -> Float { lock.lock(); defer { lock.unlock() }; return meter }
     func firstBufferTime() -> Double? { lock.lock(); defer { lock.unlock() }; return firstBufferAt }
-    func audioDurations() -> (input: Double, audible: Double, converted: Double) {
+    func audioSummary() -> (input: Double, audible: Double, converted: Double, peakRMS: Float,
+                            hasFloatSamples: Bool, bufferCount: Int, sampleRate: Double,
+                            channels: AVAudioChannelCount, commonFormat: AVAudioCommonFormat) {
         conversionLock.lock(); defer { conversionLock.unlock() }
-        return (inputSeconds, audibleSeconds, outputSeconds)
+        return (inputSeconds, audibleSeconds, outputSeconds, peakRMS, hasFloatSamples, bufferCount,
+                inputFormat.sampleRate, inputFormat.channelCount, inputFormat.commonFormat)
+    }
+    func audioDurations() -> (input: Double, audible: Double, converted: Double) {
+        let summary = audioSummary()
+        return (summary.input, summary.audible, summary.converted)
     }
     func finish() {
         conversionLock.lock(); defer { conversionLock.unlock() }
@@ -141,6 +156,7 @@ final class AnalyzerAudioFeed: @unchecked Sendable {
 
 @MainActor
 final class SpeechAnalyzerCapture: SpeechCapturing {
+    private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice.voice", category: "capture")
     var onEvent: ((UUID, SpeechEvent) -> Void)?
     var onReadiness: ((SpeechReadiness) -> Void)?
     private let input = MicrophoneInput()
@@ -161,6 +177,7 @@ final class SpeechAnalyzerCapture: SpeechCapturing {
         let feed: AnalyzerAudioFeed
         var transcript = RangedTranscript()
         var results: Task<Void, Error>?
+        var audioSummaryLogged = false
         init(name: String, module: SpeechTranscriber?, analyzer: SpeechAnalyzer?, feed: AnalyzerAudioFeed) {
             self.name = name; self.module = module; self.analyzer = analyzer; self.feed = feed
         }
@@ -314,7 +331,8 @@ final class SpeechAnalyzerCapture: SpeechCapturing {
         let started = ProcessInfo.processInfo.systemUptime
         input.gate.close()?.finish()
         meterTimer?.invalidate(); meterTimer = nil
-        let durations = active.session.feed.audioDurations()
+        logAudioSummary(id: active.id, session: active.session)
+        let durations = active.session.feed.audioSummary()
         onEvent?(active.id, .timing("Captured audio duration", milliseconds: durations.input * 1000))
         onEvent?(active.id, .timing("Converted audio duration", milliseconds: durations.converted * 1000))
         finishTask = Task { [weak self] in
@@ -334,6 +352,7 @@ final class SpeechAnalyzerCapture: SpeechCapturing {
 
     func cancel() {
         let prior = active
+        if let prior { logAudioSummary(id: prior.id, session: prior.session) }
         active = nil
         input.gate.close()?.finish()
         meterTimer?.invalidate(); meterTimer = nil
@@ -341,6 +360,13 @@ final class SpeechAnalyzerCapture: SpeechCapturing {
         prior?.session.results?.cancel()
         if let prior { Task { await prior.session.analyzer?.cancelAndFinishNow() } }
         prepareNext()
+    }
+
+    private func logAudioSummary(id: UUID, session: Session) {
+        guard !session.audioSummaryLogged else { return }
+        session.audioSummaryLogged = true
+        let summary = session.feed.audioSummary()
+        Self.log.notice("capture=\(id.uuidString, privacy: .public) audio_input_ms=\(summary.input * 1000) audio_converted_ms=\(summary.converted * 1000) audio_above_noise_floor_ms=\(summary.audible * 1000) peak_rms=\(summary.peakRMS) float_samples=\(summary.hasFloatSamples) buffers=\(summary.bufferCount) sample_rate=\(summary.sampleRate) channels=\(summary.channels) common_format=\(summary.commonFormat.rawValue)")
     }
 
     private func prepareNext() {

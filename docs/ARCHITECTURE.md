@@ -1,7 +1,7 @@
 # Architecture and source map
 
 The package keeps two modules: `JevVoice` owns the macOS application and integration
-side effects; `JevVoiceCore` holds shared values, interpretation and model clients.
+side effects; `JevVoiceCore` holds shared values and model clients.
 Directory groups are navigation aids, not new packages or access-control boundaries.
 
 ## Normal control flow
@@ -12,14 +12,24 @@ monitor. `VoiceController` owns capture/session state and defaults to
 `MicrophoneInput` owns the long-lived engine on a serial queue. Its admission gate
 drops idle buffers and strips any pre-hold prefix from a straddling buffer.
 `SpeechAnalyzerCapture` owns a fresh prepared analyzer and bounded feed per hold;
-it alone reconciles recognition ranges. Capture IDs pass unchanged into intent
-provenance. Fn release closes admission and drains accepted audio, while the next
-analyzer prepares independently of the still-running hardware.
-`ContinuousIntentCoordinator` coordinates decisions over changing speech.
-`CuaVoiceRuntime` owns task contexts and connects them to `CuaTaskAgent` and
-`CuaWorkQueue`. `CuaConnection` transports MCP to the pinned local Driver.
-Cua owns desktop observation, native actions and cursor feedback. Jev chooses
-structured decisions; the optional text provider generates prose/advisory reasoning.
+it alone reconciles recognition ranges. Capture IDs, revisions, audio ranges and
+finality pass through `ContinuousIntentCoordinator` in a transcript handoff, along
+with the exact text and current task context. The coordinator owns speculative
+handoff cancellation and consumed-span bookkeeping, not speech meaning. Fn release
+closes admission and drains accepted audio, while the next analyzer prepares
+independently of the still-running hardware.
+
+For each pending source span, `CuaVoiceRuntime` starts a Cua session and sends the
+original transcript and task context to `CuaTaskAgent.decide`, together with the
+installed-app inventory. Jev makes the first operation, span, task relationship,
+application and literal-payload decision there. The runtime creates task records
+only after that decision and mechanically applies selected stop, stop-all or
+correction mechanics. Selected execution continues through that same
+`CuaTaskAgent`'s bounded observe/choose/act loop; later Jev calls use fresh Cua
+observations inside that execution workflow. `CuaWorkQueue` owns app leases and
+`CuaConnection` transports MCP to the pinned local Driver. Cua observations and
+supported tools ground desktop targets and effects. The optional text provider
+generates requested prose/advisory reasoning.
 
 This describes wiring, not acceptance of every behavior. See
 [the migration gates](voice-ui/PLAN.md) for remaining work.
@@ -45,13 +55,15 @@ before changing isolation. No new global coordinator is implied by these groups.
 
 ## Capture lifecycle
 
-There is one production interpretation/execution route: SpeechAnalyzer → continuous
-intent coordination → Cua task runtime. Capture state and task progress have separate
-owners. Cancellation and session identity reject late results; consumed-span tracking
-prevents replay while preserving intentional repetitions. Manual mode still requires
-explicit submission. Legacy recognizer, parser/planner, native executor, dictation
-helper and conditional probe were removed under the authorized simplification plan.
-Live dictation remains an open migration gate, not a replaced capability.
+There is one production voice route: SpeechAnalyzer → transcript/revision transport →
+the Cua task executor's first Jev decision → Cua observation and action. There is no
+preceding speech interpreter, task-routing call or spoken-text extraction call.
+Capture state and task progress have separate owners. Cancellation and session
+identity reject late results; consumed-span tracking prevents replay while preserving
+intentional repetitions. Manual mode still requires explicit submission. Legacy
+recognizer, parser/planner, native executor, dictation helper and conditional probe
+were removed under the authorized simplification plan. Live owned-range dictation
+remains an open migration gate, not a replaced capability.
 
 Ready hardware keeps the macOS microphone indicator active. Idle audio is discarded,
 never retained or transcribed. Quit, sleep, session inactivity, permission loss and

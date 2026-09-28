@@ -9,13 +9,21 @@ private final class FakeSpeech: SpeechCapturing {
     var finishes = 0
     var preparationGate: CheckedContinuation<Void, Never>?
     var delayPreparation = false
+    var suspendReleasesPreparation = false
     var suspended = false
     func prepare(inputUID: String?) async throws -> String {
         if delayPreparation { await withCheckedContinuation { preparationGate = $0 } }
         try Task.checkCancellation()
         return "Test microphone"
     }
-    func suspend() async { suspended = true }
+    func suspend() async {
+        suspended = true
+        if suspendReleasesPreparation {
+            let gate = preparationGate
+            preparationGate = nil
+            gate?.resume()
+        }
+    }
     var startGate: CheckedContinuation<Void, Never>?
     var delayStart = false
     func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String {
@@ -29,8 +37,8 @@ private final class FakeSpeech: SpeechCapturing {
     func emit(_ event: SpeechEvent, session: UUID? = nil) { onEvent?(session ?? sessions.last!, event) }
 }
 
-/// Capture is injected; interpretation uses the production coordinator/runtime.
-/// The external model returns non-action outcomes so these tests cannot touch the desktop.
+/// Capture and the Cua transport are injected; the executor judge returns ignore
+/// outcomes so these lifecycle tests cannot dispatch a desktop action.
 @MainActor
 final class VoiceSessionTests: XCTestCase {
     private func controller(_ speech: FakeSpeech, manual: Bool = false,
@@ -39,15 +47,45 @@ final class VoiceSessionTests: XCTestCase {
         let config = Config(defaults: UserDefaults(suiteName: "test.voice.\(UUID())")!,
                             keyStore: MemoryKeyStore(), environment: [:])
         config.autoExecute = !manual
-        let runtime = CuaVoiceRuntime(config: config, judge: { state, questions in
-            if questions["kind"] != nil { judged(state["pending_speech"]?.string ?? "") }
-            let values = ["kind": "ignore", "purpose": "mention", "polarity": "notProhibited",
-                          "extent": "refine", "mode": "control", "fragment": "conversation"]
-            return questions.reduce(into: [:]) { result, item in
-                let value = values[item.key]!
-                result[item.key] = .choice(choice: value, confidence: 0.1, probabilities: [value: 1])
-            }
-        })
+        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("voice-session-\(UUID()).py")
+        try! #"""
+import json,sys
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ if r['method']=='initialize': out={'protocolVersion':'2025-03-26','capabilities':{'tools':{}}}
+ else:
+  name=r['params']['name']
+  if name=='list_apps': value={'apps':[]}
+  elif name in ('start_session','end_session'): value={'active':name=='start_session'}
+  else: raise RuntimeError('Unexpected fixture tool '+name)
+  out={'structuredContent':value}
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':out}),flush=True)
+"""#.write(to: fixture, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: fixture) }
+        let runtime = CuaVoiceRuntime(config: config,
+            makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", fixture.path]) },
+            judge: { state, questions in
+                if questions["operation"] != nil { judged(state["transcript"]?.string ?? "") }
+                return questions.reduce(into: [:]) { result, item in
+                    let value: String
+                    switch item.key {
+                    case "operation": value = "ignore"
+                    case "span": value = String(state["pending_word_range"]?["end"]?.integer ?? 0)
+                    case "task": value = "independent"
+                    case "app": value = "none"
+                    case "scope": value = "work"
+                    case "visibility": value = "background"
+                    case "contentMode": value = "control"
+                    case "literalStart", "literalEnd": value = "none"
+                    case "correctionMode": value = "retract"
+                    case "replacementStart", "replacementEnd": value = "none"
+                    case "clarification": value = "none"
+                    default: fatalError("Unexpected executor question: \(item.key)")
+                    }
+                    result[item.key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
+                }
+            })
         return VoiceController(config: config, speech: speech, authorize: { true },
                                timings: timings, frontmost: { "Fixture" }, cuaRuntime: runtime)
     }
@@ -63,6 +101,25 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertFalse(c.canBegin)
         speech.preparationGate?.resume(); await settle()
         await c.shutdown()
+    }
+    func testShutdownSuspendsBeforeWaitingForPreparationToFinish() async {
+        let speech = FakeSpeech()
+        speech.delayPreparation = true
+        speech.suspendReleasesPreparation = true
+        let c = controller(speech)
+        c.prepareMicrophone()
+        await settle()
+        XCTAssertNotNil(speech.preparationGate)
+
+        let shutdown = Task { await c.shutdown() }
+        await settle()
+        XCTAssertTrue(speech.suspended, "Shutdown must stop the speech pipeline before awaiting preparation")
+
+        if let gate = speech.preparationGate {
+            speech.preparationGate = nil
+            gate.resume()
+        }
+        await shutdown.value
     }
     func testSuspensionInterruptsFinalizationAndRejectsLateFinal() async {
         let speech = FakeSpeech(); var calls = 0
@@ -108,7 +165,8 @@ final class VoiceSessionTests: XCTestCase {
         let c = controller(speech, judged: { received.append($0) })
         c.begin(); await settle(); c.finish()
         XCTAssertEqual(speech.finishes, 1)
-        speech.emit(.final("a conversation")); speech.emit(.final("duplicate")); await settle()
+        speech.emit(.final("a conversation")); speech.emit(.final("duplicate"))
+        await c.cua.speech.waitForPending()
         XCTAssertEqual(received, ["a conversation"]); XCTAssertEqual(c.status, .done)
         await c.shutdown()
     }
@@ -118,7 +176,8 @@ final class VoiceSessionTests: XCTestCase {
         c.begin(); await settle(); speech.emit(.final("a conversation"))
         XCTAssertEqual(c.status, .awaitingRelease)
         c.finish(); XCTAssertEqual(c.status, .reviewTranscript); XCTAssertTrue(received.isEmpty)
-        c.acceptTranscript(); c.acceptTranscript(); await settle()
+        c.acceptTranscript(); c.acceptTranscript()
+        await c.cua.speech.waitForPending()
         XCTAssertEqual(received, ["a conversation"]); XCTAssertEqual(c.status, .done)
         await c.shutdown()
     }
@@ -128,7 +187,8 @@ final class VoiceSessionTests: XCTestCase {
         c.begin(); await settle(); speech.emit(.partial("a conversation")); await settle()
         c.finish(); speech.emit(.final("a conversation")); await settle()
         XCTAssertTrue(received.isEmpty); XCTAssertEqual(c.status, .awaitingConfirm)
-        c.confirm(); c.confirm(); await settle()
+        c.confirm(); c.confirm()
+        await c.cua.speech.waitForPending()
         XCTAssertEqual(received, ["a conversation"])
         await c.shutdown()
     }
@@ -183,7 +243,8 @@ final class VoiceSessionTests: XCTestCase {
     func testOldCompletionTimerCannotHideNewCapture() async throws {
         let speech = FakeSpeech()
         let current = controller(speech, timings: VoiceTimings(dismissal: 0.03))
-        current.begin(); await settle(); current.finish(); speech.emit(.final("conversation")); await settle()
+        current.begin(); await settle(); current.finish(); speech.emit(.final("conversation"))
+        await current.cua.speech.waitForPending()
         XCTAssertEqual(current.status, .done)
         current.begin(); await settle(); try await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(current.status, .listening)

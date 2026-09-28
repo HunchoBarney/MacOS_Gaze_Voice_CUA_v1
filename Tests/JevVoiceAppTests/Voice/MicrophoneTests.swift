@@ -17,4 +17,38 @@ final class MicrophoneTests: XCTestCase {
         let reconnected = [MicrophoneDevice(hardwareID: 55, uid: "builtin", name: "MacBook microphone")]
         XCTAssertEqual(try MicrophoneCatalog.resolve(uid: "builtin", devices: reconnected, defaultID: 55).hardwareID, 55)
     }
+
+    func testSettledIdleInputConfigurationRestoresTheTap() {
+        XCTAssertEqual(
+            MicrophoneInput.configurationResponse(
+                engineRunning: true, sameDevice: true, sameFormat: true
+            ),
+            .restoreTap
+        )
+    }
+
+    func testStableInputConfigurationDuringCaptureRestoresTapWithoutFailingCapture() {
+        XCTAssertEqual(
+            MicrophoneInput.configurationResponse(
+                engineRunning: true, sameDevice: true, sameFormat: true
+            ),
+            .restoreTap
+        )
+    }
+
+    func testUnavailableOrChangedInputConfigurationInterrupts() {
+        let changes = [
+            (false, true, true),
+            (true, false, true),
+            (true, true, false),
+        ]
+        for (running, sameDevice, sameFormat) in changes {
+            XCTAssertEqual(
+                MicrophoneInput.configurationResponse(
+                    engineRunning: running, sameDevice: sameDevice, sameFormat: sameFormat
+                ),
+                .interrupt
+            )
+        }
+    }
 }

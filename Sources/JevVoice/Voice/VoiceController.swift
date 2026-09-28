@@ -299,9 +299,11 @@ final class VoiceController: ObservableObject {
 
     func shutdown() async {
         microphoneEnabled = false
+        let microphone = microphoneTask
+        microphone?.cancel()
         cancel()
-        await microphoneTask?.value
         await speech.suspend()
+        await microphone?.value
         await cua.shutdown()
         await cleanupTask?.value
     }
@@ -448,6 +450,7 @@ final class VoiceController: ObservableObject {
         detail = held && !cua.speech.message.isEmpty ? cua.speech.message : cua.message
         guard !held, [.thinking, .executing].contains(status) else { return }
         if cua.active { status = .executing }
+        else if cua.speech.outcome == "clarification" { status = .error(cua.message) }
         else if let last = cuaTasks.last, last.status == "Failed" { status = .error(last.message) }
         else if let id = sessionID { complete(cua.message.isEmpty ? "No action taken" : cua.message, session: id) }
     }

@@ -42,6 +42,15 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testPreparedAnalyzerCanAttachResultsBeforeFirstCaptureInputOptIn() async throws {
+        guard let path = ProcessInfo.processInfo.environment["JARVIS_SPEECH_TEST_FILE"] else {
+            throw XCTSkip("Opt-in prerecorded capture-lifecycle check; no microphone or model call in the normal suite.")
+        }
+        try await recognizeFixture(path: path, requireStreaming: false, finalizationLimit: nil,
+                                   resultsConsumerAfterAnalyzerStarts: true)
+    }
+
+    @MainActor
     func testShortUtteranceFinalizesWithinCurrentVoiceDeadlineOptIn() async throws {
         guard let path = ProcessInfo.processInfo.environment["JARVIS_SHORT_SPEECH_TEST_FILE"] else {
             throw XCTSkip("Opt-in short recorded utterance with immediate end of input")
@@ -66,7 +75,8 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    private func recognizeFixture(path: String, requireStreaming: Bool, finalizationLimit: Double?, fast: Bool = true) async throws {
+    private func recognizeFixture(path: String, requireStreaming: Bool, finalizationLimit: Double?, fast: Bool = true,
+                                  resultsConsumerAfterAnalyzerStarts: Bool = false) async throws {
         if ProcessInfo.processInfo.environment["JARVIS_PREPARE_SPEECH"] == "1" {
             await SpeechAssets.shared.refresh(install: true)
         }
@@ -85,7 +95,7 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
         try await analyzer.prepareToAnalyze(in: format)
         let observation = StreamingObservation()
         let inputStarted = ProcessInfo.processInfo.systemUptime
-        let collection = Task { () throws -> String in
+        let collectResults = { Task { () throws -> String in
             var transcript = RangedTranscript()
             for try await result in module.results {
                 let now = ProcessInfo.processInfo.systemUptime
@@ -97,9 +107,12 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
                     text: String(result.text.characters), isFinal: result.isFinal))
             }
             return transcript.text
-        }
+        } }
+        var collection: Task<String, Error>?
         do {
+            if !resultsConsumerAfterAnalyzerStarts { collection = collectResults() }
             try await analyzer.start(inputSequence: feed.stream)
+            if collection == nil { collection = collectResults() }
             while file.framePosition < file.length {
                 let count = AVAudioFrameCount(min(1024, file.length - file.framePosition))
                 let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: count))
@@ -111,7 +124,7 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
             let finishStarted = ProcessInfo.processInfo.systemUptime
             feed.finish()
             try await analyzer.finalizeAndFinishThroughEndOfInput()
-            let text = try await collection.value
+            let text = try await collection!.value
             let finalization = ProcessInfo.processInfo.systemUptime - finishStarted
             print("RECORDED_TIMING input_start_to_first_result_ms", (observation.firstResultAt.map { $0 - inputStarted } ?? -1) * 1000,
                   "input_end_to_last_result_ms", (observation.lastResultAt.map { $0 - finishStarted } ?? -1) * 1000,
@@ -122,7 +135,7 @@ final class SpeechAnalyzerIntegrationTests: XCTestCase {
             XCTAssertTrue(text.lowercased().contains("desk"), "Final word missing: \(text)")
             if requireStreaming { XCTAssertTrue(observation.observedBeforeEnd, "No streaming result before audio ended") }
         } catch {
-            feed.finish(); collection.cancel(); await analyzer.cancelAndFinishNow(); throw error
+            feed.finish(); collection?.cancel(); await analyzer.cancelAndFinishNow(); throw error
         }
     }
 }

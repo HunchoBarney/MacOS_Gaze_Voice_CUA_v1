@@ -48,6 +48,11 @@ final class MicrophoneAudioGate: @unchecked Sendable {
 /// Only the gate crosses into the real-time tap; it never creates a Task per buffer.
 final class MicrophoneInput: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice.voice", category: "microphone")
+    enum ConfigurationResponse: Equatable { case restoreTap, interrupt }
+    static func configurationResponse(engineRunning: Bool, sameDevice: Bool, sameFormat: Bool) -> ConfigurationResponse {
+        guard engineRunning, sameDevice, sameFormat else { return .interrupt }
+        return .restoreTap
+    }
     struct Ready {
         let name: String
         let format: AVAudioFormat
@@ -56,6 +61,7 @@ final class MicrophoneInput: @unchecked Sendable {
     private let queue = DispatchQueue(label: "voice.microphone", qos: .userInitiated)
     private var engine: AVAudioEngine?
     private var deviceID: AudioDeviceID?
+    private var preparedFormat: AVAudioFormat?
     private var observer: NSObjectProtocol?
     private var interrupted: (@Sendable () -> Void)?
 
@@ -71,28 +77,40 @@ final class MicrophoneInput: @unchecked Sendable {
                     self.stopOnQueue()
                     let engine = AVAudioEngine()
                     let input = engine.inputNode
-                    if input.auAudioUnit.deviceID != device.hardwareID { try input.auAudioUnit.setDeviceID(device.hardwareID) }
-                    let format = input.outputFormat(forBus: 0)
-                    guard format.sampleRate > 0, format.channelCount > 0 else { throw VoiceError("The microphone has no usable input.") }
-                    let gate = self.gate
-                    input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, time in gate.append(buffer, at: time) }
                     self.engine = engine; self.deviceID = device.hardwareID
-                    engine.prepare()
-                    try engine.start()
+                    // Observe before selecting the device or starting the graph. Changing an
+                    // AUAudioUnit device can leave CoreAudio's graph reconfiguring while the
+                    // first tap is installed. The notification lets us attach it again once
+                    // the route has settled instead of treating a running engine as proof that
+                    // the tap exists.
                     self.observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
                         object: engine, queue: nil) { [weak self, weak engine] _ in
                             self?.queue.async { [weak self, weak engine] in
                                 guard let self, let engine, self.engine === engine else { return }
-                                let sameDevice = engine.inputNode.auAudioUnit.deviceID == device.hardwareID
-                                let sameFormat = engine.inputNode.outputFormat(forBus: 0) == format
+                                let input = engine.inputNode
+                                let sameDevice = input.auAudioUnit.deviceID == self.deviceID
+                                let currentFormat = input.outputFormat(forBus: 0)
+                                let sameFormat = currentFormat == self.preparedFormat
                                 let running = engine.isRunning
                                 Self.log.notice("configuration running=\(running) selected_device=\(sameDevice) same_format=\(sameFormat)")
-                                // Device setup can deliver a delayed notification after
-                                // startup. Preserve a healthy engine; only actual loss
-                                // or a changed route/format interrupts the hold.
-                                if !running || !sameDevice || !sameFormat { self.interrupted?() }
+                                switch Self.configurationResponse(engineRunning: running, sameDevice: sameDevice,
+                                                                  sameFormat: sameFormat) {
+                                case .restoreTap:
+                                    Self.log.notice("configuration stable; restoring input tap")
+                                    input.removeTap(onBus: 0)
+                                    self.installTap(on: input, format: currentFormat)
+                                case .interrupt:
+                                    self.interrupted?()
+                                }
                             }
                         }
+                    if input.auAudioUnit.deviceID != device.hardwareID { try input.auAudioUnit.setDeviceID(device.hardwareID) }
+                    let format = input.outputFormat(forBus: 0)
+                    guard format.sampleRate > 0, format.channelCount > 0 else { throw VoiceError("The microphone has no usable input.") }
+                    self.preparedFormat = format
+                    self.installTap(on: input, format: format)
+                    engine.prepare()
+                    try engine.start()
                     continuation.resume(returning: Ready(name: device.name, format: format))
                 } catch {
                     self.stopOnQueue()
@@ -112,6 +130,12 @@ final class MicrophoneInput: @unchecked Sendable {
         observer = nil
         engine?.stop()
         engine?.inputNode.removeTap(onBus: 0)
-        engine = nil; deviceID = nil
+        engine = nil; deviceID = nil; preparedFormat = nil
+    }
+    private func installTap(on input: AVAudioInputNode, format: AVAudioFormat) {
+        let gate = self.gate
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, time in
+            gate.append(buffer, at: time)
+        }
     }
 }

@@ -107,11 +107,11 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                 return result
             }, judge: { state, questions in
                 try await client.systemOne(state: state, questions: questions).response.answers
-            }, windowID: window, approve: { operation in
+            }, windowID: window,
+               literal: createDocument ? "copper lantern beside the window." : "copper lantern beside the window",
+               approve: { operation in
                 print("Authorized disposable-fixture participation:", operation)
                 return true
-            }, payload: { request, purpose in
-                try await JevSpeechIntent(client: client).textPayload(request: request, purpose: purpose)
             })
             let start = ContinuousClock.now
             _ = try await agent.run(goal: createDocument ? "Please make a fresh document in TextEdit and type copper lantern beside the window." : "In TextEdit, please type copper lantern beside the window into the blank document.", context: "The provided window is the existing starting document. If asked to create a new document, do not reuse this one. It is a disposable fixture.", progress: { print("Fixture step:", $0) })
