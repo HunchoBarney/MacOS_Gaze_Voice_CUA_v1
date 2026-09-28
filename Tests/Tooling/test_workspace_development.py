@@ -39,6 +39,21 @@ class WorkspaceDevelopmentTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
 
+    def test_only_cua_source_is_visible_to_git(self):
+        repository = Path(__file__).resolve().parents[2]
+        for path, ignored in (
+            ('development/JevVoice/cua-source/README.md', False),
+            ('development/JevVoice/cua-source/libs/cua-driver/rust/target/debug/cua-driver', True),
+            ('development/JevVoice/reference/perception-inputs', True),
+            ('development/JevVoice/staging/output', True),
+            ('development/AGENTS.md', True),
+        ):
+            result = subprocess.run(
+                ['git', 'check-ignore', '--quiet', '--no-index', path],
+                cwd=repository, check=False,
+            )
+            self.assertEqual(result.returncode == 0, ignored, path)
+
     def test_isolation_and_rerun_preserves_edits(self):
         (self.workspace / 'development').symlink_to(self.source.parent)
         module.setup(self.workspace, self.source)
@@ -59,6 +74,20 @@ class WorkspaceDevelopmentTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             module.setup(self.workspace, self.source)
         self.assertTrue(link.is_symlink())
+
+    def test_tracked_source_does_not_require_historical_seed_hash(self):
+        target = self.workspace / 'development/JevVoice/cua-source/source.txt'
+        target.parent.mkdir(parents=True)
+        target.write_text('tracked edit')
+        subprocess.run(['git', 'init', '--quiet', str(self.workspace)], check=True)
+        subprocess.run(['git', '-C', str(self.workspace), 'add',
+                        'development/JevVoice/cua-source/source.txt'], check=True)
+        (self.source / 'cua-source/source.txt').write_text('new root seed')
+
+        module.setup(self.workspace, self.source)
+
+        self.assertEqual(target.read_text(), 'tracked edit')
+        self.assertTrue((self.workspace / 'development/JevVoice/reference/perception-inputs').is_symlink())
 
     def test_root_assets_are_untouched(self):
         module.setup(self.source.parent.parent, self.source)

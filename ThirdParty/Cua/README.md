@@ -15,7 +15,7 @@ Do not update the pin just to accept a different build.
   claim that a reconstructed checkout will have that commit ID.
 - `local-integration.patch`: the 30 changed/added files relative to that base,
   recovered by byte comparison with the pinned upstream archive.
-- `source-manifest.json`: hashes of all 898 preserved local source/config/fixture
+- `source-manifest.json`: historical hashes of all 898 preserved local source/config/fixture
   files, executable-file inventory, and the patch. The working tree is sparse; absent upstream paths are not
   treated as deletions. Generated builds, dependencies and models are excluded.
 - `LICENSE.md`: upstream license. Preserve upstream notices in reconstructed builds.
@@ -53,9 +53,12 @@ requires separate integration validation and an intentional pin update.
 The current source snapshot, pinned Driver and perception bundle are also shared
 as private release assets. See [collaborator handoff](../../docs/HANDOFF.md).
 
-The source patch preserves local artifact tooling/lock metadata. Large downloaded
-model/runtime assets, export environments and sealed perception bundles remain in
-`development/JevVoice/`, where present. They are not part of this Git repository.
+The source patch preserves local artifact tooling/lock metadata. The sparse source
+tree under `development/JevVoice/cua-source/` is now tracked by Git and includes
+later unaccepted candidate edits, so it does not match the historical manifest
+byte for byte. Large downloaded model/runtime assets, export environments and
+sealed perception bundles remain in `development/JevVoice/`, where present. Those
+assets are not part of this Git repository.
 Use the hash-verifying upstream tooling and recorded evidence to reconstruct them;
 do not claim a fresh source checkout is a fully configured runtime.
 

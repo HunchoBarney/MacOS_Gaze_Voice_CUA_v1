@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Seed isolated workspace source; expose shared assets only as reference material."""
+"""Prepare isolated workspace source and shared read-only reference assets."""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 
 REFERENCE_DIRS = ('perception-bundles', 'perception-downloads', 'perception-inputs',
                   'handoff', 'rollback', 'verification', 'upstream-pr-audit',
@@ -13,6 +14,19 @@ REFERENCE_DIRS = ('perception-bundles', 'perception-downloads', 'perception-inpu
 LOCAL_DIRS = ('build', 'staging', 'probe', 'verification', 'perception-export-env',
               'perception-bundles', 'perception-downloads', 'perception-inputs',
               'perception-quality-results.artifacts')
+
+
+def tracked_source_files(workspace):
+    result = subprocess.run(
+        ['git', '-C', str(workspace), 'ls-files', '-z', '--',
+         'development/JevVoice/cua-source/'],
+        capture_output=True, check=False,
+    )
+    if result.returncode:
+        return set()
+    prefix = 'development/JevVoice/cua-source/'
+    return {name.decode()[len(prefix):] for name in result.stdout.split(b'\0')
+            if name}
 
 
 def setup(workspace, source):
@@ -23,14 +37,19 @@ def setup(workspace, source):
         print('Repository root owns the original development assets; leaving them untouched.')
         return
     manifest = json.loads((workspace / 'ThirdParty/Cua/source-manifest.json').read_text())
-    # Check all seed files before replacing the old whole-folder link.
-    for name, expected in manifest['files'].items():
+    for name in manifest['files']:
         relative = Path(name)
         if relative.is_absolute() or '..' in relative.parts:
             raise RuntimeError('Unsafe source manifest path: ' + name)
-        origin = source / 'cua-source' / relative
-        if origin.is_symlink() or hashlib.sha256(origin.read_bytes()).hexdigest() != expected:
-            raise RuntimeError('Source differs from preserved manifest: ' + name)
+    tracked = tracked_source_files(workspace)
+    if tracked and not set(manifest['files']).issubset(tracked):
+        raise RuntimeError('Workspace tracks only part of the preserved Cua source')
+    if not tracked:
+        # Legacy branches seed from the historical manifest. Check before replacing a link.
+        for name, expected in manifest['files'].items():
+            origin = source / 'cua-source' / name
+            if origin.is_symlink() or hashlib.sha256(origin.read_bytes()).hexdigest() != expected:
+                raise RuntimeError('Source differs from preserved manifest: ' + name)
     if development.is_symlink():
         if development.resolve() != source.parent:
             raise RuntimeError('Refusing to replace an unexpected development link')
@@ -45,6 +64,10 @@ def setup(workspace, source):
             raise RuntimeError('Source path traverses a symlink: ' + str(target))
         if target.is_symlink():
             raise RuntimeError('Workspace source file must not be a symlink: ' + str(target))
+        if tracked:
+            if not target.is_file():
+                raise RuntimeError('Tracked workspace source is missing: ' + str(target))
+            continue
         if target.exists():
             continue  # Preserve edits on repeated setup.
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -78,8 +101,9 @@ def setup(workspace, source):
         target.symlink_to(origin, target_is_directory=origin.is_dir())
     (development / 'AGENTS.md').write_text('''# Workspace development assets
 
-`JevVoice/cua-source/` is a workspace-local copy of the preserved source manifest.
-Its historical broken Git metadata, dependencies and generated builds are not copied.
+`JevVoice/cua-source/` is workspace-local. On current branches Git tracks the
+preserved source; older branches seed it from the historical manifest. Its broken
+Git metadata, dependencies and generated builds are not copied by setup.
 Keep source edits and all new build/test/export output inside this workspace.
 Do not use the original repository development folder or the legacy
 ~/Library/Caches/JevVoice compatibility link as an output location.
@@ -91,8 +115,9 @@ workspace-local output paths to tools; inspect copied configs for absolute paths
 The links are not a filesystem security boundary. Dependencies/environments must
 be created locally using the existing pins. Do not auto-upgrade or install Driver.
 
-This entire directory is Git-ignored. Preserve source changes as a reviewed patch
-in the parent repository when they need to be shared; do not assume Git saves them.
+Git tracks only `JevVoice/cua-source/` on current branches. Check `git status`
+before sharing source changes. Other development assets remain ignored and must
+be preserved separately; do not assume Git saves them.
 ''')
     print('Workspace development ready: ' + str(local))
 

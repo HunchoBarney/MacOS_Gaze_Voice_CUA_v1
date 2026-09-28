@@ -4,7 +4,9 @@ build/
 .DS_Store
 .swiftpm
 /.context/
-/development
+/development/AGENTS.md
+/development/JevVoice/*
+!/development/JevVoice/cua-source/
 
 # Per-workspace Conductor overrides can contain local paths/settings.
 .conductor/settings.local.toml
