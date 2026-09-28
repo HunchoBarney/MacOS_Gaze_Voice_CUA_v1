@@ -157,9 +157,29 @@ final class CuaVoiceRuntime {
         let invocation = Invocation(receivedAt: handoff.receivedAt)
         let agent = makeAgent(connection: connection, label: label, invocation: invocation)
         do {
-            try await connection.connect()
-            _ = try await connection.call("start_session", arguments: ["session": .string(label)])
-            let decision = try await agent.decide(handoff: handoff, previousContext: handoff.taskContext["initial_app"]?.string ?? initialApp)
+            let previousContext = handoff.taskContext["initial_app"]?.string ?? initialApp
+            let decision: CuaExecutorDecision
+            if let cachedInventory = appInventory.snapshot() {
+                let cachedDecision = try await agent.decide(handoff: handoff,
+                    previousContext: previousContext, installedApps: cachedInventory)
+                if cachedDecision.operation == .execute ||
+                    (cachedDecision.operation == .clarify && cachedDecision.clarification == .target) {
+                    try await startSession(connection, label: label)
+                    let currentInventory = try await makeToolCall(connection: connection, label: label,
+                        invocation: invocation)("list_apps", [:])
+                    decision = currentInventory == cachedInventory ? cachedDecision :
+                        try await agent.decide(handoff: handoff, previousContext: previousContext,
+                            installedApps: currentInventory)
+                } else {
+                    decision = cachedDecision
+                }
+            } else {
+                try await startSession(connection, label: label)
+                let inventory = try await makeToolCall(connection: connection, label: label,
+                    invocation: invocation)("list_apps", [:])
+                decision = try await agent.decide(handoff: handoff,
+                    previousContext: previousContext, installedApps: inventory)
+            }
             invocation.timings["Transcript to first Jev decision"] =
                 (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
             try Task.checkCancellation()
@@ -245,6 +265,11 @@ final class CuaVoiceRuntime {
                 guard let self, let work = invocation.work else { return false }
                 return try await self.requestApproval(description, for: work)
             })
+    }
+
+    private func startSession(_ connection: CuaConnection, label: String) async throws {
+        try await connection.connect()
+        _ = try await connection.call("start_session", arguments: ["session": .string(label)])
     }
 
     private func makeTimedJudge(_ invocation: Invocation) -> CuaTaskAgent.Judge {
@@ -376,7 +401,10 @@ final class CuaVoiceRuntime {
         if target.active { cancel(target.id) }
         await target.worker?.value
         try Task.checkCancellation()
+        var sessionStarted = false
         if let receipt = target.launchReceipt {
+            try await startSession(connection, label: label)
+            sessionStarted = true
             work.status = "Waiting"
             work.message = "Checking whether the original launch is unchanged…"
             onChange()
@@ -399,6 +427,7 @@ final class CuaVoiceRuntime {
             work.status = "Completed"
             return
         }
+        if !sessionStarted { try await startSession(connection, label: label) }
         try await execute(replacement, dependencyID: nil, initialApp: initialApp, work: work, agent: agent, invocation: invocation)
     }
 

@@ -6,6 +6,7 @@ import JevVoiceCore
 final class CuaAppInventory {
     private var value: JSONValue?
     private var expiresAt: Double = 0
+    func snapshot() -> JSONValue? { value }
     func read(now: Double = ProcessInfo.processInfo.systemUptime, fetch: () async throws -> JSONValue) async throws -> JSONValue {
         if let value, now < expiresAt { return value }
         let observed = try await fetch()

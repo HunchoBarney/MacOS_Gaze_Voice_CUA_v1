@@ -26,6 +26,7 @@ final class CuaVoiceControllerTests: XCTestCase {
                        sessionStartDelayMs: Int = 0, sessionEndDelayMs: Int = 0,
                        windowedFixture: Bool = false, runningFixture: Bool = false, textFixture: Bool = false,
                        persistFixture: Bool = false, intentKind: String = "command", laterFailure: String? = nil,
+                       driverUnavailableAfterFirstConnection: Bool = false,
                        operations: [String] = [], spanEnds: [Int] = [], taskScopes: [String] = [],
                        correctionModes: [String] = [], observeJudge: ((JSONValue, [String: Question]) -> Void)? = nil) throws -> (VoiceController, Capture, URL, UserDefaults) {
         let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("jarvis-pipeline-\(UUID()).py")
@@ -88,15 +89,30 @@ for line in sys.stdin:
             .replacingOccurrences(of: "PERSIST", with: persistFixture ? "True" : "False")
             .replacingOccurrences(of: "STATE_PATH", with: fixture.path + ".state")
         try script.write(to: fixture, atomically: true, encoding: .utf8)
+        let unavailableFixture = URL(fileURLWithPath: fixture.path + ".unavailable.py")
+        if driverUnavailableAfterFirstConnection {
+            try "open(__file__ + '.started', 'w').write('started')\n".write(
+                to: unavailableFixture, atomically: true, encoding: .utf8)
+        }
         addTeardownBlock {
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".calls"))
+            try? FileManager.default.removeItem(at: unavailableFixture)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: unavailableFixture.path + ".started"))
         }
         let defaults = UserDefaults(suiteName: "CuaVoiceControllerTests-\(UUID())")!
         let config = Config(defaults: defaults, keyStore: Keys(), environment: [:])
         config.autoExecute = automatic
         var executorCalls = 0
         var actionDecisions = 0
-        let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", fixture.path]) }, judge: { state, questions in
+        var connections = 0
+        let runtime = CuaVoiceRuntime(config: config, makeConnection: {
+            connections += 1
+            if driverUnavailableAfterFirstConnection && connections > 1 {
+                return CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"),
+                    arguments: ["-u", unavailableFixture.path])
+            }
+            return CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", fixture.path])
+        }, judge: { state, questions in
             observeJudge?(state, questions)
             let directDecision = questions["operation"] != nil
             if directDecision {
@@ -306,7 +322,9 @@ for line in sys.stdin:
             try? FileManager.default.removeItem(at: stateFile)
         }
         controller.begin(); try await until { controller.status == .listening }
-        capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture undo that launch", isFinal: true))
+        capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture", isFinal: true))
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+        capture.emitRevision(.init(start: 1, end: 2, text: " undo that launch", isFinal: true))
         try await until { controller.cuaTasks.count == 2 }
         guard controller.cuaTasks.count == 2 else {
             XCTFail("The executor did not schedule the correction request: \(controller.cua.speech.error ?? controller.cua.speech.message)")
@@ -512,6 +530,54 @@ for line in sys.stdin:
         await controller.shutdown()
     }
 
+    func testJevSelectedStopCancelsTaskWhenDriverIsUnavailable() async throws {
+        let (controller, capture, file, _) = try setup(delayedAction: true,
+            driverUnavailableAfterFirstConnection: true,
+            operations: ["execute", "stop"], spanEnds: [2, 4], taskScopes: ["work"])
+        defer { try? FileManager.default.removeItem(at: file) }
+        controller.begin(); try await until { controller.status == .listening }
+        capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture stop it", isFinal: true))
+        try await until { controller.cuaTasks.count == 2 && controller.cuaTasks.allSatisfy { !$0.active } }
+
+        XCTAssertEqual(controller.cuaTasks.first?.status, "Cancelled")
+        XCTAssertEqual(controller.cuaTasks.last?.status, "Completed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path + ".unavailable.py.started"))
+        await controller.shutdown()
+    }
+
+    func testJevSelectedStopAllCancelsTaskWhenDriverIsUnavailable() async throws {
+        let (controller, capture, file, _) = try setup(delayedAction: true,
+            driverUnavailableAfterFirstConnection: true,
+            operations: ["execute", "stopAll"], spanEnds: [2, 4], taskScopes: ["work"])
+        defer { try? FileManager.default.removeItem(at: file) }
+        controller.begin(); try await until { controller.status == .listening }
+        capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture stop all", isFinal: true))
+        try await until { controller.cuaTasks.first?.active == false }
+
+        XCTAssertEqual(controller.cuaTasks.count, 1)
+        XCTAssertEqual(controller.cuaTasks.first?.status, "Cancelled")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path + ".unavailable.py.started"))
+        await controller.shutdown()
+    }
+
+    func testJevSelectedCorrectionRetractsPendingTaskWithoutDriver() async throws {
+        let (controller, capture, file, _) = try setup(delayedAction: true,
+            windowedFixture: true, runningFixture: true,
+            driverUnavailableAfterFirstConnection: true,
+            operations: ["execute", "correction"], spanEnds: [2, 5], taskScopes: ["work"],
+            correctionModes: ["retract"])
+        defer { try? FileManager.default.removeItem(at: file) }
+        controller.begin(); try await until { controller.status == .listening }
+        capture.emitRevision(.init(start: 0, end: 1,
+            text: "open Fixture actually cancel that", isFinal: true))
+        try await until { controller.cuaTasks.count == 2 && controller.cuaTasks.allSatisfy { !$0.active } }
+
+        XCTAssertEqual(controller.cuaTasks.first?.status, "Cancelled")
+        XCTAssertEqual(controller.cuaTasks.last?.status, "Completed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path + ".unavailable.py.started"))
+        await controller.shutdown()
+    }
+
     func testJevSelectedStopAllCancelsActiveAndQueuedTasks() async throws {
         var executorDecisions = 0
         let (controller, capture, file, _) = try setup(delayedAction: true,
@@ -604,6 +670,26 @@ for line in sys.stdin:
         XCTAssertEqual(try String(contentsOf: insertionLog, encoding: .utf8), "\"open Notes and stop all\"\n")
         XCTAssertEqual(controller.cuaTasks.count, 1)
         await controller.shutdown()
+    }
+
+    func testDictationKeepsKeyboardCommandWordsAsLiteralContent() async throws {
+        for request in ["dictate press the key \"Enter\"", "dictate do not press the key \"Enter\""] {
+            let (controller, capture, file, _) = try setup(windowedFixture: true, runningFixture: true,
+                textFixture: true, intentKind: "dictate", taskScopes: ["work"])
+            let insertionLog = URL(fileURLWithPath: file.path + ".text")
+            defer {
+                try? FileManager.default.removeItem(at: file)
+                try? FileManager.default.removeItem(at: insertionLog)
+            }
+            controller.begin(); try await until { controller.status == .listening }
+            controller.finish(); capture.emit(.final(request))
+            try await until { controller.cuaTasks.first?.active == false }
+
+            XCTAssertEqual(controller.cuaTasks.first?.status, "Completed", request)
+            let inserted = try Data(contentsOf: insertionLog)
+            XCTAssertEqual(try JSONDecoder().decode(String.self, from: inserted), String(request.dropFirst(8)), request)
+            await controller.shutdown()
+        }
     }
 
     func testNaturalLiteralWaitsForReleaseBeforeInserting() async throws {

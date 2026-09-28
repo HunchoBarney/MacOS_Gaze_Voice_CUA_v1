@@ -129,8 +129,10 @@ final class CuaTaskAgent {
     }
 
     /// Makes the first speech meaning, task relationship, and app choice in the same
-    /// executor request that includes the original transcript and live CUA inventory.
-    func decide(handoff: TranscriptHandoff, previousContext: String = "") async throws -> CuaExecutorDecision {
+    /// executor request that includes the original transcript and available CUA inventory.
+    /// Task controls can still be selected when the Driver cannot supply inventory.
+    func decide(handoff: TranscriptHandoff, previousContext: String = "",
+                installedApps: JSONValue? = nil) async throws -> CuaExecutorDecision {
         try Task.checkCancellation()
         let words = handoff.transcript.split(whereSeparator: \.isWhitespace).map(String.init)
         guard handoff.pendingWordStart >= 0, handoff.pendingWordStart < handoff.pendingWordEnd,
@@ -142,7 +144,9 @@ final class CuaTaskAgent {
             )
         }
         let usesGroupedChoices = pendingWordCount > Self.directChoiceWords
-        let inventory = try await call("list_apps", [:])
+        let inventory: JSONValue
+        if let installedApps { inventory = installedApps }
+        else { inventory = try await call("list_apps", [:]) }
         let apps = inventory["apps"]?.array ?? []
         var appChoices: [String: String?] = ["none": "The target application is unclear or is not installed."]
         for (index, app) in apps.enumerated() {
@@ -392,7 +396,7 @@ final class CuaTaskAgent {
 
     func run(goal: String, context: String, acquireApp: (String) async throws -> Void = { _ in }, progress: (String) -> Void) async throws -> String {
         try Task.checkCancellation()
-        if CuaActionCatalog.isExplicitlyNegatedKeyboardRequest(in: goal) {
+        if contentMode == .control, CuaActionCatalog.isExplicitlyNegatedKeyboardRequest(in: goal) {
             throw DriverConnectionError.refused("The keyboard command is negated. No action was dispatched.")
         }
         let scope: String
@@ -618,7 +622,7 @@ final class CuaTaskAgent {
                 ? windowID.map { CuaActionCatalog.native(elements: elements, pid: pid, window: $0, includeEmbeddedWebControls: true, goal: goal, surface: actionSurface) } ?? []
                 : []
             let observedActions = CuaActionCatalog.merge(nativeActions, CuaActionCatalog.browser(snapshot: page, goal: goal, surface: actionSurface), CuaActionCatalog.browserDialog(snapshot: page, dialog: browserDialog, goal: goal, surface: actionSurface), browser == nil ? menuActions : [], visualActions)
-            let explicitKeyboardTool = CuaActionCatalog.explicitKeyboardTool(in: goal)
+            let explicitKeyboardTool = contentMode == .control ? CuaActionCatalog.explicitKeyboardTool(in: goal) : nil
             let userText = literal ?? generatedText ?? (selectedDecision == nil && explicitKeyboardTool == nil ? Self.exactQuotedText(in: goal) : nil)
             let actions = observedActions.map { action -> CuaObservedAction in
                 guard action.requiresText, let userText else { return action }
