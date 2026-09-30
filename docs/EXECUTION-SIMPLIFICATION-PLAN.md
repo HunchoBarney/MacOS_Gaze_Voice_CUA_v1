@@ -36,14 +36,24 @@ workspace. No retired production path or protection has been removed. Steps 4,
 6, 7, 8 and the final gates remain open; see
 [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
 
-(2026-09-30 note: the separate `COORDINATION-MEMORY-VOICE-PLAN.md` work completed
-all nine of its own steps and was committed to `main`. It reworked
+(2026-09-30 audit note: two things have moved since this status was written.
+First, the removals are further along than the unchecked boxes suggest —
+`Sources/JevVoice/Legacy/`, `Sources/JevVoiceCore/Commands/` and
+`Sources/JevVoiceCore/Speech/` (the old Executor, CommandInterpreter,
+CommandPlanner, LocalCommandParser, SlotExtractor, ClauseSplitter,
+IncrementalCommandCoordinator and speech-accumulator machinery) were deleted in
+`e8d6458` (2026-09-22) and `8a52c76` (2026-09-27), both on `main`, and the
+step-6 replacement candidates (predicted-window sets, window-content
+comparisons, description matching, custom polling, whole-app locking) are absent
+from current `Sources/`. What remains genuinely open is the live-evidence half:
+step-4 workflow proofs, step-7 matched measurements/concurrency proofs, and
+step-8 packaged-app production acceptance. Whether each already-removed
+mechanism has the per-row proof this plan required is a bookkeeping question for
+whoever resumes. Second, the `COORDINATION-MEMORY-VOICE-PLAN.md` work completed
+all nine of its own steps and was committed to `main`; it reworked
 `CuaVoiceRuntime`, `CuaTaskAgent` and `ContinuousIntentCoordinator` around
 `CuaDialogueState` — intent/attempt separation, pending questions, verified
-facts. It removed no legacy path and closed none of this plan's open steps, but
-anyone resuming steps 4/6/7/8 should re-inspect those files before relying on
-descriptions of their internals. Suite now passes 341 tests with 38 opt-in
-skips.)
+facts. Suite now passes 341 tests with 38 opt-in skips.)
 
 **Goal:** replace overlapping Jarvis execution machinery with existing Cua/Jev
 capabilities, keep one production execution loop, and preserve the existing
