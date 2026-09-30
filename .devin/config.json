@@ -1,0 +1,42 @@
+{
+  // Project-level Devin configuration for Jarvis (Jev Voice).
+  // Travels to every worktree via git. Personal overrides go in
+  // .devin/config.local.json (gitignored). Secrets never belong here.
+  "permissions": {
+    // Everyday build/test/inspect commands for this repo — skips the
+    // per-session approval prompt. Destructive or system-level commands
+    // still prompt.
+    "allow": [
+      "Exec(make *)",
+      "Exec(swift *)",
+      "Exec(python3 *)",
+      "Exec(git status *)",
+      "Exec(git status)",
+      "Exec(git diff *)",
+      "Exec(git diff)",
+      "Exec(git log *)",
+      "Exec(git log)",
+      "Exec(git show *)",
+      "Exec(git show)",
+      "Exec(git branch *)",
+      "Exec(git branch)",
+      "Exec(git worktree *)",
+      "Exec(git add *)",
+      "Exec(git restore --staged *)",
+      "Exec(codesign *)",
+      "Exec(open *)",
+      "Exec(osascript *)",
+      "Exec(pgrep *)",
+      "Exec(lipo *)",
+      "Exec(shasum *)"
+    ],
+    // Never auto-run these, even if asked: always prompt.
+    "deny": [
+      "Exec(sudo *)",
+      "Exec(tccutil *)",
+      "Exec(git push --force*)",
+      "Exec(git reset --hard*)",
+      "Exec(rm -rf /*)"
+    ]
+  }
+}
