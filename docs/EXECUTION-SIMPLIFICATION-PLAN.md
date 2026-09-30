@@ -36,6 +36,15 @@ workspace. No retired production path or protection has been removed. Steps 4,
 6, 7, 8 and the final gates remain open; see
 [the scoped implementation record](EXECUTION-SIMPLIFICATION-REPLACEMENTS.md).
 
+(2026-09-30 note: the separate `COORDINATION-MEMORY-VOICE-PLAN.md` work completed
+all nine of its own steps and was committed to `main`. It reworked
+`CuaVoiceRuntime`, `CuaTaskAgent` and `ContinuousIntentCoordinator` around
+`CuaDialogueState` — intent/attempt separation, pending questions, verified
+facts. It removed no legacy path and closed none of this plan's open steps, but
+anyone resuming steps 4/6/7/8 should re-inspect those files before relying on
+descriptions of their internals. Suite now passes 341 tests with 38 opt-in
+skips.)
+
 **Goal:** replace overlapping Jarvis execution machinery with existing Cua/Jev
 capabilities, keep one production execution loop, and preserve the existing
 voice/UI system. Prove replacements before removing current protections.
