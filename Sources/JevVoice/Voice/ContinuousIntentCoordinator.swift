@@ -12,6 +12,28 @@ struct TranscriptHandoff: Sendable, Equatable {
     let receivedAt: Double
     let audioRanges: [SpeechRevision]
     let taskContext: JSONValue
+    let contextRevision: Int
+    let contextReadSet: [String]
+
+    init(id: UUID, captureID: UUID, revision: Int, transcript: String, pendingWordStart: Int, pendingWordEnd: Int,
+         final: Bool, receivedAt: Double, audioRanges: [SpeechRevision], taskContext: JSONValue,
+         contextRevision: Int = 0, contextReadSet: [String] = []) {
+        self.id = id
+        self.captureID = captureID
+        self.revision = revision
+        self.transcript = transcript
+        self.pendingWordStart = pendingWordStart
+        self.pendingWordEnd = pendingWordEnd
+        self.final = final
+        self.receivedAt = receivedAt
+        self.audioRanges = audioRanges
+        self.taskContext = taskContext
+        self.contextRevision = contextRevision
+        self.contextReadSet = contextReadSet
+    }
+
+    /// Freshness is tracked only when the producer named the context members the decision may depend on.
+    var tracksFreshness: Bool { !contextReadSet.isEmpty }
 
     func text(in wordRange: Range<Int>) throws -> String {
         let words = transcript.split(whereSeparator: \.isWhitespace)
@@ -32,6 +54,29 @@ struct TranscriptHandoff: Sendable, Equatable {
 /// Jev selects semantic spans and operations inside the Cua task executor.
 @MainActor
 final class ContinuousIntentCoordinator {
+    struct SemanticContext: Sendable, Equatable {
+        let taskContext: JSONValue
+        let revision: Int
+        let readSet: [String]
+
+        /// `readSet` names taskContext key paths the pending decision may depend on;
+        /// only those member values decide freshness. CuaVoiceRuntime is the sole producer.
+        init(taskContext: JSONValue, revision: Int = 0, readSet: [String] = []) {
+            self.taskContext = taskContext
+            self.revision = revision
+            self.readSet = readSet
+        }
+
+        var tracksFreshness: Bool { !readSet.isEmpty }
+    }
+
+    struct SourceAcceptance: Sendable, Equatable {
+        let handoff: TranscriptHandoff
+        let wordRange: Range<Int>
+        let text: String
+        let provenance: SpeechProvenance
+    }
+
     typealias Submit = (TranscriptHandoff) async throws -> Void
     private let submit: Submit
     private var ledger = SpeechConsumption()
@@ -44,8 +89,10 @@ final class ContinuousIntentCoordinator {
     private var captureID = UUID()
     private var activeHandoffID: UUID?
     private var activeHandoff: TranscriptHandoff?
+    private var activeRefreshCount = 0
     private(set) var audio = RangedTranscript()
     var context: () -> JSONValue = { .object([:]) }
+    var semanticContext: () -> SemanticContext = { .init(taskContext: .object([:])) }
     var onChange: () -> Void = {}
     private(set) var outcome = "idle"
     private(set) var message = ""
@@ -68,6 +115,7 @@ final class ContinuousIntentCoordinator {
         transcriptReceivedAt = ProcessInfo.processInfo.systemUptime
         activeHandoffID = nil
         activeHandoff = nil
+        activeRefreshCount = 0
         error = nil
         message = ""
         outcome = "idle"
@@ -99,41 +147,53 @@ final class ContinuousIntentCoordinator {
             onChange()
             return
         }
-        pendingTask?.cancel()
-        pendingTask = nil
-        activeHandoffID = nil
-        activeHandoff = nil
-        generation = UUID()
+        cancelPendingHandoff()
         error = nil
         message = ""
         scheduleHandoff()
     }
 
-    /// Accept only the source span chosen by the executor for this current snapshot.
-    /// The ledger commits the original characters before any selected operation runs.
-    @discardableResult
-    func consume(_ handoff: TranscriptHandoff, wordRange: Range<Int>) -> Bool {
+    /// Notify that semantic state used by Jev routing changed. Progress-only updates are intentionally ignored.
+    /// A refresh happens only when a member named by the handoff's read set actually changed; an unchanged
+    /// snapshot — matching revision, or a revision bump outside the read set — never rejudges pending input.
+    func semanticStateChanged(progressOnly: Bool = false) {
+        guard !progressOnly, pendingTask != nil, let handoff = activeHandoff else { return }
+        guard relevantContextChanged(from: handoff, to: currentSemanticContext()) else { return }
+        refreshOrClarifyActiveHandoff(refreshCount: activeRefreshCount)
+    }
+
+    /// Validate the source span selected by the executor without mutating the ledger.
+    func validateSource(_ handoff: TranscriptHandoff, wordRange: Range<Int>) -> SourceAcceptance? {
         guard handoff.captureID == captureID,
               handoff.id == activeHandoffID,
               wordRange.lowerBound == ledger.consumedWordCount,
               wordRange.lowerBound == handoff.pendingWordStart,
               wordRange.upperBound > wordRange.lowerBound,
-              wordRange.upperBound <= handoff.pendingWordEnd else { return false }
+              wordRange.upperBound <= handoff.pendingWordEnd else { return nil }
 
         let sourceWords = handoff.transcript.split(whereSeparator: \.isWhitespace).map(String.init)
         let currentWords = currentText.split(whereSeparator: \.isWhitespace).map(String.init)
         guard currentWords.count >= wordRange.upperBound,
-              Array(sourceWords[wordRange]) == Array(currentWords[wordRange]) else { return false }
+              Array(sourceWords[wordRange]) == Array(currentWords[wordRange]) else { return nil }
 
-        guard hasStableCurrentPrefix(matching: handoff, throughWord: wordRange.upperBound) else { return false }
-        // Final recognition freezes words, not their meaning. A new suffix can
-        // qualify a request that ended at the old edge; let the executor rejudge
-        // that boundary before committing it. Interior boundaries remain usable.
+        guard hasStableCurrentPrefix(matching: handoff, throughWord: wordRange.upperBound) else { return nil }
         guard wordRange.upperBound < handoff.pendingWordEnd ||
-              currentWords.count == handoff.pendingWordEnd else { return false }
+              currentWords.count == handoff.pendingWordEnd else { return nil }
 
+        guard isFresh(handoff) else { return nil }
+        guard !refreshRelevantContextIfNeeded(for: handoff, ticket: generation, refreshCount: activeRefreshCount) else { return nil }
+        guard isFresh(handoff) else { return nil }
+        guard let text = try? handoff.text(in: wordRange) else { return nil }
+        return SourceAcceptance(handoff: handoff, wordRange: wordRange, text: text,
+                                provenance: handoff.provenance(for: wordRange))
+    }
+
+    /// Commit a previously validated source span and explicitly schedule the remaining speech.
+    @discardableResult
+    func commit(_ acceptance: SourceAcceptance, scheduleRemainder: Bool = true) -> Bool {
+        guard validateSource(acceptance.handoff, wordRange: acceptance.wordRange) == acceptance else { return false }
         do {
-            _ = try ledger.commit(wordCount: wordRange.count)
+            _ = try ledger.commit(wordCount: acceptance.wordRange.count)
         } catch {
             self.error = error.localizedDescription
             outcome = "failure"
@@ -142,15 +202,43 @@ final class ContinuousIntentCoordinator {
         }
         activeHandoffID = nil
         activeHandoff = nil
+        activeRefreshCount = 0
         outcome = "handoff"
         message = ""
-        scheduleHandoff()
+        if scheduleRemainder { scheduleRemaining() }
         return true
+    }
+
+    /// Resume processing remaining speech after committing with scheduleRemainder: false.
+    func resumePending() {
+        scheduleRemaining()
+    }
+
+    func scheduleRemaining() {
+        scheduleHandoff()
+    }
+
+    /// Accept only the source span chosen by the executor for this current snapshot.
+    /// The ledger commits the original characters before any selected operation runs.
+    @discardableResult
+    func consume(_ handoff: TranscriptHandoff, wordRange: Range<Int>) -> Bool {
+        guard let acceptance = validateSource(handoff, wordRange: wordRange) else { return false }
+        return commit(acceptance, scheduleRemainder: true)
     }
 
     /// Preserve an executor's wait/clarification result without consuming its source text.
     func report(_ handoff: TranscriptHandoff, outcome: String, message: String, error: String? = nil) {
         guard handoff.captureID == captureID, handoff.id == activeHandoffID else { return }
+        self.outcome = outcome
+        self.message = message
+        self.error = error
+        onChange()
+    }
+
+    /// Present an outcome after its handoff has already been committed — e.g. a
+    /// clarification whose question is now owned by dialogue state rather than
+    /// by unconsumed speech.
+    func publishOutcome(_ outcome: String, message: String, error: String? = nil) {
         self.outcome = outcome
         self.message = message
         self.error = error
@@ -172,6 +260,7 @@ final class ContinuousIntentCoordinator {
         pendingTask = nil
         activeHandoffID = nil
         activeHandoff = nil
+        activeRefreshCount = 0
         busy = false
         return task
     }
@@ -182,11 +271,21 @@ final class ContinuousIntentCoordinator {
         }
     }
 
-    private func scheduleHandoff() {
+    private func cancelPendingHandoff() {
+        generation = UUID()
+        pendingTask?.cancel()
+        pendingTask = nil
+        activeHandoffID = nil
+        activeHandoff = nil
+        busy = false
+    }
+
+    private func scheduleHandoff(refreshCount: Int = 0) {
         guard !ledger.pendingWords.isEmpty else {
             busy = false
             activeHandoffID = nil
             activeHandoff = nil
+            activeRefreshCount = 0
             onChange()
             return
         }
@@ -196,13 +295,17 @@ final class ContinuousIntentCoordinator {
         let receivedAt = transcriptReceivedAt
         let pendingStart = ledger.consumedWordCount
         let pendingEnd = snapshotText.split(whereSeparator: \.isWhitespace).count
+        let contextSnapshot = currentSemanticContext()
         let ticket = UUID()
         let handoff = TranscriptHandoff(id: UUID(), captureID: captureID, revision: snapshot.revision,
             transcript: snapshotText, pendingWordStart: pendingStart, pendingWordEnd: pendingEnd,
-            final: snapshotFinal, receivedAt: receivedAt, audioRanges: snapshot.segments, taskContext: context())
+            final: snapshotFinal, receivedAt: receivedAt, audioRanges: snapshot.segments,
+            taskContext: contextSnapshot.taskContext, contextRevision: contextSnapshot.revision,
+            contextReadSet: contextSnapshot.readSet)
         generation = ticket
         activeHandoffID = handoff.id
         activeHandoff = handoff
+        activeRefreshCount = refreshCount
         busy = true
         outcome = "candidate"
         message = "Processing transcript…"
@@ -222,19 +325,19 @@ final class ContinuousIntentCoordinator {
                     if remaining > 0 { try await Task.sleep(for: .seconds(remaining)) }
                 }
                 try Task.checkCancellation()
-                guard self.generation == ticket,
-                      self.activeHandoffID == handoff.id,
-                      self.captureID == handoff.captureID,
-                      self.ledger.consumedWordCount == handoff.pendingWordStart,
-                      self.matchesCurrentPrefix(matching: handoff, throughWord: handoff.pendingWordEnd) else {
+                guard self.isCurrent(handoff, ticket: ticket) else {
                     self.outcome = "discarded"
                     return
                 }
+                if self.refreshRelevantContextIfNeeded(for: handoff, ticket: ticket, refreshCount: refreshCount) { return }
                 try await self.submit(handoff)
                 try Task.checkCancellation()
                 guard self.generation == ticket, self.activeHandoffID == handoff.id else { return }
-                // Coalesced updates still need a decision when the old snapshot
-                // waited, requested clarification, or could not be consumed.
+                guard self.isFresh(handoff) else {
+                    _ = self.refreshRelevantContextIfNeeded(for: handoff, ticket: ticket, refreshCount: refreshCount)
+                    return
+                }
+                if self.refreshRelevantContextIfNeeded(for: handoff, ticket: ticket, refreshCount: refreshCount) { return }
                 if self.error == nil,
                    self.currentText != handoff.transcript || self.final != handoff.final || self.inputRevision != handoff.revision {
                     self.scheduleHandoff()
@@ -251,6 +354,66 @@ final class ContinuousIntentCoordinator {
             }
         }
         onChange()
+    }
+
+    private func currentSemanticContext() -> SemanticContext {
+        let semantic = semanticContext()
+        if semantic == SemanticContext(taskContext: .object([:])) {
+            return SemanticContext(taskContext: context())
+        }
+        return semantic
+    }
+
+    private func isCurrent(_ handoff: TranscriptHandoff, ticket: UUID) -> Bool {
+        generation == ticket &&
+            activeHandoffID == handoff.id &&
+            captureID == handoff.captureID &&
+            ledger.consumedWordCount == handoff.pendingWordStart &&
+            matchesCurrentPrefix(matching: handoff, throughWord: handoff.pendingWordEnd)
+    }
+
+    private func refreshRelevantContextIfNeeded(for handoff: TranscriptHandoff, ticket: UUID, refreshCount: Int) -> Bool {
+        let latest = currentSemanticContext()
+        guard relevantContextChanged(from: handoff, to: latest) else { return false }
+        guard generation == ticket, activeHandoffID == handoff.id else { return false }
+        refreshOrClarifyActiveHandoff(refreshCount: refreshCount, ticket: ticket)
+        return true
+    }
+
+    private func isFresh(_ handoff: TranscriptHandoff) -> Bool {
+        !relevantContextChanged(from: handoff, to: currentSemanticContext())
+    }
+
+    private func refreshOrClarifyActiveHandoff(refreshCount: Int, ticket: UUID? = nil) {
+        // A stale ticket must not mutate scheduler state: check it before anything else.
+        if let ticket, generation != ticket { return }
+        guard refreshCount < 2 else {
+            generation = UUID()
+            if pendingTask != nil { pendingTask?.cancel() }
+            pendingTask = nil
+            activeHandoffID = nil
+            activeHandoff = nil
+            activeRefreshCount = 0
+            busy = false
+            outcome = "clarification"
+            message = "Context changed repeatedly while reviewing speech. Please repeat the request."
+            error = nil
+            onChange()
+            return
+        }
+        generation = UUID()
+        if pendingTask != nil { pendingTask?.cancel() }
+        pendingTask = nil
+        busy = false
+        scheduleHandoff(refreshCount: refreshCount + 1)
+    }
+
+    private func relevantContextChanged(from handoff: TranscriptHandoff, to latest: SemanticContext) -> Bool {
+        guard handoff.tracksFreshness || latest.tracksFreshness else { return false }
+        for key in handoff.contextReadSet where handoff.taskContext.value(at: key) != latest.taskContext.value(at: key) {
+            return true
+        }
+        return false
     }
 
     private func canPreserve(_ handoff: TranscriptHandoff, for text: String, final: Bool) -> Bool {
@@ -296,5 +459,19 @@ final class ContinuousIntentCoordinator {
             return false
         }
         return snapshot.text == handoff.transcript && snapshot.isFinal(throughWord: count)
+    }
+}
+
+
+private extension JSONValue {
+    func value(at path: String) -> JSONValue? {
+        let parts = path.split(separator: ".").map(String.init)
+        guard !parts.isEmpty else { return self }
+        var current: JSONValue? = self
+        for part in parts {
+            guard case .object(let object)? = current else { return nil }
+            current = object[part]
+        }
+        return current
     }
 }

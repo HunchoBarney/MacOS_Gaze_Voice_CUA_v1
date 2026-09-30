@@ -16,7 +16,9 @@ final class CuaTaskAgentTests: XCTestCase {
                               task: String = "independent", app: String = "app_0", scope: String = "work",
                               visibility: String = "background", contentMode: String = "control",
                               literalStart: String = "none", literalEnd: String = "none",
-                              correctionMode: String = "retract", replacementStart: String = "none",
+                              correctionMode: String = "retract", relationship: String? = nil,
+                              pendingQuestion: String = "none",
+                              replacementStart: String = "none",
                               replacementEnd: String = "none", clarification: String = "none") throws -> [String: Answer] {
         var answers: [String: Answer] = [:]
         for key in questions.keys {
@@ -25,6 +27,8 @@ final class CuaTaskAgentTests: XCTestCase {
             case "operation": value = operation
             case "span": value = span
             case "task": value = task
+            case "relationship": value = relationship ?? (task == "independent" ? "independent" : "reference")
+            case "pendingQuestion": value = pendingQuestion
             case "app": value = app
             case "scope": value = scope
             case "visibility": value = visibility
@@ -42,9 +46,108 @@ final class CuaTaskAgentTests: XCTestCase {
         return answers
     }
 
-    func testFirstExecutorDecisionReceivesOriginalTranscriptAndTaskContextWithCuaInventory() async throws {
+    func testRelationshipSemanticsMapToDialogueContracts() {
+        let intentID = UUID()
+
+        XCTAssertEqual(CuaTaskRelationship(dialogue: .independent), .independent)
+        XCTAssertEqual(CuaTaskRelationship(dialogue: .refinement(of: intentID)), .reference)
+        XCTAssertEqual(CuaTaskRelationship(dialogue: .continuation(of: intentID)), .continuation)
+        XCTAssertEqual(CuaTaskRelationship(dialogue: .correction(of: intentID)), .revision)
+
+        // Conversational relationships recorded by `add` map exhaustively.
+        XCTAssertEqual(CuaTaskRelationship.independent.dialogueRelationship(referencedIntentID: nil), .independent)
+        XCTAssertEqual(CuaTaskRelationship.reference.dialogueRelationship(referencedIntentID: intentID), .refinement(of: intentID))
+        XCTAssertEqual(CuaTaskRelationship.continuation.dialogueRelationship(referencedIntentID: intentID), .continuation(of: intentID))
+        XCTAssertEqual(CuaTaskRelationship.revision.dialogueRelationship(referencedIntentID: intentID), .correction(of: intentID))
+        XCTAssertNil(CuaTaskRelationship.reference.dialogueRelationship(referencedIntentID: nil))
+        XCTAssertNil(CuaTaskRelationship.continuation.dialogueRelationship(referencedIntentID: nil))
+        XCTAssertNil(CuaTaskRelationship.revision.dialogueRelationship(referencedIntentID: nil))
+
+        // Answers and retries are in-place operations on an existing entry, and a
+        // prerequisite contributes only an execution-blocking edge: none of them is
+        // a Relationship, and a prerequisite must never collapse into .continuation.
+        XCTAssertNil(CuaTaskRelationship.answer.dialogueRelationship(referencedIntentID: intentID))
+        XCTAssertNil(CuaTaskRelationship.retry.dialogueRelationship(referencedIntentID: intentID))
+        XCTAssertNil(CuaTaskRelationship.prerequisite.dialogueRelationship(referencedIntentID: intentID))
+      }
+
+      func testPrerequisiteDecisionAddsIndependentIntentWithABlockingEdge() {
+        let intentID = UUID()
+        let requiredID = UUID()
+        var decision = CuaExecutorDecision(operation: .execute, consumedRange: 0..<2, request: "then add a heading",
+            replacementRequest: nil, selectedTaskID: requiredID, dependencyTaskID: requiredID,
+            appName: "Notes", bundleID: "notes", scope: "work", visibility: "background", literalText: nil)
+        decision.relationship = .prerequisite
+
+        XCTAssertTrue(decision.addsDialogueIntent)
+        XCTAssertEqual(decision.dialogueAddRelationship, .independent,
+                       "A prerequisite is conversationally independent; only its Prerequisite edge blocks execution")
+        XCTAssertNil(decision.dialogueRelationship)
+        XCTAssertEqual(decision.dialoguePrerequisite(intentID: intentID),
+                       CuaDialogueState.Prerequisite(intentID: intentID, requiresIntentID: requiredID))
+        // A non-prerequisite reference never grows an execution-blocking edge.
+        XCTAssertNil(CuaExecutorDecision(operation: .execute, consumedRange: 0..<2, request: "same app",
+            replacementRequest: nil, selectedTaskID: requiredID, dependencyTaskID: nil,
+            appName: "Notes", bundleID: "notes", scope: "work", visibility: "background", literalText: nil)
+            .dialoguePrerequisite(intentID: intentID))
+      }
+
+      func testAnswerAndRetryDecisionsOperateOnExistingEntries() {
+        let intentID = UUID()
+        var answer = CuaExecutorDecision(operation: .execute, consumedRange: 0..<3, request: "the front window",
+            replacementRequest: nil, selectedTaskID: intentID, dependencyTaskID: nil,
+            appName: "Notes", bundleID: "notes", scope: "work", visibility: "background", literalText: nil)
+        answer.relationship = .answer
+        answer.questionID = UUID()
+
+        var retry = CuaExecutorDecision(operation: .execute, consumedRange: 0..<3, request: "try that again",
+            replacementRequest: nil, selectedTaskID: intentID, dependencyTaskID: nil,
+            appName: "Notes", bundleID: "notes", scope: "work", visibility: "background", literalText: nil)
+        retry.relationship = .retry
+
+        XCTAssertFalse(answer.addsDialogueIntent)
+        XCTAssertNil(answer.dialogueRelationship)
+        XCTAssertNotNil(answer.questionID)
+        XCTAssertFalse(retry.addsDialogueIntent)
+        XCTAssertNil(retry.dialogueRelationship)
+        XCTAssertEqual(retry.selectedTaskID, intentID)
+      }
+
+      func testStructuredExecutorResultDistinguishesTargetAmbiguity() async throws {
+        let decision = CuaExecutorDecision(operation: .execute, consumedRange: 0..<1, request: "open it",
+            replacementRequest: nil, selectedTaskID: nil, dependencyTaskID: nil, appName: "Fixture",
+            bundleID: "fixture", scope: "work", visibility: "background", literalText: nil)
+        let agent = CuaTaskAgent(call: { _, _ in
+            throw DriverConnectionError.refused("The destination is ambiguous; ask which window before continuing.")
+        }, judge: { _, _ in [:] })
+
+        let result = await agent.executeStructured(decision, context: "", progress: { _ in })
+
+        XCTAssertEqual(result.decision, decision)
+        XCTAssertEqual(result.outcome, .targetAmbiguous("The destination is ambiguous; ask which window before continuing."))
+      }
+
+      func testExecutorDecisionCarriesTypedFreshTargetPreference() async throws {
+        let handoff = try transcriptHandoff("open Fixture")
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "2")
+        })
+
+        let decision = try await agent.decide(handoff: handoff)
+
+        XCTAssertEqual(decision.targetPreference, CuaTargetPreference(appName: "Fixture", bundleID: "fixture", provenance: .selectedApp))
+        XCTAssertEqual(decision.dialogueRelationship, .independent)
+      }
+
+      func testFirstExecutorDecisionReceivesOriginalTranscriptAndTaskContextWithCuaInventory() async throws {
         let activeTask: JSONValue = .object(["id": .string("task-17"), "request": .string("Open Notes"), "status": .string("Working")])
-        let handoff = try transcriptHandoff("open Fixture", taskContext: .object(["tasks": .array([activeTask])]))
+        let pendingQuestion: JSONValue = .object(["id": .string(UUID().uuidString), "question": .string("Which window should I use?"), "task": .string("Open Notes")])
+        let handoff = try transcriptHandoff("open Fixture", taskContext: .object([
+            "tasks": .array([activeTask]), "questions": .array([pendingQuestion])
+        ]))
         var decisions = 0
         var selectedState: JSONValue?
         var selectedQuestions: Set<String> = []
@@ -67,6 +170,8 @@ final class CuaTaskAgentTests: XCTestCase {
         XCTAssertNil(selectedState?["pending_speech"])
         XCTAssertTrue(selectedQuestions.contains("operation"))
         XCTAssertTrue(selectedQuestions.contains("app"))
+        XCTAssertTrue(selectedQuestions.contains("pendingQuestion"),
+                      "Pending questions are offered inside the same atomic decision")
         XCTAssertEqual(decision.operation, .execute)
         XCTAssertEqual(decision.request, "open Fixture")
         XCTAssertEqual(decision.bundleID, "fixture")
@@ -177,6 +282,7 @@ final class CuaTaskAgentTests: XCTestCase {
                 case "spanGroup": value = "10"
                 case "spanOffset": value = "47"
                 case "task": value = "independent"
+                case "relationship": value = "independent"
                 case "app": value = "app_0"
                 case "scope": value = "work"
                 case "visibility": value = "background"
@@ -219,8 +325,332 @@ final class CuaTaskAgentTests: XCTestCase {
 
         let decision = try await agent.decide(handoff: handoff)
 
-        XCTAssertEqual(decision.dependencyTaskID, taskID)
+        XCTAssertEqual(decision.selectedTaskID, taskID)
+        XCTAssertNil(decision.dependencyTaskID, "A reference is not a prerequisite")
+        XCTAssertEqual(decision.relationship, .reference)
+        XCTAssertEqual(decision.dialogueRelationship, .refinement(of: taskID))
+        XCTAssertTrue(decision.addsDialogueIntent)
+        XCTAssertNil(decision.dialoguePrerequisite(intentID: UUID()), "A reference never grows a blocking edge")
         XCTAssertEqual(decision.request, "add a heading there")
+    }
+
+    func testPrerequisiteDecisionDoesNotGateOnTaskStatusDisplayStrings() async throws {
+        let taskID = UUID()
+        // A failed related task still produces a prerequisite decision: whether it
+        // may execute is dialogue-state enforcement, not a status-string check.
+        let context: JSONValue = .object(["tasks": .array([.object([
+            "id": .string(taskID.uuidString), "request": .string("Open Notes"), "status": .string("Failed")
+        ])])])
+        let handoff = try transcriptHandoff("then add a heading", taskContext: context)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "4", task: taskID.uuidString, app: "app_0", relationship: "prerequisite")
+        })
+        let decision = try await agent.decide(handoff: handoff)
+        XCTAssertEqual(decision.operation, .execute)
+        XCTAssertEqual(decision.relationship, .prerequisite)
+        XCTAssertEqual(decision.dependencyTaskID, taskID)
+        XCTAssertNil(decision.dialogueRelationship)
+        XCTAssertEqual(decision.dialogueAddRelationship, .independent)
+        XCTAssertEqual(decision.dialoguePrerequisite(intentID: UUID())?.requiresIntentID, taskID)
+    }
+
+    func testVerifiedPrerequisiteRetainsDependency() async throws {
+        let taskID = UUID()
+        let context: JSONValue = .object(["tasks": .array([.object([
+            "id": .string(taskID.uuidString), "request": .string("Open Notes"), "status": .string("verified")
+        ])])])
+        let handoff = try transcriptHandoff("then add a heading", taskContext: context)
+        let agent = CuaTaskAgent(call: { _, _ in
+            .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "4", task: taskID.uuidString, app: "app_0", relationship: "prerequisite")
+        })
+        let decision = try await agent.decide(handoff: handoff)
+        XCTAssertEqual(decision.relationship, .prerequisite)
+        XCTAssertEqual(decision.dependencyTaskID, taskID)
+        XCTAssertEqual(decision.dialogueAddRelationship, .independent)
+    }
+
+    func testNonIndependentRelationshipWithoutReferencedTaskClarifies() async throws {
+        let handoff = try transcriptHandoff("continue that work")
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "3", task: "independent", relationship: "continuation")
+        })
+        let decision = try await agent.decide(handoff: handoff)
+        XCTAssertEqual(decision.operation, .clarify)
+        XCTAssertEqual(decision.clarification, .task)
+    }
+
+    func testIndependentRelationshipCannotCarryATaskReference() async throws {
+        let taskID = UUID()
+        let context: JSONValue = .object(["tasks": .array([.object([
+            "id": .string(taskID.uuidString), "request": .string("Open Notes"), "status": .string("Completed")
+        ])])])
+        let handoff = try transcriptHandoff("open something else", taskContext: context)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "3", task: taskID.uuidString, relationship: "independent")
+        })
+        let decision = try await agent.decide(handoff: handoff)
+        XCTAssertEqual(decision.operation, .clarify)
+        XCTAssertEqual(decision.clarification, .task)
+    }
+
+    func testAnswerDecisionBindsPendingQuestionAndNeverAddsAnIntent() async throws {
+        let taskID = UUID()
+        let questionID = UUID()
+        let context: JSONValue = .object([
+            "tasks": .array([.object([
+                "id": .string(taskID.uuidString), "request": .string("Open Notes"),
+                "status": .string("Needs confirmation")
+            ])]),
+            "questions": .array([.object([
+                "id": .string(questionID.uuidString),
+                "question": .string("Which window should I use?"),
+                "task": .string("Open Notes"), "revision": .number(3)
+            ])])
+        ])
+        let handoff = try transcriptHandoff("the front window", taskContext: context)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "3", task: taskID.uuidString, app: "app_0",
+                relationship: "answer", pendingQuestion: questionID.uuidString)
+        })
+        let decision = try await agent.decide(handoff: handoff)
+        XCTAssertEqual(decision.operation, .execute)
+        XCTAssertEqual(decision.relationship, .answer)
+        XCTAssertEqual(decision.questionID, questionID)
+        XCTAssertEqual(decision.intentRevision, 3)
+        XCTAssertEqual(decision.selectedTaskID, taskID)
+        XCTAssertFalse(decision.addsDialogueIntent, "An answer routes to dialogue.answer, never add")
+        XCTAssertNil(decision.dialogueRelationship)
+        XCTAssertNil(decision.dependencyTaskID)
+    }
+
+    func testAnswerDecisionWithoutAPendingQuestionClarifies() async throws {
+        let taskID = UUID()
+        let context: JSONValue = .object(["tasks": .array([.object([
+            "id": .string(taskID.uuidString), "request": .string("Open Notes"), "status": .string("Working")
+        ])])])
+        let handoff = try transcriptHandoff("the front window", taskContext: context)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            XCTAssertNil(questions["pendingQuestion"], "No pending questions exist to answer")
+            return try self.voiceAnswers(questions, span: "3", task: taskID.uuidString,
+                app: "app_0", relationship: "answer")
+        })
+        let decision = try await agent.decide(handoff: handoff)
+        XCTAssertEqual(decision.operation, .clarify)
+        XCTAssertEqual(decision.clarification, .task)
+        XCTAssertNil(decision.questionID)
+    }
+
+    func testRetryDecisionResumesTheExistingIntentWithoutStatusGating() async throws {
+        let taskID = UUID()
+        // An "Uncertain" display status must not decide blocking here; the dialogue
+        // state enforces retry admissibility via retryUncertain/revise.
+        let context: JSONValue = .object(["tasks": .array([.object([
+            "id": .string(taskID.uuidString), "request": .string("Open Notes"), "status": .string("Uncertain")
+        ])])])
+        let handoff = try transcriptHandoff("try that again", taskContext: context)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "3", task: taskID.uuidString, app: "app_0",
+                relationship: "retry")
+        })
+        let decision = try await agent.decide(handoff: handoff)
+        XCTAssertEqual(decision.operation, .execute)
+        XCTAssertEqual(decision.relationship, .retry)
+        XCTAssertEqual(decision.selectedTaskID, taskID)
+        XCTAssertFalse(decision.addsDialogueIntent, "A retry resumes the intent in place, never add")
+        XCTAssertNil(decision.dialogueRelationship)
+        XCTAssertNil(decision.dependencyTaskID)
+    }
+
+    /// An answer that names the missing detail rather than an app resolves the
+    /// question owner's published target from task context, so the owner resumes
+    /// in place instead of becoming a fresh clarification intent.
+    func testAnswerWithoutAnAppUsesTheQuestionOwnersPublishedTarget() async throws {
+        let taskID = UUID()
+        let questionID = UUID()
+        let context: JSONValue = .object([
+            "tasks": .array([.object([
+                "id": .string(taskID.uuidString), "request": .string("Open Notes and type"),
+                "status": .string("awaitingAnswer"), "app": .string("notes")
+            ])]),
+            "questions": .array([.object([
+                "id": .string(questionID.uuidString),
+                "question": .string("Which window should I use?"),
+                "task": .string(taskID.uuidString), "revision": .number(1)
+            ])])
+        ])
+        let handoff = try transcriptHandoff("the front window", taskContext: context)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "3", task: taskID.uuidString, app: "none",
+                relationship: "answer", pendingQuestion: questionID.uuidString)
+        })
+
+        let decision = try await agent.decide(handoff: handoff)
+
+        XCTAssertEqual(decision.operation, .execute)
+        XCTAssertEqual(decision.relationship, .answer)
+        XCTAssertEqual(decision.questionID, questionID)
+        XCTAssertEqual(decision.bundleID, "notes",
+            "The owner's stored target supplies the app the answer did not name")
+        XCTAssertEqual(decision.appName, "Notes")
+        XCTAssertFalse(decision.addsDialogueIntent)
+    }
+
+    /// When neither the answering utterance nor the owner's published target
+    /// resolves an installed app, the decision still binds the question — the
+    /// runtime resumes the owner and the executor blocks honestly, instead of
+    /// creating a fresh clarification intent that loses the answer.
+    func testAnswerWithUnresolvableAppStillBindsItsQuestion() async throws {
+        let taskID = UUID()
+        let questionID = UUID()
+        let context: JSONValue = .object([
+            "tasks": .array([.object([
+                "id": .string(taskID.uuidString), "request": .string("Open Notes and type"),
+                "status": .string("awaitingAnswer"), "app": .string("missing.app")
+            ])]),
+            "questions": .array([.object([
+                "id": .string(questionID.uuidString),
+                "question": .string("Which window should I use?"),
+                "task": .string(taskID.uuidString), "revision": .number(1)
+            ])])
+        ])
+        let handoff = try transcriptHandoff("the front window", taskContext: context)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            XCTAssertEqual(tool, "list_apps")
+            return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+        }, judge: { _, questions in
+            try self.voiceAnswers(questions, span: "3", task: taskID.uuidString, app: "none",
+                relationship: "answer", pendingQuestion: questionID.uuidString)
+        })
+
+        let decision = try await agent.decide(handoff: handoff)
+
+        XCTAssertEqual(decision.operation, .execute)
+        XCTAssertEqual(decision.relationship, .answer)
+        XCTAssertEqual(decision.questionID, questionID)
+        XCTAssertNil(decision.bundleID)
+        XCTAssertNil(decision.targetPreference,
+            "No target preference is fabricated; the runtime re-binds the stored target")
+        XCTAssertFalse(decision.addsDialogueIntent)
+    }
+
+    /// A pending-question binding with a non-answer relationship is
+    /// contradictory: it surfaces a task-identification clarification rather
+    /// than silently dropping the bound answer or misrouting an explicit answer.
+    func testPendingQuestionBoundToNonAnswerRelationshipClarifies() async throws {
+        for relationship in ["independent", "reference", "continuation", "retry", "revision", "prerequisite"] {
+            let taskID = UUID()
+            let questionID = UUID()
+            let context: JSONValue = .object([
+                "tasks": .array([.object([
+                    "id": .string(taskID.uuidString), "request": .string("Open Notes"),
+                    "status": .string("awaitingAnswer")
+                ])]),
+                "questions": .array([.object([
+                    "id": .string(questionID.uuidString),
+                    "question": .string("Which window should I use?"),
+                    "task": .string(taskID.uuidString), "revision": .number(1)
+                ])])
+            ])
+            let handoff = try transcriptHandoff("the front window", taskContext: context)
+            let agent = CuaTaskAgent(call: { tool, _ in
+                XCTAssertEqual(tool, "list_apps")
+                return .object(["apps": .array([.object(["name": .string("Notes"), "bundle_id": .string("notes")])])])
+            }, judge: { _, questions in
+                try self.voiceAnswers(questions, span: "3",
+                    task: relationship == "independent" ? "independent" : taskID.uuidString,
+                    app: "app_0", relationship: relationship, pendingQuestion: questionID.uuidString)
+            })
+
+            let decision = try await agent.decide(handoff: handoff)
+
+            XCTAssertEqual(decision.operation, .clarify,
+                "relationship=\(relationship) with a bound question must clarify")
+            XCTAssertEqual(decision.clarification, .task)
+            XCTAssertNil(decision.questionID)
+        }
+    }
+
+    func testStructuredRunResultReportsVerifiedEvidence() async throws {
+        let agent = CuaTaskAgent(call: { tool, _ in
+            switch tool {
+            case "list_apps", "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Fixture"), "bundle_id": .string("fixture"), "pid": .number(42)])])])
+            case "list_windows": return .object(["windows": .array([.object(["window_id": .number(7)])])])
+            case "get_browser_state": throw DriverConnectionError.toolRefused(tool: tool, code: "browser_route_unavailable")
+            case "get_window_state":
+                return .object(["elements": .array([.object(["role": .string("AXStaticText"), "value": .string("Done")])])])
+            default: throw DriverConnectionError.malformed
+            }
+        }, judge: { _, questions in
+            if questions["next"] != nil {
+                return ["next": .choice(choice: "done", confidence: 1, probabilities: [:])]
+            }
+            return ["app": .choice(choice: "app_0", confidence: 1, probabilities: [:]),
+                    "scope": .choice(choice: "work", confidence: 1, probabilities: [:]),
+                    "visibility": .choice(choice: "background", confidence: 1, probabilities: [:])]
+        })
+
+        let result = await agent.runStructured(goal: "Check the fixture", context: "", progress: { _ in })
+
+        guard case .verified(let evidence) = result.outcome else {
+            XCTFail("Expected a verified outcome, got \(result.outcome)")
+            return
+        }
+        XCTAssertTrue(evidence.contains("Completed in Fixture"), evidence)
+        XCTAssertNil(result.decision)
+    }
+
+    func testStructuredOutcomesClassifyExecutorFailuresWithoutThrowing() async throws {
+        let cases: [(Error, CuaTaskExecutionOutcome)] = [
+            (CuaUncertainOutcome(tool: "click", result: .object([:])),
+             .uncertain("Cua reported a partial or uncertain outcome for click. An effect may have occurred; inspect the target before retrying.")),
+            (DriverConnectionError.timedOut,
+             .uncertain("Cua timed out. A dispatched action may have completed; inspect before retrying.")),
+            (DriverConnectionError.unavailable,
+             .blocked("Install Cua Driver in Applications before connecting.")),
+            (DriverConnectionError.malformed,
+             .failed("Cua returned an invalid response. No action will be replayed.")),
+            (DriverConnectionError.toolRefused(tool: "click", code: "denied"),
+             .failed("Cua could not complete click (denied). Inspect the target before retrying.")),
+            (DriverConnectionError.refused("Which assistant task do you mean?"),
+             .clarification(.task, "Which assistant task do you mean?")),
+            (DriverConnectionError.refused("Which window should I use?"),
+             .targetAmbiguous("Which window should I use?")),
+        ]
+        for (error, expected) in cases {
+            let agent = CuaTaskAgent(call: { _, _ in throw error }, judge: { _, _ in [:] })
+            let result = await agent.runStructured(goal: "do something", context: "", progress: { _ in })
+            XCTAssertEqual(result.outcome, expected, "for \(error)")
+        }
+    }
+
+    func testStructuredResultReportsCancellationAsBlockedWithoutThrowing() async throws {
+        let agent = CuaTaskAgent(call: { _, _ in throw CancellationError() }, judge: { _, _ in [:] })
+        let result = await agent.runStructured(goal: "do something", context: "", progress: { _ in })
+        XCTAssertEqual(result.outcome, .blocked("The task was cancelled before a verified executor outcome."))
     }
 
     func testCorrectionReplacementIsSelectedWithItsTaskAndAppInOneExecutorDecision() async throws {
@@ -1896,5 +2326,78 @@ final class CuaTaskAgentTests: XCTestCase {
         XCTAssertEqual(typeCalls, 1)
         XCTAssertEqual(body, String(repeating: "a", count: 5_000) + payload)
         XCTAssertLessThan(elapsedSeconds, 1, "Exact-insertion verification must remain responsive on the main actor")
+    }
+
+    func testStructuredRunResultPreservesPartialEvidence() async throws {
+        let agent = CuaTaskAgent(call: { _, _ in
+            throw DriverConnectionError.refused("Incomplete evidence: could not confirm the click result.")
+        }, judge: { _, _ in [:] })
+
+        let result = await agent.runStructured(goal: "Click the visible button", context: "", progress: { _ in })
+
+        XCTAssertEqual(result.outcome, .partial(evidence: "Incomplete evidence: could not confirm the click result.", blockedReason: "Incomplete evidence: could not confirm the click result."))
+    }
+
+    /// A remembered window id is a preference, never execution authority. When
+    /// the pinned window is absent from the target app's fresh window list the
+    /// run refuses instead of substituting another window, and no mutation tool
+    /// is ever dispatched.
+    func testStalePinnedWindowIsRefusedWithoutSubstitution() async throws {
+        var calls: [String] = []
+        var decision = CuaExecutorDecision(operation: .execute, consumedRange: 0..<2,
+            request: "type into the window", replacementRequest: nil, selectedTaskID: nil,
+            dependencyTaskID: nil, appName: "Fixture", bundleID: "fixture",
+            scope: "work", visibility: "background", literalText: nil)
+        decision.targetPreference = CuaTargetPreference(appName: "Fixture", bundleID: "fixture",
+            windowID: 9, windowTitle: "Old window", provenance: .retained)
+        let agent = CuaTaskAgent(call: { tool, _ in
+            calls.append(tool)
+            switch tool {
+            case "get_accessibility_tree":
+                return .object(["apps": .array([.object(["name": .string("Fixture"),
+                    "bundle_id": .string("fixture"), "pid": .number(42)])])])
+            case "list_windows":
+                return .object(["windows": .array([.object(["window_id": .number(7),
+                    "title": .string("Fixture")])])])
+            default:
+                return .object([:])
+            }
+        }, judge: { _, _ in [:] })
+
+        let result = await agent.executeStructured(decision, context: "", progress: { _ in })
+
+        guard case .blocked(let message) = result.outcome else {
+            return XCTFail("A stale pinned window must refuse, not substitute: \(result.outcome)")
+        }
+        XCTAssertTrue(message.contains("pinned target window closed"), message)
+        let mutations = calls.filter { !["get_accessibility_tree", "list_windows", "get_window_state",
+            "list_apps", "check_permissions", "get_browser_state"].contains($0) }
+        XCTAssertTrue(mutations.isEmpty,
+            "A stale pinned target refuses before any mutation dispatch: \(mutations)")
+    }
+
+    /// A retained target preference bound to a different app than the decision
+    /// contradicts the contract: the run refuses before any Driver call rather
+    /// than applying the remembered target to the wrong app.
+    func testRetainedTargetBoundToAnotherAppIsRefusedBeforeDispatch() async throws {
+        var calls = 0
+        var decision = CuaExecutorDecision(operation: .execute, consumedRange: 0..<2,
+            request: "use it", replacementRequest: nil, selectedTaskID: nil, dependencyTaskID: nil,
+            appName: "Fixture", bundleID: "fixture", scope: "work",
+            visibility: "background", literalText: nil)
+        decision.targetPreference = CuaTargetPreference(appName: "Other", bundleID: "other.bundle",
+            windowID: 7, provenance: .retained)
+        let agent = CuaTaskAgent(call: { _, _ in
+            calls += 1
+            return .object([:])
+        }, judge: { _, _ in [:] })
+
+        let result = await agent.executeStructured(decision, context: "", progress: { _ in })
+
+        guard case .blocked(let message) = result.outcome else {
+            return XCTFail("A mismatched retained target must refuse: \(result.outcome)")
+        }
+        XCTAssertTrue(message.contains("no longer matches"), message)
+        XCTAssertEqual(calls, 0, "The wrong-app target is rejected before any Driver call")
     }
 }

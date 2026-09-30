@@ -15,6 +15,9 @@ final class VoiceController: ObservableObject {
     enum Status: Equatable {
         case idle, starting, listening, finishing, awaitingRelease, reviewTranscript
         case thinking, awaitingConfirm, executing, stopping, testingMicrophone, done
+        /// A pending clarification: an ordinary dialogue state carrying the
+        /// question prompt, never an Open-settings style error.
+        case awaitingAnswer(String)
         case error(String)
     }
     enum CaptureState { case idle, starting, listening, finishing, awaitingRelease, testingMicrophone, stopping }
@@ -75,6 +78,180 @@ final class VoiceController: ObservableObject {
     func cancelTask(_ id: UUID) { cua.cancel(id) }
     func approveTask(_ id: UUID, approved: Bool) { cua.resolveApproval(id, approved: approved) }
     var pendingTaskApproval: CuaVoiceRuntime.Work? { cuaTasks.first(where: { $0.approval != nil }) }
+
+    /// A pending clarification as a display row: the question plus the request
+    /// it is about. Viewing it is informational and grants no control over the
+    /// owning intent.
+    struct PendingQuestionItem: Identifiable, Equatable {
+        let id: UUID
+        let prompt: String
+        let owner: String
+    }
+
+    /// Intents this hold's capture created or resumed — the current
+    /// interaction. Identity comes from provenance capture ids, never from
+    /// task-list recency or the diagnostic selection.
+    private var sessionIntentIDs: Set<UUID> {
+        guard let sessionID else { return [] }
+        var ids = Set<UUID>()
+        for entry in cua.dialogue.entries {
+            if entry.intent.source.captureID == sessionID ||
+               entry.answers.contains(where: { $0.source.captureID == sessionID }) {
+                ids.insert(entry.intent.id)
+            }
+        }
+        for work in cua.tasks where work.provenance?.captureID == sessionID {
+            ids.insert(work.intentID)
+        }
+        return ids
+    }
+
+    /// Attempts belonging to the current interaction, in creation order.
+    private var interactionWorks: [CuaVoiceRuntime.Work] {
+        let intents = sessionIntentIDs
+        return cua.tasks.filter { intents.contains($0.intentID) }
+    }
+
+    /// A pending clarification owned by the current interaction. It is normal
+    /// dialogue state — question text plus its owning intent — not an error.
+    private var interactionQuestion: CuaDialogueState.Question? {
+        let intents = sessionIntentIDs
+        return cua.dialogue.entries.last(where: { entry in
+            guard intents.contains(entry.intent.id),
+                  case .awaitingAnswer(let id) = entry.status,
+                  let question = entry.question,
+                  question.id == id, question.revision == entry.revision
+            else { return false }
+            return true
+        })?.question
+    }
+
+    /// The interaction's own conversational text: its pending question, a
+    /// speech outcome worth surfacing, or its latest attempt's progress —
+    /// never the diagnostically selected task's message.
+    private var interactionMessage: String {
+        if let question = interactionQuestion { return question.prompt }
+        if !cua.speech.message.isEmpty,
+           ["incomplete", "clarification", "dictationWaitingForFinal"].contains(cua.speech.outcome) {
+            return cua.speech.message
+        }
+        if let work = interactionWorks.last, !work.message.isEmpty { return work.message }
+        return cua.speech.message
+    }
+
+    /// Only this session's own latest attempt can surface a failure on the
+    /// interaction's status line; unrelated tasks report on their own rows.
+    private var interactionFailure: String? {
+        guard let outcome = interactionWorks.last?.outcome else { return nil }
+        switch outcome {
+        case .failed(let reason), .blocked(let reason): return reason
+        default: return nil
+        }
+    }
+
+    /// Escape/current-interaction cancel stops only this session's active or
+    /// queued attempts — never the diagnostically selected task and never
+    /// unrelated background work. A work-less pending question intentionally
+    /// survives so the next hold can answer it; Stop All withdraws it.
+    private func cancelInteractionWork() {
+        let intents = sessionIntentIDs
+        for work in cua.tasks where work.active && intents.contains(work.intentID) {
+            cua.cancel(work.id)
+        }
+    }
+
+    /// Pending clarification questions across the dialogue, for surfaces that
+    /// show dialogue state without granting control authority.
+    var pendingQuestions: [PendingQuestionItem] {
+        cua.dialogue.entries.compactMap { entry in
+            guard case .awaitingAnswer(let id) = entry.status,
+                  let question = entry.question,
+                  question.id == id, question.revision == entry.revision
+            else { return nil }
+            return PendingQuestionItem(id: question.id, prompt: question.prompt,
+                                       owner: entry.intent.utterance)
+        }
+    }
+
+    /// A task may offer explicit retry only while its intent rests in a
+    /// retryable state; the runtime's in-place retry policy still owns the
+    /// real decision and refuses executing or cancelled intents itself.
+    func canRetryTask(_ id: UUID) -> Bool {
+        guard let work = cuaTasks.first(where: { $0.id == id }), !work.active,
+              let status = cua.dialogue.entry(for: work.intentID)?.status else { return false }
+        switch status {
+        case .blocked, .failed, .uncertain, .partial: return true
+        case .pending, .awaitingAnswer, .executing, .cancelled, .succeeded: return false
+        }
+    }
+
+    /// An explicit retry goes through the normal utterance/decision path — the
+    /// same route a spoken "try that again" takes — naming the task's request
+    /// so Jev binds the retry relationship and the dialogue resumes the intent
+    /// in place. It never replays a tool call or re-runs a worker directly.
+    /// Requires an idle pipeline: it must not rewrite a live capture's ledger.
+    func retryTask(_ id: UUID) {
+        guard canRetryTask(id), !captureActive, !cua.speech.busy,
+              cua.speech.remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let work = cuaTasks.first(where: { $0.id == id }) else { return }
+        cua.begin(app: commandFrontmostApp ?? lastExternalApp, captureID: sessionID ?? UUID())
+        cua.update("Try the earlier task again: \(work.request)", final: true)
+    }
+
+    /// Short stable identity for surfaces that show intent/attempt ids.
+    func shortID(_ id: UUID) -> String { String(id.uuidString.prefix(8)) }
+
+    /// In-memory, content-minimized diagnostics for one attempt: identities,
+    /// relation/prerequisite reason, target resolution, context (intent)
+    /// revision and effect certainty. Never dumps a literal payload.
+    func taskDiagnostics(_ task: CuaVoiceRuntime.Work) -> [String] {
+        var lines = ["intent \(shortID(task.intentID)) · attempt \(shortID(task.attemptID))"]
+        let entry = cua.dialogue.entry(for: task.intentID)
+        var relation: [String] = []
+        switch entry?.relationship {
+        case .refinement(let id): relation.append("refines \(relatedLabel(id))")
+        case .continuation(let id): relation.append("continues \(relatedLabel(id))")
+        case .correction(let id): relation.append("corrects \(relatedLabel(id))")
+        case .independent, nil: break
+        }
+        if let prerequisite = entry?.prerequisite {
+            let fact = prerequisite.requiredFact == .targetObserved ? "verified target" : "verified result"
+            relation.append("requires \(fact) from \(relatedLabel(prerequisite.requiresIntentID))")
+        }
+        if !relation.isEmpty { lines.append(relation.joined(separator: " · ")) }
+        let app = task.bundle ?? entry?.intent.target?.application
+        let window = entry?.intent.target?.window
+        if app != nil || window != nil || task.window != nil {
+            var target = "target: \(app ?? "unresolved")"
+            if let window { target += " · window \(window.title ?? window.windowID)" }
+            else if let taskWindow = task.window { target += " · window \(taskWindow)" }
+            lines.append(target)
+        }
+        if let revision = entry?.revision {
+            lines.append("context revision \(revision) · attempt bound at revision \(task.intentRevision)")
+        }
+        switch task.outcome {
+        case nil: lines.append(task.dispatchedEffect ? "effects dispatched · outcome pending" : "no effects dispatched")
+        case .verified, .verifiedFact: lines.append("effects dispatched · verified")
+        case .partial: lines.append("effects dispatched · partially verified")
+        case .uncertain: lines.append("effects dispatched · outcome uncertain")
+        case .failed, .blocked, .cancelled: lines.append("effects dispatched · outcome unverified")
+        }
+        if task.contentMode != .control {
+            if let literal = task.literalText {
+                lines.append(task.contentMode == .dictate
+                    ? "dictated text (\(literal.count) chars)"
+                    : "insert text (\(literal.count) chars)")
+            } else {
+                lines.append(task.contentMode == .dictate ? "dictation payload pending" : "text payload pending")
+            }
+        }
+        return lines
+    }
+
+    private func relatedLabel(_ intentID: UUID) -> String {
+        cua.tasks.last { $0.intentID == intentID }?.label ?? "intent \(shortID(intentID))"
+    }
     private let speech: SpeechCapturing
     private let authorize: () async -> Bool
     private let timings: VoiceTimings
@@ -101,7 +278,10 @@ final class VoiceController: ObservableObject {
         if !held, !cua.speech.busy, cleanupTask == nil, startupTask == nil,
            [.executing, .thinking].contains(status) { return true }
         if isMicrophoneTest && status != .stopping { return true }
-        switch status { case .idle, .done, .error: return cleanupTask == nil; default: return false }
+        switch status {
+        case .idle, .done, .error, .awaitingAnswer: return cleanupTask == nil
+        default: return false
+        }
     }
     var operationActive: Bool {
         if cua.active { return true }
@@ -272,7 +452,7 @@ final class VoiceController: ObservableObject {
 
     private func cancel(endingWith terminalStatus: Status, cancelTask: Bool = true) {
         cua.cancelCapture()
-        if cancelTask { cua.cancelSelected() }
+        if cancelTask { cancelInteractionWork() }
         guard status != .stopping else { return }
         held = false
         trace("capture_cancelled")
@@ -447,12 +627,59 @@ final class VoiceController: ObservableObject {
             status = held ? .awaitingRelease : .error(error)
             return
         }
-        detail = held && !cua.speech.message.isEmpty ? cua.speech.message : cua.message
-        guard !held, [.thinking, .executing].contains(status) else { return }
-        if cua.active { status = .executing }
-        else if cua.speech.outcome == "clarification" { status = .error(cua.message) }
-        else if let last = cuaTasks.last, last.status == "Failed" { status = .error(last.message) }
-        else if let id = sessionID { complete(cua.message.isEmpty ? "No action taken" : cua.message, session: id) }
+        if held {
+            // Capture owns the status while held; the detail line keeps this
+            // interaction's progress — or an independent task's — visible
+            // without letting any of it own the interaction's state.
+            if !cua.speech.message.isEmpty {
+                detail = cua.speech.message
+            } else if let work = interactionWorks.last(where: \.active) ?? interactionWorks.last {
+                detail = work.message
+            } else if let question = interactionQuestion {
+                detail = question.prompt
+            } else {
+                detail = cua.tasks.last(where: \.active)?.message ?? ""
+            }
+            return
+        }
+        // Only the interaction-driven presentation states are re-projected here.
+        // Capture-owned and rest states keep whatever they already present.
+        switch status {
+        case .thinking, .executing, .awaitingAnswer: break
+        default: return
+        }
+        // Only this session's dialogue decides the interaction's presentation.
+        // A pending clarification is a normal question state, not a failure.
+        if let question = interactionQuestion {
+            detail = question.prompt
+            status = .awaitingAnswer(question.prompt)
+            return
+        }
+        if cua.speech.outcome == "clarification", !cua.speech.message.isEmpty {
+            // A clarification that could not be recorded as an intent still
+            // presents as a question, never through the error path.
+            detail = cua.speech.message
+            status = .awaitingAnswer(cua.speech.message)
+            return
+        }
+        if interactionWorks.contains(where: \.active) || cua.speech.busy {
+            detail = interactionMessage
+            status = .executing
+            return
+        }
+        if let failure = interactionFailure {
+            detail = failure
+            status = .error(failure)
+            return
+        }
+        if case .awaitingAnswer = status, interactionWorks.isEmpty {
+            // The question was withdrawn without an answer; the interaction ends.
+            status = .idle
+            return
+        }
+        if let id = sessionID {
+            complete(interactionMessage.isEmpty ? "No action taken" : interactionMessage, session: id)
+        }
     }
 
     private func fail(_ message: String) {

@@ -566,4 +566,247 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         try? FileManager.default.removeItem(at: bundle)
         try? FileManager.default.removeItem(at: source)
     }
+
+    /// Opt-in clarification workflow on a disposable two-window fixture: an
+    /// ambiguous dictate request must surface a pending question rather than
+    /// substitute a window; the answering utterance then resumes the same
+    /// intent in place, and the literal may land only in the answered window.
+    func testClarificationAnswerResumeBindsOwnerOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_RUNTIME_DIALOGUE_TEST"] == "1" else {
+            throw XCTSkip("Opt-in clarification/answer resume in a disposable two-window fixture")
+        }
+        let key = try CuaLiveCredential.jev()
+        let connection = try CuaLiveDriver.connection()
+        try await connection.connect()
+        let session = "Jarvis dialogue \(UUID().uuidString.prefix(8))"
+        _ = try await connection.call("start_session", arguments: ["session": .string(session)])
+
+        let identifier = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let displayName = "Jarvis Dialogue \(identifier.prefix(6))"
+        let bundleID = "com.jarvis.dialogue.\(identifier)"
+        let titleA = "Dialogue first \(identifier.prefix(6))"
+        let titleB = "Dialogue second \(identifier.prefix(6))"
+        let seedA = "Seed A must stay intact."
+        let seedB = "Seed B baseline."
+        let inserted = "dialogue marker \(identifier.prefix(4))"
+        let priorPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+
+        let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("JarvisDialogue-\(identifier).app", isDirectory: true)
+        let executable = bundle.appendingPathComponent("Contents/MacOS/JarvisDialogueFixture")
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent("JarvisDialogue-\(identifier).swift")
+        var fixturePID: pid_t?
+        var runtime: CuaVoiceRuntime?
+
+        func restoreAndClean() async {
+            await runtime?.shutdown()
+            _ = try? await connection.call("end_session", arguments: ["session": .string(session)])
+            await connection.close()
+            if let fixturePID, let app = NSRunningApplication(processIdentifier: fixturePID) {
+                app.terminate()
+                for _ in 0..<50 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(100)) }
+            }
+            try? FileManager.default.removeItem(at: bundle)
+            try? FileManager.default.removeItem(at: source)
+            if let priorPID, let prior = NSRunningApplication(processIdentifier: priorPID) {
+                _ = prior.activate(options: [])
+                for _ in 0..<30 where NSWorkspace.shared.frontmostApplication?.processIdentifier != priorPID {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            let info: [String: Any] = [
+                "CFBundleExecutable": "JarvisDialogueFixture",
+                "CFBundleIdentifier": bundleID,
+                "CFBundleName": displayName,
+                "CFBundleDisplayName": displayName,
+                "CFBundlePackageType": "APPL",
+                "NSPrincipalClass": "NSApplication"
+            ]
+            let plist = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            try plist.write(to: bundle.appendingPathComponent("Contents/Info.plist"))
+            let appSource = #"""
+            import AppKit
+
+            final class FixtureDelegate: NSObject, NSApplicationDelegate {
+                var windows: [NSWindow] = []
+                func applicationDidFinishLaunching(_ notification: Notification) {
+                    for index in 0..<2 {
+                        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 560, height: 320))
+                        scroll.hasVerticalScroller = true
+                        scroll.autoresizingMask = [.width, .height]
+                        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 560, height: 320))
+                        text.string = CommandLine.arguments[3 + index]
+                        text.isEditable = true
+                        text.isSelectable = true
+                        scroll.documentView = text
+                        let window = NSWindow(contentRect: NSRect(x: 120 + index * 160, y: 120 + index * 40,
+                                                                  width: 560, height: 320),
+                                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                        window.title = CommandLine.arguments[1 + index]
+                        window.contentView = scroll
+                        window.makeKeyAndOrderFront(nil)
+                        windows.append(window)
+                    }
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
+
+            let app = NSApplication.shared
+            app.setActivationPolicy(.regular)
+            let delegate = FixtureDelegate()
+            app.delegate = delegate
+            app.run()
+            """#
+            try appSource.write(to: source, atomically: true, encoding: .utf8)
+
+            let compiler = Process()
+            compiler.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+            compiler.arguments = ["swiftc", source.path, "-framework", "AppKit", "-o", executable.path]
+            let compilerError = Pipe()
+            compiler.standardError = compilerError
+            try compiler.run()
+            compiler.waitUntilExit()
+            guard compiler.terminationStatus == 0 else {
+                let detail = String(data: compilerError.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                throw DriverConnectionError.refused("The disposable dialogue fixture did not build: \(detail.prefix(500))")
+            }
+
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = [titleA, titleB, seedA, seedB]
+            try process.run()
+            fixturePID = process.processIdentifier
+
+            var windowIDs: [String: Int] = [:]
+            for _ in 0..<100 where windowIDs.count < 2 {
+                let windows = try await connection.call("list_windows", arguments: [
+                    "pid": .number(Double(process.processIdentifier)), "session": .string(session)])
+                for window in windows["windows"]?.array ?? [] {
+                    guard let title = window["title"]?.string, let id = window["window_id"]?.integer else { continue }
+                    windowIDs[title] = id
+                }
+                if windowIDs[titleA] != nil && windowIDs[titleB] != nil { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            guard windowIDs.count == 2 else {
+                throw DriverConnectionError.refused("Cua did not observe both disposable dialogue windows.")
+            }
+            if let priorPID, let prior = NSRunningApplication(processIdentifier: priorPID) {
+                _ = prior.activate(options: [])
+                for _ in 0..<30 where NSWorkspace.shared.frontmostApplication?.processIdentifier != priorPID {
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            }
+
+            let model = JevClient(apiKey: key)
+            var modelCalls = 0
+            let toolCalls = ToolCalls()
+            let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeDialogue-\(identifier)")!,
+                                keyStore: FixtureKeyStore(key: key), environment: [:])
+            let taskRuntime = CuaVoiceRuntime(config: config,
+                makeConnection: { CuaConnection(onToolCall: { tool, length in toolCalls.record(tool, textLength: length) }) },
+                judge: { state, questions in
+                    modelCalls += 1
+                    let response = try await model.systemOne(state: state, questions: questions).response.answers
+                    for (key, answer) in response {
+                        guard case let .choice(choice, _, _) = answer,
+                              case let .choice(_, criteria)? = questions[key] else { continue }
+                        print("Dialogue Jev \(key):", criteria[choice].flatMap { $0 } ?? choice)
+                    }
+                    return response
+                })
+            runtime = taskRuntime
+
+            taskRuntime.begin(app: displayName)
+            taskRuntime.update("Dictate exactly \"\(inserted)\" into a text area in \(displayName). Preserve all existing text.", final: true)
+            let firstDeadline = Date().addingTimeInterval(120)
+            while Date() < firstDeadline {
+                if let first = taskRuntime.tasks.first, !first.active { break }
+                if taskRuntime.dialogue.entries.contains(where: {
+                    if case .awaitingAnswer = $0.status { return true }
+                    return false
+                }) { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            let ambiguous = try XCTUnwrap(taskRuntime.tasks.first)
+            XCTAssertFalse(ambiguous.active, "The ambiguous request must settle: \(ambiguous.message)")
+            let awaiting = taskRuntime.dialogue.entries.contains(where: {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            })
+            XCTAssertTrue(awaiting || ambiguous.status == "Completed",
+                "Ambiguity must either ask or pick verifiably — never claim otherwise: \(ambiguous.message)")
+            XCTAssertEqual(toolCalls.snapshot().tools["type_text"] ?? 0,
+                           awaiting ? 0 : 1,
+                           "No literal may dispatch while the window is unresolved")
+
+            if awaiting {
+                // The answering utterance resumes the question's owner in place:
+                // same intent id, exactly one follow-up work record, and the
+                // literal may be dispatched at most once in a single window.
+                taskRuntime.update("Use the window titled \"\(titleB)\".", final: true)
+                let resumeDeadline = Date().addingTimeInterval(120)
+                while Date() < resumeDeadline {
+                    let works = taskRuntime.tasks
+                    if works.count >= 2, works.last?.active == false { break }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+                let resumed = try XCTUnwrap(taskRuntime.tasks.last)
+                XCTAssertEqual(taskRuntime.tasks.count, 2, "An answer never adds a second intent's work")
+                XCTAssertEqual(resumed.intentID, ambiguous.intentID,
+                    "The answering utterance resumes the pending question's owner in place")
+                XCTAssertFalse(resumed.active, "The resumed attempt must settle: \(resumed.message)")
+            }
+
+            guard let windowA = windowIDs[titleA], let windowB = windowIDs[titleB] else {
+                throw DriverConnectionError.refused("Both fixture window ids must be known.")
+            }
+            let stateA = try await connection.call("get_window_state", arguments: [
+                "pid": .number(Double(process.processIdentifier)), "window_id": .number(Double(windowA)),
+                "include_screenshot": .bool(false), "session": .string(session)])
+            let stateB = try await connection.call("get_window_state", arguments: [
+                "pid": .number(Double(process.processIdentifier)), "window_id": .number(Double(windowB)),
+                "include_screenshot": .bool(false), "session": .string(session)])
+            let bodyA = (stateA["elements"]?.array ?? []).first { $0["role"] == .string("AXTextArea") }?["value"]?.string
+            let bodyB = (stateB["elements"]?.array ?? []).first { $0["role"] == .string("AXTextArea") }?["value"]?.string
+            let dispatches = toolCalls.snapshot().tools["type_text"] ?? 0
+            let inA = bodyA?.contains(inserted) ?? false
+            let inB = bodyB?.contains(inserted) ?? false
+            if awaiting {
+                // The answer named the destination window; the resumed attempt
+                // must bind that answer — a dispatch into A or no dispatch at all
+                // means the reply never reached the re-asked question.
+                XCTAssertEqual(dispatches, 1,
+                    "The answer resolved the only ambiguity; the literal must dispatch exactly once")
+                XCTAssertTrue(inB, "The answer named \"\(titleB)\"; the literal must land in that window")
+                XCTAssertFalse(inA, "The unanswered window must stay untouched")
+                XCTAssertEqual(bodyB, seedB + inserted,
+                    "Removing the literal restores the answered window's seed exactly")
+                XCTAssertEqual(bodyA, seedA, "The unanswered window keeps its seed untouched")
+            } else {
+                XCTAssertLessThanOrEqual(dispatches, 1, "The literal is dispatched at most once")
+                if dispatches == 0 {
+                    XCTAssertFalse(inA || inB, "Without a dispatch no window may carry the literal")
+                    XCTAssertEqual(bodyA, seedA)
+                    XCTAssertEqual(bodyB, seedB)
+                } else {
+                    XCTAssertNotEqual(inA, inB,
+                        "Any dispatched literal lands in exactly one observed window — never substituted or duplicated")
+                    XCTAssertEqual(inA ? bodyA : bodyB, (inA ? seedA : seedB) + inserted,
+                        "Removing the one literal restores that window's seed exactly")
+                    XCTAssertEqual(inA ? bodyB : bodyA, inA ? seedB : seedA,
+                        "The unselected window keeps its seed untouched")
+                }
+            }
+            print("Dialogue fixture: ambiguous \(ambiguous.status): \(ambiguous.message); resumed \(taskRuntime.tasks.last?.status ?? "none"): \(taskRuntime.tasks.last?.message ?? ""); Jev requests \(modelCalls); type_text dispatches \(dispatches).")
+        } catch {
+            await restoreAndClean()
+            throw error
+        }
+        await restoreAndClean()
+    }
 }

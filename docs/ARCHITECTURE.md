@@ -35,6 +35,27 @@ observations inside that execution workflow. `CuaWorkQueue` owns app leases and
 supported tools ground desktop targets and effects. The optional text provider
 generates requested prose/advisory reasoning.
 
+Conversational structure lives in `CuaDialogueState`, the single in-memory
+authority the runtime consults and mutates: an `Intent` carries stable identity
+across retries, corrections, clarification answers and new captures, while each
+execution becomes an `Attempt` bound to that intent at a specific revision.
+Decisions route into three shapes — add a new intent, resume an existing one
+(answer binds the pending question and reopens the owner; retry starts a fresh
+attempt on the same entry), or record a blocked refusal. Clarification questions
+are revision-bound to their owner intent; verified facts carry
+intent/attempt/revision provenance so prerequisites discharge only on observed
+effects from the producing attempt. A resume reconstructs the original request,
+scope, visibility and literal payload from the intent's stored contract, supplies
+any answered text as `previous_context` to re-asked execution questions, and
+rebinds targets from fresh observation rather than inheriting window IDs.
+`VoiceController` projects presentation per capture session — active work,
+pending questions and outcomes are scoped to the current hold, so a settled
+failure cannot contaminate a new capture; Escape cancels only current-interaction
+work while Stop All withdraws everything including question-only intents.
+Dialogue state is bounded (unresolved cap, resolved-history trim that preserves
+referenced intents transitively) and lives only in memory; nothing persists
+across an app restart.
+
 This describes wiring, not acceptance of every behavior. See
 [the migration gates](voice-ui/PLAN.md) for remaining work.
 

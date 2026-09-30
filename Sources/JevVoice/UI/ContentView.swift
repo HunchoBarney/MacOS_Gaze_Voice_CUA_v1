@@ -11,6 +11,7 @@ struct OverlayView: View {
     private var showText: Bool { !controller.transcript.isEmpty && controller.status != .done }
     private var message: String {
         if case .error(let text) = controller.status { return text }
+        if case .awaitingAnswer(let prompt) = controller.status { return prompt }
         if controller.status == .done { return controller.resultMessage }
         return controller.detail
     }
@@ -101,7 +102,7 @@ struct OverlayView: View {
 struct CuaTasksView: View {
     @ObservedObject var controller: VoiceController
     var body: some View {
-        if !controller.cuaTasks.isEmpty {
+        if !controller.cuaTasks.isEmpty || !controller.pendingQuestions.isEmpty {
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack { Text("Cua tasks").font(.headline); Spacer(); Button("Stop All", action: controller.stopAll) }
@@ -113,9 +114,23 @@ struct CuaTasksView: View {
                                 Spacer()
                                 if task.approval != nil { Button("Confirm operation") { controller.approveTask(task.id, approved: true) } }
                                 if task.active { Button("Stop") { controller.cancelTask(task.id) } }
+                                if controller.canRetryTask(task.id) {
+                                    Button("Retry") { controller.retryTask(task.id) }
+                                        .help("Ask to run this request again; Jev re-checks the current state first")
+                                }
                             }
                             Text(task.request).font(.callout)
                             Text(task.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            ForEach(controller.taskDiagnostics(task), id: \.self) {
+                                Text($0).font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    ForEach(controller.pendingQuestions) { question in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(question.prompt, systemImage: "questionmark.bubble").font(.callout)
+                            Text("awaiting answer · for: \(question.owner)")
+                                .font(.caption2).foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -154,6 +169,8 @@ struct ActivityView: View {
                         }
                     } else if controller.status == .executing || controller.status == .thinking {
                         Button("Stop", action: controller.cancel)
+                    } else if case .awaitingAnswer = controller.status {
+                        Button("Dismiss", action: controller.cancel)
                     }
                     if controller.status == .done { Text(controller.resultMessage).foregroundStyle(.secondary) }
                     if controller.status == .idle && controller.transcript.isEmpty {
@@ -170,6 +187,7 @@ struct ActivityView: View {
                     }
                     if let task = controller.diagnosticTask {
                         Text("Selected task: \(task.label)").fontWeight(.medium)
+                        ForEach(controller.taskDiagnostics(task), id: \.self) { Text($0) }
                         Text("Task elapsed: \(Int(task.elapsedMs)) ms")
                         ForEach(task.timings.keys.sorted(), id: \.self) { key in
                             Text("\(key): \(Int(task.timings[key] ?? 0)) ms")

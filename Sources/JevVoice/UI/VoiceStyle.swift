@@ -48,6 +48,7 @@ extension VoiceController.Status {
         case .awaitingRelease: return "Release Fn to review"
         case .reviewTranscript: return "Review what I heard"
         case .awaitingConfirm: return "Ready to run"
+        case .awaitingAnswer: return "Waiting for your answer"
         case .executing: return "Working…"
         case .stopping: return "Stopping…"
         case .testingMicrophone: return "Testing microphone"
@@ -61,6 +62,7 @@ extension VoiceController.Status {
         case .done: return "checkmark.circle.fill"
         case .error: return "exclamationmark.circle.fill"
         case .reviewTranscript, .awaitingRelease: return "text.bubble"
+        case .awaitingAnswer: return "questionmark.bubble"
         case .awaitingConfirm: return "play.circle"
         default: return "waveform"
         }

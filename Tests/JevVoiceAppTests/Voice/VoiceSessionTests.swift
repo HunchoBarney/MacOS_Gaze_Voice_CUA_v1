@@ -73,6 +73,8 @@ for line in sys.stdin:
                     case "operation": value = "ignore"
                     case "span": value = String(state["pending_word_range"]?["end"]?.integer ?? 0)
                     case "task": value = "independent"
+                    case "relationship": value = "independent"
+                    case "pendingQuestion": value = "none"
                     case "app": value = "none"
                     case "scope": value = "work"
                     case "visibility": value = "background"

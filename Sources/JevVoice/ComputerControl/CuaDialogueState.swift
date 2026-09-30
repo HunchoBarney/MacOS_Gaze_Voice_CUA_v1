@@ -1,0 +1,513 @@
+import Foundation
+
+/// Synchronous, in-memory coordination owned by CuaVoiceRuntime. Nothing in this file
+/// executes computer actions, records audio, or grants an assertion of success.
+struct CuaDialogueState {
+    /// Derivable provenance only: transcriptRanges are word offsets into the owning
+    /// TranscriptHandoff's transcript, the same unit as CuaExecutorDecision.consumedRange.
+    struct Source: Equatable {
+        let captureID: UUID
+        let handoffID: UUID
+        let revision: Int
+        let transcriptRanges: [Range<Int>]
+
+        init(captureID: UUID, handoffID: UUID, revision: Int, transcriptRanges: [Range<Int>]) {
+            self.captureID = captureID
+            self.handoffID = handoffID
+            self.revision = revision
+            self.transcriptRanges = transcriptRanges
+        }
+    }
+
+    struct Intent: Equatable {
+        let id: UUID
+        let source: Source
+        let utterance: String
+        let instruction: String
+        let target: Target?
+        let revision: Int
+
+        init(id: UUID = UUID(), source: Source, utterance: String,
+             instruction: String, target: Target? = nil, revision: Int = 0) {
+            self.id = id
+            self.source = source
+            self.utterance = utterance
+            self.instruction = instruction
+            self.target = target
+            self.revision = revision
+        }
+    }
+
+    /// An attempt is not an intent: retries retain the same intent and have new IDs.
+    struct Attempt: Equatable {
+        let id: UUID
+        let intentID: UUID
+        let instruction: String
+        let target: Target?
+        let revision: Int
+
+        init(id: UUID = UUID(), intentID: UUID, instruction: String, target: Target? = nil,
+             revision: Int = 0) {
+            self.id = id
+            self.intentID = intentID
+            self.instruction = instruction
+            self.target = target
+            self.revision = revision
+        }
+    }
+
+    /// Describes a new intent only. Answers and retries resume the referenced entry in
+    /// place via answer(), retryUncertain() and revise(); they are never relationships.
+    enum Relationship: Equatable {
+        case independent
+        case refinement(of: UUID)
+        case continuation(of: UUID)
+        case correction(of: UUID)
+    }
+
+    /// Relationships describe conversational meaning; only this edge blocks execution.
+    struct Prerequisite: Equatable {
+        let intentID: UUID
+        let requiresIntentID: UUID
+        let requiredFact: FactKind
+
+        init(intentID: UUID, requiresIntentID: UUID, requiredFact: FactKind = .resultObserved) {
+            self.intentID = intentID
+            self.requiresIntentID = requiresIntentID
+            self.requiredFact = requiredFact
+        }
+    }
+
+    enum FactKind: Equatable {
+        case targetObserved
+        case resultObserved
+    }
+
+    /// Only an explicitly verified readback bound to the producing attempt may discharge a fact dependency.
+    struct VerifiedFact: Equatable {
+        let kind: FactKind
+        let intentID: UUID?
+        let attemptID: UUID?
+        let revision: Int?
+        let target: Target?
+        let evidence: String
+
+        init(kind: FactKind, intentID: UUID, attemptID: UUID, revision: Int,
+             target: Target? = nil, evidence: String) {
+            self.kind = kind
+            self.intentID = intentID
+            self.attemptID = attemptID
+            self.revision = revision
+            self.target = target
+            self.evidence = evidence
+        }
+
+        /// Source-compatible construction for older adapters; intentionally cannot satisfy prerequisites.
+        init(kind: FactKind, evidence: String) {
+            self.kind = kind
+            self.intentID = nil
+            self.attemptID = nil
+            self.revision = nil
+            self.target = nil
+            self.evidence = evidence
+        }
+    }
+
+    struct Target: Equatable {
+        struct BundleIdentity: Equatable {
+            let bundleID: String
+            let displayName: String?
+        }
+        struct ProcessIdentity: Equatable {
+            let processIdentifier: Int32
+            let bundleID: String?
+        }
+        struct WindowIdentity: Equatable {
+            let windowID: String
+            let title: String?
+        }
+        enum Provenance: Equatable {
+            case source(Source)
+            case observed(attemptID: UUID)
+            case retained(intentID: UUID, revision: Int)
+            case legacyUnbound
+        }
+
+        let bundle: BundleIdentity?
+        let process: ProcessIdentity?
+        let window: WindowIdentity?
+        let elementID: String?
+        let description: String
+        let provenance: Provenance
+
+        var application: String? { bundle?.displayName ?? bundle?.bundleID }
+        var windowID: String? { window?.windowID }
+
+        init(bundle: BundleIdentity? = nil, process: ProcessIdentity? = nil,
+             window: WindowIdentity? = nil, elementID: String? = nil,
+             description: String, provenance: Provenance) {
+            self.bundle = bundle
+            self.process = process
+            self.window = window
+            self.elementID = elementID
+            self.description = description
+            self.provenance = provenance
+        }
+
+        /// Source-compatible construction for older adapters; preserves data but marks it unauthoritative.
+        init(application: String? = nil, windowID: String? = nil,
+             elementID: String? = nil, description: String) {
+            self.bundle = application.map { BundleIdentity(bundleID: $0, displayName: $0) }
+            self.process = nil
+            self.window = windowID.map { WindowIdentity(windowID: $0, title: nil) }
+            self.elementID = elementID
+            self.description = description
+            self.provenance = .legacyUnbound
+        }
+    }
+
+    struct Question: Equatable {
+        let id: UUID
+        let intentID: UUID
+        let prompt: String
+        let options: [String]
+        let target: Target?
+        let revision: Int
+
+        init(id: UUID = UUID(), intentID: UUID, prompt: String,
+             options: [String] = [], target: Target? = nil, revision: Int = 0) {
+            self.id = id
+            self.intentID = intentID
+            self.prompt = prompt
+            self.options = options
+            self.target = target
+            self.revision = revision
+        }
+    }
+
+    struct Answer: Equatable {
+        let questionID: UUID
+        let intentID: UUID
+        let revision: Int
+        let source: Source
+        let utterance: String
+    }
+
+    struct ContextVersion: Equatable {
+        let semanticRevision: Int
+        let readSet: Set<String>
+
+        init(semanticRevision: Int, readSet: Set<String> = []) {
+            self.semanticRevision = semanticRevision
+            self.readSet = readSet
+        }
+    }
+
+    enum FocusContract: Equatable {
+        case conversational(intentID: UUID)
+        case uiSelection(target: Target)
+        case none
+    }
+
+    struct AttemptEvidence: Equatable {
+        let attemptID: UUID
+        let intentID: UUID
+        let revision: Int
+        let outcome: Outcome
+    }
+
+    enum Outcome: Equatable {
+        case verified(evidence: String)
+        case verifiedFact(VerifiedFact)
+        case partial(evidence: String, blockedReason: String, verifiedFacts: [VerifiedFact] = [])
+        case blocked(reason: String)
+        case cancelled(reason: String)
+        case failed(reason: String)
+        case uncertain(reason: String)
+    }
+
+    enum Status: Equatable {
+        case pending
+        case awaitingAnswer(questionID: UUID)
+        case executing(attemptID: UUID)
+        case uncertain(attemptID: UUID, reason: String)
+        case partial(attemptID: UUID, evidence: String, blockedReason: String)
+        case blocked(attemptID: UUID?, reason: String)
+        case cancelled(reason: String)
+        case succeeded(attemptID: UUID, evidence: String)
+        case failed(attemptID: UUID, reason: String)
+
+        var isResolved: Bool {
+            if case .succeeded = self { return true }
+            if case .failed = self { return true }
+            if case .cancelled = self { return true }
+            return false
+        }
+    }
+
+    struct Entry: Equatable {
+        let intent: Intent
+        let relationship: Relationship
+        let prerequisite: Prerequisite?
+        fileprivate(set) var status: Status = .pending
+        fileprivate(set) var attempts: [Attempt] = []
+        fileprivate(set) var question: Question?
+        fileprivate(set) var answers: [Answer] = []
+        fileprivate(set) var revision: Int = 0
+        fileprivate(set) var verifiedFacts: [VerifiedFact] = []
+        fileprivate(set) var evidence: [AttemptEvidence] = []
+    }
+
+    enum TransitionError: Error, Equatable {
+        case duplicateIntent
+        case unknownIntent
+        case unknownRelatedIntent
+        case invalidPrerequisite
+        case invalidTransition
+        case invalidAttempt
+        case invalidQuestion
+        case emptyEvidence
+        case invalidProvenance
+        case unresolvedCapacity
+    }
+
+    /// Unresolved work is never discarded to make room; callers handle backpressure.
+    let resolvedHistoryLimit: Int
+    let unresolvedLimit: Int
+    private(set) var entries: [Entry] = []
+    private var knownIntentIDs: Set<UUID> = []
+    private var knownQuestionIDs: Set<UUID> = []
+    private var knownAttemptIDs: Set<UUID> = []
+
+    init(resolvedHistoryLimit: Int = 32, unresolvedLimit: Int = 32) {
+        self.resolvedHistoryLimit = max(0, resolvedHistoryLimit)
+        self.unresolvedLimit = max(0, unresolvedLimit)
+    }
+
+    func entry(for id: UUID) -> Entry? { entries.first { $0.intent.id == id } }
+
+    func questionOwner(for id: UUID) -> UUID? {
+        currentQuestionOwner(for: id)?.intent.id
+    }
+
+    private func currentQuestionOwner(for id: UUID) -> Entry? {
+        entries.first { entry in
+            entry.question?.id == id && entry.status == .awaitingAnswer(questionID: id) &&
+                entry.question?.revision == entry.revision
+        }
+    }
+
+    mutating func add(_ intent: Intent, relationship: Relationship = .independent,
+                      prerequisite: Prerequisite? = nil) throws {
+        guard !knownIntentIDs.contains(intent.id) else { throw TransitionError.duplicateIntent }
+        guard entries.filter({ !$0.status.isResolved }).count < unresolvedLimit else {
+            throw TransitionError.unresolvedCapacity
+        }
+        guard !intent.utterance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !intent.source.transcriptRanges.isEmpty else {
+            throw TransitionError.invalidProvenance
+        }
+        switch relationship {
+        case .independent:
+            break
+        case .refinement(let id), .continuation(let id), .correction(let id):
+            guard entry(for: id) != nil else { throw TransitionError.unknownRelatedIntent }
+        }
+        if let prerequisite {
+            guard prerequisite.intentID == intent.id,
+                  prerequisite.requiresIntentID != intent.id,
+                  entry(for: prerequisite.requiresIntentID) != nil else {
+                throw TransitionError.invalidPrerequisite
+            }
+        }
+        entries.append(Entry(intent: intent, relationship: relationship,
+                             prerequisite: prerequisite))
+        knownIntentIDs.insert(intent.id)
+        trimResolvedHistory()
+    }
+
+    func canExecute(_ id: UUID) -> Bool {
+        guard let entry = entry(for: id), entry.status == .pending else { return false }
+        guard let prerequisite = entry.prerequisite else { return true }
+        guard let required = self.entry(for: prerequisite.requiresIntentID) else { return false }
+        return required.verifiedFacts.contains { fact in
+            guard fact.kind == prerequisite.requiredFact,
+                  fact.intentID == required.intent.id,
+                  fact.revision == required.revision,
+                  let attemptID = fact.attemptID,
+                  required.attempts.contains(where: { $0.id == attemptID }) else { return false }
+            if fact.kind == .targetObserved {
+                guard let target = fact.target else { return false }
+                if case .legacyUnbound = target.provenance { return false }
+            }
+            return true
+        }
+    }
+
+    mutating func ask(_ question: Question) throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == question.intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        guard entries[index].status == .pending else { throw TransitionError.invalidTransition }
+        guard question.revision == entries[index].revision,
+              !knownQuestionIDs.contains(question.id) else { throw TransitionError.invalidQuestion }
+        knownQuestionIDs.insert(question.id)
+        entries[index].question = question
+        entries[index].status = .awaitingAnswer(questionID: question.id)
+    }
+
+    /// Answering re-opens the intent for a fresh attempt; the question remains as history.
+    mutating func answer(_ answer: Answer) throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == answer.intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        guard entries[index].status == .awaitingAnswer(questionID: answer.questionID),
+              entries[index].question?.revision == answer.revision,
+              entries[index].revision == answer.revision else {
+            throw TransitionError.invalidQuestion
+        }
+        guard !answer.utterance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !answer.source.transcriptRanges.isEmpty,
+              answer.source != entries[index].intent.source,
+              !entries[index].answers.contains(where: { $0.source == answer.source }) else {
+            throw TransitionError.invalidProvenance
+        }
+        entries[index].answers.append(answer)
+        entries[index].revision += 1
+        entries[index].status = .pending
+    }
+
+    mutating func begin(_ attempt: Attempt) throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == attempt.intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        guard canExecute(attempt.intentID) else { throw TransitionError.invalidTransition }
+        guard attempt.revision == entries[index].revision,
+              !knownAttemptIDs.contains(attempt.id) else {
+            throw TransitionError.invalidAttempt
+        }
+        knownAttemptIDs.insert(attempt.id)
+        entries[index].attempts.append(attempt)
+        entries[index].status = .executing(attemptID: attempt.id)
+    }
+
+    mutating func finish(attemptID: UUID, intentID: UUID, outcome: Outcome) throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        guard entries[index].status == .executing(attemptID: attemptID) else {
+            throw TransitionError.invalidAttempt
+        }
+        let revision = entries[index].revision
+        func validate(_ fact: VerifiedFact) throws {
+            guard !fact.evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  fact.intentID == intentID,
+                  fact.attemptID == attemptID,
+                  fact.revision == revision else {
+                throw TransitionError.emptyEvidence
+            }
+            if fact.kind == .targetObserved {
+                guard let target = fact.target,
+                      case .observed(attemptID) = target.provenance else {
+                    throw TransitionError.invalidProvenance
+                }
+            }
+        }
+        switch outcome {
+        case .verified(let evidence):
+            guard !evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw TransitionError.emptyEvidence
+            }
+            entries[index].status = .succeeded(attemptID: attemptID, evidence: evidence)
+        case .verifiedFact(let fact):
+            try validate(fact)
+            entries[index].verifiedFacts.append(fact)
+            entries[index].status = .succeeded(attemptID: attemptID, evidence: fact.evidence)
+        case .partial(let evidence, let blockedReason, let verifiedFacts):
+            guard !evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !blockedReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw TransitionError.emptyEvidence
+            }
+            for fact in verifiedFacts { try validate(fact) }
+            entries[index].verifiedFacts.append(contentsOf: verifiedFacts)
+            entries[index].status = .partial(attemptID: attemptID, evidence: evidence,
+                                             blockedReason: blockedReason)
+        case .blocked(let reason):
+            entries[index].status = .blocked(attemptID: attemptID, reason: reason)
+        case .cancelled(let reason):
+            entries[index].status = .cancelled(reason: reason)
+        case .failed(let reason):
+            entries[index].status = .failed(attemptID: attemptID, reason: reason)
+        case .uncertain(let reason):
+            entries[index].status = .uncertain(attemptID: attemptID, reason: reason)
+        }
+        entries[index].evidence.append(.init(attemptID: attemptID, intentID: intentID,
+                                             revision: revision, outcome: outcome))
+        trimResolvedHistory()
+    }
+
+    /// An uncertain attempt never becomes a verified success without a new attempt.
+    mutating func retryUncertain(intentID: UUID) throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        guard case .uncertain = entries[index].status else {
+            throw TransitionError.invalidTransition
+        }
+        entries[index].status = .pending
+    }
+
+    mutating func cancel(intentID: UUID, reason: String = "cancelled") throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        if case .executing = entries[index].status {
+            throw TransitionError.invalidTransition
+        }
+        // Resolved outcomes are terminal: rewriting them would bump the
+        // revision that bound the intent's verified facts and let a late
+        // cancel erase a recorded result.
+        guard !entries[index].status.isResolved else {
+            throw TransitionError.invalidTransition
+        }
+        entries[index].question = nil
+        entries[index].revision += 1
+        entries[index].status = .cancelled(reason: reason)
+        trimResolvedHistory()
+    }
+
+    mutating func revise(intentID: UUID) throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        if case .executing = entries[index].status {
+            throw TransitionError.invalidTransition
+        }
+        entries[index].question = nil
+        entries[index].revision += 1
+        entries[index].status = .pending
+    }
+
+    private mutating func trimResolvedHistory() {
+        // Preserve the entire ancestor closure of unresolved work.
+        var protected = Set(entries.filter { !$0.status.isResolved }.map { $0.intent.id })
+        var frontier = Array(protected)
+        while let id = frontier.popLast() {
+            guard let entry = entry(for: id) else { continue }
+            var parents: [UUID] = []
+            if let parent = entry.prerequisite?.requiresIntentID { parents.append(parent) }
+            switch entry.relationship {
+            case .independent: break
+            case .refinement(let parent), .continuation(let parent), .correction(let parent):
+                parents.append(parent)
+            }
+            for parent in parents where protected.insert(parent).inserted { frontier.append(parent) }
+        }
+        var resolved = entries.filter { $0.status.isResolved }.count
+        while resolved > resolvedHistoryLimit,
+              let oldest = entries.firstIndex(where: { $0.status.isResolved && !protected.contains($0.intent.id) }) {
+            entries.remove(at: oldest)
+            resolved -= 1
+        }
+    }
+}
