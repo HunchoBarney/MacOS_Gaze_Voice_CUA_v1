@@ -10,3 +10,4 @@ build/
 
 # Per-workspace Conductor overrides can contain local paths/settings.
 .conductor/settings.local.toml
+.empryo

@@ -1,9 +1,12 @@
 # Working in Jarvis
 
-Read README.md and the relevant part of docs/ARCHITECTURE.md before changing a subsystem.
-Use docs/DEVELOPMENT.md for commands and prerequisites. SwiftPM discovers the grouped
-source/test directories automatically; retain the existing module boundaries unless
-there is a concrete reason to change them.
+`EMPRYO.md` is the Empryo-native project guide; use it alongside this cross-agent
+file when working in Empryo. Start from README.md, the relevant part of
+docs/ARCHITECTURE.md and docs/DEVELOPMENT.md. Locate code with the repository map,
+read affected implementations before editing, and follow callers and tests. Reproduce
+bugs before fixing them; prove the same user-facing behavior before and after when
+it can be exercised safely. SwiftPM discovers the grouped source/test directories;
+retain module boundaries unless there is a concrete reason to change them.
 
 The migration remains incomplete. docs/voice-ui/SPEC.md owns active behavior;
 PLAN.md owns current gates; EVIDENCE.md records build-specific results; HISTORY.md
@@ -50,7 +53,7 @@ Finish when the requested outcome is supported by appropriate evidence, required
 checks pass, and material review findings are resolved. Do not start another cleanup
 or verification cycle without a concrete reason. Report what changed, what was
 actually verified, and remaining limitations; if blocked, state the unmet requirement
-without claiming completion.
+without claiming completion. Commit or publish only when the owner asks.
 
 For parallel worktrees, run `scripts/setup-workspace-development.py` through
 Conductor setup. `development/JevVoice/cua-source` and generated outputs must be

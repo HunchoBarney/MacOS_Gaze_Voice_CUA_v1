@@ -48,6 +48,12 @@ selected by their integrations, which can include speech and observed applicatio
 content. Do not assume only app names leave the device. See the current model
 boundaries in [architecture](docs/ARCHITECTURE.md).
 
+## Empryo
+
+`EMPRYO.md` contains project-specific instructions loaded by Empryo; `AGENTS.md`
+provides the cross-agent entry point. Existing tests, opt-in live checks and
+migration evidence remain the verification paths.
+
 ## Find your way
 
 - [Approved execution simplification](docs/EXECUTION-SIMPLIFICATION-PLAN.md): replace
