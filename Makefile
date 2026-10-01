@@ -13,7 +13,7 @@ setup:
 	@xcrun --find swift >/dev/null
 	@swift --version
 	@xcrun --sdk macosx --show-sdk-version
-	@echo "Runtime prerequisites: see docs/DEVELOPMENT.md and ThirdParty/Cua/README.md"
+	@echo "Runtime prerequisites: see ThirdParty/Cua/README.md and AGENTS.md"
 
 build:
 	swift build -c release

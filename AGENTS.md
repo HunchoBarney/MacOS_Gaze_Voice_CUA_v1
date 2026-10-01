@@ -1,63 +1,54 @@
 # Working in Jarvis
 
-`EMPRYO.md` is the Empryo-native project guide; use it alongside this cross-agent
-file when working in Empryo. Start from README.md, the relevant part of
-docs/ARCHITECTURE.md and docs/DEVELOPMENT.md. Locate code with the repository map,
-read affected implementations before editing, and follow callers and tests. Reproduce
-bugs before fixing them; prove the same user-facing behavior before and after when
-it can be exercised safely. SwiftPM discovers the grouped source/test directories;
-retain module boundaries unless there is a concrete reason to change them.
+Jarvis ("Jev Voice") is a macOS menu-bar computer-control app: Fn/Globe
+hold-to-talk → Apple SpeechAnalyzer → `ContinuousIntentCoordinator` → Jev
+semantic decision → `CuaVoiceRuntime` → `CuaTaskAgent` → pinned Cua Driver over
+stdio MCP. `CuaDialogueState` is the bounded in-memory coordination layer
+(intents, attempts, pending questions, verified facts). `EMPRYO.md` is the
+Empryo-native project guide alongside this file.
 
-The migration remains incomplete. docs/voice-ui/SPEC.md owns active behavior;
-PLAN.md owns current gates; EVIDENCE.md records build-specific results; HISTORY.md
-is reference-only. Follow EXECUTION.md only for an authorized migration task.
-Do not turn unrelated maintenance into migration implementation.
+## Commands
 
-For the approved execution simplification, follow
-docs/EXECUTION-SIMPLIFICATION-PLAN.md for scope, sequence and completion. Use the
-voice specification as a behavioral constraint; do not automatically resume P0–P5.
-Prove each Cua/Jev replacement before deleting a protection. Record scoped results
-as simplification evidence without closing unrelated migration gates.
+- `make setup` — toolchain check (no credentials/downloads)
+- `make test` — full suite: `swift test` plus `python3 -B -m unittest discover -s Tests/Tooling`
+- `swift test --filter <Suite>` — focused suites
+- `make app` — release build → `build/Jev Voice.app`, ad-hoc signed
 
-Preserve credentials, preferences, app identities, dependency pins, and unrelated
-work. Only development/JevVoice/cua-source/ is tracked; the rest of development/
-is ignored but contains unique evidence, models and
-recovery bundles; it is not a disposable cache. See ThirdParty/Cua/README.md before
-changing or rebuilding Driver. Never auto-upgrade the pinned runtime.
+SwiftPM discovers the grouped source/test directories; keep module boundaries.
 
-Ground diagnoses in relevant code, logs, or observed behavior. Label suspected
-causes as hypotheses until supported. Verify uncertain API behavior against the
-installed version or authoritative documentation; do not invent capabilities.
+## Rules that matter
 
-Choose verification based on affected behavior and risk. Start with relevant
-existing tests; add coverage for genuine behavior gaps, not tests that merely
-mirror the implementation. Use `make test` for the default regression suite when
-warranted or required by the task. Preserve required checks and acceptance criteria.
-Repeat or broaden checks only when relevant edits, failures, or unresolved risks
-justify it. Documentation-only changes generally need content/diff review, not app tests.
+- **Pinned Driver.** Computer control requires the exact pinned Cua Driver
+  Local — see `ThirdParty/Cua/README.md` before changing or rebuilding it.
+  Never auto-upgrade the pinned runtime. Stock Cua is not interchangeable.
+- **Credentials and identity.** Jev key lives in Keychain; bundle id is
+  `com.chriswozniczek.jevvoice`. Don't touch credentials, preferences, app
+  identity or dependency pins. Never put secrets in repo files.
+- **Ad-hoc signing caveat.** `codesign --verify --deep --strict` fails
+  spuriously inside this synced Documents checkout (the file provider restores
+  FinderInfo on generated bundles). Verify signatures on a copy outside the
+  synced directory.
+- **Live tests are opt-in and can mutate macOS.** They're behind `JARVIS_*`
+  env flags; run them through `scripts/with-desktop-lock.py`, one desktop owner
+  at a time. Never claim physical Fn/microphone or packaged-app acceptance from
+  simulated tests.
+- **Development assets.** `development/JevVoice/cua-source/` is the only
+  tracked part; the rest of `development/` is ignored but holds unique
+  evidence/models — not a disposable cache. `development/JevVoice/reference/`
+  is read-only shared input; never write through its links or the legacy
+  `~/Library/Caches/JevVoice` path. Worktrees run
+  `scripts/setup-workspace-development.py` (Conductor does it automatically;
+  manual worktrees pass `--source`).
 
-Live tests are opt-in and can mutate macOS. Run them with the desktop lock described
-in docs/DEVELOPMENT.md, one desktop owner at a time. Distinguish automated and
-recorded-audio checks, observed app behavior, and user-reported physical tests.
-Do not claim physical Fn/microphone or application acceptance from simulated tests.
-Record pre-existing failures separately from regressions.
+## Working style
 
-Use small, responsibility-focused changes. Preserve behavior and test intent;
-review complete affected paths. Do not add frameworks or abstractions without a
-current need. Legacy code still supports regression comparisons and conditional
-fixtures; inspect usage before removal.
-
-Fix the shared cause when evidence supports it; avoid app-specific workarounds for
-general defects. Keep unrelated refactors and speculative improvements out of scope.
-Finish when the requested outcome is supported by appropriate evidence, required
-checks pass, and material review findings are resolved. Do not start another cleanup
-or verification cycle without a concrete reason. Report what changed, what was
-actually verified, and remaining limitations; if blocked, state the unmet requirement
-without claiming completion. Commit or publish only when the owner asks.
-
-For parallel worktrees, run `scripts/setup-workspace-development.py` through
-Conductor setup. `development/JevVoice/cua-source` and generated outputs must be
-workspace-local. Treat `development/JevVoice/reference/` as read-only shared inputs;
-never write through its links or the legacy `~/Library/Caches/JevVoice` path.
-Copy inputs locally before modifying them. Review Cua source edits before
-committing; preserve ignored assets separately. See docs/LOCAL-DEVELOPMENT-STORAGE.md.
+- Reproduce bugs before fixing; prove the same user-facing behavior before and
+  after where safely checkable.
+- Ground diagnoses in code, logs, or observed behavior — label hypotheses until
+  supported. Verify API behavior against the installed version.
+- Small, responsibility-focused changes; follow existing conventions; no new
+  frameworks/abstractions without current need. Fix shared causes, not
+  app-specific workarounds.
+- Other agents share this folder. Never stash/reset/clean; add files by name.
+  Commit or publish only when the owner asks.
+- Report what changed, what was actually verified, and what remains unverified.

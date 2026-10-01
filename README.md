@@ -4,10 +4,10 @@ A macOS menu-bar computer-control app with a floating voice capsule, Fn/Globe
 hold-to-talk, Apple SpeechAnalyzer, Cua Driver, Jev decisions, and optional text
 generation. The application bundle is still named **Jev Voice.app**.
 
-**Status:** the Cua migration is incomplete. The current production path uses
-SpeechAnalyzer and Cua; passing logic tests does not establish reliable continuous
-speech, live dictation, or concurrent control across all apps. See the
-[current gates](docs/voice-ui/PLAN.md) and [recorded evidence](docs/voice-ui/EVIDENCE.md).
+**Status:** the current production path uses SpeechAnalyzer and Cua; passing
+logic tests does not establish reliable continuous speech, live dictation, or
+concurrent control across all apps. Live/desktop and physical Fn/microphone
+checks remain opt-in and unverified at release level.
 
 ## Start developing
 
@@ -45,8 +45,7 @@ opens emoji or system Dictation instead.
 
 Speech processing is on-device. Jev and an enabled text provider receive context
 selected by their integrations, which can include speech and observed application
-content. Do not assume only app names leave the device. See the current model
-boundaries in [architecture](docs/ARCHITECTURE.md).
+content. Do not assume only app names leave the device.
 
 ## Empryo
 
@@ -56,20 +55,9 @@ migration evidence remain the verification paths.
 
 ## Find your way
 
-- [Approved execution simplification](docs/EXECUTION-SIMPLIFICATION-PLAN.md): replace
-  overlapping execution machinery with proven Cua/Jev capabilities while preserving
-  voice/UI behavior. This scoped work does not restart the broader migration.
-
-- [Collaborator handoff](docs/HANDOFF.md): the current source and downloadable runtime/model packages.
-
-- [Architecture and source map](docs/ARCHITECTURE.md): responsibilities and ownership.
-- [Development and verification](docs/DEVELOPMENT.md): Conductor, tests, packaging, runtime prerequisites.
+- [Agent rules](AGENTS.md): commands, pinned Driver, workspace and live-test rules.
+- [Cua integration](ThirdParty/Cua/README.md): the pinned Driver contract.
 - [Eye tracking trial](EyeTracking/README.md): standalone gaze overlay and its local macOS workflow.
-- [Behavior specification](docs/voice-ui/SPEC.md): active S1–S9 requirements.
-- [Migration plan](docs/voice-ui/PLAN.md): active P0–P5 gates and A1–A13 acceptance matrix.
-- [Migration execution instructions](docs/voice-ui/EXECUTION.md): use only when implementing that migration.
-- [Local storage](docs/LOCAL-DEVELOPMENT-STORAGE.md): tracked Cua source, local assets and compatibility paths.
-- [Cleanup record](docs/CLEANUP.md): changes, verification and recovery.
 
 This project originated from [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).
 FluidVoice attribution is in [ThirdParty/FluidVoice](ThirdParty/FluidVoice/NOTICE.md).

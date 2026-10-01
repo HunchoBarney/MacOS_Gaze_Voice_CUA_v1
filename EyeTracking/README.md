@@ -3,9 +3,9 @@
 This workspace copy of [PINTO0309/screen-eye-tracking](https://github.com/PINTO0309/screen-eye-tracking)
 at source commit `48b7e37` includes the local calibration and projection changes.
 The upstream license is preserved in `LICENSE`. Its macOS trial scripts
-package the app under this workspace's `build/` directory. See the
-[workspace development guide](../docs/DEVELOPMENT.md#eye-tracking-trial) for setup,
-verification, and the Conductor run commands.
+package the app under this workspace's `build/` directory. Setup and the
+Conductor run commands live in `AGENTS.md` and `.conductor/settings.toml` at the
+workspace root.
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20771714.svg)](https://doi.org/10.5281/zenodo.20771713)
 
