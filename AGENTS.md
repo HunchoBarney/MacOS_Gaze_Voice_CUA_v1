@@ -12,9 +12,10 @@ and papers for current truth; installed versions beat remembered ones.
 
 ## Tripwires — each exists because it caused real damage
 
-- `development/` is gitignored but holds unique evidence and models — never
-  treat as a disposable cache. Only `development/JevVoice/cua-source/` is
-  tracked.
+- `development/` holds unique evidence and models — never treat as a
+  disposable cache. Tracked: `development/JevVoice/cua-source/` plus the
+  text layer (`*.json`, `*.md`, `*.txt`, `*.log` at any depth); binaries,
+  `.app` interiors and build outputs stay ignored.
 - `development/JevVoice/reference/` and the `~/Library/Caches/JevVoice` link
   are read-only shared inputs. Copy before modifying.
 - The Cua Driver is pinned and hash-verified against
