@@ -78,12 +78,18 @@ def setup(workspace, source):
             raise RuntimeError('Output directory must be local: ' + str(target))
         target.mkdir(exist_ok=True)
     config = local / 'perception-quality-config.json'
-    if not config.exists():
-        data = json.loads((source / config.name).read_text())
-        for artifact in data.get('bindings', {}).get('artifacts', []):
-            if artifact.get('path', '').startswith('perception-bundles/'):
-                artifact['path'] = 'reference/' + artifact['path']
-        config.write_text(json.dumps(data, indent=2) + '\n')
+    origin_config = source / config.name
+    if not config.exists() and origin_config.exists():
+        try:
+            data = json.loads(origin_config.read_text())
+        except OSError:
+            print('Warning: ' + str(origin_config) + ' is unreadable '
+                  '(iCloud-evicted?); skipping perception config.')
+        else:
+            for artifact in data.get('bindings', {}).get('artifacts', []):
+                if artifact.get('path', '').startswith('perception-bundles/'):
+                    artifact['path'] = 'reference/' + artifact['path']
+            config.write_text(json.dumps(data, indent=2) + '\n')
     reference = local / 'reference'
     if reference.is_symlink():
         raise RuntimeError('Reference container must be local')
