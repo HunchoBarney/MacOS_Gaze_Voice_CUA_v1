@@ -17,8 +17,10 @@ and papers for current truth; installed versions beat remembered ones.
   tracked.
 - `development/JevVoice/reference/` and the `~/Library/Caches/JevVoice` link
   are read-only shared inputs. Copy before modifying.
-- The Cua Driver is pinned and hash-verified — never upgrade it
-  (`ThirdParty/Cua/README.md`).
+- The Cua Driver is pinned and hash-verified against
+  `ThirdParty/Cua/source-manifest.json`. Upgrading is welcome — verify the new
+  version's contracts against `ThirdParty/Cua/README.md` and rerun the checks;
+  a silent swap breaks the app.
 - Credentials live in Keychain; secrets never enter repo files. Bundle id:
   `com.chriswozniczek.jevvoice`.
 - Live/desktop tests sit behind `JARVIS_*` flags and mutate macOS — run them
