@@ -19,16 +19,16 @@ class WorkspaceDevelopmentTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.source = self.root / 'main/development/JevVoice'
-        (self.source / 'cua-source').mkdir(parents=True)
-        (self.source / 'cua-source/source.txt').write_text('original')
-        (self.source / 'perception-inputs').mkdir()
-        (self.source / 'perception-inputs/model').write_text('model')
-        (self.source / 'perception-quality-config.json').write_text('{}')
         self.workspace = self.root / 'workspace'
         manifest = self.workspace / 'ThirdParty/Cua/source-manifest.json'
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({'files': {'source.txt': hashlib.sha256(b'original').hexdigest()}}))
+        subprocess.run(['git', 'init', '--quiet', str(self.workspace)], check=True)
+        tracked = self.workspace / 'development/JevVoice/cua-source/source.txt'
+        tracked.parent.mkdir(parents=True)
+        tracked.write_text('original')
+        subprocess.run(['git', '-C', str(self.workspace), 'add',
+                        'development/JevVoice/cua-source/source.txt'], check=True)
 
     def test_conductor_context_is_ignored(self):
         repository = Path(__file__).resolve().parents[2]
@@ -54,97 +54,64 @@ class WorkspaceDevelopmentTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode == 0, ignored, path)
 
-    def test_isolation_and_rerun_preserves_edits(self):
-        (self.workspace / 'development').symlink_to(self.source.parent)
-        module.setup(self.workspace, self.source)
+    def test_creates_local_dirs_and_rerun_preserves_edits(self):
+        module.setup(self.workspace)
         local = self.workspace / 'development/JevVoice'
-        self.assertFalse((self.workspace / 'development').is_symlink())
+        for name in module.LOCAL_DIRS:
+            self.assertTrue((local / name).is_dir(), name)
         (local / 'cua-source/source.txt').write_text('local edit')
         (local / 'build/result').write_text('local result')
-        module.setup(self.workspace, self.source)
+        module.setup(self.workspace)
         self.assertEqual((local / 'cua-source/source.txt').read_text(), 'local edit')
-        self.assertEqual((self.source / 'cua-source/source.txt').read_text(), 'original')
-        self.assertFalse((self.source / 'build/result').exists())
-        self.assertEqual((local / 'reference/perception-inputs').resolve(), (self.source / 'perception-inputs').resolve())
+        self.assertEqual((local / 'build/result').read_text(), 'local result')
 
-    def test_changed_seed_does_not_remove_link(self):
-        link = self.workspace / 'development'
-        link.symlink_to(self.source.parent)
-        (self.source / 'cua-source/source.txt').write_text('changed seed')
+    def test_development_symlink_is_replaced_with_local_dir(self):
+        import shutil
+        outside = self.root / 'elsewhere'
+        outside.mkdir()
+        (outside / 'sentinel').write_text('untouched')
+        shutil.rmtree(self.workspace / 'development')
+        (self.workspace / 'development').symlink_to(outside)
+        with self.assertRaises(RuntimeError):  # tracked source now absent from worktree
+            module.setup(self.workspace)
+        self.assertFalse((self.workspace / 'development').is_symlink())
+        self.assertEqual((outside / 'sentinel').read_text(), 'untouched')
+
+    def test_missing_tracked_source_is_an_error(self):
+        (self.workspace / 'development/JevVoice/cua-source/source.txt').unlink()
         with self.assertRaises(RuntimeError):
-            module.setup(self.workspace, self.source)
-        self.assertTrue(link.is_symlink())
+            module.setup(self.workspace)
 
-    def test_tracked_source_does_not_require_historical_seed_hash(self):
-        target = self.workspace / 'development/JevVoice/cua-source/source.txt'
-        target.parent.mkdir(parents=True)
-        target.write_text('tracked edit')
-        subprocess.run(['git', 'init', '--quiet', str(self.workspace)], check=True)
-        subprocess.run(['git', '-C', str(self.workspace), 'add',
-                        'development/JevVoice/cua-source/source.txt'], check=True)
-        (self.source / 'cua-source/source.txt').write_text('new root seed')
-
-        module.setup(self.workspace, self.source)
-
-        self.assertEqual(target.read_text(), 'tracked edit')
-        self.assertTrue((self.workspace / 'development/JevVoice/reference/perception-inputs').is_symlink())
-
-    def test_root_assets_are_untouched(self):
-        module.setup(self.source.parent.parent, self.source)
-        self.assertFalse((self.source / 'reference').exists())
-
-    def test_source_link_is_rejected(self):
-        local = self.workspace / 'development/JevVoice'
-        local.mkdir(parents=True)
-        (local / 'cua-source').symlink_to(self.source / 'cua-source')
+    def test_cua_source_symlink_is_rejected(self):
+        outside = self.root / 'elsewhere'
+        outside.mkdir()
+        import shutil
+        shutil.rmtree(self.workspace / 'development/JevVoice/cua-source')
+        (self.workspace / 'development/JevVoice/cua-source').symlink_to(outside)
         with self.assertRaises(RuntimeError):
-            module.setup(self.workspace, self.source)
+            module.setup(self.workspace)
 
     def test_seed_file_link_is_rejected(self):
         target = self.workspace / 'development/JevVoice/cua-source/source.txt'
-        target.parent.mkdir(parents=True)
-        target.symlink_to(self.source / 'cua-source/source.txt')
-
+        outside = self.root / 'elsewhere.txt'
+        outside.write_text('foreign')
+        target.unlink()
+        target.symlink_to(outside)
         with self.assertRaises(RuntimeError):
-            module.setup(self.workspace, self.source)
-
+            module.setup(self.workspace)
         self.assertTrue(target.is_symlink())
-        self.assertEqual((self.source / 'cua-source/source.txt').read_text(), 'original')
 
-    def test_configured_asset_root_precedes_conductor_root(self):
-        environment = os.environ.copy()
-        environment.update({
-            'CONDUCTOR_IS_LOCAL': '1',
-            'CONDUCTOR_ROOT_PATH': str(self.root / 'missing-conductor-root'),
-            'JARVIS_DEVELOPMENT_SOURCE': str(self.source),
-        })
+    def test_untracked_source_is_an_error(self):
+        subprocess.run(['git', '-C', str(self.workspace), 'rm', '-r', '-q', '--cached',
+                        'development/JevVoice/cua-source'], check=True)
+        with self.assertRaises(RuntimeError) as ctx:
+            module.setup(self.workspace)
+        self.assertIn('not tracked', str(ctx.exception))
+
+    def test_main_uses_workspace_argument(self):
         result = subprocess.run(
             [sys.executable, str(SETUP_SCRIPT), '--workspace', str(self.workspace)],
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
+            capture_output=True, text=True, check=False,
         )
-
         self.assertEqual(result.returncode, 0, result.stderr)
-        copied = self.workspace / 'development/JevVoice/cua-source/source.txt'
-        self.assertTrue(copied.is_file(), result.stdout)
-        self.assertEqual(copied.read_text(), 'original')
-
-    def test_missing_local_asset_root_is_an_error(self):
-        environment = os.environ.copy()
-        environment.pop('JARVIS_DEVELOPMENT_SOURCE', None)
-        environment.update({
-            'CONDUCTOR_IS_LOCAL': '1',
-            'CONDUCTOR_ROOT_PATH': str(self.root / 'missing-conductor-root'),
-        })
-        result = subprocess.run(
-            [sys.executable, str(SETUP_SCRIPT), '--workspace', str(self.workspace)],
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('No local development assets', result.stderr)
+        self.assertTrue((self.workspace / 'development/JevVoice/staging').is_dir())

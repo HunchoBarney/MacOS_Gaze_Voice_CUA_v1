@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Prepare isolated workspace source and shared read-only reference assets."""
+"""Prepare workspace-local development directories in a worktree.
+
+The repo is self-contained: cua-source is tracked, everything else under
+development/JevVoice is local generated output. This script verifies the
+tracked source is complete, creates the local output directories, and
+writes the workspace asset note.
+"""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 
-REFERENCE_DIRS = ('perception-bundles', 'perception-downloads', 'perception-inputs',
-                  'handoff', 'rollback', 'verification', 'upstream-pr-audit',
-                  'perception-quality-results.artifacts')
 LOCAL_DIRS = ('build', 'staging', 'probe', 'verification', 'perception-export-env',
               'perception-bundles', 'perception-downloads', 'perception-inputs',
               'perception-quality-results.artifacts')
@@ -29,13 +30,9 @@ def tracked_source_files(workspace):
             if name}
 
 
-def setup(workspace, source):
+def setup(workspace):
     workspace = workspace.resolve()
-    source = source.resolve()
     development = workspace / 'development'
-    if workspace == source.parent.parent:
-        print('Repository root owns the original development assets; leaving them untouched.')
-        return
     manifest = json.loads((workspace / 'ThirdParty/Cua/source-manifest.json').read_text())
     for name in manifest['files']:
         relative = Path(name)
@@ -45,14 +42,10 @@ def setup(workspace, source):
     if tracked and not set(manifest['files']).issubset(tracked):
         raise RuntimeError('Workspace tracks only part of the preserved Cua source')
     if not tracked:
-        # Legacy branches seed from the historical manifest. Check before replacing a link.
-        for name, expected in manifest['files'].items():
-            origin = source / 'cua-source' / name
-            if origin.is_symlink() or hashlib.sha256(origin.read_bytes()).hexdigest() != expected:
-                raise RuntimeError('Source differs from preserved manifest: ' + name)
+        raise RuntimeError(
+            'development/JevVoice/cua-source is not tracked on this branch; '
+            'worktrees need a branch where it is')
     if development.is_symlink():
-        if development.resolve() != source.parent:
-            raise RuntimeError('Refusing to replace an unexpected development link')
         development.unlink()  # Only the link, never its target.
     local = development / 'JevVoice'
     local.mkdir(parents=True, exist_ok=True)
@@ -64,66 +57,18 @@ def setup(workspace, source):
             raise RuntimeError('Source path traverses a symlink: ' + str(target))
         if target.is_symlink():
             raise RuntimeError('Workspace source file must not be a symlink: ' + str(target))
-        if tracked:
-            if not target.is_file():
-                raise RuntimeError('Tracked workspace source is missing: ' + str(target))
-            continue
-        if target.exists():
-            continue  # Preserve edits on repeated setup.
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source / 'cua-source' / name, target)
+        if not target.is_file():
+            raise RuntimeError('Tracked workspace source is missing: ' + str(target))
     for name in LOCAL_DIRS:
         target = local / name
         if target.is_symlink():
             raise RuntimeError('Output directory must be local: ' + str(target))
         target.mkdir(exist_ok=True)
-    config = local / 'perception-quality-config.json'
-    origin_config = source / config.name
-    if not config.exists() and origin_config.exists():
-        try:
-            data = json.loads(origin_config.read_text())
-        except OSError:
-            print('Warning: ' + str(origin_config) + ' is unreadable '
-                  '(iCloud-evicted?); skipping perception config.')
-        else:
-            for artifact in data.get('bindings', {}).get('artifacts', []):
-                if artifact.get('path', '').startswith('perception-bundles/'):
-                    artifact['path'] = 'reference/' + artifact['path']
-            config.write_text(json.dumps(data, indent=2) + '\n')
-    reference = local / 'reference'
-    if reference.is_symlink():
-        raise RuntimeError('Reference container must be local')
-    reference.mkdir(exist_ok=True)
-    names = REFERENCE_DIRS + ('perception-quality-report.json', 'perception-quality-results.json')
-    for name in names:
-        target = reference / name
-        origin = source / name
-        if not origin.exists():
-            continue
-        if target.is_symlink() and target.resolve() == origin.resolve():
-            continue
-        if target.exists() or target.is_symlink():
-            raise RuntimeError('Refusing to replace reference: ' + str(target))
-        target.symlink_to(origin, target_is_directory=origin.is_dir())
     (development / 'AGENTS.md').write_text('''# Workspace development assets
 
-`JevVoice/cua-source/` is workspace-local. On current branches Git tracks the
-preserved source; older branches seed it from the historical manifest. Its broken
-Git metadata, dependencies and generated builds are not copied by setup.
-Keep source edits and all new build/test/export output inside this workspace.
-Do not use the original repository development folder or the legacy
-~/Library/Caches/JevVoice compatibility link as an output location.
-
-`JevVoice/reference/` contains shared symbolic links. Treat every target as READ-ONLY:
-never modify, delete, chmod, rebuild, install into, or write results there.
-Copy any input requiring modification to a local directory first. Pass explicit
-workspace-local output paths to tools; inspect copied configs for absolute paths.
-The links are not a filesystem security boundary. Dependencies/environments must
-be created locally using the existing pins. Do not auto-upgrade or install Driver.
-
-Git tracks only `JevVoice/cua-source/` on current branches. Check `git status`
-before sharing source changes. Other development assets remain ignored and must
-be preserved separately; do not assume Git saves them.
+`JevVoice/` is workspace-local. Git tracks `cua-source/` and small text
+files; everything else here is generated output and stays ignored.
+Keep all new build/test/export output inside this workspace.
 ''')
     print('Workspace development ready: ' + str(local))
 
@@ -131,22 +76,8 @@ be preserved separately; do not assume Git saves them.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', type=Path, default=Path.cwd())
-    parser.add_argument('--source', type=Path)
     args = parser.parse_args()
-    source = args.source
-    if source is None:
-        configured = os.environ.get('JARVIS_DEVELOPMENT_SOURCE')
-        if configured:
-            source = Path(configured)
-    if source is None:
-        root = os.environ.get('CONDUCTOR_ROOT_PATH')
-        if not root or os.environ.get('CONDUCTOR_IS_LOCAL') == '0':
-            print('No local Conductor asset root; skipping development assets.')
-            return
-        source = Path(root) / 'development/JevVoice'
-    if not source.is_dir():
-        raise RuntimeError('No local development assets at ' + str(source))
-    setup(args.workspace, source)
+    setup(args.workspace)
 
 
 if __name__ == '__main__':

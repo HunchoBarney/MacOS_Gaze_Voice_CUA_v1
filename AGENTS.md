@@ -12,12 +12,9 @@ and papers for current truth; installed versions beat remembered ones.
 
 ## Tripwires — each exists because it caused real damage
 
-- `development/` holds unique evidence and models — never treat as a
-  disposable cache. Tracked: `development/JevVoice/cua-source/` plus the
-  text layer (`*.json`, `*.md`, `*.txt`, `*.log` at any depth); binaries,
-  `.app` interiors and build outputs stay ignored.
-- `development/JevVoice/reference/` and the `~/Library/Caches/JevVoice` link
-  are read-only shared inputs. Copy before modifying.
+- `development/` is local-only: `cua-source/` and the text layer
+  (`*.json`/`*.md`/`*.txt`/`*.log`) are tracked; everything else is
+  regenerable output and stays ignored.
 - The Cua Driver is pinned and hash-verified against
   `ThirdParty/Cua/source-manifest.json`. Upgrading is welcome — verify the new
   version's contracts against `ThirdParty/Cua/README.md` and rerun the checks;
@@ -32,4 +29,4 @@ and papers for current truth; installed versions beat remembered ones.
 - Other agents share this folder: never stash/reset/clean; commit or push
   only when asked.
 - Parallel work: `git worktree add`, then
-  `python3 scripts/setup-workspace-development.py --source <main>/development/JevVoice`.
+  `python3 scripts/setup-workspace-development.py` inside the worktree.
