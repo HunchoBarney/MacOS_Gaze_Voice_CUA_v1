@@ -1,54 +1,32 @@
 # Working in Jarvis
 
-Jarvis ("Jev Voice") is a macOS menu-bar computer-control app: Fn/Globe
-hold-to-talk → Apple SpeechAnalyzer → `ContinuousIntentCoordinator` → Jev
-semantic decision → `CuaVoiceRuntime` → `CuaTaskAgent` → pinned Cua Driver over
-stdio MCP. `CuaDialogueState` is the bounded in-memory coordination layer
-(intents, attempts, pending questions, verified facts). `EMPRYO.md` is the
-Empryo-native project guide alongside this file.
+Verify before you claim. Every claim ties to evidence the user can check — a
+test run, a file:line, command output — proportional to the size of the claim.
+Assume you're wrong until the evidence says otherwise. You may search the web
+and papers for current truth; installed versions beat remembered ones.
 
 ## Commands
 
-- `make setup` — toolchain check (no credentials/downloads)
-- `make test` — full suite: `swift test` plus `python3 -B -m unittest discover -s Tests/Tooling`
-- `swift test --filter <Suite>` — focused suites
-- `make app` — release build → `build/Jev Voice.app`, ad-hoc signed
+- `make setup` / `make test` / `make app` (release → `build/Jev Voice.app`)
+- `swift test --filter <Suite>` for focused checks
 
-SwiftPM discovers the grouped source/test directories; keep module boundaries.
+## Tripwires — each exists because it caused real damage
 
-## Rules that matter
-
-- **Pinned Driver.** Computer control requires the exact pinned Cua Driver
-  Local — see `ThirdParty/Cua/README.md` before changing or rebuilding it.
-  Never auto-upgrade the pinned runtime. Stock Cua is not interchangeable.
-- **Credentials and identity.** Jev key lives in Keychain; bundle id is
-  `com.chriswozniczek.jevvoice`. Don't touch credentials, preferences, app
-  identity or dependency pins. Never put secrets in repo files.
-- **Ad-hoc signing caveat.** `codesign --verify --deep --strict` fails
-  spuriously inside this synced Documents checkout (the file provider restores
-  FinderInfo on generated bundles). Verify signatures on a copy outside the
-  synced directory.
-- **Live tests are opt-in and can mutate macOS.** They're behind `JARVIS_*`
-  env flags; run them through `scripts/with-desktop-lock.py`, one desktop owner
-  at a time. Never claim physical Fn/microphone or packaged-app acceptance from
-  simulated tests.
-- **Development assets.** `development/JevVoice/cua-source/` is the only
-  tracked part; the rest of `development/` is ignored but holds unique
-  evidence/models — not a disposable cache. `development/JevVoice/reference/`
-  is read-only shared input; never write through its links or the legacy
-  `~/Library/Caches/JevVoice` path. Worktrees run
-  `scripts/setup-workspace-development.py` (Conductor does it automatically;
-  manual worktrees pass `--source`).
-
-## Working style
-
-- Reproduce bugs before fixing; prove the same user-facing behavior before and
-  after where safely checkable.
-- Ground diagnoses in code, logs, or observed behavior — label hypotheses until
-  supported. Verify API behavior against the installed version.
-- Small, responsibility-focused changes; follow existing conventions; no new
-  frameworks/abstractions without current need. Fix shared causes, not
-  app-specific workarounds.
-- Other agents share this folder. Never stash/reset/clean; add files by name.
-  Commit or publish only when the owner asks.
-- Report what changed, what was actually verified, and what remains unverified.
+- `development/` is gitignored but holds unique evidence and models — never
+  treat as a disposable cache. Only `development/JevVoice/cua-source/` is
+  tracked.
+- `development/JevVoice/reference/` and the `~/Library/Caches/JevVoice` link
+  are read-only shared inputs. Copy before modifying.
+- The Cua Driver is pinned and hash-verified — never upgrade it
+  (`ThirdParty/Cua/README.md`).
+- Credentials live in Keychain; secrets never enter repo files. Bundle id:
+  `com.chriswozniczek.jevvoice`.
+- Live/desktop tests sit behind `JARVIS_*` flags and mutate macOS — run them
+  through `scripts/with-desktop-lock.py`, one owner at a time. Simulated tests
+  never prove physical Fn/microphone or packaged-app behavior.
+- `codesign --verify --deep --strict` fails spuriously in this synced
+  Documents checkout — verify on a copy outside it.
+- Other agents share this folder: never stash/reset/clean; commit or push
+  only when asked.
+- Parallel work: `git worktree add`, then
+  `python3 scripts/setup-workspace-development.py --source <main>/development/JevVoice`.
