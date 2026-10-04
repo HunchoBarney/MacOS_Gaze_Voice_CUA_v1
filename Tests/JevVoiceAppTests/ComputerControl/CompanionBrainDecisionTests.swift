@@ -108,12 +108,12 @@ final class CompanionBrainDecisionTests: XCTestCase {
             """) else { return XCTFail("expected clarify") }
         XCTAssertEqual(clarify.options, ["Notes", "Mail"])
 
-        guard case .answer(let text) = try decode("""
+        guard case .answer(let text, _) = try decode("""
             {"type":"answer","text":"Nothing is running."}
             """) else { return XCTFail("expected answer") }
         XCTAssertEqual(text, "Nothing is running.")
 
-        guard case .refuse(let reason) = try decode("""
+        guard case .refuse(let reason, _) = try decode("""
             {"type":"refuse","reason":"cannot do that"}
             """) else { return XCTFail("expected refuse") }
         XCTAssertEqual(reason, "cannot do that")

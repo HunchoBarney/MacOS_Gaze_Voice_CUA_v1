@@ -121,16 +121,16 @@ public enum PlannerDecision: Sendable {
     /// Ask the user a single question (spoken + card).
     case clarify(ClarifyRequest)
     /// Answer aloud/in the card — no computer action.
-    case answer(text: String)
+    case answer(text: String, consumedThrough: Int? = nil)
     /// The next step needs input consent this turn.
-    case consentNeeded(ConsentRequest)
-    case refuse(reason: String)
+    case consentNeeded(ConsentRequest, consumedThrough: Int? = nil)
+    case refuse(reason: String, consumedThrough: Int? = nil)
     /// Delegate work to a persistent agent (Wave 2+).
     case delegate(DelegationRequest)
     /// Follow-up message into an existing agent's thread.
-    case sendToAgent(slug: String, message: String)
+    case sendToAgent(slug: String, message: String, consumedThrough: Int? = nil)
     /// Read an agent's findings without waking it.
-    case agentMemory(slug: String)
+    case agentMemory(slug: String, consumedThrough: Int? = nil)
     /// Stop work the user named — a specific intent, or everything.
     case cancel(CancelRequest)
     /// A correction of an earlier intent: retract it or record the revision.
@@ -198,13 +198,18 @@ public enum TaskRelationship: Sendable, Equatable {
     case correction(of: UUID)
 }
 
-/// Stop work the user named: a specific intent, or everything when the
-/// target is nil.
+/// Stop work the user named: a specific intent, the single live intent
+/// when the target is nil, or everything when `stopAll` is explicit.
 public struct CancelRequest: Sendable {
     public var targetIntentID: UUID?
     public var consumedThrough: Int?
-    public init(targetIntentID: UUID? = nil, consumedThrough: Int? = nil) {
+    /// True only for an explicit "stop everything" — a nil target without
+    /// this flag binds the single live intent or asks, never all.
+    public var stopAll: Bool
+    public init(targetIntentID: UUID? = nil, consumedThrough: Int? = nil,
+                stopAll: Bool = false) {
         self.targetIntentID = targetIntentID; self.consumedThrough = consumedThrough
+        self.stopAll = stopAll
     }
 }
 
@@ -238,8 +243,12 @@ public struct RetryRequest: Sendable {
 public struct ClarifyRequest: Sendable {
     public var question: String
     public var options: [String]
-    public init(question: String, options: [String] = []) {
+    /// Words of the presented utterance this decision consumed from the
+    /// front — nil covers every remaining word.
+    public var consumedThrough: Int?
+    public init(question: String, options: [String] = [], consumedThrough: Int? = nil) {
         self.question = question; self.options = options
+        self.consumedThrough = consumedThrough
     }
 }
 
@@ -253,12 +262,15 @@ public struct DelegationRequest: Sendable {
     public var newAgentDescription: String?
     /// The task/message handed to the agent.
     public var message: String
+    /// Words of the presented utterance this decision consumed from the
+    /// front — nil covers every remaining word.
+    public var consumedThrough: Int?
     public init(agentSlug: String? = nil, newAgentName: String? = nil,
                 newAgentRole: String? = nil, newAgentDescription: String? = nil,
-                message: String) {
+                message: String, consumedThrough: Int? = nil) {
         self.agentSlug = agentSlug; self.newAgentName = newAgentName
         self.newAgentRole = newAgentRole; self.newAgentDescription = newAgentDescription
-        self.message = message
+        self.message = message; self.consumedThrough = consumedThrough
     }
 }
 

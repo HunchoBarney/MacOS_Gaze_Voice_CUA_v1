@@ -71,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &subscriptions)
 
         agentRuntime = Self.makeAgentRuntime()
+        // The agents runtime boots after the controller exists — the voice
+        // delegation seam is wired late, never guessed at init time.
+        controller.cua.agentBridge = VoiceAgentBridge(runtime: agentRuntime)
         agentRuntime?.onConsentAsk = { [weak self] request in
             self?.speechOutput.speak(request.summary)
         }

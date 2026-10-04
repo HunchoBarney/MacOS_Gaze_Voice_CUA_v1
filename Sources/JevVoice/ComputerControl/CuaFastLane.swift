@@ -150,32 +150,6 @@ struct CuaFastAction: Equatable {
         return (action, qualifier)
     }
 
-    /// Whether a resolved bundle may execute the parsed action. The table is
-    /// tab/window-oriented; non-tabbable apps get the agent loop instead of a
-    /// wrong-tool keystroke. Text entry is app-generic. A stated app qualifier
-    /// must resolve to this bundle — a qualifier naming something else (or
-    /// nothing) is silently dropped by nobody: nil sends the whole request
-    /// back to the loop rather than acting on the wrong target.
-    static func match(goal: String, bundle: String, appName: String) -> CuaFastAction? {
-        guard let parsed = parse(goal) else { return nil }
-        guard !parsed.action.needsTabbableApp || tabbableBundles.contains(bundle) else { return nil }
-        // A phrase carrying a risk keyword must keep its per-action judgment —
-        // unless the lane carries that judgment itself (app-quit approves in
-        // place rather than delegating to a model that may pick a wrong item).
-        guard parsed.action.selfApproves
-            || !CuaTaskAgent.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description) else { return nil }
-        if let qualifier = parsed.appQualifier {
-            let q = normalize(qualifier)
-            let named = normalize(appName)
-            let compactBundle = bundle.lowercased()
-            let qualifierMatches = named == q || (!q.isEmpty && (named.contains(q)
-                || compactBundle.contains(q.replacingOccurrences(of: " ", with: ""))))
-                || (genericBrowserQualifiers.contains(q) && tabbableBundles.contains(bundle))
-            guard qualifierMatches else { return nil }
-        }
-        return parsed.action
-    }
-
     /// Resolve an app qualifier (or its absence) to an installed app.
     /// Keystroke lanes resolve through the frontmost tabbable app or a
     /// uniquely running tabbable app; text entry with no qualifier means the
@@ -268,19 +242,6 @@ struct CuaFastAction: Equatable {
             return implicitBrowser(apps: apps, frontmostBundle: frontmostBundle)
         }
         return namedApp(q, in: apps)
-    }
-
-    /// Whether `goal` is a bare open-command whose query names this exact
-    /// app — the deterministic launch-completion gate. A query naming a
-    /// different or unknown app is false, so a model-chosen scope never lets
-    /// a compound phrase fast-exit on the wrong target.
-    static func launchCommand(goal: String, bundle: String, appName: String) -> Bool {
-        guard let parsed = parseOpen(goal) else { return false }
-        let q = normalize(parsed.query)
-        let named = normalize(appName)
-        return named == q || (!q.isEmpty && (named.contains(q)
-            || bundle.lowercased().contains(q.replacingOccurrences(of: " ", with: ""))))
-            || (genericBrowserQualifiers.contains(q) && tabbableBundles.contains(bundle))
     }
 
     /// The named-app match shared by qualifier and open-query resolution.

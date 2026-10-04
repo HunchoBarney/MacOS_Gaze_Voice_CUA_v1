@@ -111,28 +111,6 @@ final class CuaTaskAgentTests: XCTestCase {
 
     // MARK: - Pure helpers the escalation seams use
 
-    func testRequestOperandFindsRightmostIntroducer() {
-        XCTAssertEqual(CuaTaskAgent.requestOperand(in: "type hello world"), "hello world")
-        XCTAssertEqual(CuaTaskAgent.requestOperand(in: "search for cats and dogs"), "cats and dogs")
-        XCTAssertNil(CuaTaskAgent.requestOperand(in: "open the thing"))
-        XCTAssertNil(CuaTaskAgent.requestOperand(in: "type "))
-    }
-
-    func testStripLiteralIntroducerRemovesOnlyWholePhraseLeads() {
-        XCTAssertEqual(CuaTaskAgent.stripLiteralIntroducer("the words hello there"), "hello there")
-        XCTAssertEqual(CuaTaskAgent.stripLiteralIntroducer("saying goodnight"), "goodnight")
-        XCTAssertEqual(CuaTaskAgent.stripLiteralIntroducer("hello there"), "hello there")
-        XCTAssertEqual(CuaTaskAgent.stripLiteralIntroducer("typewriter"), "typewriter")
-    }
-
-    func testStripDestinationTailRemovesAppSuffixOnly() {
-        XCTAssertEqual(CuaTaskAgent.stripDestinationTail("meeting notes in Notes", appName: "Notes"),
-                       "meeting notes")
-        XCTAssertEqual(CuaTaskAgent.stripDestinationTail("notes about meetings", appName: "Notes"),
-                       "notes about meetings")
-        XCTAssertEqual(CuaTaskAgent.stripDestinationTail("text", appName: nil), "text")
-    }
-
     func testUniqueEditableTargetRequiresExactlyOneEditable() {
         let editable: JSONValue = .object([
             "role": .string("AXTextArea"), "label": .string("Body"),
@@ -167,6 +145,23 @@ final class CuaTaskAgentTests: XCTestCase {
                                                         actionDescription: "Click Send"))
         XCTAssertFalse(CuaTaskAgent.requiresRiskJudgment(goal: "open a new tab",
                                                          actionDescription: "Open a new browser tab"))
+    }
+
+    /// A hotkey description names no consequential keyword but carries the
+    /// same effect — ⌘Q quits, ⌘W closes, ⌘⌫ trashes. These must ask.
+    func testRequiresRiskJudgmentFlagsConsequentialHotkeys() {
+        XCTAssertTrue(CuaTaskAgent.requiresRiskJudgment(goal: "quit the app",
+                                                        actionDescription: "Press ⌘Q"))
+        XCTAssertTrue(CuaTaskAgent.requiresRiskJudgment(goal: "close the window",
+                                                        actionDescription: "hotkey_cmd+w"))
+        XCTAssertTrue(CuaTaskAgent.requiresRiskJudgment(goal: "close the window",
+                                                        actionDescription: "Press cmd+w"))
+        XCTAssertTrue(CuaTaskAgent.requiresRiskJudgment(goal: "trash the file",
+                                                        actionDescription: "Press ⌘⌫"))
+        XCTAssertFalse(CuaTaskAgent.requiresRiskJudgment(goal: "copy the selection",
+                                                         actionDescription: "Press ⌘C"))
+        XCTAssertFalse(CuaTaskAgent.requiresRiskJudgment(goal: "save the document",
+                                                         actionDescription: "hotkey_cmd+s"))
     }
 
     // MARK: - Postcondition ledger

@@ -38,10 +38,14 @@ final class CuaWorkQueue {
         // An admitted owner releases only after its in-flight operation unwinds.
     }
     private func admit() {
+        // Leases key on a normalized identity — "Safari" and "SAFARI" are the
+        // same app; the caller resolves bundle-ids to display names so
+        // "com.apple.Safari" lands on the same lease.
         while active.count < limit,
-              let index = waiting.firstIndex(where: { !active.values.contains($0.app) }) {
+              let index = waiting.firstIndex(where: {
+                  !active.values.contains($0.app.lowercased()) }) {
             let next = waiting.remove(at: index)
-            active[next.id] = next.app
+            active[next.id] = next.app.lowercased()
             next.continuation.resume()
         }
     }

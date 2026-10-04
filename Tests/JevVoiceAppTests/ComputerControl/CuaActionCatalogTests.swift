@@ -17,15 +17,6 @@ final class CuaActionCatalogTests: XCTestCase {
         XCTAssertNil(CuaActionCatalog.explicitBrowserNavigationURL(in: "open the thing"))
     }
 
-    func testSearchNavigationURLRequiresANamedEngineAndPayload() {
-        XCTAssertEqual(CuaActionCatalog.searchNavigationURL(in: "search google for the weather", payload: "the weather"),
-                       "https://www.google.com/search?q=the%20weather")
-        XCTAssertEqual(CuaActionCatalog.searchNavigationURL(in: "bing for flights", payload: "flights"),
-                       "https://www.bing.com/search?q=flights")
-        XCTAssertNil(CuaActionCatalog.searchNavigationURL(in: "search for the weather", payload: "the weather"))
-        XCTAssertNil(CuaActionCatalog.searchNavigationURL(in: "search google", payload: nil))
-    }
-
     func testNegatedKeyboardRequestIsDetected() {
         XCTAssertTrue(CuaActionCatalog.isExplicitlyNegatedKeyboardRequest(in: "do not press the key \"return\""))
         XCTAssertFalse(CuaActionCatalog.isExplicitlyNegatedKeyboardRequest(in: "press the key \"return\""))

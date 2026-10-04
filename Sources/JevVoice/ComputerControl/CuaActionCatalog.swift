@@ -21,15 +21,6 @@ enum CuaActionCatalog {
     /// ("search google for the weather", "bing for flights"). Only a bound
     /// payload becomes the query — an unnamed search stays on the omnibox,
     /// which uses the user's own default engine rather than hardcoding one.
-    static func searchNavigationURL(in goal: String, payload: String?) -> String? {
-        guard let payload, !payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let encoded = payload.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
-        let g = goal.lowercased()
-        if g.contains("google") { return "https://www.google.com/search?q=\(encoded)" }
-        if g.contains("duckduckgo") { return "https://duckduckgo.com/?q=\(encoded)" }
-        if g.contains("bing") { return "https://www.bing.com/search?q=\(encoded)" }
-        return nil
-    }
 
     static func isExplicitlyNegatedKeyboardRequest(in goal: String) -> Bool {
         explicitKeyboardClause(in: goal)?.negated == true

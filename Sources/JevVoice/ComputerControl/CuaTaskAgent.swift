@@ -45,7 +45,6 @@ enum CuaExecutorDecision {
 final class CuaTaskAgent {
     typealias Call = (String, [String: JSONValue]) async throws -> JSONValue
     typealias Judge = (JSONValue, [String: Question]) async throws -> [String: Answer]
-    typealias Generate = (String, String, Bool) async throws -> String
     private let call: Call
     private let approve: ((String) async throws -> Bool)?
     private(set) var bundleID: String?
@@ -177,7 +176,9 @@ final class CuaTaskAgent {
                 // menu-bar app may never show one and "opened" stays honest.
                 _ = try? await waitForLaunchWindow(pid: pid)
             }
-            let rows = (try? await listedWindowRows(pid: pid)) ?? []
+            // A transport fault is not "no windows" — propagate it rather
+            // than skipping the verified-front contract on a dead driver.
+            let rows = try await listedWindowRows(pid: pid)
             if let pinned = windowID,
                !rows.contains(where: { $0["window_id"]?.integer == pinned }) {
                 throw DriverConnectionError.refused("The pinned target window closed. No other window was substituted.")
@@ -506,11 +507,18 @@ final class CuaTaskAgent {
             }
             progress("Minimizing \(name)'s window")
             // A just-shown/just-raised app can still be building its menu bar;
-            // one settle+retry absorbs that without repeating a dispatched act.
+            // one settle+retry absorbs that. Only a rejection retries — the
+            // driver answered, so nothing dispatched. A transport fault means
+            // the first call may have landed; replaying a mutation on a dead
+            // transport is exactly the unsafe retry this surface refuses.
             do {
                 _ = try await call("invoke_menu", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                                    "path": .array([.string("Window"), .string("Minimize")])])
-            } catch {
+            } catch let error as DriverConnectionError {
+                switch error {
+                case .closed, .timedOut, .remote: throw error
+                case .refused, .malformed, .toolRefused, .unavailable: break
+                }
                 try await Task.sleep(for: .milliseconds(400))
                 _ = try await call("invoke_menu", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                                    "path": .array([.string("Window"), .string("Minimize")])])
@@ -690,38 +698,6 @@ final class CuaTaskAgent {
         ["com.google.Chrome", "com.microsoft.edgemac"].contains(bundle)
     }
 
-    /// Approved isolated-profile prepare — the drive loop's escalateBrowser
-    /// seam calls this when the user's own browser refuses automation binding.
-    func prepareIsolatedBrowser(name: String) async throws -> Int {
-        guard let approve,
-              try await approve("Open a new isolated Chrome profile for this request. It does not use your signed-in profile, cookies, or existing tabs.") else {
-            throw DriverConnectionError.refused("Chrome is not prepared for automation. Approve a new isolated browser profile to continue.")
-        }
-        try Task.checkCancellation()
-        let prepared = try await call("browser_prepare", [
-            "allow_launch": .bool(true),
-            "profile": .object(["mode": .string("isolated_new")])
-        ])
-        guard let pid = prepared["prepared_pid"]?.integer, pid > 0 else {
-            throw DriverConnectionError.refused("Cua did not return the isolated browser process for \(name). No browser action was dispatched.")
-        }
-        launchedPID = pid
-        return pid
-    }
-
-    func waitForBrowserWindow(pid: Int) async throws -> Int {
-        for _ in 0..<50 {
-            let result = try await call("list_windows", ["pid": .number(Double(pid))])
-            let windows = result["windows"]?.array ?? []
-            let visible = windows.filter { $0["is_on_screen"] != .bool(false) }
-            let candidates = visible.isEmpty ? windows.filter { !($0["title"]?.string ?? "").isEmpty } : visible
-            if candidates.count == 1, let id = candidates[0]["window_id"]?.integer { return id }
-            if candidates.count > 1 { throw DriverConnectionError.refused("The isolated browser opened several windows. Select the exact target before continuing.") }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        throw DriverConnectionError.refused("The isolated browser window did not become observable. No page action was dispatched.")
-    }
-
     private func waitForLaunchWindow(pid: Int) async throws {
         // Bounded patience for a just-launched first window — a real window
         // materializes in well under a second; a menu-bar app never shows one
@@ -748,57 +724,6 @@ final class CuaTaskAgent {
         throw DriverConnectionError.refused("The launched app did not show an observable window. The launch was not repeated; inspect the app before retrying.")
     }
 
-    /// The operand of an operand-carrying verb phrase — the words destined for
-    /// a field after command wording like "search for", "go to", "type", or
-    /// "run". The last whole-word introducer wins, so "open google and search
-    /// for X" yields X, and "write a note that says Y" yields Y.
-    nonisolated static func requestOperand(in source: String) -> String? {
-        let introducers = ["that says", "says", "search for", "look for", "look up",
-                           "navigate to", "go to", "visit", "google", "search",
-                           "type", "write", "enter", "run", "play", "say", "find"]
-        let lower = source.lowercased()
-        var best: (position: Int, end: String.Index)?
-        for introducer in introducers {
-            var cursor = lower.startIndex
-            while let range = lower.range(of: introducer, range: cursor..<lower.endIndex) {
-                let leftOK = range.lowerBound == lower.startIndex
-                    || !lower[lower.index(before: range.lowerBound)].isLetter
-                let rightOK = range.upperBound == lower.endIndex
-                    || !lower[range.upperBound].isLetter
-                if leftOK && rightOK {
-                    let position = lower.distance(from: lower.startIndex, to: range.lowerBound)
-                    if best == nil || position > best!.position
-                        || (position == best!.position && range.upperBound > best!.end) {
-                        best = (position, range.upperBound)
-                    }
-                }
-                cursor = range.upperBound
-            }
-        }
-        guard let best else { return nil }
-        let tail = source[best.end...].trimmingCharacters(in: .whitespacesAndNewlines)
-        return tail.isEmpty ? nil : tail
-    }
-
-    /// Spoken payload introducers are grammar, not content: "the words hello"
-    /// means the payload "hello". Only fires on the whole-phrase leads a
-    /// dictation request uses — never inside the payload.
-    nonisolated static func stripLiteralIntroducer(_ text: String) -> String {
-        let lead = #"^\s*(?:the\s+)?(?:words?|text|message|phrase|sentence|line|following)\s+|^\s*(?:saying|that\s+says?|which\s+says?)\s+"#
-        guard let range = text.range(of: lead, options: [.regularExpression, .caseInsensitive]) else { return text }
-        let trimmed = text[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? text : trimmed
-    }
-
-    /// A literal span's tail naming the destination app is not payload text.
-    nonisolated static func stripDestinationTail(_ text: String, appName: String?) -> String {
-        guard let appName, !appName.isEmpty else { return text }
-        let tail = #"\s+(?:in|into|at|to)\s+"# + NSRegularExpression.escapedPattern(for: appName) + #"\s*$"#
-        guard let range = text.range(of: tail, options: [.regularExpression, .caseInsensitive]) else { return text }
-        let trimmed = text[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? text : trimmed
-    }
-
     /// Whether an action could have a consequence beyond a reversible local
     /// change — sending, deleting, purchasing, closing/quitting, or security —
     /// and so still needs an approval call. Ordinary clicks, text and
@@ -814,6 +739,13 @@ final class CuaTaskAgent {
                              "replace", "archive", "close", "upload", "download", "export"]
         let actionText = actionDescription.lowercased()
         if consequential.contains(where: { actionText.contains($0) }) { return true }
+        // A hotkey description names no keyword but carries the same effect:
+        // ⌘Q quits, ⌘W closes, ⌘⌫ trashes, ⇧⌘Q signs out, ⇧⌘⌫ empties it.
+        let chords = ["cmd+q", "command+q", "⌘q", "cmd+w", "command+w", "⌘w",
+                      "cmd+delete", "command+delete", "⌘⌫", "cmd+backspace",
+                      "cmd+shift+q", "shift+cmd+q", "cmd+shift+delete",
+                      "shift+cmd+delete", "cmd+option+esc", "command+option+esc"]
+        if chords.contains(where: { actionText.contains($0) }) { return true }
         // A bare confirm keystroke inside a send-style request is the send.
         let goalText = goal.lowercased()
         let sendContext = ["send", "submit", "post", "reply", "publish"].contains { goalText.contains($0) }

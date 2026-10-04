@@ -325,7 +325,11 @@ final class VoiceController: ObservableObject {
         self.dictation = dictation
         self.speaker = speaker
         self.authorize = authorize ?? { await SpeechAnalyzerCapture.requestAuthorization() }
-        self.cua = cuaRuntime ?? CuaVoiceRuntime(config: config)
+        // Production wires the real planner: CompanionBrain re-reads the text
+        // provider per decision, so a missing key degrades to the fast lane +
+        // an honest unavailable message and self-heals once a key is saved.
+        self.cua = cuaRuntime ?? CuaVoiceRuntime(config: config,
+                                               planner: CompanionBrain(settings: .shared))
         self.timings = timings
         self.frontmost = frontmost ?? { NSWorkspace.shared.frontmostApplication?.localizedName }
         lastExternalApp = self.frontmost()

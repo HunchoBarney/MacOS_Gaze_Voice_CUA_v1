@@ -192,16 +192,19 @@ struct CompanionBrain: CompanionPlanning {
                     ?? fields["consumedThrough"]?.integer))
         case "clarify":
             guard let question = field("question") else { throw Failure.malformedDecision }
-            return .clarify(ClarifyRequest(question: question, options: strings("options")))
+            return .clarify(ClarifyRequest(question: question, options: strings("options"),
+                                           consumedThrough: fields["consumed_through"]?.integer))
         case "answer":
             guard let answer = field("text") ?? field("answer") else { throw Failure.malformedDecision }
-            return .answer(text: answer)
+            return .answer(text: answer, consumedThrough: fields["consumed_through"]?.integer)
         case "consent":
             guard let summary = field("summary") else { throw Failure.malformedDecision }
             return .consentNeeded(ConsentRequest(summary: summary,
-                                                 reason: field("reason") ?? "input approval"))
+                                                 reason: field("reason") ?? "input approval"),
+                                  consumedThrough: fields["consumed_through"]?.integer)
         case "refuse":
-            return .refuse(reason: field("reason") ?? "I can't do that.")
+            return .refuse(reason: field("reason") ?? "I can't do that.",
+                           consumedThrough: fields["consumed_through"]?.integer)
         case "delegate":
             guard let message = field("message") else { throw Failure.malformedDecision }
             return .delegate(DelegationRequest(
@@ -209,21 +212,23 @@ struct CompanionBrain: CompanionPlanning {
                 newAgentName: field("new_agent_name") ?? field("newAgentName"),
                 newAgentRole: field("new_agent_role") ?? field("newAgentRole"),
                 newAgentDescription: field("new_agent_description") ?? field("newAgentDescription"),
-                message: message))
+                message: message, consumedThrough: fields["consumed_through"]?.integer))
         case "send_to_agent", "sendToAgent":
             guard let slug = field("slug") ?? field("agent_slug") ?? field("agentSlug"),
                   let message = field("message") else { throw Failure.malformedDecision }
-            return .sendToAgent(slug: slug, message: message)
+            return .sendToAgent(slug: slug, message: message,
+                                consumedThrough: fields["consumed_through"]?.integer)
         case "agent_memory", "agentMemory":
             guard let slug = field("slug") ?? field("agent_slug") ?? field("agentSlug")
             else { throw Failure.malformedDecision }
-            return .agentMemory(slug: slug)
+            return .agentMemory(slug: slug, consumedThrough: fields["consumed_through"]?.integer)
         case "cancel":
             return .cancel(CancelRequest(
                 targetIntentID: uuid("target_intent") ?? uuid("targetIntent"),
                 consumedThrough: fields["consumed_through"]?.integer))
         case "stop_all", "stopAll":
-            return .cancel(CancelRequest(consumedThrough: fields["consumed_through"]?.integer))
+            return .cancel(CancelRequest(consumedThrough: fields["consumed_through"]?.integer,
+                                         stopAll: true))
         case "correct":
             var replacement: TaskSpec?
             if let goal = field("replacement_goal") {
@@ -313,8 +318,10 @@ struct CompanionBrain: CompanionPlanning {
         `questions` lists live pending asks; an `execute` answering one sets \
         `answers_question` to that `id`.
         - An utterance naming several requests ("open Notes then send it") \
-        decides only the first request and sets `consumed_through` to the word \
-        index it ends at; the remainder is judged on its own.
+        decides only the first request and sets `consumed_through` to the \
+        NUMBER OF LEADING WORDS that request covers — a count, not an index; \
+        the remainder is judged on its own. This applies to every decision \
+        type, not only "execute".
         - When `pending_question` is set and the utterance answers it, emit \
         the decision the completed request implies — usually "execute" whose \
         `goal` folds the answer in (the named answer becomes `window` or a \

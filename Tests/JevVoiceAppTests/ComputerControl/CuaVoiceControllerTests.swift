@@ -84,7 +84,9 @@ for line in sys.stdin:
   if name == 'get_browser_state':
    out={'isError':True,'structuredContent':{'refusal':{'code':'browser_route_unavailable'}}}
   else:
-   if name in ('list_apps','get_accessibility_tree'): value={'apps':[{'name':'Fixture','bundle_id':'test.fixture','running':running,'pid':42 if running else 0}]}
+   if name in ('list_apps','get_accessibility_tree'):
+    relaunch=os.path.exists(__file__+'.relaunch')
+    value={'apps':[{'name':'Fixture','bundle_id':'test.fixture','running':running,'pid':(99 if relaunch else 42) if running else 0}]}
    elif name=='launch_app':
     running=True; save_state(); value={'pid':42}
     if DROP_ALWAYS or (DROP_ONCE and not os.path.exists(__file__+'.dropped')): open(__file__+'.dropped','w').write('x'); drop_now=True
@@ -138,6 +140,7 @@ for line in sys.stdin:
         }
         addTeardownBlock {
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".calls"))
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".relaunch"))
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".cursor"))
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".dropped"))
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".typedropped"))
@@ -195,7 +198,7 @@ for line in sys.stdin:
             case "clarify":
                 return .clarify(ClarifyRequest(question: "What would you like me to do?"))
             case "stopAll":
-                return .cancel(CancelRequest(targetIntentID: nil, consumedThrough: consumed))
+                return .cancel(CancelRequest(consumedThrough: consumed, stopAll: true))
             case "stop":
                 let target = selectedIntentID()
                     ?? context.tasks.last(where: { $0.status == "executing" || $0.status == "pending" })?.intentID
@@ -581,6 +584,47 @@ for line in sys.stdin:
         let state = try XCTUnwrap(JSONSerialization.jsonObject(with: stateData) as? [String: Bool])
         XCTAssertEqual(state["running"], false, "A correction must inspect the live process and reverse only the unchanged task-owned launch")
         XCTAssertEqual(controller.cuaTasks.dropFirst().first?.message, "Closed only the unchanged app launched by that task.")
+        await controller.shutdown()
+    }
+
+    /// A relaunched app (same bundle, different pid) is not the process the
+    /// task owned — the reversal must leave it alone and dispatch nothing.
+    func testCorrectionNeverReversesARelaunchedProcess() async throws {
+        let (controller, capture, file, _) = try setup(windowedFixture: true, persistFixture: true,
+            operations: ["execute", "correction"], spanEnds: [2, 5], taskScopes: ["launch", "launch"],
+            correctionModes: ["retract", "retract"])
+        let callsFile = URL(fileURLWithPath: file.path + ".calls")
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: callsFile)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: file.path + ".state"))
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: file.path + ".relaunch"))
+        }
+        controller.begin(); try await until { controller.status == .listening }
+        capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture", isFinal: true))
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+
+        // The recorded pid dies; a substitute instance (same bundle, pid 99)
+        // stands in its place — the correction must not touch it.
+        FileManager.default.createFile(atPath: file.path + ".relaunch", contents: Data())
+        capture.emitRevision(.init(start: 1, end: 2, text: " undo that launch", isFinal: true))
+        try await until { controller.cuaTasks.count == 2 }
+        guard controller.cuaTasks.count == 2 else {
+            XCTFail("The executor did not schedule the correction request: \(controller.cua.speech.error ?? controller.cua.speech.message)")
+            await controller.shutdown()
+            return
+        }
+        try await until { controller.cuaTasks.count > 1 && (controller.cuaTasks[1].approval != nil || !controller.cuaTasks[1].active) }
+        if controller.cuaTasks.count > 1, controller.cuaTasks[1].approval != nil {
+            controller.cua.resolveApproval(controller.cuaTasks[1].id, approved: true)
+        }
+        try await until { controller.cuaTasks.allSatisfy { !$0.active } }
+
+        XCTAssertEqual(controller.cuaTasks.dropFirst().first?.message,
+                       "Nothing to undo — the app is no longer running.")
+        let calls = (try? String(contentsOf: callsFile, encoding: .utf8)) ?? ""
+        XCTAssertFalse(calls.contains("invoke_menu"),
+                       "A relaunched process is not task-owned — no quit may dispatch to it")
         await controller.shutdown()
     }
 
