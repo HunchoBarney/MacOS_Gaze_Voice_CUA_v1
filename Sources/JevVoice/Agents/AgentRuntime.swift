@@ -9,17 +9,25 @@ import JevVoiceCore
 final class AgentDriveExecutor: DriveExecuting {
     private let connection: CuaConnection
     private let apiKey: @Sendable () -> String
+    private let sessionLabel: String?
     private let progress: @Sendable (String) -> Void
 
     init(connection: CuaConnection, apiKey: @escaping @Sendable () -> String,
+         sessionLabel: String? = nil,
          progress: @escaping @Sendable (String) -> Void = { _ in }) {
-        self.connection = connection; self.apiKey = apiKey; self.progress = progress
+        self.connection = connection; self.apiKey = apiKey
+        self.sessionLabel = sessionLabel; self.progress = progress
     }
 
     func drive(_ task: DriveTask) async throws -> DriveResult {
         let connection = self.connection, apiKey = self.apiKey
+        let sessionLabel = self.sessionLabel
         let loop = CuaAgentLoop(
-            call: { name, args in try await connection.call(name, arguments: args) },
+            call: { name, args in
+                var merged = args
+                if let sessionLabel { merged["session"] = .string(sessionLabel) }
+                return try await connection.call(name, arguments: merged)
+            },
             judge: { state, questions in
                 try await JevClient(apiKey: apiKey()).systemOne(state: state, questions: questions)
                     .response.answers
@@ -69,7 +77,7 @@ final class AgentRuntime: ObservableObject {
     /// through resolveConsent so marker asks stay runtime-owned.
     let gate: ComputerUseGate
     private let connection: CuaConnection
-    private let executor: AgentDriveExecutor
+    private let apiKey: @Sendable () -> String
     private let registry = EndpointRegistry()
     private var endpoints: [String: Endpoints] = [:]
     private var markerAsks: [ConsentRequest] = []
@@ -105,8 +113,7 @@ final class AgentRuntime: ObservableObject {
         self.scheduler = RoutineScheduler(fire: { slug, routine in
             await fireBox.fire?(slug, routine)
         })
-        executor = AgentDriveExecutor(connection: connection, apiKey: apiKey,
-                                      progress: { _ in })
+        self.apiKey = apiKey
         fireBox.fire = { [weak self] slug, routine in
             await self?.fireRoutine(slug: slug, routine: routine)
         }
@@ -163,6 +170,16 @@ final class AgentRuntime: ObservableObject {
     /// workspace repairs it.
     private func ensureEndpoints(for agent: CompanionAgent) async throws {
         guard endpoints[agent.slug] == nil else { return }
+        let sessionLabel = "agent-" + agent.slug
+        // The driver's session owns the visible per-agent cursor: session
+        // color + name badge follow every action this agent dispatches.
+        _ = try? await connection.call("start_session",
+                                       arguments: ["session": .string(sessionLabel)])
+        _ = try? await connection.call("set_agent_cursor_enabled",
+                                       arguments: ["session": .string(sessionLabel),
+                                                   "enabled": .bool(true)])
+        let executor = AgentDriveExecutor(connection: connection, apiKey: apiKey,
+                                          sessionLabel: sessionLabel)
         let jev = JevUseMCPServer(executor: executor, consent: gate, agentSlug: agent.slug)
         let jevServer = jev.server()
         let cuServer = gate.server(agentSlug: agent.slug)

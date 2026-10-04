@@ -100,6 +100,11 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
             }
             args["delivery_mode"] = .string(ConsentContract.requiredDeliveryMode)
         }
+        if let agentSlug, args["session"] == nil {
+            // Per-agent driver session — the badge + session-colored cursor
+            // the driver renders is this agent's visible identity.
+            args["session"] = .string("agent-" + agentSlug)
+        }
         return await forward(name, args)
     }
 
