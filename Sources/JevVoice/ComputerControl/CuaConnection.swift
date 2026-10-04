@@ -220,7 +220,14 @@ actor CuaConnection {
     private func startEmbeddedDaemon() async throws {
         let socket = Self.embeddedSocketPath()
         try? FileManager.default.removeItem(atPath: socket)
-        var environment = ProcessInfo.processInfo.environment
+        // Env allowlist only — never inherit host secrets or ambient
+        // CUA_DRIVER_* vars (an exported DANGEROUSLY_BYPASS_APPROVALS would
+        // break startup; the SDK's env_clear + allowlist contract).
+        var environment: [String: String] = [:]
+        for key in ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "USER", "SHELL",
+                    "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "__CF_USER_TEXT_ENCODING"] {
+            if let value = ProcessInfo.processInfo.environment[key] { environment[key] = value }
+        }
         environment["CUA_DRIVER_EMBEDDED"] = "1"
         environment["CUA_DRIVER_HOST_BUNDLE_ID"] = CuaDependency.hostBundleID
         environment["CUA_DRIVER_EMBEDDED_HOST_PID"] = "\(ProcessInfo.processInfo.processIdentifier)"
