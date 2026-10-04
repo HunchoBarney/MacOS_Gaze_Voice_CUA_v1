@@ -253,6 +253,13 @@ final class VoiceController: ObservableObject {
         cua.tasks.last { $0.intentID == intentID }?.label ?? "intent \(shortID(intentID))"
     }
     private let speech: SpeechCapturing
+    private let dictation: DictationDelivering
+    /// Spoken replies seam — nil or Config.ttsEnabled=false stays silent.
+    var speaker: SpeechSynthesizing?
+    /// Consent yes/no binding: the runtime reports the single pending ask and
+    /// consumes the resolution (e.g. gate.approve / gate.deny).
+    var pendingConsent: () -> ConsentRequest? = { nil }
+    var onConsentResolution: (ConsentRequest, Bool) -> Void = { _, _ in }
     private let authorize: () async -> Bool
     private let timings: VoiceTimings
     private let frontmost: () -> String?
@@ -261,6 +268,8 @@ final class VoiceController: ObservableObject {
     private var commandFrontmostApp: String?
     private var sessionID: UUID?
     private var held = false
+    private var dictating = false
+    private var latchRelease = false
     private var automatic = true
     private var microphoneTask: Task<Void, Never>?
     private var microphoneEnabled = true
@@ -303,10 +312,14 @@ final class VoiceController: ObservableObject {
     init(config: Config? = nil, speech: SpeechCapturing? = nil,
          authorize: (() async -> Bool)? = nil,
          timings: VoiceTimings = VoiceTimings(), frontmost: (() -> String?)? = nil,
-         cuaRuntime: CuaVoiceRuntime? = nil) {
+         cuaRuntime: CuaVoiceRuntime? = nil,
+         dictation: DictationDelivering = DictationDelivery(),
+         speaker: SpeechSynthesizing? = nil) {
         let config = config ?? Config.shared
         self.config = config
         self.speech = speech ?? SpeechAnalyzerCapture()
+        self.dictation = dictation
+        self.speaker = speaker
         self.authorize = authorize ?? { await SpeechAnalyzerCapture.requestAuthorization() }
         self.cua = cuaRuntime ?? CuaVoiceRuntime(config: config)
         self.timings = timings
@@ -378,12 +391,40 @@ final class VoiceController: ObservableObject {
         guard !operationActive else { return }
         fail(message)
     }
-    func begin(inputHandlingMs: Double? = nil) {
+    func begin(inputHandlingMs: Double? = nil) { begin(inputHandlingMs: inputHandlingMs, dictating: false) }
+
+    /// Fn+Ctrl dictation: the same capture pipeline, but the transcript is
+    /// delivered as literal text — no planner call ever sees it.
+    func beginDictation() {
+        guard config.dictationHotkey else { return }
+        begin(dictating: true)
+    }
+
+    /// Ctrl joined an armed Fn hold — the rest of this capture is dictation.
+    func dictate() {
+        guard config.dictationHotkey, !dictating else { return }
+        guard status == .starting || status == .listening else { return }
+        dictating = true
+        cua.cancelCapture()
+        trace("dictation_mid_hold")
+    }
+
+    /// A tap-short Fn release with latch mode on: keep the capture listening;
+    /// the monitor's `.finish` that follows is consumed here.
+    func latchHold() {
+        guard config.latchMode, status == .starting || status == .listening else { return }
+        latchRelease = true
+        held = false
+        trace("latch_hold")
+    }
+
+    private func begin(inputHandlingMs: Double? = nil, dictating: Bool) {
         guard canBegin else { return }
         let priorStart = startupTask
         priorStart?.cancel()
         speech.cancel()
         isMicrophoneTest = false
+        self.dictating = dictating
         held = true
         let id = newSession()
         if let inputHandlingMs { measurements["Fn handler"] = inputHandlingMs }
@@ -423,6 +464,9 @@ final class VoiceController: ObservableObject {
     func finish() {
         trace("fn_up")
         held = false
+        // A latch release keeps the capture listening; the next Fn tap
+        // arrives as a plain `.finish` and ends it below.
+        guard !latchRelease else { latchRelease = false; return }
         durationTask?.cancel(); durationTask = nil
         switch status {
         case .starting: cancel()
@@ -460,6 +504,7 @@ final class VoiceController: ObservableObject {
         startupTask?.cancel()
         speech.cancel()
         isMicrophoneTest = false
+        dictating = false
         held = false
         let id = newSession()
         commandFrontmostApp = lastExternalApp
@@ -528,7 +573,7 @@ final class VoiceController: ObservableObject {
     func startMicrophoneTest() {
         guard canBegin, !isMicrophoneTest else { return }
         let id = newSession()
-        held = false; isMicrophoneTest = true; status = .starting
+        held = false; isMicrophoneTest = true; dictating = false; status = .starting
         let selectedUID = config.microphoneUID
         startupTask = Task { [weak self] in
             guard let self else { return }
@@ -555,6 +600,9 @@ final class VoiceController: ObservableObject {
 
     private func newSession() -> UUID {
         deadlineTask?.cancel(); durationTask?.cancel(); hideTask?.cancel()
+        latchRelease = false
+        // A new capture barges in on any spoken reply.
+        speaker?.stop()
         let id = UUID(); sessionID = id
         automatic = config.autoExecute
         transcript = ""; detail = ""; resultMessage = ""; audioLevel = 0
@@ -574,20 +622,21 @@ final class VoiceController: ObservableObject {
             Self.voiceLog.notice("capture=\(id.uuidString, privacy: .public) timing=\(name, privacy: .public) milliseconds=\(milliseconds)")
         case .level(let level): audioLevel = level
         case .transcript(let snapshot):
-            cua.speech.record(snapshot)
+            // Dictation feeds the delivery path only — the planner never sees it.
+            if !dictating { cua.speech.record(snapshot) }
             let text = snapshot.text
             // Finality can change without changing any characters.
             transcript = text
             trace(snapshot.segments.last?.isFinal == true ? "recognition_final_segment" : "recognition_volatile_segment")
             if measurements["First partial"] == nil { measurements["First partial"] = (ProcessInfo.processInfo.systemUptime - beganAt) * 1000 }
-            if automatic {
+            if automatic, !dictating {
                 cua.update(text, final: false)
             }
         case .partial(let text):
             guard text != transcript else { return }
             transcript = text
             if measurements["First partial"] == nil { measurements["First partial"] = (ProcessInfo.processInfo.systemUptime - beganAt) * 1000 }
-            if automatic {
+            if automatic, !dictating {
                 cua.update(text, final: false)
             }
         case .final(let text):
@@ -597,7 +646,9 @@ final class VoiceController: ObservableObject {
             deadlineTask?.cancel(); durationTask?.cancel()
             if held {
                 cua.cancelCapture()
-                detail = "Recognition ended before you released Fn. Release the key, then review the text."
+                detail = dictating
+                    ? "Recognition ended before you released Fn. Release to insert what was captured."
+                    : "Recognition ended before you released Fn. Release the key, then review the text."
                 status = .awaitingRelease
             } else {
                 measurements["Transcript finalized"] = (ProcessInfo.processInfo.systemUptime - releasedAt) * 1000
@@ -616,6 +667,16 @@ final class VoiceController: ObservableObject {
     }
 
     private func showTranscriptReview() {
+        // Dictation never waits on a review — literal text goes straight to
+        // the focused field; nothing usable means nothing delivered.
+        if dictating {
+            if let id = sessionID, !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                deliver(transcript, session: id)
+            } else {
+                cancelCaptureAttempt()
+            }
+            return
+        }
         cua.cancelCapture()
         if automatic {
             do { transcript = try cua.speech.reviewRemainder(transcript) }
@@ -634,12 +695,63 @@ final class VoiceController: ObservableObject {
             cancelCaptureAttempt()
             return
         }
+        if dictating {
+            deliver(text, session: id)
+            return
+        }
+        // A bare yes/no with exactly one pending consent ask is a resolution,
+        // not an utterance — surfaced through the runtime's hook.
+        if let request = pendingConsent(), let approved = Self.consentAnswer(text) {
+            onConsentResolution(request, approved)
+            complete(approved ? "Approved." : "Denied.", session: id)
+            return
+        }
         if automatic { status = .executing; cua.update(text, final: true) }
         else { status = .awaitingConfirm; detail = "Run this request through Cua?" }
     }
 
+    /// Literal delivery to the focused editable element via the
+    /// DictationDelivering seam — no intent is recorded for it.
+    private func deliver(_ text: String, session id: UUID) {
+        status = .executing
+        detail = "Dictating into the focused field…"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.dictation.deliver(text)
+                guard self.sessionID == id else { return }
+                self.complete("Dictated into the focused field.", session: id)
+            } catch {
+                guard self.sessionID == id else { return }
+                self.fail(error.localizedDescription)
+            }
+        }
+    }
+
+    /// A bare yes/no — normalized against punctuation — that resolves the
+    /// single pending consent ask. Anything richer routes through the planner.
+    static func consentAnswer(_ text: String) -> Bool? {
+        let normalized = text.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .punctuationCharacters)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        switch normalized {
+        case "yes", "yeah", "yep": return true
+        case "no", "nope", "nah": return false
+        default: return nil
+        }
+    }
+
+    /// Spoken replies go through the SpeechSynthesizing seam only; dictation
+    /// completions stay silent since the text lands where the user is looking.
+    private func speak(_ text: String) {
+        guard config.ttsEnabled, !text.isEmpty else { return }
+        speaker?.speak(text)
+    }
+
     private func complete(_ message: String, session id: UUID) {
         resultMessage = message
+        if !dictating { speak(message) }
         status = .done
         hideTask = Task { [weak self] in
             guard let self else { return }
@@ -673,6 +785,9 @@ final class VoiceController: ObservableObject {
             }
             return
         }
+        // Dictation's executing/done projection belongs to the delivery path —
+        // unrelated task state must not complete it early.
+        guard !dictating else { return }
         // Only the interaction-driven presentation states are re-projected here.
         // Capture-owned and rest states keep whatever they already present.
         switch status {
@@ -683,6 +798,7 @@ final class VoiceController: ObservableObject {
         // A pending clarification is a normal question state, not a failure.
         if let question = interactionQuestion {
             detail = question.prompt
+            speak(question.prompt)
             status = .awaitingAnswer(question.prompt)
             return
         }
@@ -690,6 +806,7 @@ final class VoiceController: ObservableObject {
             // A clarification that could not be recorded as an intent still
             // presents as a question, never through the error path.
             detail = cua.speech.message
+            speak(cua.speech.message)
             status = .awaitingAnswer(cua.speech.message)
             return
         }

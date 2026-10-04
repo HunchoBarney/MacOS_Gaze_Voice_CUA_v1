@@ -28,6 +28,23 @@ final class Config: ObservableObject {
         didSet { defaults.set(agentCursorEnabled, forKey: "agentCursorEnabled") }
     }
 
+    /// Spoken replies through the SpeechSynthesizing seam.
+    @Published var ttsEnabled: Bool {
+        didSet { defaults.set(ttsEnabled, forKey: "ttsEnabled") }
+    }
+
+    /// Tap Fn to start capture, tap again to stop — hold-to-talk stays the
+    /// default when off.
+    @Published var latchMode: Bool {
+        didSet { defaults.set(latchMode, forKey: "latchMode") }
+    }
+
+    /// Fn+Ctrl hold dictates literal text into the focused field instead of
+    /// running an intent.
+    @Published var dictationHotkey: Bool {
+        didSet { defaults.set(dictationHotkey, forKey: "dictationHotkey") }
+    }
+
     init(
         defaults: UserDefaults = .standard,
         keyStore: APIKeyStore = KeychainAPIKeyStore(),
@@ -42,6 +59,9 @@ final class Config: ObservableObject {
             : defaults.double(forKey: "confidenceThreshold")
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? false
+        self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
+        self.latchMode = defaults.object(forKey: "latchMode") as? Bool ?? false
+        self.dictationHotkey = defaults.object(forKey: "dictationHotkey") as? Bool ?? true
 
         do {
             if let stored = try keyStore.read() {
