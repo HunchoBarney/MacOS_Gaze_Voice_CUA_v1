@@ -103,10 +103,26 @@ for line in sys.stdin:
                     }
                     result[item.key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
                 }
-            }, screenLocked: { false })
+            }, planner: OperationPlanner(decide: { @Sendable utterance, _ in
+                judged(utterance)
+                if operation == "execute" {
+                    return .execute(TaskSpec(goal: utterance,
+                                             application: inventoryApp ? "Fixture" : nil,
+                                             scope: .work))
+                }
+                return .refuse(reason: "ignored")
+            }), screenLocked: { false })
         return VoiceController(config: config, speech: speech, authorize: { true },
                                frontmost: { "Fixture" }, cuaRuntime: runtime,
                                dictation: dictation, speaker: speaker)
+    }
+    /// Maps each submitted utterance to the scripted operation and reports it —
+    /// the decision seam the removed judge battery used to expose.
+    private struct OperationPlanner: CompanionPlanning {
+        let decide: @Sendable (String, PlannerContext) -> PlannerDecision
+        func decide(utterance: String, context: PlannerContext) async throws -> PlannerDecision {
+            decide(utterance, context)
+        }
     }
     private func settle() async { for _ in 0..<50 { await Task.yield() } }
     private func settleUntil(_ c: VoiceController, _ status: VoiceController.Status) async {
@@ -182,7 +198,10 @@ for line in sys.stdin:
         speech.emit(.final("open Fixture"))
         await settleUntil(c, .done)
         XCTAssertEqual(dictation.delivered, ["open Fixture"])
-        XCTAssertEqual(judged, 1)
+        // The decision fired exactly once — the deterministic fast lane may
+        // answer without a planner call, which is still one decision.
+        XCTAssertLessThanOrEqual(judged, 1)
+        XCTAssertEqual(c.cuaTasks.count, 1)
         await c.shutdown()
     }
 

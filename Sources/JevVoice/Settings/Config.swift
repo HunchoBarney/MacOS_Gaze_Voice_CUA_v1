@@ -14,10 +14,6 @@ final class Config: ObservableObject {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
     }
 
-    @Published var confidenceThreshold: Double {
-        didSet { defaults.set(confidenceThreshold, forKey: "confidenceThreshold") }
-    }
-
     @Published var autoExecute: Bool {
         didSet { defaults.set(autoExecute, forKey: "autoExecute") }
     }
@@ -54,9 +50,6 @@ final class Config: ObservableObject {
         self.keyStore = keyStore
         self.apiKey = environment["TYPESAFE_API_KEY"] ?? ""
         self.microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
-        self.confidenceThreshold = defaults.object(forKey: "confidenceThreshold") == nil
-            ? 0.7
-            : defaults.double(forKey: "confidenceThreshold")
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true

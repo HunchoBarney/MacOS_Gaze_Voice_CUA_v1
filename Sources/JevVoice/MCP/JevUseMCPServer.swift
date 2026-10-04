@@ -124,6 +124,8 @@ struct JevUseMCPServer: Sendable {
         case .handedBack(let handBack): status = "handed_back"; reason = handBack.rawValue
         case .blocked(let message): status = "blocked"; reason = message
         case .needsText(let field): status = "needs_text"; reason = field
+        case .needsWindow(let candidates):
+            status = "needs_window"; reason = candidates.joined(separator: ", ")
         case .blockedByConsent(let message): status = "blocked_by_consent"; reason = message
         case .maxSteps: status = "max_steps"
         case .cancelled: status = "cancelled"

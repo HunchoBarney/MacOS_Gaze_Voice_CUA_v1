@@ -129,13 +129,10 @@ final class ConfigTests: XCTestCase {
 
     func testNonSecretPreferencesStillPersistInDefaults() {
         let config = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), environment: [:])
-        XCTAssertEqual(config.confidenceThreshold, 0.7)
         XCTAssertTrue(config.autoExecute)
-        config.confidenceThreshold = 0.85
         config.autoExecute = false
 
         let reloaded = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), environment: [:])
-        XCTAssertEqual(reloaded.confidenceThreshold, 0.85)
         XCTAssertFalse(reloaded.autoExecute)
     }
 }
