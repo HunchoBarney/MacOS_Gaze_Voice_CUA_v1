@@ -71,6 +71,10 @@ public actor CodexRuntimeBridge {
 
     private let configuration: Configuration
     private var sessions: [String: Session] = [:]
+    /// Cold starts in flight — a second send for the same slug awaits the
+    /// first's spawn instead of binding a second app-server to the same
+    /// CODEX_HOME/thread.
+    private var starting: [String: Task<Session, Error>] = [:]
     public nonisolated let events: AsyncStream<AgentCodexEvent>
     private let eventContinuation: AsyncStream<AgentCodexEvent>.Continuation
 
@@ -79,6 +83,18 @@ public actor CodexRuntimeBridge {
         var continuation: AsyncStream<AgentCodexEvent>.Continuation!
         events = AsyncStream { continuation = $0 }
         eventContinuation = continuation
+    }
+
+    /// In-flight spawns retain the bridge, so a deinit means only registered
+    /// sessions can still be live — cancel forwarders and terminate children.
+    /// App quit should still call `stopAll()` for deterministic teardown.
+    deinit {
+        for session in sessions.values {
+            session.forwarder.cancel()
+            let client = session.client
+            Task { await client.close() }
+        }
+        eventContinuation.finish()
     }
 
     /// Lazily spawns (or reuses) the agent's app-server and returns its live
@@ -96,7 +112,11 @@ public actor CodexRuntimeBridge {
         var session = try await self.session(for: agent)
         let turnID = try await session.client.startTurn(threadID: session.threadID, text: message)
         session.activeTurnID = turnID
-        sessions[agent.slug] = session
+        // Write back only while this is still the registered session — a
+        // concurrent sessionEnded/stop must not be resurrected.
+        if sessions[agent.slug]?.client === session.client {
+            sessions[agent.slug] = session
+        }
         return turnID
     }
 
@@ -112,23 +132,41 @@ public actor CodexRuntimeBridge {
     /// Escape hatch: the live protocol client for a running agent session.
     public func client(slug: String) -> CodexProtocolClient? { sessions[slug]?.client }
 
-    /// Tears the agent's app-server down; the next send respawns it.
+    /// Tears the agent's app-server down; the next send respawns it. A stop
+    /// requested while a cold start is in flight cancels the spawn — the
+    /// late session never registers and its process is closed.
     public func stop(slug: String) {
+        starting[slug]?.cancel()
         guard let session = sessions.removeValue(forKey: slug) else { return }
+        teardown(session)
+    }
+
+    public func stopAll() {
+        for slug in Set(sessions.keys).union(starting.keys) { stop(slug: slug) }
+    }
+
+    private func teardown(_ session: Session) {
         session.forwarder.cancel()
         Task { await session.client.close() }
     }
 
-    public func stopAll() {
-        for slug in Array(sessions.keys) { stop(slug: slug) }
+    private func session(for agent: CompanionAgent) async throws -> Session {
+        let slug = agent.slug
+        if let session = sessions[slug], await session.client.connected { return session }
+        // A cold start is already running — share its outcome rather than
+        // spawn a twin app-server against the same CODEX_HOME.
+        if let pending = starting[slug] { return try await pending.value }
+        if let stale = sessions.removeValue(forKey: slug) { teardown(stale) }
+        let task = Task<Session, Error> { [self] in try await spawnAndRegister(agent) }
+        starting[slug] = task
+        defer { starting.removeValue(forKey: slug) }
+        return try await task.value
     }
 
-    private func session(for agent: CompanionAgent) async throws -> Session {
-        if let session = sessions[agent.slug], await session.client.connected { return session }
-        if let stale = sessions.removeValue(forKey: agent.slug) {
-            stale.forwarder.cancel()
-            Task { await stale.client.close() }
-        }
+    /// Spawns the app-server, binds/resumes the thread, then registers —
+    /// re-checking cancellation at the last point so a stop() that landed
+    /// mid-spawn closes the session instead of publishing it.
+    private func spawnAndRegister(_ agent: CompanionAgent) async throws -> Session {
         try writeConfig(for: agent)
         var environment = configuration.environment
         environment["CODEX_HOME"] = agent.codexHomePath
@@ -139,6 +177,9 @@ public actor CodexRuntimeBridge {
         let continuation = eventContinuation
         let forwarder = Task { [weak self] in
             for await event in client.events {
+                if case .turnCompleted(_, let turn) = event {
+                    await self?.turnEnded(slug: slug, client: client, turnID: turn.id)
+                }
                 continuation.yield(AgentCodexEvent(agentSlug: slug, event: event))
             }
             await self?.sessionEnded(slug: slug, client: client)
@@ -160,6 +201,7 @@ public actor CodexRuntimeBridge {
             }
             let session = Session(client: client, threadID: threadID,
                                   activeTurnID: nil, forwarder: forwarder)
+            try Task.checkCancellation()
             sessions[slug] = session
             return session
         } catch {
@@ -167,6 +209,13 @@ public actor CodexRuntimeBridge {
             await client.close()
             throw error
         }
+    }
+
+    /// Clears the completed turn so a later interrupt() can't hit a stale id.
+    private func turnEnded(slug: String, client: CodexProtocolClient, turnID: String) {
+        guard sessions[slug]?.client === client,
+              sessions[slug]?.activeTurnID == turnID else { return }
+        sessions[slug]?.activeTurnID = nil
     }
 
     /// Only clears the registry when the finished stream belongs to the
@@ -177,9 +226,9 @@ public actor CodexRuntimeBridge {
         sessions.removeValue(forKey: slug)
     }
 
-    /// config.toml — Clicky parity: custom provider, apikey auth, never ask
-    /// for approval, workspace-scoped writes plus loopback network for the
-    /// computer-use/jev-use MCP servers.
+    /// config.toml — Clicky parity: custom provider authenticated via env_key,
+    /// never ask for approval, workspace-scoped writes plus loopback network
+    /// for the computer-use/jev-use MCP servers.
     private func writeConfig(for agent: CompanionAgent) throws {
         let home = URL(fileURLWithPath: agent.codexHomePath, isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -193,7 +242,6 @@ public actor CodexRuntimeBridge {
         var toml = """
         model = \(tomlString(provider.model))
         model_provider = \(tomlString(provider.name))
-        preferred_auth_method = "apikey"
         approval_policy = "never"
         sandbox_mode = "workspace-write"
 

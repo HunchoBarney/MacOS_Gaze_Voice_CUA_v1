@@ -204,6 +204,16 @@ final class AgentMarkersTests: XCTestCase {
         let text = "All set. <ROUTINE>{\"action\":\"create\",\"every_minutes\":5,\"task\":\"t\"}</ROUTINE> <COMPUTER_USE_REQUEST>ok?</> Cheers."
         XCTAssertEqual(AgentMarkers.strippingMarkers(text), "All set.   Cheers.")
     }
+
+    func testStrippingMarkersCutsDanglingOpenTagToEnd() {
+        XCTAssertEqual(AgentMarkers.strippingMarkers("Reply text. <ROUTINE>{\"action\":\"cre"),
+                       "Reply text.")
+        XCTAssertEqual(AgentMarkers.strippingMarkers("Done. <COMPUTER_USE_REQUEST>cl"),
+                       "Done.")
+        // A complete pair still strips; a later dangling tag cuts the tail.
+        let text = "a <ROUTINE>{\"action\":\"pause\",\"routine_id\":\"r\"}</ROUTINE> b <COMPUTER_USE_REQUEST>leak"
+        XCTAssertEqual(AgentMarkers.strippingMarkers(text), "a  b")
+    }
 }
 
 final class AgentWorkspaceTests: XCTestCase {
@@ -312,6 +322,51 @@ final class RoutineSchedulerTests: XCTestCase {
         XCTAssertEqual(fired, ["desk:on"])
         await scheduler.stopAll()
     }
+
+    func testEveryMinutesBelowTwoIsRefused() async throws {
+        let counter = Counter()
+        let scheduler = RoutineScheduler(firstRunImmediate: true) { slug, routine in
+            await counter.bump("\(slug):\(routine.id)")
+        }
+        let agent = CompanionAgent(slug: "desk", name: "d", role: "r", description: "x",
+                                   workspacePath: "/tmp", codexHomePath: "/tmp/h",
+                                   routines: [
+                                    Routine(id: "too-fast", everyMinutes: 1, task: "t"),
+                                    Routine(id: "zero", everyMinutes: 0, task: "t"),
+                                    Routine(id: "ok", everyMinutes: 2, task: "t"),
+                                   ])
+        await scheduler.sync(agents: [agent])
+        for _ in 0..<20 where await counter.fired.isEmpty {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let fired = await counter.fired
+        XCTAssertEqual(fired, ["desk:ok"])
+        await scheduler.stopAll()
+    }
+
+    /// Two schedule() calls on one key must not leave an orphaned repeater —
+    /// a ghost second timer would roughly double the fire rate.
+    func testRescheduleSameKeyLeavesNoGhostTimer() async throws {
+        let counter = Counter()
+        let scheduler = RoutineScheduler { slug, routine in
+            await counter.bump("\(slug):\(routine.id)")
+        }
+        let routine = Routine(id: "r1", everyMinutes: 5, task: "sweep")
+        await scheduler.schedule(key: "a\u{1F}r1", slug: "a", routine: routine,
+                                 interval: 0.1, fireNow: false)
+        // Re-attach within the same runloop hop — the first timer's attach
+        // lands after its entry was replaced and must be invalidated.
+        await scheduler.schedule(key: "a\u{1F}r1", slug: "a", routine: routine,
+                                 interval: 0.1, fireNow: false)
+        try await Task.sleep(for: .milliseconds(500))
+        let first = await counter.fired.count
+        try await Task.sleep(for: .milliseconds(400))
+        let delta = await counter.fired.count - first
+        // One 0.1s timer over 0.4s ≈ 4 fires; a ghost doubles it to ~8.
+        XCTAssertGreaterThanOrEqual(delta, 2)
+        XCTAssertLessThanOrEqual(delta, 6)
+        await scheduler.stopAll()
+    }
 }
 
 final class CodexRuntimeBridgeTests: XCTestCase {
@@ -335,5 +390,125 @@ final class CodexRuntimeBridgeTests: XCTestCase {
         XCTAssertTrue(toml.contains("[mcp_servers.\"jev-use\"]"))
         // Secrets travel via process env only — never into the TOML.
         XCTAssertFalse(toml.contains("sk-"))
+    }
+
+    func testChildEnvironmentIsAllowlisted() {
+        let env = CodexProtocolClient.filteredEnvironment(
+            parent: ["PATH": "/usr/bin", "HOME": "/u", "LANG": "en_US.UTF-8",
+                     "LC_ALL": "C", "TMPDIR": "/tmp/x", "USER": "u", "SHELL": "/bin/zsh",
+                     "XDG_CONFIG_HOME": "/c", "XDG_DATA_HOME": "/d",
+                     "__CF_USER_TEXT_ENCODING": "0x0",
+                     "AWS_SECRET_ACCESS_KEY": "leak", "OPENAI_API_KEY": "sk-host",
+                     "GITHUB_TOKEN": "ghp_host"],
+            injected: ["JEV_OPENAI_API_KEY": "sk-child", "JEV_CU_TOKEN": "t",
+                       "CODEX_HOME": "/home"])
+        XCTAssertEqual(env["PATH"], "/usr/bin")
+        XCTAssertEqual(env["XDG_CONFIG_HOME"], "/c")
+        XCTAssertEqual(env["__CF_USER_TEXT_ENCODING"], "0x0")
+        XCTAssertEqual(env["JEV_OPENAI_API_KEY"], "sk-child")
+        XCTAssertEqual(env["CODEX_HOME"], "/home")
+        for leaked in ["AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN"] {
+            XCTAssertNil(env[leaked], leaked)
+        }
+    }
+
+    /// Executable python fixture standing in for `codex app-server` — one
+    /// READY line per spawn lets tests count processes, and a slow
+    /// initialize widens the cold-start race window.
+    private func bridgeFixture() throws -> URL {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-bridge-fixture-\(UUID().uuidString)")
+        try #"""
+#!/usr/bin/python3
+import json,sys,time
+print('READY', file=sys.stderr, flush=True)
+for line in sys.stdin:
+    req=json.loads(line)
+    m=req.get('method'); id=req.get('id')
+    if m=='initialize':
+        time.sleep(0.3)
+        print(json.dumps({'id':id,'result':{'codexHome':'/tmp/mock'}}),flush=True)
+    elif m=='initialized':
+        continue
+    elif m=='thread/start':
+        print(json.dumps({'id':id,'result':{'thread':{'id':'thr-'+str(id)}}}),flush=True)
+    elif m=='thread/resume':
+        print(json.dumps({'id':id,'result':{'thread':{'id':req['params']['threadId']}}}),flush=True)
+    elif m=='turn/start':
+        print(json.dumps({'id':id,'result':{'turn':{'id':'turn-'+str(id),'status':'inProgress'}}}),flush=True)
+    else:
+        print(json.dumps({'id':id,'result':{}}),flush=True)
+"""#.write(to: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
+        return path
+    }
+
+    private actor LineCounter {
+        var lines: [String] = []
+        func bump(_ line: String) { lines.append(line) }
+    }
+
+    private func bridge(script: URL, lines: LineCounter) -> CodexRuntimeBridge {
+        CodexRuntimeBridge(configuration: .init(
+            codexBinary: script,
+            provider: CodexModelProvider(name: "p", baseURL: "http://127.0.0.1:1",
+                                         envKey: "JEV_TEST_KEY", model: "m"),
+            environment: ["JEV_TEST_KEY": "tok"],
+            onStderrLine: { line in Task { await lines.bump(line) } }))
+    }
+
+    private func agent(root: URL) throws -> CompanionAgent {
+        let workspace = root.appendingPathComponent("ws", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        return CompanionAgent(slug: "desk", name: "d", role: "r", description: "x",
+                              workspacePath: workspace.path,
+                              codexHomePath: workspace.appendingPathComponent("codex-home").path)
+    }
+
+    /// Two concurrent sends on a cold agent must share one spawn — a second
+    /// app-server bound to the same CODEX_HOME must never start.
+    func testConcurrentColdStartSharesSingleSpawn() async throws {
+        let script = try bridgeFixture()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bridge-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: script)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let lines = LineCounter()
+        let bridge = bridge(script: script, lines: lines)
+        let agent = try agent(root: root)
+        async let first = bridge.send(to: agent, message: "one")
+        async let second = bridge.send(to: agent, message: "two")
+        _ = try await (first, second)
+        let spawned = await lines.lines.filter { $0.contains("READY") }.count
+        XCTAssertEqual(spawned, 1)
+        let thread = await bridge.activeThread(slug: "desk")
+        XCTAssertNotNil(thread)
+        await bridge.stopAll()
+    }
+
+    /// A stop() landing mid-spawn cancels the cold start — the late session
+    /// must never register.
+    func testStopDuringInFlightSpawnLeavesNoSession() async throws {
+        let script = try bridgeFixture()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bridge-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: script)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let lines = LineCounter()
+        let bridge = bridge(script: script, lines: lines)
+        let agent = try agent(root: root)
+        let send = Task { try await bridge.send(to: agent, message: "hi") }
+        // Fixture sleeps 0.3s inside initialize — 100ms lands mid-spawn.
+        try await Task.sleep(for: .milliseconds(100))
+        await bridge.stop(slug: "desk")
+        do { _ = try await send.value; XCTFail("stopped spawn completed") }
+        catch { /* expected — spawn was cancelled */ }
+        let client = await bridge.client(slug: "desk")
+        XCTAssertNil(client)
+        await bridge.stopAll()
     }
 }

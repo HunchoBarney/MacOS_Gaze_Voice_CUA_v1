@@ -197,9 +197,8 @@ public actor CodexProtocolClient {
         process.arguments = arguments
         process.standardInput = stdin
         process.standardOutput = stdout
-        var environment = ProcessInfo.processInfo.environment
-        for (key, value) in self.environment { environment[key] = value }
-        process.environment = environment
+        process.environment = Self.filteredEnvironment(
+            parent: ProcessInfo.processInfo.environment, injected: environment)
         let stderr = Pipe()
         process.standardError = onStderrLine == nil ? FileHandle.nullDevice : stderr
         process.terminationHandler = { [weak self] _ in
@@ -249,6 +248,21 @@ public actor CodexProtocolClient {
             disconnect(error)
             throw error
         }
+    }
+
+    /// Env allowlist — a long-lived app-server child must not inherit host
+    /// secrets. Only launch essentials pass through; every injected var (API
+    /// env_key token, MCP bearer vars, CODEX_HOME) is carried explicitly.
+    static func filteredEnvironment(parent: [String: String],
+                                    injected: [String: String]) -> [String: String] {
+        let allowed: Set<String> = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR",
+                                    "USER", "SHELL", "__CF_USER_TEXT_ENCODING"]
+        var environment: [String: String] = [:]
+        for (key, value) in parent where allowed.contains(key) || key.hasPrefix("XDG_") {
+            environment[key] = value
+        }
+        for (key, value) in injected { environment[key] = value }
+        return environment
     }
 
     /// New persistent thread rooted at `cwd` (the agent's workspace).
@@ -370,13 +384,17 @@ public actor CodexProtocolClient {
         } catch { disconnect(error) }
     }
 
-    /// Observed server requests on 0.158.0: item/* /requestApproval family
-    /// (decision: accept|acceptForSession|decline|cancel),
-    /// mcpServer/elicitation/request (action: accept|decline|cancel),
-    /// item/tool/requestUserInput (answers map). Anything else gets -32601.
+    /// Observed server requests on 0.158.0: item/*/requestApproval family
+    /// (decision: accept|acceptForSession|decline|cancel) — except
+    /// item/permissions/requestApproval, whose result is a permissions map
+    /// (empty = grant nothing); mcpServer/elicitation/request (action:
+    /// accept|decline|cancel); item/tool/requestUserInput (answers map).
+    /// Anything else gets -32601.
     private static func answerServerRequest(id: JSONValue, method: String) -> JSONValue {
         let result: JSONValue
-        if method.hasSuffix("requestApproval") {
+        if method == "item/permissions/requestApproval" {
+            result = .object(["permissions": .object([:])])
+        } else if method.hasSuffix("requestApproval") {
             result = .object(["decision": .string("decline")])
         } else if method == "mcpServer/elicitation/request" {
             result = .object(["action": .string("decline")])

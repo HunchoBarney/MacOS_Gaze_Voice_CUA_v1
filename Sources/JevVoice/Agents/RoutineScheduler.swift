@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// Re-injects a routine's task message into its agent's thread every
 /// `everyMinutes` while the app runs (Clicky routines: mac awake + app open,
@@ -6,9 +7,16 @@ import Foundation
 /// `fire` hands the (slug, routine) pair to the coordinator, which owns the
 /// actual `send(to:message:)`.
 public actor RoutineScheduler {
+    private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice", category: "routines")
+    /// Clicky contract minimum — shorter cadences are refused, not clamped.
+    public static let minimumEveryMinutes = 2
+
     private struct Entry {
         var routine: Routine
         var timer: Timer?
+        /// Identifies the schedule() generation — a timer whose attach lands
+        /// after its entry was replaced is invalidated, never adopted.
+        var token: UUID
     }
 
     private let fire: @Sendable (String, Routine) async -> Void
@@ -27,7 +35,11 @@ public actor RoutineScheduler {
     public func sync(agents: [CompanionAgent]) {
         var wanted: [String: (slug: String, routine: Routine)] = [:]
         for agent in agents {
-            for routine in agent.routines where routine.enabled && routine.everyMinutes >= 1 {
+            for routine in agent.routines where routine.enabled {
+                guard routine.everyMinutes >= Self.minimumEveryMinutes else {
+                    Self.log.warning("routine \(routine.id, privacy: .public) on \(agent.slug, privacy: .public) skipped: every_minutes \(routine.everyMinutes) < \(Self.minimumEveryMinutes)")
+                    continue
+                }
                 wanted[key(slug: agent.slug, routineID: routine.id)] = (agent.slug, routine)
             }
         }
@@ -45,25 +57,31 @@ public actor RoutineScheduler {
     }
 
     /// Interval is a parameter so tests can run sub-second schedules.
+    /// Rescheduling the same key invalidates the prior timer before the new
+    /// entry is written — no orphaned repeaters survive a re-attach.
     func schedule(key entryKey: String, slug: String, routine: Routine,
                   interval: TimeInterval, fireNow: Bool? = nil) {
-        entries[entryKey] = Entry(routine: routine, timer: nil)
+        if let old = entries[entryKey]?.timer {
+            DispatchQueue.main.async { old.invalidate() }
+        }
+        let token = UUID()
+        entries[entryKey] = Entry(routine: routine, timer: nil, token: token)
         let fire = self.fire
         DispatchQueue.main.async { [weak self] in
             let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
                 Task { await fire(slug, routine) }
             }
-            Task { await self?.attach(entryKey, timer: timer) }
+            Task { await self?.attach(entryKey, timer: timer, token: token) }
         }
         if fireNow ?? firstRunImmediate {
             Task { await fire(slug, routine) }
         }
     }
 
-    private func attach(_ entryKey: String, timer: Timer) {
-        guard entries[entryKey] != nil else {
-            // Unscheduled before the main-runloop hop landed — kill the timer
-            // on the thread that owns it.
+    private func attach(_ entryKey: String, timer: Timer, token: UUID) {
+        guard entries[entryKey]?.token == token else {
+            // Unscheduled or replaced before the main-runloop hop landed —
+            // kill the timer on the thread that owns it.
             DispatchQueue.main.async { timer.invalidate() }
             return
         }

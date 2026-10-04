@@ -62,7 +62,8 @@ public enum AgentMarkers {
     }
 
     /// Message text with every marker block removed — what should be spoken
-    /// or shown as the agent's visible reply.
+    /// or shown as the agent's visible reply. A dangling open tag with no
+    /// close (stream cut mid-marker) is stripped through end of string.
     public static func strippingMarkers(_ text: String) -> String {
         var stripped = "", cursor = text.startIndex
         let all = (markers(in: text, tag: "ROUTINE")
@@ -73,6 +74,14 @@ public enum AgentMarkers {
             cursor = marker.whole.upperBound
         }
         stripped += text[cursor...]
+        var dangling: String.Index?
+        for tag in ["<ROUTINE>", "<COMPUTER_USE_REQUEST>"] {
+            if let range = stripped.range(of: tag),
+               dangling == nil || range.lowerBound < dangling! {
+                dangling = range.lowerBound
+            }
+        }
+        if let dangling { stripped = String(stripped[..<dangling]) }
         return stripped.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
