@@ -42,6 +42,9 @@ public enum DriveStatus: Sendable, Equatable {
     case blocked(String)
     /// Loop found fields needing text the caller didn't supply in `values`.
     case needsText(fieldLabel: String)
+    /// The named window resolves to several live candidates — the caller
+    /// asks the user which one and resumes with `windowName` disambiguated.
+    case needsWindow(candidates: [String])
     /// An input tool was refused by the consent gate this turn.
     case blockedByConsent(String)
     case maxSteps(history: [String])
@@ -64,6 +67,15 @@ public struct DriveTask: Sendable {
     public var application: String?
     public var pid: Int?
     public var windowID: Int?
+    /// The window the request names — matched case-insensitively against
+    /// titles; several matches hand the choice back as a question.
+    public var windowName: String?
+    /// The user's answer to a question this intent asked — carried into
+    /// `previous_context` on every judgment so a re-asked ambiguity can be
+    /// resolved by the reply instead of looping identically.
+    public var previousContext: String?
+    /// Honest task scope — `.open` is satisfied by the app running.
+    public var scope: TaskSpec.Scope
     /// Field-label → literal text supplied BY THE CALLER. Jev selects fields;
     /// it never generates text.
     public var values: [String: String]
@@ -74,10 +86,14 @@ public struct DriveTask: Sendable {
     public var successContains: [String]
     public var maxSteps: Int
     public init(goal: String, application: String? = nil, pid: Int? = nil,
-                windowID: Int? = nil, values: [String: String] = [:],
+                windowID: Int? = nil, windowName: String? = nil,
+                previousContext: String? = nil,
+                scope: TaskSpec.Scope = .work, values: [String: String] = [:],
                 deny: [String] = [], successContains: [String] = [], maxSteps: Int = 24) {
         self.goal = goal; self.application = application
-        self.pid = pid; self.windowID = windowID; self.values = values
+        self.pid = pid; self.windowID = windowID; self.windowName = windowName
+        self.previousContext = previousContext
+        self.scope = scope; self.values = values
         self.deny = deny; self.successContains = successContains
         self.maxSteps = maxSteps
     }
@@ -115,6 +131,13 @@ public enum PlannerDecision: Sendable {
     case sendToAgent(slug: String, message: String)
     /// Read an agent's findings without waking it.
     case agentMemory(slug: String)
+    /// Stop work the user named — a specific intent, or everything.
+    case cancel(CancelRequest)
+    /// A correction of an earlier intent: retract it or record the revision.
+    case correct(CorrectionRequest)
+    /// Re-run a referenced intent in place — same intent, fresh attempt,
+    /// fresh observation. Never a blind replay of a settled action.
+    case retry(RetryRequest)
 }
 
 /// App-level task description produced by the planner (pre-resolution).
@@ -131,12 +154,84 @@ public struct TaskSpec: Sendable {
     /// Literal text the user dictated for insertion (planner-parsed).
     public var literalText: String?
     public var successContains: [String]
+    /// True only when the planner folded an answer to a pending question into
+    /// this spec — the runtime resumes that question's owner intent in place.
+    /// A plain execute while a question is pending is a NEW request and is
+    /// capacity-checked like any other.
+    public var resolvesPendingQuestion: Bool
+    /// When the utterance answers a specific pending question, its id —
+    /// nil folds the newest one. Lets "the second one" bind the question it
+    /// names instead of stealing the latest ask.
+    public var answersQuestionID: UUID?
+    /// How the new intent relates to a referenced earlier intent.
+    public var relationship: TaskRelationship
+    /// An explicit execution-blocking edge: this intent may only run once
+    /// the referenced intent has produced a verified fact of the required
+    /// kind. Waiting happens inside the attempt, never silently.
+    public var requiresIntentID: UUID?
+    /// Words of the presented utterance this decision consumed from the
+    /// front — for "open Notes then send it" the planner marks the prefix it
+    /// used and the remainder re-presents as its own decision. Nil = the
+    /// decision covers every remaining word.
+    public var consumedThrough: Int?
     public init(goal: String, application: String? = nil, scope: Scope = .work,
                 window: String? = nil, deny: [String] = [], values: [String: String] = [:],
-                literalText: String? = nil, successContains: [String] = []) {
+                literalText: String? = nil, successContains: [String] = [],
+                resolvesPendingQuestion: Bool = false, answersQuestionID: UUID? = nil,
+                relationship: TaskRelationship = .independent, requiresIntentID: UUID? = nil,
+                consumedThrough: Int? = nil) {
         self.goal = goal; self.application = application; self.scope = scope
         self.window = window; self.deny = deny; self.values = values
         self.literalText = literalText; self.successContains = successContains
+        self.resolvesPendingQuestion = resolvesPendingQuestion
+        self.answersQuestionID = answersQuestionID
+        self.relationship = relationship; self.requiresIntentID = requiresIntentID
+        self.consumedThrough = consumedThrough
+    }
+}
+
+/// How a new intent relates to a referenced earlier one — the planner-facing
+/// mirror of the dialogue ledger's relationship edge.
+public enum TaskRelationship: Sendable, Equatable {
+    case independent
+    case continuation(of: UUID)
+    case correction(of: UUID)
+}
+
+/// Stop work the user named: a specific intent, or everything when the
+/// target is nil.
+public struct CancelRequest: Sendable {
+    public var targetIntentID: UUID?
+    public var consumedThrough: Int?
+    public init(targetIntentID: UUID? = nil, consumedThrough: Int? = nil) {
+        self.targetIntentID = targetIntentID; self.consumedThrough = consumedThrough
+    }
+}
+
+/// A correction of an earlier intent. `retract` withdraws/cancels the target
+/// (and unwinds effects the target verifiably owns); `revise` records the
+/// correction link and runs a replacement spec when the planner supplies one.
+public struct CorrectionRequest: Sendable {
+    public enum Mode: String, Sendable { case retract, revise }
+    public var targetIntentID: UUID?
+    public var mode: Mode
+    public var replacement: TaskSpec?
+    public var consumedThrough: Int?
+    public init(targetIntentID: UUID? = nil, mode: Mode = .retract,
+                replacement: TaskSpec? = nil, consumedThrough: Int? = nil) {
+        self.targetIntentID = targetIntentID; self.mode = mode
+        self.replacement = replacement; self.consumedThrough = consumedThrough
+    }
+}
+
+/// Re-run a referenced intent in place: same intent id, fresh attempt,
+/// re-observed state — never a replay of the earlier dispatch.
+public struct RetryRequest: Sendable {
+    /// The intent to re-attempt; nil targets the most recent retryable one.
+    public var targetIntentID: UUID?
+    public var consumedThrough: Int?
+    public init(targetIntentID: UUID? = nil, consumedThrough: Int? = nil) {
+        self.targetIntentID = targetIntentID; self.consumedThrough = consumedThrough
     }
 }
 
@@ -167,25 +262,62 @@ public struct DelegationRequest: Sendable {
     }
 }
 
+/// One published intent the planner may reference — for stops, corrections,
+/// continuations and retries. The id is the stable dialogue intent id.
+public struct PlannerTaskRef: Sendable {
+    public var intentID: UUID
+    public var request: String
+    /// Semantic status: pending, executing, awaitingAnswer, uncertain,
+    /// partial, blocked, cancelled, succeeded, failed.
+    public var status: String
+    public var application: String?
+    public init(intentID: UUID, request: String, status: String, application: String? = nil) {
+        self.intentID = intentID; self.request = request
+        self.status = status; self.application = application
+    }
+}
+
+/// A live pending question the planner may bind an answer to.
+public struct PendingQuestionRef: Sendable {
+    public var questionID: UUID
+    public var intentID: UUID
+    public var prompt: String
+    public var options: [String]
+    public init(questionID: UUID, intentID: UUID, prompt: String, options: [String] = []) {
+        self.questionID = questionID; self.intentID = intentID
+        self.prompt = prompt; self.options = options
+    }
+}
+
 /// Context the planner sees — deliberately small (Clicky keeps planner
 /// context lean; the loop handles step-level detail).
 public struct PlannerContext: Sendable {
     /// Recent user intents/tasks for follow-up routing ("it", "again").
     public var recentIntents: [String]
-    /// Pending clarification an utterance might answer.
+    /// Referenceable intents — the ids cancel/correct/retry/continuation
+    /// decisions bind to.
+    public var tasks: [PlannerTaskRef]
+    /// Pending clarification an utterance might answer — the newest ask.
     public var pendingClarify: ClarifyRequest?
+    /// Every live pending question; an answer may name any of them.
+    public var questions: [PendingQuestionRef]
     /// Pending agent/consent ask a bare "yes"/"no" resolves.
     public var pendingConsent: ConsentRequest?
     /// Agent roster summary for delegation routing.
     public var agents: [CompanionAgent]
     /// Short foreground-app hint ("TextEdit — Untitled 3").
     public var foregroundHint: String?
-    public init(recentIntents: [String] = [], pendingClarify: ClarifyRequest? = nil,
+    /// True only on the release-final handoff — literal insertions hold
+    /// for this so dictated text stays revisable mid-hold.
+    public var utteranceFinal: Bool
+    public init(recentIntents: [String] = [], tasks: [PlannerTaskRef] = [],
+                pendingClarify: ClarifyRequest? = nil, questions: [PendingQuestionRef] = [],
                 pendingConsent: ConsentRequest? = nil, agents: [CompanionAgent] = [],
-                foregroundHint: String? = nil) {
-        self.recentIntents = recentIntents; self.pendingClarify = pendingClarify
+                foregroundHint: String? = nil, utteranceFinal: Bool = true) {
+        self.recentIntents = recentIntents; self.tasks = tasks
+        self.pendingClarify = pendingClarify; self.questions = questions
         self.pendingConsent = pendingConsent; self.agents = agents
-        self.foregroundHint = foregroundHint
+        self.foregroundHint = foregroundHint; self.utteranceFinal = utteranceFinal
     }
 }
 

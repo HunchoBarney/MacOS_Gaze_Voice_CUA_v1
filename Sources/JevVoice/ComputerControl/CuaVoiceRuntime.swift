@@ -7,7 +7,11 @@ import OSLog
 final class CuaVoiceRuntime {
     private static let observationTools: Set<String> = [
         "list_apps", "get_accessibility_tree", "list_windows", "get_window_state",
-        "get_browser_state", "parse_visual_regions"
+        "get_browser_state", "parse_visual_regions",
+        // Raising a window is a precondition for interactive lanes, not a
+        // content mutation — a cancelled approval that only ever raised a
+        // window dispatched no task effect.
+        "bring_to_front"
     ]
 
     private static func dispatchesEffect(tool: String, arguments: [String: JSONValue]) -> Bool {
@@ -32,13 +36,11 @@ final class CuaVoiceRuntime {
         var message = ""
         var bundle: String?
         var window: Int?
-        var launchReceipt: CuaLaunchReceipt?
         /// Attempted dispatch only — verified/uncertain effects live in `outcome`.
         var dispatchedEffect = false
-        /// The attempt's exact insertion payload and content mode, retained so a
-        /// resumed attempt re-executes the same request rather than the resuming
-        /// utterance's words. Not a replayable effect — fresh observation still
-        /// gates every dispatch.
+        /// The utterance's literal insert payload + content mode, kept for the
+        /// inspector's "text payload" line. The spec — not replayed words —
+        /// always carries the payload to the drive loop.
         var literalText: String?
         var contentMode: CuaExecutorDecision.ContentMode = .control
         var provenance: SpeechProvenance?
@@ -52,8 +54,6 @@ final class CuaVoiceRuntime {
         var outcome: CuaDialogueState.Outcome?
         var stopRequested = false
         var attemptBegan = false
-        /// Intent a conversational relationship or prerequisite edge points at.
-        var referencedIntentID: UUID?
         init(label: String, request: String, intentID: UUID, attemptID: UUID) {
             self.label = label; self.request = request
             self.intentID = intentID; self.attemptID = attemptID
@@ -85,6 +85,33 @@ final class CuaVoiceRuntime {
         init(receivedAt: Double) { self.receivedAt = receivedAt }
     }
 
+    /// What one accepted utterance became — the worker's dispatch plan.
+    private enum AcceptedKind {
+        /// Deterministic primitive: zero model calls to resolve, runFastLane proves it.
+        case fastLane(CuaTaskAgent.FastResolution, goal: String)
+        /// The planner handed a task spec to the drive loop.
+        case execute(TaskSpec)
+        /// The planner deferred on consent: park for approval, then re-decide.
+        case consent(ConsentRequest)
+        /// The planner stopped a specific earlier intent.
+        case cancel(CancelRequest)
+        /// The planner corrected an earlier intent — retract or revise.
+        case correct(CorrectionRequest)
+        /// A fresh attempt on an existing intent — same intent, new attempt id.
+        case retry(intentID: UUID, spec: TaskSpec)
+
+        /// Leading words of the utterance the decision consumed, when the
+        /// planner marked a prefix — nil consumes the whole span.
+        var consumedThrough: Int? {
+            switch self {
+            case .execute(let spec): return spec.consumedThrough
+            case .cancel(let request): return request.consumedThrough
+            case .correct(let request): return request.consumedThrough
+            default: return nil
+            }
+        }
+    }
+
     private let config: Config
     private let judge: CuaTaskAgent.Judge
     private let requiresAPIKey: Bool
@@ -92,6 +119,16 @@ final class CuaVoiceRuntime {
     /// Injectable probe — unit tests must not depend on the host's real
     /// console lock state; production uses the CGSession read below.
     private let screenLocked: () -> Bool
+    /// The utterance planner — one provider call per final utterance.
+    /// Injectable: tests drive decisions with a scripted stub; a missing or
+    /// failing planner degrades to fast-lane + honest unavailability.
+    private let planner: (any CompanionPlanning)?
+    /// Persistent-agent seam (delegate / follow-up / memory). Nil means the
+    /// agents runtime is not wired and agent decisions refuse honestly.
+    private let agentBridge: (any AgentBridging)?
+    /// Test seam: scripted scenarios disable deterministic preemption so every
+    /// utterance reaches the injected planner. Production leaves this nil.
+    private let fastLaneResolver: (@MainActor (String, [JSONValue]) -> CuaTaskAgent.FastResolution?)?
     private let queue = CuaWorkQueue()
     private let appInventory = CuaAppInventory()
     private(set) var tasks: [Work] = []
@@ -111,18 +148,9 @@ final class CuaVoiceRuntime {
     /// The single owner of intents, attempts, relationships, questions and facts.
     /// Readable for diagnostics and tests; only the runtime mutates it.
     private(set) var dialogue = CuaDialogueState()
-    /// The intent's own execution contract — scope, visibility and the literal
-    /// payload — recorded when the intent is added. A Work is only an attempt:
-    /// a decide-time clarification removes its Work while the intent stays
-    /// awaiting an answer, and a resuming answer/retry describes the reply
-    /// fragment, not the original request, so the stored contract always wins.
-    private struct IntentPayload {
-        var literalText: String?
-        var contentMode: CuaExecutorDecision.ContentMode
-        var scope: String?
-        var visibility: String?
-    }
-    private var intentPayloads: [UUID: IntentPayload] = [:]
+    /// The intent's execution contract — the TaskSpec the planner produced —
+    /// retained for diagnostics and pruning.
+    private var intentSpecs: [UUID: TaskSpec] = [:]
     private var contextVersion = 0
     var onChange: () -> Void = {}
 
@@ -153,11 +181,17 @@ final class CuaVoiceRuntime {
 
     init(config: Config, makeConnection: @escaping () -> CuaConnection = { CuaConnection() },
          judge: CuaTaskAgent.Judge? = nil, dialogue: CuaDialogueState = CuaDialogueState(),
+         planner: (any CompanionPlanning)? = nil,
+         agentBridge: (any AgentBridging)? = nil,
+         fastLaneResolver: (@MainActor (String, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = nil,
          screenLocked: @escaping () -> Bool = { CuaVoiceRuntime.consoleScreenLocked }) {
         self.config = config
         self.makeConnection = makeConnection
         self.dialogue = dialogue
         self.screenLocked = screenLocked
+        self.planner = planner
+        self.agentBridge = agentBridge
+        self.fastLaneResolver = fastLaneResolver
         if let judge {
             self.judge = judge
             self.requiresAPIKey = false
@@ -367,256 +401,637 @@ final class CuaVoiceRuntime {
         }
     }
 
-    private func receive(_ handoff: TranscriptHandoff) async throws {
-        if requiresAPIKey, config.apiKey.isEmpty {
-            throw DriverConnectionError.refused("Save the Jev API key in Commands settings.")
+    // MARK: - Utterance intake
+
+    /// Bare approval/denial words while a work parks on an approval resolve it
+    /// directly — deterministic, no model call, and it never reaches the
+    /// planner where "yes" could be misread as a request.
+    private static func consentVerdict(_ utterance: String) -> Bool? {
+        switch utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().trimmingCharacters(in: .punctuationCharacters) {
+        case "yes", "yeah", "yep", "yup", "confirm", "go ahead", "approved",
+             "approve", "do it", "ok", "okay", "sure", "continue", "proceed":
+            return true
+        case "no", "nope", "deny", "denied", "cancel", "don't", "do not",
+             "stop", "never mind", "nevermind", "abort":
+            return false
+        default:
+            return nil
         }
+    }
+
+    /// Bare stop phrases cancel or withdraw — deterministic, no model call.
+    /// A stop phrase inside a longer request falls through to the planner,
+    /// which is the correct owner of "click the stop button" style tasks.
+    private static func retryVerdict(_ utterance: String) -> Bool {
+        switch utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().trimmingCharacters(in: .punctuationCharacters) {
+        case "try that again", "try again", "retry", "retry that",
+             "do that again", "redo", "redo that", "run that again":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// "Try that again" targets the intent the phrase refers to: a real retry
+    /// state — uncertain, partial, blocked or failed — resolves newest first,
+    /// a cancelled candidate still answers so the refusal is honest, and with
+    /// nothing retryable the earliest resolved intent is the anchored
+    /// referent ("the earlier task").
+    private func retryTarget(explicitIntentID: UUID? = nil,
+                             namedRequest: String? = nil) -> CuaDialogueState.Entry? {
+        if let explicitIntentID { return dialogue.entry(for: explicitIntentID) }
+        if let namedRequest {
+            let needle = namedRequest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let named = dialogue.entries.last(where: {
+                $0.intent.instruction.lowercased() == needle
+            }) ?? dialogue.entries.last(where: {
+                $0.intent.instruction.lowercased().contains(needle)
+            }) { return named }
+        }
+        if let retryable = dialogue.entries.last(where: {
+            switch $0.status {
+            case .uncertain, .partial, .blocked, .failed, .cancelled: return true
+            default: return false
+            }
+        }) { return retryable }
+        return dialogue.entries.first(where: { $0.status.isResolved })
+    }
+
+    /// A retry resumes the same intent in place — the fresh Work gets a new
+    /// attempt id, never a new intent. The original spec is reused: a retry
+    /// never re-plans, so a reply-shaped phrase can't narrow scope. Cancelled
+    /// and withdrawn intents refuse honestly; uncertain/partial/blocked keep
+    /// their verified facts (same revision), failed/succeeded re-revise.
+    private func handleRetry(utterance: String, label: String, invocation: Invocation,
+                             explicitTarget: UUID? = nil) async {
+        let namedRequest: String? = {
+            let lower = utterance.lowercased()
+            guard let marker = lower.range(of: "try the earlier task again:") else { return nil }
+            return String(utterance[marker.upperBound...])
+        }()
+        guard let target = retryTarget(explicitIntentID: explicitTarget,
+                                       namedRequest: namedRequest) else {
+            speech.publishOutcome("answer", message: "There is nothing to retry.")
+            return
+        }
+        let work = Work(label: label, request: target.intent.instruction,
+                        intentID: target.intent.id, attemptID: UUID())
+        work.timings = invocation.timings
+        tasks.append(work)
+        selectedID = work.id
+        pruneWorks()
+        if case .cancelled = target.status {
+            work.active = false
+            work.outcome = .blocked(reason: "The request was already cancelled; it cannot be retried.")
+            work.message = "The request was already cancelled; it cannot be retried."
+            noteChange()
+            return
+        }
+        switch target.status {
+        case .uncertain:
+            try? dialogue.retryUncertain(intentID: target.intent.id)
+        default:
+            try? dialogue.revise(intentID: target.intent.id)
+        }
+        work.intentRevision = dialogue.entry(for: target.intent.id)?.revision ?? 0
+        noteChange()
+        let kind: AcceptedKind
+        if let spec = intentSpecs[target.intent.id] {
+            kind = .execute(spec)
+        } else if let apps = try? await appList(invocation: invocation),
+                  let resolved = (fastLaneResolver ?? { goal, list in
+                      CuaTaskAgent(call: { _, _ in .object([:]) }).resolveFastLane(goal: goal, apps: list)
+                  })(target.intent.instruction, apps) {
+            kind = .fastLane(resolved, goal: target.intent.instruction)
+        } else {
+            kind = .execute(TaskSpec(goal: target.intent.instruction,
+                                     application: target.intent.target?.application))
+        }
+        work.worker = Task { [weak self] in
+            guard let self else { return }
+            await self.runWork(kind, work: work, invocation: invocation)
+        }
+    }
+
+    private enum StopVerdict { case all, one, withdraw }
+    /// Utterances that introduce literal text — dictate/type/insert led —
+    /// whose payload must stay revisable until the release-final handoff.
+    private static func isLiteralIntroducer(_ utterance: String) -> Bool {
+        let first = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        return ["dictate", "type", "insert", "write"].contains(first)
+    }
+
+    private static func stopVerdict(_ utterance: String) -> StopVerdict? {
+        switch utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().trimmingCharacters(in: .punctuationCharacters) {
+        case "stop everything", "stop all", "cancel everything", "cancel all",
+             "abort everything":
+            return .all
+        case "stop", "stop that", "stop it", "cancel", "cancel that",
+             "cancel it", "abort":
+            return .one
+        case "never mind", "nevermind", "forget it", "forget that":
+            return .withdraw
+        default:
+            return nil
+        }
+    }
+
+    private func receive(_ handoff: TranscriptHandoff) async throws {
+        // An utterance is decidable once its pending span rests on final
+        // segments — hold-to-talk streams final phrases mid-hold, so release
+        // is not the decision boundary. Genuinely partial text settles inside
+        // the coordinator's window and is resubmitted when it finalizes.
+        var snapshot = RangedTranscript()
+        for range in handoff.audioRanges { _ = try? snapshot.apply(range) }
+        let range = handoff.pendingWordStart..<handoff.pendingWordEnd
+        guard !range.isEmpty,
+              let utterance = try? handoff.text(in: range),
+              !utterance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            speech.report(handoff, outcome: "incomplete",
+                          message: "The request is incomplete; no action was taken.")
+            return
+        }
+
+        // Every pending span gets a decision — volatile text included, so a
+        // stable prefix pays its model latency once. Only a segment-final or
+        // release-final span may materialize (the gate sits after the
+        // decision, before any commit); a volatile decision stays a reported
+        // candidate the next revision re-decides, never dispatches.
+        let materializable = handoff.final
+            || snapshot.isFinal(throughWord: handoff.pendingWordEnd)
+
         nextLabel += 1
         let label = "Jarvis \(nextLabel) · \(instanceLabel)"
         let invocation = Invocation(receivedAt: handoff.receivedAt)
-        let agent = makeAgent(invocation: invocation)
-        do {
-            let previousContext = handoff.taskContext["initial_app"]?.string ?? initialApp
-            let decision: CuaExecutorDecision
-            if let cachedInventory = appInventory.snapshot() {
-                let cachedDecision = try await agent.decide(handoff: handoff,
-                    previousContext: previousContext, installedApps: cachedInventory)
-                if cachedDecision.operation == .execute ||
-                    (cachedDecision.operation == .clarify && cachedDecision.clarification == .target) {
-                    let currentInventory = try await makeToolCall(invocation: invocation)("list_apps", [:])
-                    decision = currentInventory == cachedInventory ? cachedDecision :
-                        try await agent.decide(handoff: handoff, previousContext: previousContext,
-                            installedApps: currentInventory)
-                } else {
-                    decision = cachedDecision
+        // A standalone utterance is the whole transcript of this hold — the
+        // user's own control words. A span inside a compound utterance
+        // ("open X stop it") is routed by the planner, which picks the target
+        // a bare phrase cannot.
+        let standalone = handoff.pendingWordStart == 0
+            && handoff.pendingWordEnd == utterance.split(whereSeparator: \.isWhitespace).count
+
+        // Deterministic control phrases — resolved without any model call,
+        // and only once their span may commit.
+        if standalone, materializable {
+            if let verdict = Self.consentVerdict(utterance),
+               tasks.contains(where: { $0.approvalContinuation != nil && $0.active }) {
+                guard speech.consume(handoff, wordRange: range) else { return }
+                for work in tasks where work.approvalContinuation != nil && work.active {
+                    resolveApproval(work.id, approved: verdict)
                 }
-            } else {
-                let inventory = try await makeToolCall(invocation: invocation)("list_apps", [:])
-                decision = try await agent.decide(handoff: handoff,
-                    previousContext: previousContext, installedApps: inventory)
+                return
             }
+            if let verdict = Self.stopVerdict(utterance) {
+                handleStop(verdict, handoff: handoff, range: range,
+                           label: label, invocation: invocation)
+                return
+            }
+            if Self.retryVerdict(utterance) || utterance.lowercased().hasPrefix("try the earlier task again") {
+                guard let acceptance = speech.validateSource(handoff, wordRange: range),
+                      speech.commit(acceptance, scheduleRemainder: false) else { return }
+                await handleRetry(utterance: utterance, label: label, invocation: invocation)
+                speech.resumePending()
+                return
+            }
+        }
+
+        var kind: AcceptedKind?
+        var decision: PlannerDecision?
+        var fastApps: [JSONValue] = []
+        if true {
+            // The deterministic fast lane resolves exact primitives against the
+            // installed-app list — "open Safari", "quit Mail" — without a
+            // planner call. Ambiguity falls through to the planner unchanged.
+            var fastResolution: CuaTaskAgent.FastResolution?
+            if let apps = try? await appList(invocation: invocation) {
+                fastApps = apps
+                fastResolution = (fastLaneResolver ?? { goal, list in
+                    CuaTaskAgent(call: { _, _ in .object([:]) }).resolveFastLane(goal: goal, apps: list)
+                })(utterance, apps)
+            }
+            if let resolved = fastResolution {
+                kind = .fastLane(resolved, goal: utterance)
+            } else {
+                guard let planner else {
+                    speech.report(handoff, outcome: "failure",
+                                  message: "Voice planning is not available in this build. Simple app commands still work.")
+                    return
+                }
+                do {
+                    let context = await plannerContext(utteranceFinal: handoff.final)
+                    decision = try await planner.decide(utterance: utterance, context: context)
+                } catch {
+                    speech.report(handoff, outcome: "failure",
+                                  message: "Voice planning is unavailable right now: \(error.localizedDescription)")
+                    return
+                }
+                invocation.timings["Transcript to first Jev decision"] =
+                    (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
+                try Task.checkCancellation()
+            }
+        }
+
+        // A decision on volatile text is a candidate only — the model may
+        // still revise, so nothing commits until the span is segment-final
+        // or the hold released. Literal holds report their waiting state.
+        guard materializable else {
+            let literalHold: Bool = {
+                if Self.isLiteralIntroducer(utterance) { return true }
+                if case .execute(let spec) = decision { return spec.literalText != nil }
+                return false
+            }()
+            speech.report(handoff,
+                          outcome: literalHold ? "dictationWaitingForFinal" : "candidate",
+                          message: literalHold
+                              ? "Dictation will be inserted after you finish speaking."
+                              : "Processing transcript…")
+            return
+        }
+
+        // Multi-span utterances ("open Notes then quit Mail"): the decision
+        // declares how many leading words it consumed; the committed prefix
+        // reschedules the remainder as its own decision automatically.
+        func consumedRange(_ explicit: Int?) -> Range<Int> {
+            let used = min(explicit ?? range.count, range.count)
+            return range.lowerBound..<(range.lowerBound + used)
+        }
+        func acceptanceFor(_ explicit: Int?) -> ContinuousIntentCoordinator.SourceAcceptance? {
+            speech.validateSource(handoff, wordRange: consumedRange(explicit))
+        }
+
+        var immediate: (outcome: String, message: String)?
+        if kind == nil, let decision {
+            switch decision {
+            case .execute(let spec):
+                if spec.resolvesPendingQuestion {
+                    guard let owner = questionOwner(for: spec.answersQuestionID) else {
+                        // A stale answer names no live question — surface an
+                        // honest ask rather than silently executing a guess.
+                        guard let acceptance = acceptanceFor(spec.consumedThrough) else { return }
+                        let question = "Which task do you mean?"
+                        acceptClarify(ClarifyRequest(question: question),
+                                      acceptance: acceptance, label: label, invocation: invocation)
+                        speech.publishOutcome("clarification", message: question)
+                        speech.resumePending()
+                        return
+                    }
+                    await resumeAnsweredIntent(owner: owner, spec: spec, utterance: utterance,
+                                               handoff: handoff, range: consumedRange(spec.consumedThrough),
+                                               label: label, invocation: invocation)
+                    speech.resumePending()
+                    return
+                }
+                if spec.literalText != nil, spec.application == nil {
+                    // A literal payload with no named target needs its app
+                    // first — the stored spec survives for the answer's resume.
+                    guard let acceptance = acceptanceFor(spec.consumedThrough) else { return }
+                    let question = "Which app should I use?"
+                    acceptClarify(ClarifyRequest(question: question),
+                                  acceptance: acceptance, label: label, invocation: invocation,
+                                  retainedSpec: spec)
+                    speech.publishOutcome("clarification", message: question)
+                    speech.resumePending()
+                    return
+                }
+                if spec.literalText != nil, !handoff.final {
+                    speech.report(handoff, outcome: "dictationWaitingForFinal",
+                                  message: "Dictation will be inserted after you finish speaking.")
+                    return
+                }
+                kind = .execute(spec)
+            case .consentNeeded(let request):
+                dialogue.recordConsent(request)
+                kind = .consent(request)
+            case .clarify(let request):
+                guard let acceptance = acceptanceFor(nil) else { return }
+                acceptClarify(request, acceptance: acceptance, label: label, invocation: invocation)
+                speech.publishOutcome("clarification", message: request.question)
+                speech.resumePending()
+                return
+            case .answer(let text):
+                guard let acceptance = acceptanceFor(nil),
+                      speech.commit(acceptance) else { return }
+                supersedeAnsweredIntent(acceptance: acceptance, utterance: utterance)
+                immediate = ("answer", text)
+            case .refuse(let reason):
+                guard let acceptance = acceptanceFor(nil),
+                      speech.commit(acceptance) else { return }
+                supersedeAnsweredIntent(acceptance: acceptance, utterance: utterance)
+                immediate = ("incomplete", reason)
+            case .cancel(let request):
+                if request.targetIntentID == nil {
+                    guard speech.consume(handoff, wordRange: consumedRange(request.consumedThrough)) else { return }
+                    stopAll()
+                    speech.publishOutcome("answer", message: "Stopped everything.")
+                    return
+                }
+                kind = .cancel(request)
+            case .correct(let request):
+                if request.targetIntentID == nil {
+                    let candidates = dialogue.entries.filter { !$0.status.isResolved }
+                    if candidates.count > 1 {
+                        // An ambiguous correction is a real question — the
+                        // referenced intents must not be touched on a guess.
+                        guard let acceptance = acceptanceFor(request.consumedThrough) else { return }
+                        let question = "Which task do you mean?"
+                        acceptClarify(ClarifyRequest(question: question),
+                                      acceptance: acceptance, label: label, invocation: invocation)
+                        speech.publishOutcome("clarification", message: question)
+                        speech.resumePending()
+                        return
+                    }
+                }
+                kind = .correct(request)
+            case .retry(let request):
+                guard let acceptance = acceptanceFor(request.consumedThrough),
+                      speech.commit(acceptance, scheduleRemainder: false) else { return }
+                await handleRetry(utterance: utterance, label: label, invocation: invocation,
+                                  explicitTarget: request.targetIntentID)
+                speech.resumePending()
+                return
+            case .delegate(let request):
+                guard speech.consume(handoff, wordRange: consumedRange(nil)) else { return }
+                immediate = await delegateOutcome(request)
+            case .sendToAgent(let slug, let message):
+                guard speech.consume(handoff, wordRange: consumedRange(nil)) else { return }
+                immediate = await sendToAgentOutcome(slug: slug, message: message)
+            case .agentMemory(let slug):
+                guard speech.consume(handoff, wordRange: consumedRange(nil)) else { return }
+                immediate = await agentMemoryOutcome(slug: slug)
+            }
+        }
+        if let immediate {
+            speech.publishOutcome(immediate.outcome, message: immediate.message)
+            speech.resumePending()
+            return
+        }
+        // A literal insert resolved before release parks its dispatch until
+        // the release-final handoff — the decision re-runs on those same
+        // words, so nothing needs storing here.
+        if let kind, isLiteralKind(kind), !handoff.final {
+            speech.report(handoff, outcome: "dictationWaitingForFinal",
+                          message: "Dictation will be inserted after you finish speaking.")
+            return
+        }
+        guard let kind else { return }
+        // The first-decision timing covers deterministic resolution too —
+        // session bootstrap is inside it, so a fast-lane hit still accounts
+        // the wait the user actually paid.
+        if invocation.timings["Transcript to first Jev decision"] == nil {
             invocation.timings["Transcript to first Jev decision"] =
                 (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
-            try Task.checkCancellation()
+        }
+        _ = fastApps
 
-            switch decision.operation {
-            case .wait:
-                speech.report(handoff, outcome: "incomplete", message: handoff.final ? "The request is incomplete; no action was taken." : "Listening for a complete request…")
-            case .clarify:
-                // Record the ambiguous request as an intent awaiting an answer so
-                // the next hold's reply binds a real question owner, then present
-                // the question with the same surface a plain clarification had.
-                let prompt = decision.clarification?.question ?? "What would you like me to do?"
-                let range = decision.consumedRange ?? handoff.pendingWordStart..<handoff.pendingWordEnd
-                guard !range.isEmpty, let acceptance = speech.validateSource(handoff, wordRange: range) else {
-                    speech.report(handoff, outcome: "clarification", message: prompt)
-                    return
-                }
-                do {
-                    _ = try acceptIntent(decision: decision, handoff: handoff,
-                                         acceptance: acceptance, label: label, invocation: invocation)
-                    speech.publishOutcome("clarification", message: prompt)
-                } catch {
-                    speech.publishOutcome("clarification", message: error.localizedDescription)
-                }
-                speech.resumePending()
-            case .ignore:
-                if let range = decision.consumedRange { _ = speech.consume(handoff, wordRange: range) }
-            case .stopAll:
-                guard let range = decision.consumedRange, speech.consume(handoff, wordRange: range) else {
-                    return
-                }
-                stopAll()
-            case .execute, .stop, .correction:
-                guard let range = decision.consumedRange, decision.request != nil else {
-                    throw DriverConnectionError.malformed
-                }
-                // Only the utterance's own live text waits for release: a resumed
-                // intent's stored payload was finalized in its original hold, so
-                // an answer or retry dispatches like any control decision.
-                let effectiveMode = decision.contentMode
-                if effectiveMode != .control, !handoff.final {
-                    let message = effectiveMode == .dictate
-                        ? "Dictation will be inserted after you finish speaking."
-                        : "Text will be inserted after you finish speaking."
-                    speech.report(handoff, outcome: "dictationWaitingForFinal", message: message)
-                    return
-                }
-                // One no-await acceptance transition: validate the source/read set,
-                // publish known intent metadata, claim the source, then schedule
-                // the worker and the remaining speech.
-                guard let acceptance = speech.validateSource(handoff, wordRange: range) else {
-                    return
-                }
-                let work: Work
-                do {
-                    work = try acceptIntent(decision: decision, handoff: handoff,
-                                            acceptance: acceptance, label: label,
-                                            invocation: invocation)
-                } catch {
-                    speech.report(handoff, outcome: "clarification", message: error.localizedDescription)
-                    return
-                }
-                if work.active {
-                    work.worker = Task { [weak self] in
-                        guard let self else { return }
-                        await self.runSelected(decision, handoff: handoff, work: work, agent: agent,
-                                               invocation: invocation)
-                    }
-                    speech.resumePending()
-                } else {
-                    speech.resumePending()
-                }
-            }
+        // Accept the utterance's task: validate the source is still current,
+        // claim it exactly once, bind the intent, then spawn the worker.
+        let consumed = consumedRange(kind.consumedThrough)
+        guard let acceptance = speech.validateSource(handoff, wordRange: consumed) else {
+            return
+        }
+        let work: Work
+        do {
+            work = try acceptIntent(kind: kind, acceptance: acceptance, label: label,
+                                    invocation: invocation, apps: fastApps)
         } catch {
-            throw error
+            speech.report(handoff, outcome: "clarification", message: error.localizedDescription)
+            return
+        }
+        if work.active {
+            work.worker = Task { [weak self] in
+                guard let self else { return }
+                await self.runWork(kind, work: work, invocation: invocation)
+            }
+            if case .consent(let request) = kind {
+                speech.publishOutcome("clarification", message: request.summary)
+            }
+            speech.resumePending()
+        } else {
+            speech.resumePending()
         }
     }
 
-    /// Planned routing for one accepted utterance. Every routing kind either
-    /// adds a new intent, resumes an existing one in place, or honestly blocks.
-    /// A pending question means the new intent enters awaiting-answer state.
-    private struct Routing {
-        enum Kind {
-            case add(CuaDialogueState.Relationship, CuaDialogueState.Prerequisite?, String?)
-            case resume
-            case blocked(String)
+    /// True when the accepted dispatch is a literal insertion — those hold
+    /// for the release-final handoff so dictated text stays revisable.
+    private func isLiteralKind(_ kind: AcceptedKind) -> Bool {
+        switch kind {
+        case .execute(let spec): return spec.literalText != nil
+        case .fastLane(let resolved, _):
+            if case .type = resolved.action?.body { return true }
+            return false
+        default: return false
         }
-        let kind: Kind
-        let intentID: UUID
-        let request: String
-        let referencedIntentID: UUID?
-        let questionID: UUID?
     }
 
-    private func planRouting(decision: CuaExecutorDecision,
-                             acceptance: ContinuousIntentCoordinator.SourceAcceptance) -> Routing {
-        let referencedID = decision.selectedTaskID
-        let referencedWork = referencedID.flatMap { id in
-            tasks.last { $0.id == id } ?? tasks.last { $0.intentID == id }
-        }
-        let referencedIntentID = referencedWork?.intentID
-            ?? referencedID.flatMap { dialogue.entry(for: $0) != nil ? $0 : nil }
-        let referencedEntry = referencedIntentID.flatMap { dialogue.entry(for: $0) }
-
-        var route: Routing
-        switch decision.relationship {
-        case .answer:
-            guard let questionID = decision.questionID,
-                  let ownerID = dialogue.questionOwner(for: questionID),
-                  let owner = dialogue.entry(for: ownerID) else {
-                route = Routing(kind: .blocked("That answer no longer matches a pending question."),
-                                intentID: UUID(), request: acceptance.text,
-                                referencedIntentID: nil, questionID: nil)
-                break
-            }
-            if let revision = decision.intentRevision, revision != owner.revision {
-                route = Routing(kind: .blocked("That answer is no longer current; the task changed since the question was asked."),
-                                intentID: UUID(), request: acceptance.text,
-                                referencedIntentID: ownerID, questionID: questionID)
-                break
-            }
-            route = Routing(kind: .resume, intentID: ownerID, request: owner.intent.instruction,
-                            referencedIntentID: ownerID, questionID: questionID)
-        case .retry:
-            guard let intentID = referencedIntentID, let entry = referencedEntry else {
-                route = Routing(kind: .blocked("The task to retry is no longer available."),
-                                intentID: UUID(), request: acceptance.text,
-                                referencedIntentID: nil, questionID: nil)
-                break
-            }
-            switch entry.status {
-            case .cancelled:
-                route = Routing(kind: .blocked("The selected task was cancelled; it will not be retried."),
-                                intentID: UUID(), request: acceptance.text,
-                                referencedIntentID: intentID, questionID: nil)
-            case .executing:
-                route = Routing(kind: .blocked("The selected task is still running; stop it before retrying."),
-                                intentID: UUID(), request: acceptance.text,
-                                referencedIntentID: intentID, questionID: nil)
-            default:
-                route = Routing(kind: .resume, intentID: intentID, request: entry.intent.instruction,
-                                referencedIntentID: intentID, questionID: nil)
-            }
-        default:
-            route = planAddedIntent(decision: decision, acceptance: acceptance,
-                                    referencedIntentID: referencedIntentID,
-                                    referencedEntry: referencedEntry)
-        }
-        return route
-    }
-
-    private func planAddedIntent(decision: CuaExecutorDecision,
-                                 acceptance: ContinuousIntentCoordinator.SourceAcceptance,
-                                 referencedIntentID: UUID?, referencedEntry: CuaDialogueState.Entry?) -> Routing {
-        let intentID = UUID()
-        func blocked(_ reason: String) -> Routing {
-            Routing(kind: .blocked(reason), intentID: intentID, request: acceptance.text,
-                    referencedIntentID: referencedIntentID, questionID: nil)
-        }
-        let relationship: CuaDialogueState.Relationship
-        var prerequisite: CuaDialogueState.Prerequisite?
-        switch decision.operation {
-        case .correction:
-            relationship = referencedEntry != nil ? .correction(of: referencedIntentID!) : .independent
-        case .stop, .stopAll, .ignore, .wait:
-            relationship = .independent
-        case .clarify:
-            // An ambiguous request becomes an intent awaiting the user's answer;
-            // the question binds its owner so the next hold can resolve it.
-            return Routing(kind: .add(.independent, nil,
-                                      decision.clarification?.question
-                                        ?? "What would you like me to do?"),
-                           intentID: intentID, request: acceptance.text,
-                           referencedIntentID: nil, questionID: nil)
-        case .execute:
-            switch decision.relationship {
-            case .reference:
-                // A context reference is conversational only. It degrades to an
-                // independent intent when the referent is gone — never a block.
-                relationship = referencedEntry != nil ? .refinement(of: referencedIntentID!) : .independent
-            case .continuation:
-                guard let intentID = referencedIntentID, referencedEntry != nil else {
-                    return blocked("The task that request continues is no longer available.")
+    /// A bare stop phrase, applied: everything → stopAll; a pending question →
+    /// withdraw it; exactly one running task → cancel; an ambiguous "stop"
+    /// becomes a real question — the user is asked, never told something stopped.
+    private func handleStop(_ verdict: StopVerdict, handoff: TranscriptHandoff,
+                            range: Range<Int>, label: String, invocation: Invocation) {
+        switch verdict {
+        case .all:
+            guard speech.consume(handoff, wordRange: range) else { return }
+            stopAll()
+            speech.publishOutcome("answer", message: "Stopped everything.")
+        case .withdraw:
+            guard speech.consume(handoff, wordRange: range) else { return }
+            if let awaiting = dialogue.entries.first(where: {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            }) {
+                try? dialogue.cancel(intentID: awaiting.intent.id, reason: "Withdrawn.")
+                if let work = tasks.last(where: { $0.intentID == awaiting.intent.id }) {
+                    work.active = false
+                    work.outcome = .cancelled(reason: "Withdrawn.")
+                    work.message = "Withdrawn."
                 }
-                relationship = .continuation(of: intentID)
-            case .revision:
-                guard let intentID = referencedIntentID, referencedEntry != nil else {
-                    return blocked("The task that request revises is no longer available.")
-                }
-                relationship = .correction(of: intentID)
-            case .prerequisite:
-                guard let required = referencedIntentID, referencedEntry != nil else {
-                    return blocked("The earlier task this request requires is no longer available.")
-                }
-                guard !createsPrerequisiteCycle(intentID: intentID, requiresIntentID: required) else {
-                    return blocked("That request would create a dependency cycle.")
-                }
-                relationship = .independent
-                prerequisite = .init(intentID: intentID, requiresIntentID: required)
-            case .independent:
-                relationship = .independent
-            case .answer, .retry:
-                return blocked("The decision could not be routed.")
+                noteChange()
+                speech.publishOutcome("answer", message: "Withdrawn.")
+            } else if let target = tasks.first(where: { $0.id == selectedID && $0.active })
+                        ?? tasks.last(where: { $0.active }) {
+                cancel(target.id)
+                speech.publishOutcome("answer", message: "Cancelled.")
+            } else {
+                speech.publishOutcome("answer", message: "Nothing to withdraw.")
+            }
+        case .one:
+            let target = tasks.first(where: { $0.id == selectedID && $0.active })
+                ?? (tasks.filter { $0.active }.count == 1 ? tasks.last(where: { $0.active }) : nil)
+            if let target {
+                guard speech.consume(handoff, wordRange: range) else { return }
+                cancel(target.id)
+                speech.publishOutcome("answer", message: "Stopping \(target.label); dispatched effects may finish.")
+            } else {
+                guard let acceptance = speech.validateSource(handoff, wordRange: range) else { return }
+                let question = "Which assistant task do you mean?"
+                acceptClarify(ClarifyRequest(question: question),
+                              acceptance: acceptance, label: label, invocation: invocation)
+                speech.publishOutcome("clarification", message: question)
             }
         }
-        return Routing(kind: .add(relationship, prerequisite, nil), intentID: intentID,
-                       request: decision.request ?? acceptance.text,
-                       referencedIntentID: referencedIntentID, questionID: nil)
     }
 
-    /// Prerequisite edges can only point backwards at already-added intents, so a
-    /// true cycle is structurally unreachable; this still rejects any pre-existing
-    /// chain that would loop the new intent back to itself.
-    private func createsPrerequisiteCycle(intentID: UUID, requiresIntentID: UUID) -> Bool {
-        var visited: Set<UUID> = [intentID]
-        var current: UUID? = requiresIntentID
-        while let id = current {
-            guard visited.insert(id).inserted else { return true }
-            current = dialogue.entry(for: id)?.prerequisite?.requiresIntentID
+    /// The intent a correction binds to — the explicit target, else the most
+    /// recent intent that is not the correction itself or already resolved
+    /// into nothing.
+    private func correctionTarget(_ request: CorrectionRequest,
+                                  excluding: UUID? = nil) -> CuaDialogueState.Entry? {
+        if let target = request.targetIntentID {
+            return dialogue.entry(for: target)
         }
-        return false
+        return dialogue.entries.last { $0.intent.id != excluding }
     }
+
+    /// The intent that owns the question an answer binds to — the named
+    /// question when the planner picked one, else the newest pending ask.
+    private func questionOwner(for questionID: UUID?) -> CuaDialogueState.Entry? {
+        if let questionID, let ownerID = dialogue.questionOwner(for: questionID) {
+            return dialogue.entry(for: ownerID)
+        }
+        return dialogue.pendingClarification?.entry
+    }
+
+    /// The pending question an answer resolves — the named one when the
+    /// planner picked it, else the newest pending ask.
+    private func pendingQuestion(for questionID: UUID?) -> CuaDialogueState.Question? {
+        if let questionID {
+            return dialogue.entries.lazy.compactMap(\.question).first { $0.id == questionID }
+        }
+        return dialogue.pendingClarification?.question
+    }
+
+    /// The answering spec fills only what the question left open: targeting
+    /// fields (app, window, values) merge in; goal, scope, literal payload and
+    /// denials always stay with the original — a reply's own shape can never
+    /// narrow an earlier request into an easier success.
+    private func mergeAnswer(_ answer: TaskSpec, into stored: TaskSpec) -> TaskSpec {
+        var merged = stored
+        if merged.application == nil { merged.application = answer.application }
+        for (key, value) in answer.values where merged.values[key] == nil {
+            merged.values[key] = value
+        }
+        merged.relationship = stored.relationship
+        merged.requiresIntentID = stored.requiresIntentID
+        return merged
+    }
+
+    /// A pending question's intent is superseded by the planner's folded
+    /// decision: the answer is recorded on the question (with the answering
+    /// utterance's own source), and the awaiting intent closes honestly —
+    /// the NEW intent carries the folded goal.
+    /// An utterance that answers a pending question resumes the question's
+    /// owner intent: `dialogue.answer` records the reply on the question and
+    /// re-opens the intent pending with a bumped revision; the fresh Work is a
+    /// new attempt carrying the folded spec, never a new intent.
+    private func resumeAnsweredIntent(owner: CuaDialogueState.Entry,
+                                      spec: TaskSpec,
+                                      utterance: String,
+                                      handoff: TranscriptHandoff,
+                                      range: Range<Int>,
+                                      label: String,
+                                      invocation: Invocation) async {
+        guard let acceptance = speech.validateSource(handoff, wordRange: range),
+              let question = pendingQuestion(for: spec.answersQuestionID),
+              question.intentID == owner.intent.id else {
+            speech.report(handoff, outcome: "incomplete", message: "That answer arrived too late; please ask again.")
+            return
+        }
+        guard speech.commit(acceptance, scheduleRemainder: false) else { return }
+        let merged = mergeAnswer(spec, into: intentSpecs[owner.intent.id] ?? spec)
+        let source = CuaDialogueState.Source(captureID: acceptance.handoff.captureID,
+                                             handoffID: acceptance.handoff.id,
+                                             revision: acceptance.handoff.revision,
+                                             transcriptRanges: [acceptance.wordRange])
+        do {
+            try dialogue.answer(.init(questionID: question.id, intentID: owner.intent.id,
+                                      revision: owner.revision, source: source,
+                                      utterance: utterance))
+        } catch {
+            speech.publishOutcome("clarification", message: "That answer arrived too late; please ask again.")
+            return
+        }
+        let work = Work(label: label, request: merged.goal,
+                        intentID: owner.intent.id, attemptID: UUID())
+        work.provenance = acceptance.provenance
+        work.literalText = merged.literalText
+        work.contentMode = merged.literalText != nil ? .literal : .control
+        work.bundle = merged.application
+        work.intentRevision = dialogue.entry(for: owner.intent.id)?.revision ?? owner.revision
+        work.timings = invocation.timings
+        intentSpecs[owner.intent.id] = merged
+        tasks.append(work)
+        selectedID = work.id
+        pruneWorks()
+        noteChange()
+        work.worker = Task { [weak self] in
+            guard let self else { return }
+            await self.runWork(.execute(merged), work: work, invocation: invocation)
+        }
+    }
+
+    private func supersedeAnsweredIntent(acceptance: ContinuousIntentCoordinator.SourceAcceptance,
+                                         utterance: String) {
+        guard let pending = dialogue.pendingClarification else { return }
+        let source = CuaDialogueState.Source(captureID: acceptance.handoff.captureID,
+                                             handoffID: acceptance.handoff.id,
+                                             revision: acceptance.handoff.revision,
+                                             transcriptRanges: [acceptance.wordRange])
+        try? dialogue.answer(.init(questionID: pending.question.id,
+                                   intentID: pending.entry.intent.id,
+                                   revision: pending.entry.revision,
+                                   source: source, utterance: utterance))
+        try? dialogue.cancel(intentID: pending.entry.intent.id,
+                             reason: "Superseded by the answer.")
+        noteChange()
+    }
+
+    /// The pending clarification the planner saw, as a ClarifyRequest — the
+    /// newest awaiting-answer intent's question.
+    private func pendingClarifyRequest() -> ClarifyRequest? {
+        guard let pending = dialogue.pendingClarification else { return nil }
+        return ClarifyRequest(question: pending.question.prompt,
+                              options: pending.question.options)
+    }
+
+    /// The lean planner context: recent intents, one pending question or
+    /// consent, the agent roster, and a foreground hint.
+    private func plannerContext(utteranceFinal: Bool = true) async -> PlannerContext {
+        let unresolved = dialogue.entries.filter { !$0.status.isResolved }.map(\.intent.utterance)
+        let resolved = dialogue.entries.filter { $0.status.isResolved }
+            .suffix(4).map(\.intent.utterance)
+        let roster = (await agentBridge?.roster()) ?? []
+        return PlannerContext(
+            recentIntents: Array((unresolved + resolved).suffix(8)),
+            tasks: dialogue.entries.suffix(8).map { entry in
+                PlannerTaskRef(intentID: entry.intent.id,
+                               request: entry.intent.instruction,
+                               status: entry.status.plannerLabel,
+                               application: entry.intent.target?.application)
+            },
+            pendingClarify: pendingClarifyRequest(),
+            questions: dialogue.entries.filter {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            }.compactMap(\.question).map {
+                PendingQuestionRef(questionID: $0.id, intentID: $0.intentID,
+                                   prompt: $0.prompt, options: $0.options)
+            },
+            pendingConsent: dialogue.solePendingConsent,
+            agents: roster,
+            foregroundHint: initialApp.isEmpty ? nil : initialApp,
+            utteranceFinal: utteranceFinal)
+    }
+
+    private func appList(invocation: Invocation) async throws -> [JSONValue] {
+        let result = try await makeToolCall(invocation: invocation)("list_apps", [:])
+        return result["apps"]?.array ?? []
+    }
+
+    // MARK: - Intent acceptance
 
     /// Unresolved capacity is bounded: terminal-ambiguous records (blocked,
     /// uncertain, partial) drain oldest-first so an `add` cannot wedge on them.
@@ -639,22 +1054,62 @@ final class CuaVoiceRuntime {
         }
     }
 
-    /// One no-await transition: validate routing, publish known metadata, claim
-    /// the source exactly once, then mutate dialogue state. Context freshness
-    /// stays untouched until the source is claimed because nothing on the read
-    /// set changes between validate and commit.
-    private func acceptIntent(decision: CuaExecutorDecision, handoff: TranscriptHandoff,
+    /// An ambiguous request becomes an intent awaiting the answer — the Work
+    /// registers the utterance, the question owns the wait, and the intent
+    /// resolves when a later utterance supersedes or withdraws it.
+    private func acceptClarify(_ request: ClarifyRequest,
+                             acceptance: ContinuousIntentCoordinator.SourceAcceptance,
+                             label: String, invocation: Invocation,
+                             retainedSpec: TaskSpec? = nil) {
+        let intentID = UUID()
+        let source = CuaDialogueState.Source(captureID: acceptance.handoff.captureID,
+                                             handoffID: acceptance.handoff.id,
+                                             revision: acceptance.handoff.revision,
+                                             transcriptRanges: [acceptance.wordRange])
+        // The source is claimed before the intent binds — a commit failure
+        // can never leave an orphaned question with unclaimed words behind it.
+        guard speech.commit(acceptance, scheduleRemainder: false) else { return }
+        do {
+            try drainUnresolvedForCapacity()
+            try dialogue.add(.init(id: intentID, source: source,
+                                   utterance: acceptance.text, instruction: acceptance.text))
+            try dialogue.ask(.init(intentID: intentID, prompt: request.question,
+                                   options: request.options,
+                                   revision: dialogue.entry(for: intentID)?.revision ?? 0))
+            if let retainedSpec { intentSpecs[intentID] = retainedSpec }
+        } catch {
+            try? dialogue.cancel(intentID: intentID, reason: "The question could not be recorded.")
+        }
+        noteChange()
+    }
+
+    /// One no-await transition: the source was validated by the caller; commit
+    /// claims it exactly once, then the intent is bound. A commit failure
+    /// rolls the Work back so a stale transcript never leaves phantom tasks.
+    private func acceptIntent(kind: AcceptedKind,
                               acceptance: ContinuousIntentCoordinator.SourceAcceptance,
-                              label: String, invocation: Invocation) throws -> Work {
-        let routing = planRouting(decision: decision, acceptance: acceptance)
-        let work = Work(label: label, request: routing.request,
-                        intentID: routing.intentID, attemptID: UUID())
+                              label: String, invocation: Invocation,
+                              apps: [JSONValue] = []) throws -> Work {
+        let intentID = UUID()
+        let request: String
+        switch kind {
+        case .fastLane(_, let goal): request = goal
+        case .execute: request = acceptance.text
+        case .consent(let consent): request = consent.summary
+        case .cancel: request = acceptance.text
+        case .correct(let correction):
+            request = correction.replacement?.goal ?? acceptance.text
+        case .retry(_, let spec): request = spec.goal
+        }
+        let work = Work(label: label, request: request, intentID: intentID, attemptID: UUID())
         work.provenance = acceptance.provenance
-        work.literalText = decision.literalText
-        work.contentMode = decision.contentMode
-        // Known app/relationship metadata is populated before the task is visible.
-        work.bundle = decision.bundleID
-        work.referencedIntentID = routing.referencedIntentID
+        var pendingSpec: TaskSpec?
+        if case .execute(let spec) = kind {
+            work.literalText = spec.literalText
+            work.contentMode = spec.literalText != nil ? .literal : .control
+            work.bundle = spec.application
+            pendingSpec = spec
+        }
         work.timings = invocation.timings
         work.timings["Transcript to submission"] =
             (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
@@ -665,123 +1120,207 @@ final class CuaVoiceRuntime {
         pruneWorks()
         guard speech.commit(acceptance, scheduleRemainder: false) else {
             tasks.removeAll { $0.id == work.id }
+            intentSpecs.removeValue(forKey: intentID)
             invocation.work = nil
             selectedID = previousSelection
             onChange()
             throw DriverConnectionError.refused("The transcript changed before the request could be accepted.")
         }
-        // The source is claimed; only now may routing mutate dialogue state.
-        applyRouting(routing, decision: decision, acceptance: acceptance, work: work)
-        work.intentRevision = dialogue.entry(for: work.intentID)?.revision ?? 0
-        if case .awaitingAnswer = dialogue.entry(for: work.intentID)?.status {
-            // A pending question is dialogue-visible, not a running task: the
-            // surface stays identical to a plain clarification and the answer
-            // resumes the intent through the normal execute path.
-            tasks.removeAll { $0.id == work.id }
-            invocation.work = nil
-            selectedID = previousSelection
-        }
-        noteChange()
-        return work
-    }
-
-    private func applyRouting(_ routing: Routing, decision: CuaExecutorDecision,
-                              acceptance: ContinuousIntentCoordinator.SourceAcceptance, work: Work) {
+        // The source is claimed; only now may the intent be bound.
         let source = CuaDialogueState.Source(captureID: acceptance.handoff.captureID,
                                              handoffID: acceptance.handoff.id,
                                              revision: acceptance.handoff.revision,
                                              transcriptRanges: [acceptance.wordRange])
-        var addedNewIntent = false
         do {
-            switch routing.kind {
-            case .add(let relationship, let prerequisite, let question):
-                try drainUnresolvedForCapacity()
-                try dialogue.add(.init(id: routing.intentID, source: source,
-                                       utterance: acceptance.text,
-                                       instruction: routing.request,
-                                       target: intentTarget(for: decision, source: source)),
-                                 relationship: relationship, prerequisite: prerequisite)
-                addedNewIntent = true
-                intentPayloads[routing.intentID] = IntentPayload(literalText: decision.literalText,
-                    contentMode: decision.contentMode, scope: decision.scope,
-                    visibility: decision.visibility)
-                if let question {
-                    let ownerEntry = dialogue.entry(for: routing.intentID)
-                    let candidates = decision.clarification == .task
-                        ? dialogue.entries.filter {
-                            $0.intent.id != routing.intentID && !$0.status.isResolved
-                        }.map(\.intent.utterance)
-                        : []
-                    try dialogue.ask(.init(intentID: routing.intentID, prompt: question,
-                                           options: candidates,
-                                           target: ownerEntry?.intent.target,
-                                           revision: ownerEntry?.revision ?? 0))
-                    work.message = question
-                    work.phase = .waiting
-                }
-            case .resume:
-                switch decision.relationship {
-                case .answer:
-                    guard let questionID = routing.questionID else {
-                        throw CuaDialogueState.TransitionError.invalidQuestion
+            try drainUnresolvedForCapacity()
+            var relationship = CuaDialogueState.Relationship.independent
+            var prerequisite: CuaDialogueState.Prerequisite?
+            switch kind {
+            case .execute(let spec):
+                // A follow-up naming a terminal-failed or cancelled intent is
+                // conversational context, never an execution dependency.
+                func normalized(_ relationship: CuaDialogueState.Relationship,
+                                to parent: UUID) -> CuaDialogueState.Relationship {
+                    guard let target = dialogue.entry(for: parent) else { return relationship }
+                    switch target.status {
+                    case .failed, .cancelled, .blocked: return .independent
+                    default: return relationship
                     }
-                    try dialogue.answer(.init(questionID: questionID, intentID: routing.intentID,
-                        revision: dialogue.entry(for: routing.intentID)?.revision ?? 0,
-                        source: source, utterance: acceptance.text))
-                case .retry:
-                    guard let entry = dialogue.entry(for: routing.intentID) else {
-                        throw CuaDialogueState.TransitionError.unknownIntent
-                    }
-                    // A retry resumes the intent in place: uncertain intents keep
-                    // their revision and facts; anything else revises forward.
-                    if case .uncertain = entry.status { try dialogue.retryUncertain(intentID: routing.intentID) }
-                    else { try dialogue.revise(intentID: routing.intentID) }
-                default:
-                    throw CuaDialogueState.TransitionError.invalidTransition
                 }
-            case .blocked(let reason):
-                // Record the utterance as a resolved intent so it cannot wedge;
-                // the Work carries the honest blocked outcome.
-                let relationship: CuaDialogueState.Relationship
-                if let referenced = routing.referencedIntentID, dialogue.entry(for: referenced) != nil {
-                    relationship = .refinement(of: referenced)
-                } else {
-                    relationship = .independent
+                switch spec.relationship {
+                case .independent: break
+                case .continuation(let parent):
+                    relationship = normalized(.continuation(of: parent), to: parent)
+                case .correction(let parent):
+                    relationship = normalized(.correction(of: parent), to: parent)
                 }
-                try? drainUnresolvedForCapacity()
-                try? dialogue.add(.init(id: routing.intentID, source: source,
-                                        utterance: acceptance.text, instruction: routing.request),
-                                  relationship: relationship)
-                try? dialogue.cancel(intentID: routing.intentID, reason: reason)
-                work.outcome = .blocked(reason: reason)
-                work.message = reason
-                work.active = false
+                if let required = spec.requiresIntentID {
+                    prerequisite = .init(intentID: intentID, requiresIntentID: required)
+                }
+            case .correct(let correction):
+                if let target = correction.targetIntentID ?? correctionTarget(correction)?.intent.id {
+                    relationship = .correction(of: target)
+                }
+            default: break
             }
-            noteChange()
+            try dialogue.add(.init(id: intentID, source: source,
+                                   utterance: acceptance.text, instruction: request,
+                                   target: intentTarget(for: kind, source: source, apps: apps)),
+                             relationship: relationship,
+                             prerequisite: prerequisite)
         } catch {
-            // Only an intent this call added may be resolved here. A resume
-            // failure must not destroy the existing intent it targeted — the
-            // user's earlier question or goal survives to be answered or
-            // retried again.
-            if addedNewIntent {
-                try? dialogue.cancel(intentID: routing.intentID, reason: "The request could not be recorded.")
-            }
+            // The words were already claimed — the refusal's honest record is
+            // a settled failed row, never a silent drop or a phantom intent.
+            work.active = false
             work.outcome = .failed(reason: error.localizedDescription)
             work.message = error.localizedDescription
-            work.active = false
+            intentSpecs.removeValue(forKey: intentID)
+            invocation.work = nil
             noteChange()
+            return work
         }
+        // The intent is live now — record its spec where pruneWorks keeps it,
+        // so an explicit retry can re-execute the same payload in place.
+        if let pendingSpec { intentSpecs[intentID] = pendingSpec }
+        work.intentRevision = dialogue.entry(for: intentID)?.revision ?? 0
+        noteChange()
+        return work
     }
 
-    private func intentTarget(for decision: CuaExecutorDecision,
-                              source: CuaDialogueState.Source) -> CuaDialogueState.Target? {
-        guard let preference = decision.targetPreference else { return nil }
+    private func intentTarget(for kind: AcceptedKind,
+                              source: CuaDialogueState.Source,
+                              apps: [JSONValue] = []) -> CuaDialogueState.Target? {
+        let app: String?
+        var bundle: String?
+        switch kind {
+        case .fastLane(let resolved, _):
+            app = resolved.name; bundle = resolved.bundle
+        case .execute(let spec):
+            app = spec.application
+        case .retry(_, let spec):
+            app = spec.application
+        case .cancel, .correct, .consent:
+            return nil
+        }
+        guard app != nil || bundle != nil else { return nil }
+        if bundle == nil, let app {
+            // The named app resolves to its bundle identity against the live
+            // list, so facts and pending questions bind the real target.
+            bundle = apps.first(where: {
+                $0["name"]?.string?.caseInsensitiveCompare(app) == .orderedSame
+                    || $0["bundle_id"]?.string?.caseInsensitiveCompare(app) == .orderedSame
+            })?["bundle_id"]?.string
+        }
         return .init(
-            bundle: preference.bundleID.map { .init(bundleID: $0, displayName: preference.appName) },
-            process: preference.processID.map { .init(processIdentifier: Int32($0), bundleID: preference.bundleID) },
-            window: preference.windowID.map { .init(windowID: String($0), title: preference.windowTitle) },
-            description: preference.appName ?? decision.request ?? "",
+            bundle: (bundle ?? app).map { .init(bundleID: $0, displayName: app) },
+            description: app ?? bundle ?? "",
             provenance: .source(source))
+    }
+
+    /// The planner's stop for a specific intent: withdraw a pending question,
+    /// cancel the running work, or report honestly that nothing was live.
+    /// The correction work itself is never a candidate for its own target.
+    private func runCancelWork(_ request: CancelRequest, work: Work) async -> CuaDialogueState.Outcome {
+        let target = request.targetIntentID.flatMap { dialogue.entry(for: $0) }
+            ?? dialogue.entries.last { $0.intent.id != work.intentID }
+        guard let target else {
+            return .verified(evidence: "There was nothing to stop.")
+        }
+        if case .awaitingAnswer = target.status {
+            try? dialogue.cancel(intentID: target.intent.id, reason: "Withdrawn by the user.")
+            if let targetWork = tasks.last(where: { $0.intentID == target.intent.id }),
+               targetWork.active {
+                targetWork.worker?.cancel()
+                targetWork.active = false
+                targetWork.outcome = .cancelled(reason: "Withdrawn by the user.")
+                targetWork.message = "Withdrawn."
+            }
+            noteChange()
+            return .verified(evidence: "Withdrew the pending question.")
+        }
+        if let targetWork = tasks.last(where: { $0.intentID == target.intent.id && $0.active }) {
+            cancel(targetWork.id)
+            _ = await targetWork.worker?.value
+            return .verified(evidence: "Stopped \(targetWork.label).")
+        }
+        return .verified(evidence: "Nothing was running for that task.")
+    }
+
+    /// A correction: withdraws a question, cancels live work, or unwinds an
+    /// effect the target verifiably owns. Reversal is bounded — it only
+    /// quits an app the target's own verified launch fact still shows
+    /// running, re-observed before and after, never a guessed kill.
+    private func runCorrectionWork(_ request: CorrectionRequest, work: Work,
+                                   invocation: Invocation) async throws -> CuaDialogueState.Outcome {
+        guard let target = correctionTarget(request, excluding: work.intentID) else {
+            return .verified(evidence: "There was nothing to correct.")
+        }
+        if case .awaitingAnswer = target.status {
+            try? dialogue.cancel(intentID: target.intent.id, reason: "Withdrawn by the correction.")
+            if let targetWork = tasks.last(where: { $0.intentID == target.intent.id }),
+               targetWork.active {
+                targetWork.worker?.cancel()
+                targetWork.active = false
+                targetWork.outcome = .cancelled(reason: "Withdrawn by the correction.")
+                targetWork.message = "Withdrawn."
+            }
+            noteChange()
+            return .verified(evidence: "Withdrew the pending question.")
+        }
+        if let targetWork = tasks.last(where: { $0.intentID == target.intent.id && $0.active }) {
+            cancel(targetWork.id)
+            _ = await targetWork.worker?.value
+            return .verified(evidence: "Stopped \(targetWork.label).")
+        }
+        if request.mode == .revise, let replacement = request.replacement {
+            intentSpecs[work.intentID] = replacement
+            return try await runExecution(replacement, work: work,
+                                          agent: makeAgent(invocation: invocation),
+                                          invocation: invocation)
+        }
+        if request.mode == .retract,
+           let fact = target.verifiedFacts.first(where: { $0.kind == .resultObserved }),
+           fact.target != nil {
+            let callTool = makeToolCall(invocation: invocation, useInstalledAppCache: false)
+            // The recorded process identity is the "unchanged" evidence: only
+            // the very pid the task launched is reversed — a relaunched or
+            // user-restarted app (different pid) is left alone.
+            let observedPID = fact.target?.process.map { Int($0.processIdentifier) }
+            let bundle = fact.target?.bundle?.bundleID
+            let name = fact.target?.bundle?.displayName ?? target.intent.target?.application
+            if let pid = try? await runningApp(pid: observedPID, bundleID: bundle,
+                                               name: name, call: callTool) {
+                _ = try? await callTool("invoke_menu", [
+                    "pid": .number(Double(pid)),
+                    "path": .array([.string("Quit")])
+                ])
+                if (try? await runningApp(pid: observedPID, bundleID: bundle,
+                                          name: name, call: callTool)) != nil {
+                    return .uncertain(reason: "The quit was dispatched but the app still reports running.")
+                }
+                return .verified(evidence: "Closed only the unchanged app launched by that task.")
+            }
+            return .verified(evidence: "Nothing to undo — the app is no longer running.")
+        }
+        return .verified(evidence: "Recorded the correction.")
+    }
+
+    /// Whether the recorded target still reports running — the reversal's
+    /// re-observation, never trusted from a stale list. The recorded pid wins:
+    /// it pins the exact process the task owned, so a substitute instance is
+    /// never mistaken for it.
+    private func runningApp(pid: Int?, bundleID: String?, name: String?,
+                            call: CuaTaskAgent.Call) async throws -> Int? {
+        let result = try await call("list_apps", [:])
+        for app in result["apps"]?.array ?? [] {
+            guard let o = app.object, o["running"]?.bool == true else { continue }
+            if let pid, o["pid"]?.integer == pid { return pid }
+            if let bundleID, o["bundle_id"]?.string == bundleID,
+               let live = o["pid"]?.integer { return live }
+            if let name, o["name"]?.string?.caseInsensitiveCompare(name) == .orderedSame,
+               let live = o["pid"]?.integer { return live }
+        }
+        return nil
     }
 
     /// Active and unresolved intents — plus everything they transitively
@@ -804,25 +1343,16 @@ final class CuaVoiceRuntime {
             tasks.remove(at: index)
         }
         let liveIntentIDs = Set(dialogue.entries.map { $0.intent.id })
-        intentPayloads = intentPayloads.filter { liveIntentIDs.contains($0.key) }
+        intentSpecs = intentSpecs.filter { liveIntentIDs.contains($0.key) }
     }
 
+    // MARK: - Dispatch plumbing
+
     private func makeAgent(invocation: Invocation) -> CuaTaskAgent {
-        CuaTaskAgent(call: makeToolCall(invocation: invocation),
-            judge: makeTimedJudge(invocation), generate: { prompt, context, reasoning in
-                let accessStarted = ProcessInfo.processInfo.systemUptime
-                let client = try {
-                    defer { invocation.timings["Provider credential access", default: 0] += (ProcessInfo.processInfo.systemUptime - accessStarted) * 1000 }
-                    return try TextProviderSettings.shared.client()
-                }()
-                let generationStarted = ProcessInfo.processInfo.systemUptime
-                defer { invocation.timings["Text generation", default: 0] += (ProcessInfo.processInfo.systemUptime - generationStarted) * 1000 }
-                return try await client.generate(prompt: prompt, context: context, reasoning: reasoning)
-            }, reasoningAvailable: TextProviderSettings.shared.configured, allowConfirmedRepetition: true, approve: { [weak self] description in
+        CuaTaskAgent(call: makeToolCall(invocation: invocation, useInstalledAppCache: false),
+            approve: { [weak self] description in
                 guard let self, let work = invocation.work else { return false }
                 return try await self.requestApproval(description, for: work)
-            }, payload: { request, purpose in
-                try await JevSpeechIntent(client: JevClient(apiKey: self.config.apiKey)).textPayload(request: request, purpose: purpose)
             })
     }
 
@@ -859,7 +1389,7 @@ final class CuaVoiceRuntime {
     private func makeTimedJudge(_ invocation: Invocation) -> CuaTaskAgent.Judge {
         { state, questions in
             let started = ProcessInfo.processInfo.systemUptime
-            defer { invocation.timings["Jev execution", default: 0] += (ProcessInfo.processInfo.systemUptime - started) * 1000 }
+            defer { invocation.timings["Jev judgment", default: 0] += (ProcessInfo.processInfo.systemUptime - started) * 1000 }
             return try await self.judge(state, questions)
         }
     }
@@ -891,65 +1421,118 @@ final class CuaVoiceRuntime {
         }
     }
 
-    private func runSelected(_ decision: CuaExecutorDecision, handoff: TranscriptHandoff, work: Work,
-                             agent: CuaTaskAgent, invocation: Invocation) async {
+    // MARK: - Worker
+
+    private func runWork(_ kind: AcceptedKind, work: Work, invocation: Invocation) async {
         let start = ContinuousClock.now
         do {
             try Task.checkCancellation()
             if work.stopRequested { throw CancellationError() }
-            try await beginAttempt(for: work)
             work.phase = .working
             // On a locked console every activation and key event silently
             // no-ops — the driver reports `partial` for each bring_to_front
             // and each step fails with a different confusing message. One
             // session read up front turns the whole class into a single
-            // honest refusal instead of a per-step failure trail. `.stop`
-            // is bookkeeping only; it still runs.
-            if decision.operation != .stop, screenLocked() {
+            // honest refusal instead of a per-step failure trail.
+            if screenLocked() {
                 throw DriverConnectionError.refused("The screen is locked. Unlock it before running computer commands.")
             }
-            let outcome: CuaDialogueState.Outcome
-            switch decision.operation {
-            case .stop:
-                outcome = try executeStop(decision, work: work)
-            case .correction:
-                outcome = try await applyCorrection(decision, work: work, agent: agent,
-                    initialApp: handoff.taskContext["initial_app"]?.string ?? "",
-                    invocation: invocation)
-            case .execute:
-                let result = await execute(decision, work: work, agent: agent, invocation: invocation,
-                    initialApp: handoff.taskContext["initial_app"]?.string ?? "")
-                if let question = Self.pendingQuestion(result.outcome) {
-                    // The attempt observed an ambiguity: finish it honestly,
-                    // re-open the intent and attach the question the next hold
-                    // answers through an .answer decision.
-                    let alreadyAnswered = !(dialogue.entry(for: work.intentID)?.answers.isEmpty ?? true)
-                    try? dialogue.finish(attemptID: work.attemptID, intentID: work.intentID,
-                                         outcome: .blocked(reason: question))
-                    if alreadyAnswered {
-                        // The user already answered this intent's question and
-                        // it still cannot resolve; re-asking only loops.
-                        work.message = "Your answer did not resolve it — try restating the request."
-                        outcome = .blocked(reason: question)
-                    } else {
-                        try? dialogue.revise(intentID: work.intentID)
-                        if let revision = dialogue.entry(for: work.intentID)?.revision {
-                            try? dialogue.ask(.init(intentID: work.intentID, prompt: question,
-                                                    options: agent.pendingQuestionOptions,
-                                                    target: dialogue.entry(for: work.intentID)?.intent.target,
-                                                    revision: revision))
-                        }
-                        work.message = question
-                        outcome = .blocked(reason: question)
-                    }
-                } else {
-                    outcome = mapOutcome(result, work: work)
+
+            // Every app-bound attempt serializes on the app lease — the fast
+            // lane and the drive loop dispatch the same kind of effect.
+            let queueApp: String? = {
+                switch kind {
+                case .execute(let spec), .retry(_, let spec): return spec.application
+                case .fastLane(let resolved, _): return resolved.name
+                case .consent, .cancel, .correct: return nil
                 }
-            default:
-                throw DriverConnectionError.malformed
+            }()
+            if let queueApp, !queueApp.isEmpty {
+                work.phase = .waiting
+                work.message = "Waiting for \(queueApp)…"
+                noteChange(progressOnly: true)
+                let queued = ProcessInfo.processInfo.systemUptime
+                try await queue.acquire(work.id, app: queueApp)
+                invocation.timings["Queue wait", default: 0] +=
+                    (ProcessInfo.processInfo.systemUptime - queued) * 1000
+                work.phase = .working
+                noteChange(progressOnly: true)
+            }
+            // "Jev execution" is the execution span — the same measure whether
+            // the deterministic lane or the drive loop produced the effects.
+            let executionStarted = ProcessInfo.processInfo.systemUptime
+            defer {
+                invocation.timings["Jev execution", default: 0] +=
+                    (ProcessInfo.processInfo.systemUptime - executionStarted) * 1000
+            }
+            var outcome: CuaDialogueState.Outcome
+            switch kind {
+            case .consent(let request):
+                try await beginAttempt(for: work)
+                // The consent ask parks the attempt on the existing approval
+                // surface — "Needs confirmation" in the task list, voice yes/no
+                // and the confirm/cancel buttons resolve it.
+                let approved = try await requestApproval(request.summary, for: work)
+                dialogue.resolveConsent(id: request.id, approved: approved)
+                guard approved else {
+                    outcome = .blocked(reason: "The request was declined.")
+                    break
+                }
+                // Approved — the planner re-decides the original instruction
+                // with the consent resolved; the utterance's words were claimed
+                // by the consent intent, so the instruction text decides again.
+                guard let planner else {
+                    outcome = .blocked(reason: "Planning is not available in this build.")
+                    break
+                }
+                let followup = try await planner.decide(utterance: work.request,
+                                                        context: await plannerContext())
+                switch followup {
+                case .execute(let spec):
+                    intentSpecs[work.intentID] = spec
+                    outcome = try await runExecution(spec, work: work, agent: makeAgent(invocation: invocation),
+                                                     invocation: invocation)
+                case .clarify(let clarify):
+                    outcome = .blocked(reason: clarify.question)
+                case .answer(let text):
+                    work.message = text
+                    outcome = .verified(evidence: text)
+                case .refuse(let reason):
+                    outcome = .blocked(reason: reason)
+                case .consentNeeded(let again):
+                    // A chained ask parks again — approval state reset by the gate.
+                    dialogue.recordConsent(again)
+                    let reapproved = try await requestApproval(again.summary, for: work)
+                    dialogue.resolveConsent(id: again.id, approved: reapproved)
+                    outcome = reapproved
+                        ? .blocked(reason: "The request was approved but needs another pass — please ask again.")
+                        : .blocked(reason: "The request was declined.")
+                case .delegate, .sendToAgent, .agentMemory, .cancel, .correct, .retry:
+                    outcome = .blocked(reason: "The approved request could not be converted to an action.")
+                }
+            case .fastLane(let resolved, let goal):
+                try await beginAttempt(for: work)
+                outcome = try await runFastLaneOutcome(resolved, goal: goal, work: work,
+                                                       agent: makeAgent(invocation: invocation),
+                                                       invocation: invocation)
+            case .execute(let spec):
+                try await beginAttempt(for: work)
+                outcome = try await runExecution(spec, work: work, agent: makeAgent(invocation: invocation),
+                                                 invocation: invocation)
+            case .cancel(let request):
+                try await beginAttempt(for: work)
+                outcome = await runCancelWork(request, work: work)
+            case .correct(let request):
+                try await beginAttempt(for: work)
+                outcome = try await runCorrectionWork(request, work: work, invocation: invocation)
+            case .retry(_, let spec):
+                try await beginAttempt(for: work)
+                outcome = try await runExecution(spec, work: work, agent: makeAgent(invocation: invocation),
+                                                 invocation: invocation)
             }
             try Task.checkCancellation()
-            work.timings["Transcript to observed result"] = (ProcessInfo.processInfo.systemUptime - handoff.receivedAt) * 1000
+            work.timings["Transcript to observed result"] =
+                (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
             settle(work: work, outcome: outcome)
         } catch is CancellationError {
             settle(work: work, outcome: .cancelled(reason: "Cancelled. Already dispatched effects may have finished."))
@@ -957,8 +1540,21 @@ final class CuaVoiceRuntime {
             let mapped: CuaDialogueState.Outcome
             if Task.isCancelled || work.stopRequested {
                 mapped = .cancelled(reason: "Cancelled. Already dispatched effects may have finished.")
-            } else if case .refused(let reason) = error as? DriverConnectionError {
-                mapped = .blocked(reason: reason)
+            } else if let uncertain = error as? CuaUncertainOutcome {
+                mapped = .uncertain(reason: uncertain.localizedDescription)
+            } else if let connection = error as? DriverConnectionError {
+                switch connection {
+                case .refused(let reason), .remote(let reason):
+                    mapped = .blocked(reason: reason)
+                case .closed, .timedOut:
+                    // The transport died after a dispatch could have landed —
+                    // the outcome is unknowable, not failed.
+                    mapped = .uncertain(reason: connection.localizedDescription)
+                case .unavailable:
+                    mapped = .blocked(reason: connection.localizedDescription)
+                case .malformed, .toolRefused:
+                    mapped = .failed(reason: connection.localizedDescription)
+                }
             } else {
                 mapped = .failed(reason: error.localizedDescription)
             }
@@ -1005,161 +1601,242 @@ final class CuaVoiceRuntime {
         work.attemptBegan = true
     }
 
-    /// Published ids are intent ids; resolve a selected id to a task record,
-    /// preferring an in-flight attempt when an intent has several works.
-    private func workForPublishedID(_ id: UUID) -> Work? {
-        tasks.first { $0.id == id }
-            ?? tasks.first { $0.intentID == id && $0.active }
-            ?? tasks.last { $0.intentID == id }
-    }
-
-    private func executeStop(_ decision: CuaExecutorDecision, work: Work) throws -> CuaDialogueState.Outcome {
-        guard let id = decision.selectedTaskID, let target = workForPublishedID(id) else {
-            throw DriverConnectionError.refused("The selected task is no longer available to stop.")
-        }
-        cancel(target.id)
-        work.message = target.active ? "Stop requested for \(target.label); in-flight effects may finish." : "The selected task has already completed."
-        return .verified(evidence: work.message)
-    }
-
-    /// The agent gets a fresh structured run every attempt: no raw related-task
-    /// window is ever inherited, and references contribute context only.
-    private func execute(_ decision: CuaExecutorDecision, work: Work, agent: CuaTaskAgent,
-                         invocation: Invocation, initialApp: String) async -> CuaTaskExecutionResult {
-        defer {
+    /// The deterministic fast lane: zero model calls, postcondition-verified.
+    /// A `nil` runFastLane means the primitive resolved but could not dispatch
+    /// (e.g. ambiguous field) — the drive loop takes over from real state.
+    private func runFastLaneOutcome(_ resolved: CuaTaskAgent.FastResolution, goal: String,
+                                    work: Work, agent: CuaTaskAgent,
+                                    invocation: Invocation) async throws -> CuaDialogueState.Outcome {
+        if let evidence = try await agent.runFastLane(resolved, goal: goal,
+            progress: { progress in
+                work.message = progress
+                self.noteChange(progressOnly: true)
+            }) {
             work.bundle = agent.bundleID ?? work.bundle
-            work.window = agent.windowID ?? work.window
-            work.launchReceipt = agent.launchReceipt ?? work.launchReceipt
+            return verifiedOutcome(evidence: evidence, agent: agent, work: work)
         }
-        var executionDecision = decision
-        var context = referencedContext(for: work) ?? initialApp
-        if !decision.addsDialogueIntent, let entry = dialogue.entry(for: work.intentID) {
-            // Answers and retries resume the intent in place: execution uses the
-            // intent's own instruction, with the applied answer kept in context.
-            // The intent's stored target supplies an app the resuming utterance
-            // did not name, and its previous attempt retains the literal payload
-            // so a retry re-executes the same request instead of the empty reply.
-            let previous = tasks.last { $0.intentID == work.intentID && $0.id != work.id }
-            // An answer/retry utterance is the reply to a question, never the
-            // payload itself — "Untitled 21" answers which window, it is not
-            // text to insert. Dropping the reply's own literal lets the
-            // intent's stored payload restore below.
-            let replyOnly = decision.relationship == .answer || decision.relationship == .retry
-            var literalText = replyOnly ? nil : decision.literalText
-            var contentMode = replyOnly ? .control : decision.contentMode
-            // The intent's recorded contract outlives its attempts: a reply that
-            // names no payload still re-executes the original literal, and the
-            // reply's own scope/visibility can never narrow the request (an
-            // answer judged "launch" must not complete a "work" intent early).
-            let payload = intentPayloads[work.intentID]
-            if literalText == nil, contentMode == .control {
-                if let stored = payload?.literalText {
-                    literalText = stored
-                    contentMode = payload?.contentMode ?? .literal
-                } else if let prior = previous?.literalText {
-                    literalText = prior
-                    contentMode = previous?.contentMode ?? .literal
-                }
-            }
-            var resumed = CuaExecutorDecision(operation: .execute, consumedRange: decision.consumedRange,
-                request: entry.intent.instruction, replacementRequest: nil,
-                selectedTaskID: nil, dependencyTaskID: nil,
-                appName: decision.appName ?? entry.intent.target?.bundle.map { $0.displayName ?? $0.bundleID },
-                bundleID: decision.bundleID ?? entry.intent.target?.bundle?.bundleID,
-                scope: {
-                    // An answer naming one of the offered options picks a
-                    // concrete existing target; a stored "create" contract is
-                    // contradicted by that choice — the user pointed at the
-                    // window to work in, not at a document to make.
-                    if payload?.scope == "create",
-                       let options = entry.question?.options, !options.isEmpty,
-                       let answer = entry.answers.last?.utterance,
-                       options.contains(where: {
-                           $0.trimmingCharacters(in: .whitespaces).lowercased()
-                               == answer.trimmingCharacters(in: .whitespaces).lowercased()
-                       }) { return "work" }
-                    return payload?.scope ?? decision.scope
-                }(),
-                visibility: payload?.visibility ?? decision.visibility,
-                literalText: literalText, contentMode: contentMode)
-            resumed.relationship = decision.relationship
-            resumed.targetPreference = decision.targetPreference ?? entry.intent.target.map { stored in
-                CuaTargetPreference(
-                    appName: stored.application,
-                    bundleID: stored.bundle?.bundleID,
-                    processID: stored.process.map { Int($0.processIdentifier) },
-                    windowID: stored.window.flatMap { Int($0.windowID) },
-                    windowTitle: stored.window?.title,
-                    provenance: .retained)
-            }
-            resumed.questionID = decision.questionID
-            resumed.intentRevision = decision.intentRevision
-            work.bundle = work.bundle ?? resumed.bundleID
-            executionDecision = resumed
-            if let answer = entry.answers.last {
-                context = "Answer to the pending question: \(answer.utterance). " + context
-            }
+        // Fast lane declined to dispatch — the drive loop continues from the
+        // same intent with the utterance as its goal.
+        work.bundle = agent.bundleID ?? work.bundle
+        let spec = TaskSpec(goal: goal, application: resolved.name)
+        intentSpecs[work.intentID] = spec
+        return try await runDriveLoop(spec, work: work, invocation: invocation)
+    }
+
+    /// Planner-spec execution: fast-lane retry on the normalized goal first
+    /// (the planner's cleaned-up goal often parses where the raw utterance
+    /// did not), then the drive loop for everything else.
+    private func runExecution(_ spec: TaskSpec, work: Work, agent: CuaTaskAgent,
+                              invocation: Invocation) async throws -> CuaDialogueState.Outcome {
+        // The deterministic lane covers only a pure open-scope primitive —
+        // the whole contract it can satisfy. A spec carrying work, literal
+        // text, or targeting constraints belongs to the drive loop, which
+        // honors all of them.
+        if spec.scope == .open, spec.literalText == nil,
+           spec.values.isEmpty, spec.window == nil, spec.deny.isEmpty,
+           let apps = try? await appList(invocation: invocation),
+           let resolved = agent.resolveFastLane(goal: spec.goal, apps: apps),
+           let evidence = try await agent.runFastLane(resolved, goal: spec.goal,
+               progress: { progress in
+                   work.message = progress
+                   self.noteChange(progressOnly: true)
+               }) {
+            work.bundle = agent.bundleID ?? work.bundle
+            return verifiedOutcome(evidence: evidence, agent: agent, work: work)
         }
-        work.message = "Starting the selected Cua operation…"
-        work.phase = .working
-        noteChange(progressOnly: true)
-        return await agent.executeStructured(executionDecision, context: context,
-            actionOwner: CuaActionOwner(taskID: work.id, revision: work.intentRevision),
-            acquireApp: { app in
-                work.bundle = app
-                work.phase = .waiting
-                work.message = "Waiting for \(app)…"
-                self.noteChange(progressOnly: true)
-                let queued = ProcessInfo.processInfo.systemUptime
-                try await self.queue.acquire(work.id, app: app)
-                invocation.timings["Queue wait", default: 0] += (ProcessInfo.processInfo.systemUptime - queued) * 1000
-                work.phase = .working
-                self.noteChange(progressOnly: true)
-            }, progress: { progress in
+        return try await runDriveLoop(spec, work: work, invocation: invocation)
+    }
+
+    /// The drive loop executes one spec to a `DriveResult`; statuses map to
+    /// honest dialogue outcomes. `.needsText` re-opens the intent with a
+    /// question the next utterance answers through the normal decision path.
+    private func runDriveLoop(_ spec: TaskSpec, work: Work,
+                              invocation: Invocation) async throws -> CuaDialogueState.Outcome {
+        if requiresAPIKey, config.apiKey.isEmpty {
+            return .blocked(reason: "Save the Jev API key in Commands settings to run computer tasks.")
+        }
+        var values = spec.values
+        var goal = spec.goal
+        switch spec.scope {
+        case .open:
+            goal += "\nOnly open or show the app — perform no further actions."
+        case .create:
+            goal += "\nThe task must produce a new top-level document or window; a pre-existing one does not satisfy it."
+        case .work:
+            break
+        }
+        if let literal = spec.literalText {
+            values["literal_text"] = literal
+            goal += "\nInsert this exact text where the task calls for it: \(literal)"
+        }
+        // The app lease was taken in runWork for every app-bound kind; the
+        // consent follow-up path re-acquires here only if runWork did not.
+        if let app = spec.application, !app.isEmpty {
+            let queued = ProcessInfo.processInfo.systemUptime
+            try await queue.acquire(work.id, app: app)
+            invocation.timings["Queue wait", default: 0] +=
+                (ProcessInfo.processInfo.systemUptime - queued) * 1000
+        }
+        let loop = CuaAgentLoop(call: makeToolCall(invocation: invocation, useInstalledAppCache: false),
+            judge: makeTimedJudge(invocation),
+            generate: { prompt, context, reasoning in
+                let client = try TextProviderSettings.shared.client()
+                return try await client.generate(prompt: prompt, context: context, reasoning: reasoning)
+            },
+            approve: { [weak self] description in
+                guard let self else { return false }
+                return try await self.requestApproval(description, for: work)
+            },
+            payload: { request, purpose in
+                try await JevSpeechIntent(client: JevClient(apiKey: self.config.apiKey))
+                    .textPayload(request: request, purpose: purpose)
+            },
+            progress: { progress in
                 work.message = progress
                 self.noteChange(progressOnly: true)
             })
+        let result: DriveResult
+        do {
+            result = try await loop.drive(DriveTask(
+                goal: goal, application: spec.application,
+                windowName: spec.window,
+                previousContext: dialogue.entry(for: work.intentID)?.answers.last?.utterance,
+                scope: spec.scope,
+                values: values, deny: spec.deny,
+                successContains: spec.successContains))
+        } catch {
+            let facts = loop.observedPostconditions.compactMap { dialogueFact(from: $0, work: work) }
+            guard facts.isEmpty else {
+                return .partial(evidence: facts.last?.evidence ?? "Some effects were verified.",
+                                blockedReason: error.localizedDescription,
+                                verifiedFacts: facts)
+            }
+            throw error
+        }
+        work.bundle = result.pid.flatMap { _ in work.bundle }
+        if let pendingAsk = pendingLoopQuestion(result.status) {
+            // The loop needs an answer the caller never supplied — finish
+            // this attempt honestly and re-open the intent with the ask; the
+            // answer arrives as a new utterance the planner folds in.
+            try? dialogue.finish(attemptID: work.attemptID, intentID: work.intentID,
+                                 outcome: .blocked(reason: pendingAsk.prompt))
+            work.attemptBegan = false
+            try? dialogue.revise(intentID: work.intentID)
+            if let revision = dialogue.entry(for: work.intentID)?.revision {
+                try? dialogue.ask(.init(intentID: work.intentID, prompt: pendingAsk.prompt,
+                                        options: pendingAsk.options,
+                                        target: dialogue.entry(for: work.intentID)?.intent.target,
+                                        revision: revision))
+            }
+            work.message = pendingAsk.prompt
+            work.active = false
+            noteChange()
+            return .blocked(reason: pendingAsk.prompt)
+        }
+        return mapDriveResult(result, work: work, loop: loop)
     }
 
-    private func referencedContext(for work: Work) -> String? {
-        guard let referencedID = work.referencedIntentID,
-              let referenced = tasks.last(where: { $0.intentID == referencedID && $0.id != work.id })
-            else { return nil }
-        return "Previous task: \(referenced.request). App: \(referenced.bundle ?? ""). Result: \(referenced.message)"
-    }
-
-    private static func pendingQuestion(_ outcome: CuaTaskExecutionOutcome) -> String? {
-        switch outcome {
-        case .clarification(_, let message), .targetAmbiguous(let message): return message
-        default: return nil
+    private func pendingLoopQuestion(_ status: DriveStatus) -> (prompt: String, options: [String])? {
+        switch status {
+        case .needsText(let label):
+            return ("What text should go in \(label)?", [])
+        case .needsWindow(let candidates):
+            return ("Which window should I use?", candidates)
+        default:
+            return nil
         }
     }
 
-    /// Structured executor outcomes become dialogue outcomes. Verified facts are
-    /// emitted only for observed postconditions bound to this attempt and intent
-    /// revision; a plain verified outcome records no fact and cannot discharge a
-    /// prerequisite.
-    private func mapOutcome(_ result: CuaTaskExecutionResult, work: Work) -> CuaDialogueState.Outcome {
-        switch result.outcome {
-        case .verified(let evidence):
-            let facts = result.postconditions.compactMap { dialogueFact(from: $0, work: work) }
+    /// Verified with postcondition evidence when the run observed real effects.
+    private func verifiedOutcome(evidence: String, agent: CuaTaskAgent,
+                                 work: Work) -> CuaDialogueState.Outcome {
+        let facts = agent.observedPostconditions.compactMap { dialogueFact(from: $0, work: work) }
+        if let fact = facts.first(where: { $0.kind == .resultObserved }) ?? facts.first {
+            return .verifiedFact(fact)
+        }
+        return .verified(evidence: evidence)
+    }
+
+    /// Drive statuses become honest dialogue outcomes: nothing is upgraded —
+    /// a partial or uncertain run never reports success, and handbacks name
+    /// what was observed rather than what was attempted.
+    private func mapDriveResult(_ result: DriveResult, work: Work,
+                                loop: CuaAgentLoop) -> CuaDialogueState.Outcome {
+        let facts = loop.observedPostconditions.compactMap { dialogueFact(from: $0, work: work) }
+        let lastStep = result.history.last ?? "the task ended"
+        switch result.status {
+        case .done:
             if let fact = facts.first(where: { $0.kind == .resultObserved }) ?? facts.first {
                 return .verifiedFact(fact)
             }
-            return .verified(evidence: evidence)
-        case .partial(let evidence, let blockedReason):
-            return .partial(evidence: evidence, blockedReason: blockedReason,
-                            verifiedFacts: result.postconditions.compactMap { dialogueFact(from: $0, work: work) })
-        case .uncertain(let reason):
-            return .uncertain(reason: reason)
+            return .verified(evidence: lastStep)
+        case .handedBack(let reason):
+            let detail = result.history.isEmpty
+                ? "Nothing was dispatched."
+                : "Stopped after: \(lastStep)."
+            let honest: String
+            switch reason {
+            case .lowConfidence:
+                honest = "The next step could not be chosen confidently. \(detail)"
+            case .noCandidate:
+                honest = "No matching control was found on screen. \(detail)"
+            case .noInteractiveElements:
+                honest = "The window showed no interactive elements. \(detail)"
+            case .untrustedAnswer:
+                honest = "The proposed action was not trustworthy and was refused. \(detail)"
+            }
+            return result.history.isEmpty ? .blocked(reason: honest) : .uncertain(reason: honest)
         case .blocked(let reason):
             return (work.stopRequested || Task.isCancelled) ? .cancelled(reason: reason) : .blocked(reason: reason)
-        case .failed(let reason):
-            return .failed(reason: reason)
-        case .clarification(_, let message), .targetAmbiguous(let message):
-            return .blocked(reason: message)
+        case .blockedByConsent(let reason):
+            return .blocked(reason: reason)
+        case .needsText(let label):
+            return .blocked(reason: "The field \(label) needs text that was never supplied.")
+        case .needsWindow(let candidates):
+            return .blocked(reason: "The named window is ambiguous among \(candidates.count) live windows.")
+        case .maxSteps:
+            return .uncertain(reason: "Stopped at the step limit — \(lastStep). The outcome is unverified.")
+        case .cancelled:
+            return .cancelled(reason: "Cancelled. Already dispatched effects may have finished.")
         }
     }
+
+    // MARK: - Agent delegation outcomes
+
+    private func delegateOutcome(_ request: DelegationRequest) async -> (String, String) {
+        guard let agentBridge else {
+            return ("refused", "Persistent agents are not available in this build.")
+        }
+        do {
+            return ("answer", try await agentBridge.delegate(request))
+        } catch {
+            return ("refused", "The agent could not be delegated: \(error.localizedDescription)")
+        }
+    }
+
+    private func sendToAgentOutcome(slug: String, message: String) async -> (String, String) {
+        guard let agentBridge else {
+            return ("refused", "Persistent agents are not available in this build.")
+        }
+        do {
+            return ("answer", try await agentBridge.sendToAgent(slug: slug, message: message))
+        } catch {
+            return ("refused", "The agent could not be reached: \(error.localizedDescription)")
+        }
+    }
+
+    private func agentMemoryOutcome(slug: String) async -> (String, String) {
+        guard let agentBridge else {
+            return ("refused", "Persistent agents are not available in this build.")
+        }
+        do {
+            return ("answer", try await agentBridge.agentMemory(slug: slug))
+        } catch {
+            return ("refused", "The agent's memory could not be read: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Settlement
 
     /// Bind an observed postcondition to the producing attempt and intent
     /// revision. A target fact with no bindable target is dropped, never fabricated.
@@ -1193,8 +1870,10 @@ final class CuaVoiceRuntime {
             work.message = reason
         case .partial(_, let blockedReason, _):
             work.message = blockedReason
-        case .verified, .verifiedFact:
-            break
+        case .verified(let evidence):
+            work.message = evidence
+        case .verifiedFact(let fact):
+            work.message = fact.evidence
         }
         work.outcome = outcome
         noteChange()
@@ -1213,54 +1892,22 @@ final class CuaVoiceRuntime {
         }
     }
 
-    private func applyCorrection(_ decision: CuaExecutorDecision, work: Work, agent: CuaTaskAgent,
-                                 initialApp: String,
-                                 invocation: Invocation) async throws -> CuaDialogueState.Outcome {
-        guard let id = decision.selectedTaskID, let target = workForPublishedID(id), target.id != work.id else {
-            throw DriverConnectionError.refused("The selected task is no longer available to correct.")
-        }
-        cancel(target.id)
-        // An inactive work can still hold a live pending question or an
-        // unresolved blocked/uncertain/partial intent: the correction must
-        // actually withdraw it, not just claim it was cancelled.
-        if !target.active, let status = dialogue.entry(for: target.intentID)?.status,
-           !status.isResolved {
-            target.stopRequested = true
-            try? dialogue.cancel(intentID: target.intentID, reason: "Cancelled.")
-            target.outcome = .cancelled(reason: "Cancelled.")
-            target.message = "Cancelled."
-            noteChange()
-        }
-        await target.worker?.value
-        try Task.checkCancellation()
-        if let receipt = target.launchReceipt {
-            _ = try await sessionTransport()
-            work.phase = .waiting
-            work.message = "Checking whether the original launch is unchanged…"
-            noteChange(progressOnly: true)
-            let queued = ProcessInfo.processInfo.systemUptime
-            try await queue.acquire(work.id, app: receipt.bundle)
-            invocation.timings["Queue wait", default: 0] += (ProcessInfo.processInfo.systemUptime - queued) * 1000
-            work.message = try await receipt.reverse(call: makeToolCall(invocation: invocation,
-                useInstalledAppCache: false),
-                judge: makeTimedJudge(invocation), approveFocus: {
-                    try await self.requestApproval("Temporarily focus \(receipt.bundle) to normally quit the unchanged app launched by \(target.label). No work will be discarded.", for: work)
-                })
-            queue.release(work.id)
-        } else if target.dispatchedEffect {
-            throw DriverConnectionError.refused("Pending work stopped. No unchanged launch is eligible for reversal; completed or uncertain effects remain.")
-        } else {
-            work.message = "The earlier request was cancelled before any computer action was dispatched."
-        }
+}
 
-        guard let replacement = decision.replacementExecution else {
-            return .verified(evidence: work.message.isEmpty
-                ? "The earlier request was retracted." : work.message)
+
+private extension CuaDialogueState.Status {
+    /// The compact label the planner sees for a task it may reference.
+    var plannerLabel: String {
+        switch self {
+        case .pending: return "pending"
+        case .awaitingAnswer: return "awaitingAnswer"
+        case .executing: return "executing"
+        case .uncertain: return "uncertain"
+        case .partial: return "partial"
+        case .blocked: return "blocked"
+        case .cancelled: return "cancelled"
+        case .succeeded: return "succeeded"
+        case .failed: return "failed"
         }
-        _ = try await sessionTransport()
-        let result = await execute(replacement, work: work, agent: agent, invocation: invocation,
-                                   initialApp: initialApp)
-        return mapOutcome(result, work: work)
     }
-
 }

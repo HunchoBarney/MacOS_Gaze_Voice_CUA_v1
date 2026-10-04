@@ -54,6 +54,10 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             // consults list_apps to recover bundle identity.
             if name == "list_apps" { return .object(["apps": .array([])]) }
             if name == "list_windows" { return .object(["windows": .array([])]) }
+            if name == "bring_to_front" {
+                return .object(["activated": .bool(true),
+                                "exact_window_effect": .object(["verified": .bool(true)])])
+            }
             return try dispatch(name, args)
         }
         let judge: CuaTaskAgent.Judge = { _, questions in
@@ -145,9 +149,22 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         let (loop, _, asked) = harness(
             states: [window([element(0, role: "AXStaticText", label: "nothing")])],
             steps: { _ in self.answers(next: "done") })
-        let result = try await loop.drive(DriveTask(goal: "read", pid: 7, windowID: 42))
+        let result = try await loop.drive(DriveTask(goal: "read", pid: 7, windowID: 42,
+                                                    values: ["query": "weather"]))
         XCTAssertEqual(result.status, .handedBack(.noInteractiveElements))
         XCTAssertTrue(asked.value.isEmpty)
+    }
+
+    /// The converse of the payload gate: with nothing pending the judge still
+    /// sees done/stuck for an inert window — a readable state can honestly
+    /// satisfy or honestly block the request.
+    func testInertSnapshotWithoutPayloadStillReachesJudge() async throws {
+        let (loop, _, asked) = harness(
+            states: [window([element(0, role: "AXStaticText", label: "nothing")])],
+            steps: { _ in self.answers(next: "stuck", blocked: "other") })
+        let result = try await loop.drive(DriveTask(goal: "read", pid: 7, windowID: 42))
+        XCTAssertEqual(result.status, .blocked("The task could not be completed from pid 7's current state (other). Nothing further was dispatched."))
+        XCTAssertFalse(asked.value.isEmpty)
     }
 
     func testStuckMapsToBlockedWithReason() async throws {
@@ -178,7 +195,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         guard case .maxSteps(let history) = result.status else {
             return XCTFail("expected maxSteps, got \(result.status)")
         }
-        XCTAssertEqual(history.count, 2)
+        XCTAssertEqual(history.count, 3)
     }
 
     func testInvalidAnswerHandsBackUntrusted() async throws {

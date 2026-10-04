@@ -475,6 +475,22 @@ final class CuaAgentLoop {
             DriveResult(status: status, history: ledger, pid: pid, windowID: windowID)
         }
 
+    /// Best-effort window listing: ordinary failures degrade to nil, but a
+    /// dead or timed-out transport rethrows — a launch's own success report
+    /// can never stand in for liveness after the driver died.
+    func listWindows(pid: Int) async throws -> JSONValue? {
+        do {
+            return try await call("list_windows", ["pid": .number(Double(pid))])
+        } catch let error as DriverConnectionError {
+            switch error {
+            case .closed, .timedOut: throw error
+            default: return nil
+            }
+        } catch {
+            return nil
+        }
+    }
+
         // ── Target: a caller pid, a running app matched by name/bundle, or a
         // background launch — `launch_app` returns its own `windows[]` so the
         // pin needs no extra listing round-trip.
@@ -528,16 +544,107 @@ final class CuaAgentLoop {
         }
         if appName.isEmpty { appName = task.application ?? "pid \(resolvedPID)" }
 
-        if windowID == nil,
-           let listing = try? await call("list_windows", ["pid": .number(Double(resolvedPID))]) {
+        // An open-scope request is satisfied by the app itself running —
+        // the loop never demands a window it has no work to do in. A task
+        // carrying a literal payload is never open-only: the text still needs
+        // a live surface, so a "launch" classification can never early-pass it.
+        if task.scope == .open, task.values["literal_text"] == nil {
+            // "Observed running" must be an observation, not the launch's own
+            // success report — a transport failure here propagates honestly
+            // rather than fabricating the postcondition.
+            let live = try await call("list_apps", [:])
+            let stillRunning = (live["apps"]?.array ?? []).contains {
+                $0["pid"]?.integer == resolvedPID && $0["running"] != .bool(false)
+            }
+            guard stillRunning else {
+                return finish(.blocked("\(appName) did not stay running after launch. Nothing further was dispatched."))
+            }
+            ledger.append("\(appName) is running — the open request is satisfied.")
+            recordPostcondition(.resultObserved, "Observed \(appName) running.",
+                                appName: appName, bundleID: bundleID, processID: resolvedPID)
+            return finish(.done)
+        }
+
+        /// The window set observed before any task effect — a create-scope
+        /// request is only proven by a window outside this set.
+        var baselineWindowIDs: Set<Int> = []
+
+        // Several windows the request could mean hand the pick to the judge
+        // first — a prior answer rides `previous_context` so a re-asked
+        // ambiguity resolves from the reply instead of looping identically.
+        // Only a "none" answer becomes a user-facing question; a matched or
+        // sole window binds silently.
+        // A transport death mid-run is never "no windows" — only ordinary
+        // listing failures are best-effort. `.closed`/`.timedOut` must
+        // propagate so the outcome reads uncertain, never false-blocked.
+        if windowID == nil, let listing = try await listWindows(pid: resolvedPID) {
+            var matches = listing["windows"]?.array ?? []
+            if let wanted = task.windowName, !wanted.isEmpty {
+                matches = matches.filter {
+                    ($0["title"]?.string ?? "").localizedCaseInsensitiveContains(wanted)
+                }
+            }
+            if baselineWindowIDs.isEmpty {
+                baselineWindowIDs = Set((listing["windows"]?.array ?? [])
+                    .compactMap { $0["window_id"]?.integer })
+            }
+            if matches.count > 1 {
+                var criteria: [String: String?] = [
+                    "none": "None of these — the user must choose which window."]
+                for match in matches {
+                    guard let id = match["window_id"]?.integer else { continue }
+                    criteria["w\(id)"] = match["title"]?.string ?? "window \(id)"
+                }
+                let state: JSONValue = .object([
+                    "request": .string(task.goal),
+                    "app": .string(appName),
+                    "previous_context": .string(task.previousContext ?? ""),
+                    "windows": .array(matches)])
+                var picked: Int?
+                if let answers = try? await judge(state, [
+                        "window": .choice(
+                            instructions: "Which live window should this request bind to? Use previous_context when it names the window; pick none only when the request gives no steer.",
+                            criteria: criteria)]),
+                   let answer = answers["window"],
+                   case .choice(let key, _, _) = answer,
+                   key.hasPrefix("w"), key != "none",
+                   let id = Int(key.dropFirst()),
+                   criteria[key] != nil {
+                    picked = id
+                }
+                if let picked {
+                    windowID = picked
+                } else {
+                    return finish(.needsWindow(candidates:
+                        matches.compactMap { $0["title"]?.string ?? $0["window_id"]?.integer.map(String.init) }))
+                }
+            } else {
+                windowID = matches.first?["window_id"]?.integer
+            }
+        }
+
+        if windowID == nil, let listing = try await listWindows(pid: resolvedPID) {
             windowID = Self.preferredWindow(in: listing["windows"]?.array ?? [])
         }
         currentWindowID = windowID
+
+        // Interaction happens in the target's front window — raise it so
+        // keyboard, click, and menu lanes land where the user asked. The
+        // driver's verified raise doubles as frontmost evidence for the
+        // menu lane; a failed raise only narrows the offer set.
+        var activated = false
+        if let wid = windowID {
+            let activation = try? await call("bring_to_front",
+                ["pid": .number(Double(resolvedPID)), "window_id": .number(Double(wid))])
+            activated = activation?["activated"] == .bool(true)
+            if activated { ledger.append("brought \(appName)'s window to the front") }
+        }
 
         let isBrowser = CuaTaskAgent.supportsIsolatedBrowser(bundleID)
         var browserTarget: JSONValue?
         var browserShownTab: String?
         var tabsBaseline: [String]?
+
         var newTabRequested = false
         var dispatchFailures = 0
         var windowInputAmbiguous = false
@@ -556,6 +663,9 @@ final class CuaAgentLoop {
         for _ in 0..<max(task.maxSteps, 1) {
             do { try Task.checkCancellation() } catch { return finish(.cancelled) }
             guard var wid = windowID else {
+                if task.values["literal_text"] != nil {
+                    return finish(.blocked("No app was launched to receive the text — \(appName) produced no usable window. Nothing was dispatched."))
+                }
                 return finish(.blocked("No usable window exists in \(appName). Nothing was dispatched."))
             }
 
@@ -614,7 +724,8 @@ final class CuaAgentLoop {
             for element in elements {
                 if let index = element["element_index"]?.integer { elementByIndex[index] = element }
             }
-            let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(resolvedPID)
+            let frontmost = activated
+                || NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(resolvedPID)
             var interactive = 0
             var elementCandidates = 0
             for element in elements {
@@ -691,9 +802,11 @@ final class CuaAgentLoop {
             offer(.done, "The request is fully satisfied by the observed state")
             offer(.stuck, "The request cannot be completed from here; stop honestly")
 
-            // An empty or fully inert projection hands back for the
-            // pixel/screenshot path rather than guessing at controls.
-            if interactive == 0 && pageRefs.isEmpty {
+            // A caller-supplied payload needs a live surface to land in —
+            // with nothing interactive there is nowhere to put it. With no
+            // payload the judge still sees done/stuck/keyboard lanes, so an
+            // empty window can honestly satisfy or honestly block the goal.
+            if interactive == 0 && pageRefs.isEmpty && !task.values.isEmpty {
                 return finish(.handedBack(.noInteractiveElements))
             }
 
@@ -713,6 +826,9 @@ final class CuaAgentLoop {
             // reason ride along, mapped onto a StepJudgment.
             let mergedState: [String: JSONValue] = [
                 "request": .string(task.goal),
+                "previous_context": .string(task.previousContext ?? ""),
+                "scope": .string(task.scope.rawValue),
+                "window_produced_by_task": .bool(!baselineWindowIDs.contains(wid)),
                 "app": .string(appName), "window_title": .string(windowTitle),
                 "selected_window_id": .number(Double(wid)),
                 "values_available": .array(task.values.keys.sorted().map { .string($0) }),
@@ -775,10 +891,13 @@ final class CuaAgentLoop {
                                                  tabs: tabs, facts: observedPostconditions)
                 let postUnmet = !task.successContains.isEmpty
                     && !task.successContains.contains { corpus.contains($0.lowercased()) }
-                if !evidence || postUnmet {
+                let createVetoed = task.scope == .create && baselineWindowIDs.contains(wid)
+                if !evidence || postUnmet || createVetoed {
                     unprovenDone += 1
                     guard unprovenDone < Self.maximumUnprovenDone else {
-                        return finish(.blocked("The request's outcome could not be proven from \(appName)'s observed state. Completed steps are not claimed as success; inspect the app before retrying."))
+                        return finish(.blocked(createVetoed
+                            ? "A new document window was requested, but the task could not be completed: \(appName)'s observed state never produced one. Nothing is claimed as success."
+                            : "The request's outcome could not be proven from \(appName)'s observed state. Completed steps are not claimed as success; inspect the app before retrying."))
                     }
                     modelHistory.append(.object(["observation": .string(
                         "The completion claim was rejected: its evidence is not observable yet. Continuing.")]))
@@ -815,11 +934,18 @@ final class CuaAgentLoop {
                 dispatchText = text
             }
 
-            // ── Dispatch. A transient driver fault is an observation, not a
+            // ── Dispatch. Consequential descriptions ask the user once —
+            // the vocabulary boundary carries the safety, not a per-action
+            // judge. A transient driver fault is an observation, not a
             // verdict: the next observe→decide pass re-reads real state and
             // chooses again — never a blind replay of a mutation that may
             // have landed. Consecutive faults still bound out honestly.
             let description = criteria[lane.id].flatMap { $0 } ?? lane.id
+            if CuaTaskAgent.requiresRiskJudgment(goal: task.goal, actionDescription: description) {
+                guard let approve, try await approve("\(appName)\n\(description)") else {
+                    throw DriverConnectionError.refused("The operation or its authorization is unclear: \(description). Nothing was dispatched.")
+                }
+            }
             let result: JSONValue
             do {
                 result = try await dispatch(lane, pid: resolvedPID, wid: wid, goal: task.goal,
@@ -867,6 +993,20 @@ final class CuaAgentLoop {
                                          "observation": .string(outcome)]))
             ledger.append("\(description) → \(outcome)")
             progress("\(description) → \(outcome)")
+            // A produced window outranks a baseline pin for create-scope
+            // work: exactly one new onscreen window after a mutation becomes
+            // the pin; two or more stays ambiguous rather than guessed.
+            if laneMutates(lane), task.scope == .create, baselineWindowIDs.contains(wid),
+               let listing = try? await call("list_windows", ["pid": .number(Double(resolvedPID))]) {
+                let produced = (listing["windows"]?.array ?? []).filter {
+                    $0["is_on_screen"] != .bool(false)
+                        && !baselineWindowIDs.contains($0["window_id"]?.integer ?? -1) }
+                if produced.count == 1, let newID = produced[0]["window_id"]?.integer {
+                    windowID = newID
+                    currentWindowID = newID
+                    wid = newID
+                }
+            }
             // Driver honesty fields: a confirmed effect (or an explicit
             // verified readback) is proof; a suspected noop or a pixel
             // escalation arms the pixel rung for the next observation;

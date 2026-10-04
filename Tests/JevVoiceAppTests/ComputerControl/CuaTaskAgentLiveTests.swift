@@ -2,31 +2,35 @@ import XCTest
 import JevVoiceCore
 @testable import JevVoice
 
+/// Opt-in live checks against the real Cua driver + real models. Under the
+/// split architecture these exercise the two production seams directly:
+/// `CompanionBrain` (one decision per utterance) and `CuaAgentLoop.drive`
+/// (Jev-picked steps). The fixture invariants are unchanged: disposable
+/// window, observed readbacks, no mutation after cancellation.
 @MainActor
 final class CuaTaskAgentLiveTests: XCTestCase {
+
+    /// An unspecified target must surface a clarify decision — never a guessed
+    /// app. Live provider, zero driver calls.
     func testUnspecifiedTargetDoesNotBorrowPriorAppOptIn() async throws {
-        guard ProcessInfo.processInfo.environment["JARVIS_CUA_AGENT_TEST"] == "1",
-              let key = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"] else { throw XCTSkip("Opt-in live Jev target judgment; no OS mutation") }
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_AGENT_TEST"] == "1" else {
+            throw XCTSkip("Opt-in live planner clarify check; no OS mutation")
+        }
+        let brain = CompanionBrain(settings: .shared)
         for request in ["Open something.", "Can you open an app?", "Open the thing."] {
-            var furtherCalls = 0
-            let agent = CuaTaskAgent(call: { tool, _ in
-                if tool == "list_apps" { return .object(["apps": .array([
-                    .object(["name": .string("Calculator"), "bundle_id": .string("com.apple.calculator")]),
-                    .object(["name": .string("TextEdit"), "bundle_id": .string("com.apple.TextEdit")])])]) }
-                furtherCalls += 1
-                throw DriverConnectionError.refused("Unexpected app selection")
-            }, judge: { state, questions in
-                try await JevClient(apiKey: key).systemOne(state: state, questions: questions).response.answers
-            })
+            let decision: PlannerDecision
             do {
-                _ = try await agent.run(goal: request, context: "Calculator", progress: { _ in })
-                XCTFail("Unspecified target must ask for clarification")
+                decision = try await brain.decide(utterance: request, context: PlannerContext())
             } catch {
-                XCTAssertTrue(error.localizedDescription.contains("Which app"), error.localizedDescription)
+                throw XCTSkip("Text provider unavailable for live clarify check: \(error.localizedDescription)")
             }
-            XCTAssertEqual(furtherCalls, 0, request)
+            guard case .clarify = decision else {
+                XCTFail("Unspecified target must ask for clarification, got \(decision)")
+                continue
+            }
         }
     }
+
     func testNativeFixtureOptIn() async throws { try await fixture(createDocument: false) }
     func testNewDocumentFixtureOptIn() async throws { try await fixture(createDocument: true) }
     func testPostDispatchTimeoutInspectsNativeTargetOptIn() async throws {
@@ -118,7 +122,7 @@ final class CuaTaskAgentLiveTests: XCTestCase {
             var postTimeoutReadbacks = 0
             var textDispatches = 0
             var lateMutations = 0
-            let agent = CuaTaskAgent(call: { tool, args in
+            let loop = CuaAgentLoop(call: { tool, args in
                 if cancelAfterDispatch, textDispatches > 0,
                    !["list_apps", "get_accessibility_tree", "list_windows", "get_window_state", "get_browser_state", "parse_visual_regions"].contains(tool) {
                     lateMutations += 1
@@ -163,22 +167,32 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                 let answers = try await client.systemOne(state: state, questions: questions).response.answers
                 print("Native fixture judgments:", answers)
                 return answers
-            }, windowID: window, allowConfirmedRepetition: ProcessInfo.processInfo.environment["JARVIS_CUA_SIMPLIFIED"] == "1", approve: { operation in
+            }, approve: { operation in
                 print("Authorized disposable-fixture participation:", operation)
                 return true
-            }, payload: { request, purpose in
-                try await JevSpeechIntent(client: client).textPayload(request: request, purpose: purpose)
-            })
+            }, progress: { print("Fixture step:", $0) })
             let start = ContinuousClock.now
+            let goal = createDocument
+                ? "In TextEdit, create a new document and insert exactly \"copper lantern beside the window\". The pinned window is the existing starting document — do not reuse it; it is a disposable fixture."
+                : "In TextEdit, please type copper lantern beside the window into the blank document."
             let operation = Task {
-                try await agent.run(goal: createDocument ? "In TextEdit in the background, create a new document and insert exactly \"copper lantern beside the window\"." : "In TextEdit, please type copper lantern beside the window into the blank document.", context: "The provided window is the existing starting document. If asked to create a new document, do not reuse this one. It is a disposable fixture.", progress: { print("Fixture step:", $0) })
+                try await loop.drive(DriveTask(goal: goal, application: "com.apple.TextEdit",
+                                               pid: pid, windowID: window,
+                                               values: ["literal_text": "copper lantern beside the window"]))
             }
+            var result: DriveResult?
+            var statusLine = ""
             do {
-                _ = try await operation.value
+                result = try await operation.value
+                statusLine = result.map { "\($0.status)" } ?? ""
+                if case .done = result?.status {} else if let r = result {
+                    statusLine = r.history.last ?? "\(r.status)"
+                    throw DriverConnectionError.refused(statusLine)
+                }
                 XCTAssertFalse(simulatePostDispatchTimeout || cancelAfterDispatch, "A stopped or uncertain task must not report completion")
             } catch {
                 if simulatePostDispatchTimeout {
-                    XCTAssertTrue(error.localizedDescription.contains("effect remains uncertain"), error.localizedDescription)
+                    XCTAssertTrue(error.localizedDescription.contains("uncertain"), error.localizedDescription)
                 } else if cancelAfterDispatch {
                     XCTAssertTrue(error is CancellationError, error.localizedDescription)
                 } else { throw error }
@@ -191,7 +205,7 @@ final class CuaTaskAgentLiveTests: XCTestCase {
                 XCTAssertEqual(textDispatches, 1, "The fixture needs exactly one real insertion")
                 XCTAssertEqual(lateMutations, 0, "No mutation may follow acknowledged cancellation")
             }
-            let resultWindow = try XCTUnwrap(agent.windowID)
+            let resultWindow = try XCTUnwrap(result?.windowID ?? loop.currentWindowID)
             if createDocument { XCTAssertNotEqual(resultWindow, window, "The request requires a new document, not an edit to the fixture") }
             let observed = try await connection.call("get_window_state", arguments: ["pid": .number(Double(pid)), "window_id": .number(Double(resultWindow)), "include_screenshot": .bool(false), "session": .string(label)])
             let bodies = (observed["elements"]?.array ?? []).filter { $0["role"] == .string("AXTextArea") }
