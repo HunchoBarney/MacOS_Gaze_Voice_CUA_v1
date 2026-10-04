@@ -5,7 +5,8 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var windows: VoiceWindows!
-    private let controller = VoiceController()
+    private let speechOutput = SpeechOutput()
+    private lazy var controller = VoiceController(speaker: speechOutput)
     private let microphones = MicrophoneCatalog()
     private let input = FnInputMonitor()
     private var subscriptions: Set<AnyCancellable> = []
@@ -50,6 +51,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         input.onInterruption = { [weak self] reason in self?.controller.interruptCapture(reason) }
+        input.dictationChordEnabled = controller.config.dictationHotkey
+        input.latchMode = controller.config.latchMode
+        speechOutput.enabled = controller.config.ttsEnabled
+        input.onDictationBegin = { [weak self] in self?.controller.beginDictation() }
+        input.onDictationConvert = { [weak self] in self?.controller.dictate() }
+        input.onLatch = { [weak self] in self?.controller.latchHold() }
+        controller.config.$dictationHotkey.sink { [weak self] in self?.input.dictationChordEnabled = $0 }
+            .store(in: &subscriptions)
+        controller.config.$latchMode.sink { [weak self] in self?.input.latchMode = $0 }
+            .store(in: &subscriptions)
+        controller.config.$ttsEnabled.sink { [weak self] in self?.speechOutput.enabled = $0 }
+            .store(in: &subscriptions)
         input.$ready.removeDuplicates().sink { [weak self] ready in
             guard let self, self.canPrepareMicrophone else { return }
             if ready { self.controller.prepareMicrophone() }
