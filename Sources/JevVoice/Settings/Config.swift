@@ -6,9 +6,14 @@ final class Config: ObservableObject {
 
     private let defaults: UserDefaults
     private let keyStore: APIKeyStore
+    private let elevenLabsKeyStore: APIKeyStore
     @Published private(set) var apiKeyError: String?
 
     @Published private(set) var apiKey: String
+    /// ElevenLabs TTS credential — env `ELEVENLABS_API_KEY` first, Keychain
+    /// `elevenLabsAPIKey` second. Empty routes spoken replies to the system
+    /// voice instead of the cloud voice.
+    @Published private(set) var elevenLabsAPIKey: String
 
     @Published var microphoneUID: String {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
@@ -44,11 +49,14 @@ final class Config: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         keyStore: APIKeyStore = KeychainAPIKeyStore(),
+        elevenLabsKeyStore: APIKeyStore = KeychainAPIKeyStore(account: "elevenLabsAPIKey"),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.defaults = defaults
         self.keyStore = keyStore
+        self.elevenLabsKeyStore = elevenLabsKeyStore
         self.apiKey = environment["TYPESAFE_API_KEY"] ?? ""
+        self.elevenLabsAPIKey = environment["ELEVENLABS_API_KEY"] ?? ""
         self.microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? false
@@ -70,6 +78,25 @@ final class Config: ObservableObject {
             }
         } catch {
             apiKeyError = "Could not load or migrate the API key in Keychain: \(error.localizedDescription)"
+        }
+
+        if elevenLabsAPIKey.isEmpty {
+            elevenLabsAPIKey = (try? elevenLabsKeyStore.read()) ?? ""
+        }
+    }
+
+    @discardableResult
+    func saveElevenLabsAPIKey(_ value: String) -> Bool {
+        do {
+            if value.isEmpty {
+                try elevenLabsKeyStore.delete()
+            } else {
+                try elevenLabsKeyStore.save(value)
+            }
+            elevenLabsAPIKey = value
+            return true
+        } catch {
+            return false
         }
     }
 

@@ -5,7 +5,7 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var windows: VoiceWindows!
-    private let speechOutput = SpeechOutput()
+    private let speechOutput = ElevenLabsSpeechOutput()
     private lazy var controller = VoiceController(speaker: speechOutput)
     private var agentRuntime: AgentRuntime?
     private let microphones = MicrophoneCatalog()
@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         input.dictationChordEnabled = controller.config.dictationHotkey
         input.latchMode = controller.config.latchMode
         speechOutput.enabled = controller.config.ttsEnabled
+        speechOutput.apiKey = controller.config.elevenLabsAPIKey
         input.onDictationBegin = { [weak self] in self?.controller.beginDictation() }
         input.onDictationConvert = { [weak self] in self?.controller.dictate() }
         input.onLatch = { [weak self] in self?.controller.latchHold() }
@@ -65,6 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.config.$latchMode.sink { [weak self] in self?.input.latchMode = $0 }
             .store(in: &subscriptions)
         controller.config.$ttsEnabled.sink { [weak self] in self?.speechOutput.enabled = $0 }
+            .store(in: &subscriptions)
+        controller.config.$elevenLabsAPIKey.sink { [weak self] in self?.speechOutput.apiKey = $0 }
             .store(in: &subscriptions)
 
         agentRuntime = Self.makeAgentRuntime()

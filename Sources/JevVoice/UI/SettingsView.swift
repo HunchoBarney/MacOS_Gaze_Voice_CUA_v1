@@ -28,6 +28,8 @@ struct SettingsView: View {
     @StateObject private var cuaSetup = CuaSetup()
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = false
+    @State private var elevenLabsKeyDraft = ""
+    @State private var elevenLabsKeySaved = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -87,8 +89,12 @@ struct SettingsView: View {
         }
         .frame(minWidth: 740, minHeight: 520)
         .tint(.accentColor)
-        .onAppear { apiKeyDraft = config.apiKey }
+        .onAppear {
+            apiKeyDraft = config.apiKey
+            elevenLabsKeyDraft = config.elevenLabsAPIKey
+        }
         .onChange(of: apiKeyDraft) { apiKeySaved = false }
+        .onChange(of: elevenLabsKeyDraft) { elevenLabsKeySaved = false }
     }
 
     private var voiceSettings: some View {
@@ -100,6 +106,23 @@ struct SettingsView: View {
                     Button("Prepare speech") { Task { await speechAssets.refresh(install: true) } }
                         .disabled(speechAssets.preparing || speechAssets.ready)
                 }.task { await speechAssets.refresh() }
+            }
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Spoken replies", systemImage: "speaker.wave.2").font(.headline)
+                    Toggle("Speak replies aloud", isOn: $config.ttsEnabled)
+                    Text("ElevenLabs API key").font(.callout)
+                    HStack {
+                        SecureField("sk-…", text: $elevenLabsKeyDraft).textFieldStyle(.roundedBorder).onSubmit(saveElevenLabsKey)
+                        Button("Save", action: saveElevenLabsKey).buttonStyle(.borderedProminent)
+                    }
+                    Text("Stored in macOS Keychain. Leave empty to use the system voice; a failed request also falls back to it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if elevenLabsKeySaved {
+                        Text(elevenLabsKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             VoiceCard {
                 VStack(alignment: .leading, spacing: 14) {
@@ -227,4 +250,5 @@ struct SettingsView: View {
     }
 
     private func saveAPIKey() { apiKeySaved = config.saveAPIKey(apiKeyDraft) }
+    private func saveElevenLabsKey() { elevenLabsKeySaved = config.saveElevenLabsAPIKey(elevenLabsKeyDraft) }
 }
