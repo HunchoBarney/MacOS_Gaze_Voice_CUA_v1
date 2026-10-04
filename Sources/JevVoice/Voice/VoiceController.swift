@@ -270,6 +270,10 @@ final class VoiceController: ObservableObject {
     private var held = false
     private var dictating = false
     private var latchRelease = false
+    /// A latch tap landed while startup was still resolving: `held` is already
+    /// released but the capture continues, so the startup guards must treat
+    /// the hold as logically alive instead of wedging at `.starting`.
+    private var latched = false
     private var automatic = true
     private var microphoneTask: Task<Void, Never>?
     private var microphoneEnabled = true
@@ -406,6 +410,10 @@ final class VoiceController: ObservableObject {
         guard status == .starting || status == .listening else { return }
         dictating = true
         cua.cancelCapture()
+        // Partials already handed to the planner may have dispatched work —
+        // conversion withdraws this interaction's intents and attempts along
+        // with the pending decision.
+        cancelInteractionWork()
         trace("dictation_mid_hold")
     }
 
@@ -414,6 +422,9 @@ final class VoiceController: ObservableObject {
     func latchHold() {
         guard config.latchMode, status == .starting || status == .listening else { return }
         latchRelease = true
+        // During startup the latch is deferred: `held` ends now but the
+        // in-flight startup keeps going and resolves to `.listening`.
+        latched = status == .starting
         held = false
         trace("latch_hold")
     }
@@ -444,12 +455,12 @@ final class VoiceController: ObservableObject {
             let permissionStart = ProcessInfo.processInfo.systemUptime
             let granted = await self.authorize()
             self.refreshPermissions()
-            guard self.sessionID == id, self.held, !Task.isCancelled else { return }
+            guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
             self.measurements["Permission check"] = (ProcessInfo.processInfo.systemUptime - permissionStart) * 1000
             guard granted else { self.fail("Microphone access is needed. Open Voice settings."); return }
             do {
                 let name = try await self.speech.start(session: id, inputUID: selectedUID, transcribe: true)
-                guard self.sessionID == id, self.held, !Task.isCancelled else { return }
+                guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
                 self.inputName = name
                 self.trace("capture_started")
                 self.measurements["Microphone ready"] = (ProcessInfo.processInfo.systemUptime - self.beganAt) * 1000
@@ -467,6 +478,7 @@ final class VoiceController: ObservableObject {
         // A latch release keeps the capture listening; the next Fn tap
         // arrives as a plain `.finish` and ends it below.
         guard !latchRelease else { latchRelease = false; return }
+        latched = false
         durationTask?.cancel(); durationTask = nil
         switch status {
         case .starting: cancel()
@@ -530,7 +542,7 @@ final class VoiceController: ObservableObject {
         cua.cancelCapture()
         if cancelTask { cancelInteractionWork() }
         guard status != .stopping else { return }
-        held = false
+        held = false; dictating = false; latched = false
         trace("capture_cancelled")
         sessionID = nil
         deadlineTask?.cancel(); deadlineTask = nil
@@ -600,7 +612,7 @@ final class VoiceController: ObservableObject {
 
     private func newSession() -> UUID {
         deadlineTask?.cancel(); durationTask?.cancel(); hideTask?.cancel()
-        latchRelease = false
+        latchRelease = false; latched = false
         // A new capture barges in on any spoken reply.
         speaker?.stop()
         let id = UUID(); sessionID = id
@@ -834,7 +846,7 @@ final class VoiceController: ObservableObject {
         trace("capture_failed")
         cua.cancelCapture()
         speech.cancel()
-        audioLevel = 0; held = false; isMicrophoneTest = false
+        audioLevel = 0; held = false; dictating = false; latched = false; isMicrophoneTest = false
         deadlineTask?.cancel(); durationTask?.cancel()
         status = .error(message)
     }

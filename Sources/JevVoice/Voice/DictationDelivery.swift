@@ -39,8 +39,13 @@ struct DictationDelivery: DictationDelivering {
     }
 
     /// Snapshot → set dictated text → ⌘V → restore. The restore waits out a
-    /// short beat so the frontmost app has consumed the paste before the
-    /// user's prior clipboard contents go back.
+    /// settle beat so the frontmost app has consumed the paste before the
+    /// user's prior clipboard contents go back. Residual race: the settle is
+    /// a heuristic, not proof — a target that reads the pasteboard unusually
+    /// late can still paste the restored clipboard instead of the dictated
+    /// text. No reader-side signal can close that window; the changeCount
+    /// check below only prevents the reverse corruption (restoring over a
+    /// newer clipboard written by someone else).
     static func paste(_ text: String) async -> Bool {
         let board = NSPasteboard.general
         let prior = snapshot(of: board)
@@ -50,7 +55,11 @@ struct DictationDelivery: DictationDelivering {
             restore(prior, to: board)
             return false
         }
-        try? await Task.sleep(for: .milliseconds(250))
+        let written = board.changeCount
+        try? await Task.sleep(for: .milliseconds(400))
+        // Another writer claimed the board after our paste — restoring the
+        // snapshot would destroy their copy, so the residue stays instead.
+        guard board.changeCount == written else { return true }
         restore(prior, to: board)
         return true
     }

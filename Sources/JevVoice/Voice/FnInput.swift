@@ -14,7 +14,9 @@ struct FnInputState {
         /// Short Fn tap with latch mode on: release latches instead of finishing.
         var latch = false
     }
-    var dictationEnabled = true
+    /// Off until the coordinator binds the dictation seams — an armed chord
+    /// with no consumer must fail closed, never start a planner capture.
+    var dictationEnabled = false
     var latchMode = false
     var latchThreshold: TimeInterval = 0.4
     private(set) var held = false
@@ -206,14 +208,21 @@ final class FnInputMonitor: ObservableObject {
             observedPhysicalHold = state.held && physicalFnDown
         }
         if result.action == .begin { beginHandlingMs = (ProcessInfo.processInfo.systemUptime - handlingStarted) * 1000 }
-        // Feature seams fire before the base action so their handlers are
-        // already in place when begin/finish reaches the controller.
+        dispatch(result)
+        return result.consume ? nil : Unmanaged.passUnretained(event)
+    }
+
+    /// Feature seams fire before the base action so their handlers are
+    /// already in place when begin/finish reaches the controller. A dictation
+    /// result never reaches `onAction`: an unwired or disabled seam leaves the
+    /// event consumed as `.none` rather than starting a planner capture.
+    func dispatch(_ result: FnInputState.Result) {
         if result.dictation {
             if result.action == .begin { onDictationBegin() } else { onDictationConvert() }
+            return
         }
         if result.latch { onLatch() }
         if result.action != .none { onAction(result.action) }
-        return result.consume ? nil : Unmanaged.passUnretained(event)
     }
 
     private func checkHealth() {

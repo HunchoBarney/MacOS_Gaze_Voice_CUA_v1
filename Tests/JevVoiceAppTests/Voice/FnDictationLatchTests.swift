@@ -4,6 +4,7 @@ import XCTest
 final class FnDictationLatchTests: XCTestCase {
     func testControlFirstChordBeginsDictation() {
         var input = FnInputState()
+        input.dictationEnabled = true
         _ = input.handle(.flagsChanged, key: 59, fn: false, dictationChord: true, canBegin: true, active: false)
         let down = input.handle(.flagsChanged, key: 63, fn: true, dictationChord: true,
                                 canBegin: true, active: false)
@@ -17,6 +18,7 @@ final class FnDictationLatchTests: XCTestCase {
 
     func testFnThenCtrlConvertsHoldToDictation() {
         var input = FnInputState()
+        input.dictationEnabled = true
         XCTAssertEqual(input.handle(.flagsChanged, key: 63, fn: true, canBegin: true, active: false).action, .begin)
         let ctrl = input.handle(.flagsChanged, key: 59, fn: true, otherModifiers: true,
                                 dictationChord: true, canBegin: false, active: true)
@@ -30,6 +32,7 @@ final class FnDictationLatchTests: XCTestCase {
 
     func testRightControlJoinsHoldAsDictation() {
         var input = FnInputState()
+        input.dictationEnabled = true
         _ = input.handle(.flagsChanged, key: 63, fn: true, canBegin: true, active: false)
         let ctrl = input.handle(.flagsChanged, key: 62, fn: true, otherModifiers: true,
                                 dictationChord: true, canBegin: false, active: true)
@@ -45,9 +48,8 @@ final class FnDictationLatchTests: XCTestCase {
         XCTAssertFalse(down.dictation)
     }
 
-    func testDictationChordDisabledFallsBackToPlainModifier() {
+    func testDictationChordDisabledByDefault() {
         var input = FnInputState()
-        input.dictationEnabled = false
         _ = input.handle(.flagsChanged, key: 59, fn: false, dictationChord: true, canBegin: true, active: false)
         let down = input.handle(.flagsChanged, key: 63, fn: true, otherModifiers: true,
                                 dictationChord: true, canBegin: true, active: false)
@@ -56,8 +58,58 @@ final class FnDictationLatchTests: XCTestCase {
         XCTAssertFalse(down.consume)
     }
 
+    /// With the chord disabled a mid-hold Ctrl must behave exactly as it did
+    /// before the chord existed: fall through to `.cancelCapture`, consumed
+    /// by neither the dictation gate nor the tap.
+    func testDisabledChordMidHoldCtrlFallsThroughToCancelCapture() {
+        var input = FnInputState()
+        XCTAssertEqual(input.handle(.flagsChanged, key: 63, fn: true, canBegin: true, active: false).action, .begin)
+        let ctrl = input.handle(.flagsChanged, key: 59, fn: true, otherModifiers: true,
+                                dictationChord: true, canBegin: false, active: true)
+        XCTAssertEqual(ctrl.action, .cancelCapture)
+        XCTAssertFalse(ctrl.dictation)
+        XCTAssertFalse(ctrl.consume)
+    }
+
+    /// A dictation `.begin` may never surface through `onAction` — even with
+    /// the dictation seams unbound the event is consumed as `.none` so
+    /// dictated speech cannot reach the planner.
+    @MainActor
+    func testDictationBeginNeverReachesOnAction() {
+        let monitor = FnInputMonitor()
+        var actions: [FnInputState.Action] = []
+        var began = 0
+        monitor.onAction = { actions.append($0) }
+        monitor.onDictationBegin = { began += 1 }
+        monitor.dispatch(.init(action: .begin, consume: true, dictation: true))
+        XCTAssertEqual(began, 1)
+        XCTAssertTrue(actions.isEmpty)
+    }
+
+    @MainActor
+    func testUnwiredDictationBeginIsConsumedWithoutOnAction() {
+        let monitor = FnInputMonitor()
+        var actions: [FnInputState.Action] = []
+        monitor.onAction = { actions.append($0) }
+        monitor.dispatch(.init(action: .begin, consume: true, dictation: true))
+        XCTAssertTrue(actions.isEmpty)
+    }
+
+    @MainActor
+    func testDictationConvertFiresOnlyTheConvertSeam() {
+        let monitor = FnInputMonitor()
+        var actions: [FnInputState.Action] = []
+        var converted = 0
+        monitor.onAction = { actions.append($0) }
+        monitor.onDictationConvert = { converted += 1 }
+        monitor.dispatch(.init(consume: true, dictation: true))
+        XCTAssertEqual(converted, 1)
+        XCTAssertTrue(actions.isEmpty)
+    }
+
     func testDictationChordWhileBusyDoesNotBegin() {
         var input = FnInputState()
+        input.dictationEnabled = true
         let down = input.handle(.flagsChanged, key: 63, fn: true, dictationChord: true,
                                 canBegin: false, active: true)
         XCTAssertEqual(down.action, .none)
@@ -108,6 +160,7 @@ final class FnDictationLatchTests: XCTestCase {
 
     func testDictationHoldNeverLatches() {
         var input = FnInputState()
+        input.dictationEnabled = true
         input.latchMode = true
         _ = input.handle(.flagsChanged, key: 63, fn: true, dictationChord: true, now: 0,
                          canBegin: true, active: false)

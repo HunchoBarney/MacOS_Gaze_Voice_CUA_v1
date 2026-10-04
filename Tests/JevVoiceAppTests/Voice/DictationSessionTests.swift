@@ -42,6 +42,8 @@ final class DictationSessionTests: XCTestCase {
                             dictation: FakeDictation = FakeDictation(),
                             speaker: FakeSpeaker = FakeSpeaker(),
                             manual: Bool = false, latch: Bool = false,
+                            inventoryApp: Bool = false, slowTree: Bool = false,
+                            operation: String = "ignore",
                             judged: @escaping (String) -> Void = { _ in }) -> VoiceController {
         let config = Config(defaults: UserDefaults(suiteName: "test.dictation.\(UUID())")!,
                             keyStore: MemoryKeyStore(), environment: [:])
@@ -49,20 +51,27 @@ final class DictationSessionTests: XCTestCase {
         config.latchMode = latch
         let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("voice-dictation-\(UUID()).py")
         try! #"""
-import json,sys
+import json,sys,time
+apps=APPS_LIST
 for line in sys.stdin:
  r=json.loads(line)
  if 'id' not in r: continue
  if r['method']=='initialize': out={'protocolVersion':'2025-03-26','capabilities':{'tools':{}}}
  else:
   name=r['params']['name']
-  if name=='list_apps': value={'apps':[]}
+  if name=='list_apps': value={'apps':apps}
+  elif name=='get_accessibility_tree':
+   if SLOW_TREE: time.sleep(0.5)
+   value={'apps':[]}
   elif name in ('start_session','end_session'): value={'active':name=='start_session'}
   elif name=='set_agent_cursor_enabled': value={'enabled':r['params']['arguments'].get('enabled',False)}
   else: raise RuntimeError('Unexpected fixture tool '+name)
   out={'structuredContent':value}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':out}),flush=True)
-"""#.write(to: fixture, atomically: true, encoding: .utf8)
+"""#.replacingOccurrences(of: "APPS_LIST",
+                         with: inventoryApp ? "[{'name':'Fixture','bundle_id':'com.test.fixture'}]" : "[]")
+            .replacingOccurrences(of: "SLOW_TREE", with: slowTree ? "True" : "False")
+            .write(to: fixture, atomically: true, encoding: .utf8)
         addTeardownBlock { try? FileManager.default.removeItem(at: fixture) }
         let runtime = CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", fixture.path]) },
@@ -71,12 +80,12 @@ for line in sys.stdin:
                 return questions.reduce(into: [:]) { result, item in
                     let value: String
                     switch item.key {
-                    case "operation": value = "ignore"
+                    case "operation": value = operation
                     case "span": value = String(state["pending_word_range"]?["end"]?.integer ?? 0)
                     case "task": value = "independent"
                     case "relationship": value = "independent"
                     case "pendingQuestion": value = "none"
-                    case "app": value = "none"
+                    case "app": value = inventoryApp ? "app_0" : "none"
                     case "scope": value = "work"
                     case "visibility": value = "background"
                     case "contentMode": value = "control"
@@ -84,11 +93,17 @@ for line in sys.stdin:
                     case "correctionMode": value = "retract"
                     case "replacementStart", "replacementEnd": value = "none"
                     case "clarification": value = "none"
+                    case "next": value = "done"
+                    case "window": value = "none"
+                    case "risk": value = "ordinary"
+                    case "windowEffect": value = "same"
+                    case "quit": value = "0"
+                    case "doneEvidence": value = "proven"
                     default: fatalError("Unexpected executor question: \(item.key)")
                     }
                     result[item.key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
                 }
-            })
+            }, screenLocked: { false })
         return VoiceController(config: config, speech: speech, authorize: { true },
                                frontmost: { "Fixture" }, cuaRuntime: runtime,
                                dictation: dictation, speaker: speaker)
@@ -99,6 +114,13 @@ for line in sys.stdin:
             if c.status == status { return }
             await Task.yield()
         }
+    }
+    private func until(_ predicate: () -> Bool) async throws {
+        for _ in 0..<200 {
+            if predicate() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting for the voice pipeline")
     }
 
     func testDictationCaptureDeliversLiteralTextWithoutPlanner() async {
@@ -133,6 +155,55 @@ for line in sys.stdin:
         await settleUntil(c, .done)
         XCTAssertEqual(dictation.delivered, ["insert this"])
         XCTAssertEqual(judged, 0)
+        await c.shutdown()
+    }
+
+    /// Auto-execute hands live partials to the planner before Ctrl joins; the
+    /// conversion must withdraw the intents/attempts those partials already
+    /// dispatched, not just the pending decision — then deliver literal text.
+    func testMidHoldCtrlConversionCancelsDispatchedInteractionWork() async throws {
+        let speech = DictationFakeSpeech()
+        let dictation = FakeDictation()
+        var judged = 0
+        let c = controller(speech, dictation: dictation, inventoryApp: true,
+                           slowTree: true, operation: "execute", judged: { _ in judged += 1 })
+        c.begin()
+        await settle()
+        var snapshot = RangedTranscript()
+        try snapshot.apply(SpeechRevision(start: 0, end: 1, text: "open Fixture", isFinal: true))
+        speech.emit(.transcript(snapshot))
+        try await until { !c.cuaTasks.isEmpty }
+        let work = try XCTUnwrap(c.cuaTasks.first)
+        XCTAssertTrue(work.active)
+        c.dictate()
+        XCTAssertTrue(work.stopRequested)
+        try await until { !work.active }
+        c.finish()
+        speech.emit(.final("open Fixture"))
+        await settleUntil(c, .done)
+        XCTAssertEqual(dictation.delivered, ["open Fixture"])
+        XCTAssertEqual(judged, 1)
+        await c.shutdown()
+    }
+
+    /// A latch tap landing while startup is still resolving must not wedge
+    /// `captureState` at `.starting`: the deferred latch rides the in-flight
+    /// startup through to `.listening`, and the second tap still finishes.
+    func testLatchTapDuringStartupStillReachesListening() async {
+        let speech = DictationFakeSpeech()
+        let c = controller(speech, latch: true)
+        c.begin()
+        XCTAssertEqual(c.status, .starting)
+        c.latchHold()
+        c.finish()
+        await settleUntil(c, .listening)
+        XCTAssertEqual(c.status, .listening)
+        c.finish()
+        XCTAssertEqual(c.status, .finishing)
+        speech.emit(.final("latched words"))
+        await c.cua.speech.waitForPending()
+        await settleUntil(c, .done)
+        XCTAssertEqual(c.status, .done)
         await c.shutdown()
     }
 
