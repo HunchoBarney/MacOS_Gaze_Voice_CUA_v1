@@ -27,6 +27,12 @@ actor CuaConnection {
     private let arguments: [String]
     private let onToolCall: (@Sendable (String, Int?) -> Void)?
     private var process: Process?
+    /// The `serve --embedded` daemon the MCP proxy connects to when the
+    /// executable resolved to the bundle-embedded driver. Its stdin is a
+    /// liveness pipe: EOF after host exit shuts the daemon down.
+    private var daemon: Process?
+    private var daemonLiveness: FileHandle?
+    private var daemonSocketPath: String?
     private var input: FileHandle?
     private var output: FileHandle?
     private var reader: Task<Void, Never>?
@@ -53,11 +59,19 @@ actor CuaConnection {
         reader?.cancel()
         try? input?.close()
         if process?.isRunning == true { process?.terminate() }
+        try? daemonLiveness?.close()
+        if daemon?.isRunning == true { daemon?.terminate() }
     }
 
     func connect() async throws {
         guard process == nil else { throw DriverConnectionError.remote("Cua connection already started.") }
-        if executable == CuaDependency.executable {
+        var launchArguments = arguments
+        if let bundled = CuaDependency.bundledExecutable, executable == bundled {
+            try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
+            try await startEmbeddedDaemon()
+            launchArguments = ["mcp", "--embedded", "--socket", daemonSocketPath ?? "",
+                               "--host-bundle-id", CuaDependency.hostBundleID]
+        } else if executable == CuaDependency.installedExecutable {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
             // The daemon's existing-profile browser grant is a launch-time
             // property; reconcile before this process's first connection so a
@@ -70,7 +84,7 @@ actor CuaConnection {
         generation = token
         frames = MCPFrames()
         process.executableURL = executable
-        process.arguments = arguments
+        process.arguments = launchArguments
         process.standardInput = stdin
         process.standardOutput = stdout
         // Driver logs may contain observed content. Do not persist them as product history.
@@ -199,6 +213,62 @@ actor CuaConnection {
 
     func close() { disconnect(DriverConnectionError.closed) }
 
+    /// Spawns `serve --embedded` as a direct child so the driver stays in this
+    /// app's TCC responsibility chain — grants attribute to Jev Voice, never
+    /// to a second CuaDriver identity. Mirrors the driver's documented host
+    /// contract: private socket, liveness stdin pipe, host attribution env.
+    private func startEmbeddedDaemon() async throws {
+        let socket = Self.embeddedSocketPath()
+        try? FileManager.default.removeItem(atPath: socket)
+        var environment = ProcessInfo.processInfo.environment
+        environment["CUA_DRIVER_EMBEDDED"] = "1"
+        environment["CUA_DRIVER_HOST_BUNDLE_ID"] = CuaDependency.hostBundleID
+        environment["CUA_DRIVER_EMBEDDED_HOST_PID"] = "\(ProcessInfo.processInfo.processIdentifier)"
+        let liveness = Pipe()
+        let daemon = Process()
+        daemon.executableURL = executable
+        daemon.arguments = ["serve", "--embedded", "--parent-liveness-stdio",
+                            "--no-permissions-gate", "--socket", socket,
+                            "--host-bundle-id", CuaDependency.hostBundleID,
+                            "--permission-mode", "standard",
+                            "--grant", "existing-profile"]
+        daemon.environment = environment
+        // Daemon logs may contain observed content; do not persist them.
+        daemon.standardOutput = FileHandle.nullDevice
+        daemon.standardError = FileHandle.nullDevice
+        daemon.standardInput = liveness
+        try daemon.run()
+        self.daemon = daemon
+        daemonLiveness = liveness.fileHandleForWriting
+        daemonSocketPath = socket
+        let deadline = Date().addingTimeInterval(10)
+        while daemon.isRunning && !FileManager.default.fileExists(atPath: socket) && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard daemon.isRunning, FileManager.default.fileExists(atPath: socket) else {
+            stopEmbeddedDaemon()
+            throw DriverConnectionError.unavailable
+        }
+    }
+
+    private static func embeddedSocketPath() -> String {
+        let name = "jev-cua-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(8).lowercased()).sock"
+        let preferred = NSTemporaryDirectory() + name
+        // Unix socket paths are limited to ~104 bytes.
+        return preferred.utf8.count < 96 ? preferred : "/tmp/" + name
+    }
+
+    private func stopEmbeddedDaemon() {
+        if daemon?.isRunning == true { daemon?.terminate() }
+        daemon = nil
+        try? daemonLiveness?.close()
+        daemonLiveness = nil
+        if let socket = daemonSocketPath {
+            try? FileManager.default.removeItem(atPath: socket)
+            daemonSocketPath = nil
+        }
+    }
+
     private func request(_ method: String, params: JSONValue, timeout: TimeInterval = 30) async throws -> JSONValue {
         try Task.checkCancellation()
         guard process?.isRunning == true else { throw DriverConnectionError.closed }
@@ -281,5 +351,6 @@ actor CuaConnection {
         // Closing a FileHandle while another thread reads it can raise an ObjC exception.
         // Child exit closes the write side, unblocking the reader which owns its handle.
         output = nil
+        stopEmbeddedDaemon()
     }
 }
