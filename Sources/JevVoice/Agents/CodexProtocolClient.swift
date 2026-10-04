@@ -260,6 +260,7 @@ public actor CodexProtocolClient {
         let allowed: Set<String> = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR",
                                     "USER", "SHELL", "__CF_USER_TEXT_ENCODING",
                                     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                                    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
                                     "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS"]
         var environment: [String: String] = [:]
         for (key, value) in parent where allowed.contains(key) || key.hasPrefix("XDG_") {
