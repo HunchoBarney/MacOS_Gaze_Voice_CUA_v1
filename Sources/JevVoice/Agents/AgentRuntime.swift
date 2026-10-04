@@ -65,7 +65,9 @@ final class AgentRuntime: ObservableObject {
     let store: AgentStore
     let bridge: CodexRuntimeBridge
     let scheduler: RoutineScheduler
-    private let gate: ComputerUseGate
+    /// Exposed for the UI's consent-card bind — approvals still only flow
+    /// through resolveConsent so marker asks stay runtime-owned.
+    let gate: ComputerUseGate
     private let connection: CuaConnection
     private let executor: AgentDriveExecutor
     private let registry = EndpointRegistry()
