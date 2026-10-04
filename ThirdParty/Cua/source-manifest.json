@@ -3,6 +3,25 @@
   "base_revision": "b703a8d17fb513c6288f247f710d30643abd068d",
   "recorded_local_revision": "662e9ddb2e2fd6ded048635713e199b3476926a6",
   "patch_sha256": "f513c985af5dbf06403d9ccf0eea51c9ca1bc439380830f88f5987c339016052",
+  "vendored_binaries": {
+    "cua-driver": {
+      "version": "0.32.0",
+      "url": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.32.0/cua-driver-rs-0.32.0-darwin-arm64.tar.gz",
+      "tarball_sha256": "31f278f38015616a02142ccbb396721897cee4892927db103a31b297f60035a9",
+      "member": "cua-driver-rs-0.32.0-darwin-arm64/CuaDriver.app/Contents/MacOS/cua-driver",
+      "installed": "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+      "sha256": "656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66"
+    },
+    "codex": {
+      "version": "0.160.0",
+      "package": "@openai/codex-darwin-arm64",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.0-darwin-arm64.tgz",
+      "tarball_sha256": "fc789bcd655d903f92e1a23c8dc5315ba38f43b3586eafb7bd3b195970b57466",
+      "vendor_root": "package/vendor/aarch64-apple-darwin",
+      "entrypoint": "bin/codex",
+      "sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b"
+    }
+  },
   "files": {
     ".cursorignore": "84f2a251b743dc8e8a0c654731311144e6dca1e41c8f78febb0558a5dc42b90a",
     ".editorconfig": "b698b323bd42e701c59890a18348c6890983a2915365ab2da829f92835d9e20e",

@@ -25,6 +25,33 @@ Prior pins (recovery only):
 - `699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a` — earlier
   local build, preserved under `~/Library/Caches/JevVoice/rollback/`.
 
+## Embedded driver (packaged app)
+
+`make app` runs `fetch-embedded-binaries.sh`, which stages the pinned
+executables under `build/vendor/` and verifies each against the
+`vendored_binaries` pins in `source-manifest.json` — a mismatch fails the
+build. The bundle then carries `Contents/Resources/cua-driver` plus the
+vendored Codex runtime at `Contents/Resources/CodexRuntime/` (entrypoint
+`CodexRuntime/codex`, the npm `@openai/codex` darwin-arm64 `vendor/` tree
+preserved so `codex-path`/`codex-resources` resolve).
+
+At runtime `CuaDependency` resolves the bundled driver first and falls back
+to the installed app for unpackaged runs. `CuaConnection` spawns the bundled
+binary as `serve --embedded` (env `CUA_DRIVER_EMBEDDED=1`,
+`CUA_DRIVER_HOST_BUNDLE_ID`, `CUA_DRIVER_EMBEDDED_HOST_PID`; args
+`--parent-liveness-stdio --no-permissions-gate --socket <private>
+--host-bundle-id com.chriswozniczek.jevvoice --permission-mode standard
+--grant existing-profile`) on a private socket, then speaks MCP through
+`mcp --embedded --socket <private>` on stdio — the driver's documented
+host contract (`Skills/cua-driver/EMBEDDING.md`), so Accessibility and
+Screen Recording attribute to `com.chriswozniczek.jevvoice`. The daemon's
+stdin is a liveness pipe: host exit closes it and the daemon exits.
+
+The pinned binary is the signed app-bundle member
+(`.../CuaDriver.app/Contents/MacOS/cua-driver`) of the release tarball; the
+bare top-level `cua-driver` member is a different build and does not match
+the pin.
+
 ## Preserved source
 
 - Upstream: https://github.com/trycua/cua
