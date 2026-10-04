@@ -88,7 +88,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard let self else { return }
                     switch name {
                     case NSWorkspace.willSleepNotification: self.sleeping = true
-                    case NSWorkspace.didWakeNotification: self.sleeping = false
+                    case NSWorkspace.didWakeNotification:
+                        self.sleeping = false
+                        // The driver's first calls after wake stall on its own
+                        // cold checks — warm the session so a command doesn't pay it.
+                        self.controller.cua.wakeDriverSession()
                     case NSWorkspace.sessionDidResignActiveNotification: self.sessionActive = false
                     default: self.sessionActive = true
                     }
@@ -144,6 +148,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) { input.stop(); microphones.stop() }
+    /// Relaunching a running accessory app (Spotlight, Finder, `open`) sends
+    /// reopen — without this the user gets no window and the status item may
+    /// be hidden in a crowded menu bar.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { windows.show(.voice) }
+        return true
+    }
     @objc private func showSettings() { windows.show(.voice) }
     @objc private func showActivity() { windows.show(.activity) }
 

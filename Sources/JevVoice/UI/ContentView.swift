@@ -142,8 +142,37 @@ struct CuaTasksView: View {
 struct ActivityView: View {
     @ObservedObject var controller: VoiceController
     @State private var showDiagnostics = false
+    @State private var commandText = ""
+
+    private var trimmedCommand: String {
+        commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var canRunCommand: Bool {
+        !trimmedCommand.isEmpty && controller.canSubmitCommand
+    }
+
+    private func runCommand() {
+        controller.submitTypedCommand(commandText)
+        commandText = ""
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Type a command", systemImage: "keyboard").font(.headline)
+                    HStack {
+                        TextField("e.g. open Calculator", text: $commandText)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(runCommand)
+                        Button("Run", action: runCommand)
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!canRunCommand)
+                    }
+                    Text("Runs through the same Cua path as a spoken command — same targeting, verification, and confirmation rules.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             CuaTasksView(controller: controller)
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {

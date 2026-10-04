@@ -17,7 +17,11 @@ struct CuaUncertainOutcome: Error, LocalizedError, Sendable {
     }
 }
 
-/// One persistent MCP transport per task. Never reconnects or retries a mutation.
+/// One persistent MCP transport shared by the runtime's tasks — the driver's
+/// protected-resource grants are keyed to (session, transport, resource), so a
+/// per-task transport forced the browser consent/setup surface to re-run for
+/// every task. Never reconnects or retries a mutation; a dead transport is
+/// replaced wholesale by the runtime, not resumed.
 actor CuaConnection {
     private let executable: URL
     private let arguments: [String]
@@ -33,6 +37,9 @@ actor CuaConnection {
     private var generation = UUID()
     private var initialized = false
     private(set) var serverVersion: String?
+    /// A connection that completed `initialize` and whose proxy process is
+    /// still alive. Lets the runtime reuse one transport across tasks.
+    var connected: Bool { initialized && process?.isRunning == true }
 
     init(executable: URL = CuaDependency.executable,
          arguments: [String] = ["mcp"],
@@ -52,6 +59,10 @@ actor CuaConnection {
         guard process == nil else { throw DriverConnectionError.remote("Cua connection already started.") }
         if executable == CuaDependency.executable {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
+            // The daemon's existing-profile browser grant is a launch-time
+            // property; reconcile before this process's first connection so a
+            // later consent request never finds a grantless daemon.
+            await CuaDaemonControl.ensureExistingProfileGrant()
         }
         guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw DriverConnectionError.unavailable }
         let process = Process(), stdin = Pipe(), stdout = Pipe()
@@ -121,10 +132,46 @@ actor CuaConnection {
         return result
     }
 
+    /// Reads dispatch no GUI effect, so a transient fault inside the driver is
+    /// safe to retry once — mutations are never retried since an effect may
+    /// already exist on the target.
+    private static let readOnlyTools: Set<String> = [
+        "list_apps", "list_windows", "list_sessions", "get_window_state",
+        "get_desktop_state", "get_browser_state", "get_accessibility_tree",
+        "get_session", "get_session_state", "get_config", "get_recording_state",
+        "get_agent_cursor_state", "get_cursor_position", "get_screen_size",
+        "health_report", "check_permissions", "check_for_update",
+        "clipboard_read", "parse_visual_regions", "verify_state", "page"
+    ]
+
+    private static func transientReadFault(_ error: Error) -> Bool {
+        switch error as? DriverConnectionError {
+        case .timedOut, .remote, .malformed: return true
+        case .toolRefused(_, let code): return code == "tool_invocation_failed"
+        default: return false
+        }
+    }
+
     func callResult(_ name: String, arguments: [String: JSONValue], timeout: TimeInterval = 30) async throws -> CuaToolResult {
         guard initialized else { throw DriverConnectionError.closed }
         try Task.checkCancellation()
         onToolCall?(name, arguments["text"]?.string?.count)
+        var attempts = Self.readOnlyTools.contains(name) ? 4 : 1
+        var backoff: Duration = .milliseconds(400)
+        while true {
+            attempts -= 1
+            do {
+                return try await callResultOnce(name, arguments: arguments, timeout: timeout)
+            } catch let error as DriverConnectionError where attempts > 0 && Self.transientReadFault(error) {
+                // A daemon waking alongside the machine stalls in steps —
+                // bounded backoff covers seconds of it, never a mutation.
+                try? await Task.sleep(for: backoff)
+                backoff = min(backoff * 2, .seconds(2))
+            }
+        }
+    }
+
+    private func callResultOnce(_ name: String, arguments: [String: JSONValue], timeout: TimeInterval) async throws -> CuaToolResult {
         let value = try await request("tools/call", params: .object([
             "name": .string(name), "arguments": .object(arguments)
         ]), timeout: timeout)

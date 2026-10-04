@@ -46,7 +46,7 @@ final class CuaSetup: ObservableObject {
                 try await connection.connect()
                 let permissions = try await CuaPermissionProbe.read(using: connection)
                 guard permissions["accessibility"] == .bool(true), permissions["screen_recording"] == .bool(true) else {
-                    throw DriverConnectionError.refused("Enable CuaDriverLocal in macOS Accessibility and Screen Recording settings.")
+                    throw DriverConnectionError.refused("Enable Cua Driver in macOS Accessibility and Screen Recording settings.")
                 }
                 _ = try await connection.call("start_session", arguments: ["session": .string(label)])
                 try Task.checkCancellation()

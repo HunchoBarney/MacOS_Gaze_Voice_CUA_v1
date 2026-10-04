@@ -1,10 +1,29 @@
 # Cua integration provenance and recovery
 
-The app verifies `/Applications/CuaDriverLocal.app/Contents/MacOS/cua-driver-local`
-against SHA-256 `699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a`.
-The authoritative runtime constants are in
+The app verifies `/Applications/CuaDriver.app/Contents/MacOS/cua-driver`
+against SHA-256 `656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66`
+(the official upstream `cua-driver-rs` **v0.32.0** release build, tag
+`cua-driver-rs-v0.32.0` at commit `58aba84b5b83`; tarball hash verified
+against the published release manifest on 2026-10-02). The authoritative
+runtime constants are in
 [`CuaDependency.swift`](../../Sources/JevVoice/ComputerControl/CuaDependency.swift).
 Do not update the pin just to accept a different build.
+
+v0.32.0 supersedes the local fork we previously ran: upstream landed the
+foreground-chord modifier fix (0.30.4), launch-before-snapshot wait (0.31.0),
+element-token snapshot-store resolution (0.31.0), cursor reveal for
+keyboard-first actions (0.31.0), and the post-navigation page-title refresh
+(0.30.2). Its `type_text` runs the AX→CGEvent ladder internally, so the
+fork's `type_chars_only` arg was removed from our calls. Browser `target_id`/
+`tab_id` are re-minted per `get_browser_state` read — callers must use ids
+from the same snapshot, immediately.
+
+Prior pins (recovery only):
+- `eb08ff7afb89804822c4d7026df3c211feb23e5ab3926fa5ea2007aa08916379` — local
+  combined watchdog + scroll-readback + menu-focus candidate (0.28.2-based),
+  kept installed at `/Applications/CuaDriverLocal.app` as rollback.
+- `699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a` — earlier
+  local build, preserved under `~/Library/Caches/JevVoice/rollback/`.
 
 ## Preserved source
 

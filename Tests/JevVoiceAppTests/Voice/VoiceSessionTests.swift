@@ -58,6 +58,7 @@ for line in sys.stdin:
   name=r['params']['name']
   if name=='list_apps': value={'apps':[]}
   elif name in ('start_session','end_session'): value={'active':name=='start_session'}
+  elif name=='set_agent_cursor_enabled': value={'enabled':r['params']['arguments'].get('enabled',False)}
   else: raise RuntimeError('Unexpected fixture tool '+name)
   out={'structuredContent':value}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':out}),flush=True)

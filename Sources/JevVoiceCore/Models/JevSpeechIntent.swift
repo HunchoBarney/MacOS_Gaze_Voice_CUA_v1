@@ -33,6 +33,19 @@ public final class JevSpeechIntent {
               let prefixRange = Range(match.range, in: request) else { return quotedTextPayload(in: request) }
         let prefix = request[prefixRange].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard prefix.hasSuffix("dictate") || prefix.hasSuffix("say") else { return quotedTextPayload(in: request) }
+        // An explicitly quote-delimited literal stays bounded: control text may
+        // follow it, so the whole-suffix rule must not swallow that tail.
+        var probe = request[prefixRange.upperBound...].drop(while: { $0.isWhitespace })
+        for qualifier in ["exactly", "verbatim", "precisely", "literally"] {
+            guard probe.lowercased().hasPrefix(qualifier) else { continue }
+            let next = probe.index(probe.startIndex, offsetBy: qualifier.count)
+            guard next < probe.endIndex, probe[next].isWhitespace else { continue }
+            probe = probe[next...].drop(while: { $0.isWhitespace })
+        }
+        if let first = probe.first, "\"\u{201C}\u{2018}'`".contains(first),
+           let quoted = quotedTextPayload(in: request) {
+            return quoted
+        }
         let suffix = request[prefixRange.upperBound...]
         let leading = suffix.prefix { $0.isWhitespace }
         let trailing = suffix.reversed().prefix { $0.isWhitespace }.reversed()

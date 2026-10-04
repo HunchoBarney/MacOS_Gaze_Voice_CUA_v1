@@ -203,6 +203,11 @@ struct SettingsView: View {
                         Button("Test browser") { cuaSetup.verify(apiKey: config.apiKey, browser: true) }.disabled(cuaSetup.busy)
                         if cuaSetup.busy { ProgressView().controlSize(.small); Button("Cancel") { cuaSetup.cancel() } }
                     }
+                    Toggle("Show agent cursor", isOn: $config.agentCursorEnabled)
+                    Text(config.agentCursorEnabled
+                         ? "The Cua cursor glides to each action it can place. Accessibility-only actions still act directly — the driver cannot draw a pointer for a call that has no on-screen point."
+                         : "Actions dispatch directly to the target without an animated cursor. Every click follows this rule — the mode never mixes.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             VoiceCard {
@@ -212,6 +217,9 @@ struct SettingsView: View {
                     Text("Completed commands can run while you hold Fn. Release to finish remaining speech and dictated text. Turn this off to review commands before they run.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("Model confidence is available in Activity diagnostics. It does not interrupt ordinary commands. Deletion and purchasing are not supported by this app.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Reset remembered permissions") { CuaStandingGrants.reset() }.controlSize(.small)
+                    Text("Capabilities you approve — like browser page access or menu focus per app — are remembered so they are never re-asked. Reset to be asked again.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

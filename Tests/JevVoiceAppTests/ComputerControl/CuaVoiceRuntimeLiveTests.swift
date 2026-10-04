@@ -447,7 +447,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
                         print("Candidate key Jev \(key):", label)
                     }
                     return response
-                }, windowID: windowID, actionSurface: .candidate)
+                }, windowID: windowID)
                 do {
                     _ = try await keyAgent.run(goal: "In the foreground, press the key \"return\" in the text area of \(displayName), window \(windowTitle).",
                                                context: "One disposable native text fixture with an exact, observed window.",
@@ -565,6 +565,261 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         }
         try? FileManager.default.removeItem(at: bundle)
         try? FileManager.default.removeItem(at: source)
+    }
+
+    /// Temporary diagnostic: reproduce the physical "add 7+7" Calculator run
+    /// where the task reported finished after only "7+" landed. Records the
+    /// full Jev decision trail plus the driver tool sequence, then reads the
+    /// Calculator display independently.
+    func testCalculatorMathReproOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_CALC_REPRO_TEST"] == "1" else {
+            throw XCTSkip("Opt-in Calculator math reproduction against the real desktop")
+        }
+        let key = try CuaLiveCredential.jev()
+        let connection = try CuaLiveDriver.connection()
+        try await connection.connect()
+        let session = "Jarvis calc repro \(UUID().uuidString.prefix(8))"
+        _ = try await connection.call("start_session", arguments: ["session": .string(session)])
+
+        let calcURL = URL(fileURLWithPath: "/System/Applications/Calculator.app")
+        let configuration = NSWorkspace.OpenConfiguration()
+        let calc = try await NSWorkspace.shared.openApplication(at: calcURL, configuration: configuration)
+        let pid = calc.processIdentifier
+        var windowID: Int?
+        for _ in 0..<100 {
+            let windows = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(session)])
+            if let first = (windows["windows"]?.array ?? []).first {
+                windowID = first["window_id"]?.integer
+                break
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard let windowID else { throw DriverConnectionError.refused("Calculator window never observed") }
+        _ = calc.activate(options: [])
+        for _ in 0..<30 where NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        let model = JevClient(apiKey: key)
+        let config = Config(defaults: UserDefaults(suiteName: "CuaCalcRepro-\(UUID().uuidString)")!,
+                            keyStore: FixtureKeyStore(key: key), environment: [:])
+        let toolCalls = ToolCalls()
+        let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in
+            print("REPRO driver call:", tool, "textLength", length.map(String.init) ?? "-")
+            toolCalls.record(tool, textLength: length)
+        }) }, judge: { state, questions in
+            let response = try await model.systemOne(state: state, questions: questions).response.answers
+            for (key, answer) in response {
+                guard case let .choice(choice, _, _) = answer,
+                      case let .choice(_, criteria)? = questions[key] else { continue }
+                let label = criteria[choice].flatMap { $0 } ?? choice
+                print("REPRO Jev \(key):", label)
+            }
+            return response
+        })
+        runtime.begin(app: "Calculator")
+        runtime.update("Add 7+7", final: true)
+        for _ in 0..<900 {
+            if runtime.tasks.first?.active == false { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let work = try XCTUnwrap(runtime.tasks.first)
+        print("REPRO outcome: active \(work.active); status \(work.status); message \(work.message); request \(work.request)")
+
+        let state = try await connection.call("get_window_state", arguments: [
+            "pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+            "include_screenshot": .bool(false), "session": .string(session)
+        ])
+        let display = (state["elements"]?.array ?? []).compactMap { element -> String? in
+            guard let value = element["value"]?.string, !value.isEmpty else { return nil }
+            return "\(element["role"]?.string ?? "?")=\(value)"
+        }
+        print("REPRO Calculator display elements:", display)
+        let snapshot = toolCalls.snapshot()
+        print("REPRO tools:", snapshot.tools, "textLengths:", snapshot.textLengths)
+        XCTAssertEqual(snapshot.tools["type_text"], 1,
+            "The expression must arrive as one process-scoped keyboard dispatch")
+        XCTAssertEqual(snapshot.textLengths, [4], "The bound payload is exactly \"7+7=\"")
+        XCTAssertLessThanOrEqual(snapshot.tools["click"] ?? 0, 2,
+            "Blind per-button retyping must not replace the keyboard dispatch")
+        if work.status == "Completed" {
+            XCTAssertEqual(snapshot.tools["parse_visual_regions"], 1,
+                "Completion requires observed evidence; Calculator exposes no readable AX value, so visual inspection must have run")
+        }
+        await runtime.shutdown()
+        _ = try await connection.call("end_session", arguments: ["session": .string(session)])
+        await connection.close()
+    }
+
+    /// Temporary diagnostic: reproduce the reported "open a new tab in google
+    /// chrome" failure against the real Chrome instance. Chrome keeps ~9
+    /// invisible helper windows; the runtime must pick the one plausible
+    /// window itself, not ask. Asserts a tab was actually created.
+    func testChromeNewTabReproOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_CHROME_TAB_TEST"] == "1" else {
+            throw XCTSkip("Opt-in real-Chrome new-tab reproduction under the desktop lock")
+        }
+        let key = try CuaLiveCredential.jev()
+        let connection = try CuaLiveDriver.connection()
+        try await connection.connect()
+        let session = "Jarvis chrome tab \(UUID().uuidString.prefix(8))"
+        _ = try await connection.call("start_session", arguments: ["session": .string(session)])
+
+        let chrome: NSRunningApplication
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first {
+            chrome = running
+        } else {
+            chrome = try await NSWorkspace.shared.openApplication(
+                at: URL(fileURLWithPath: "/Applications/Google Chrome.app"),
+                configuration: NSWorkspace.OpenConfiguration())
+        }
+        let pid = chrome.processIdentifier
+        _ = chrome.activate(options: [])
+        for _ in 0..<30 where NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        func plausibleWindow() async throws -> Int? {
+            let windows = (try await connection.call("list_windows", arguments: [
+                "pid": .number(Double(pid)), "session": .string(session)]))["windows"]?.array ?? []
+            let visible = windows.filter { $0["is_on_screen"] != .bool(false) }
+            var candidates = visible.filter { !($0["title"]?.string ?? "").isEmpty }
+            if candidates.isEmpty { candidates = visible.isEmpty ? windows.filter { !($0["title"]?.string ?? "").isEmpty } : visible }
+            return candidates.count == 1 ? candidates[0]["window_id"]?.integer : nil
+        }
+        /// Suspension changes radio labels ("…Inactive tab - N MB freed up"), so
+        /// raw counts are unstable; compare the label multiset instead.
+        func tabLabels(_ windowID: Int) async throws -> [String] {
+            let state = try await connection.call("get_window_state", arguments: [
+                "pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+                "include_screenshot": .bool(false), "max_elements": .number(220), "session": .string(session)])
+            return (state["elements"]?.array ?? []).compactMap {
+                ["AXRadioButton", "AXTab"].contains($0["role"]?.string ?? "") ? $0["label"]?.string : nil
+            }
+        }
+        var windowID: Int?
+        for _ in 0..<100 where windowID == nil {
+            windowID = try await plausibleWindow()
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let wid = try XCTUnwrap(windowID, "Chrome had no plausible window to attach")
+        let tabsBefore = try await tabLabels(wid)
+        print("REPRO tabs before:", tabsBefore.count)
+
+        let model = JevClient(apiKey: key)
+        let config = Config(defaults: UserDefaults(suiteName: "CuaChromeTab-\(UUID().uuidString)")!,
+                            keyStore: FixtureKeyStore(key: key), environment: [:])
+        let toolCalls = ToolCalls()
+        let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in
+            print("REPRO driver call:", tool, "textLength", length.map(String.init) ?? "-")
+            toolCalls.record(tool, textLength: length)
+        }) }, judge: { state, questions in
+            let response = try await model.systemOne(state: state, questions: questions).response.answers
+            for (key, answer) in response {
+                guard case let .choice(choice, _, _) = answer,
+                      case let .choice(_, criteria)? = questions[key] else { continue }
+                print("REPRO Jev \(key):", criteria[choice].flatMap { $0 } ?? choice)
+            }
+            return response
+        })
+        runtime.begin(app: "Google Chrome")
+        runtime.update("open a new tab in google chrome", final: true)
+        var approvedConsent = false
+        for _ in 0..<900 {
+            if runtime.tasks.first?.active == false { break }
+            // Answer the consent prompt the way a user tapping Confirm does.
+            if let work = runtime.tasks.first, work.approval != nil {
+                approvedConsent = true
+                runtime.resolveApproval(work.id, approved: true)
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        print("REPRO consent prompt seen+approved:", approvedConsent)
+        let work = try XCTUnwrap(runtime.tasks.first)
+        print("REPRO outcome: active \(work.active); status \(work.status); message \(work.message)")
+        let snapshot = toolCalls.snapshot()
+        print("REPRO tools:", snapshot.tools)
+
+        let tabsAfter = try await tabLabels(wid)
+        print("REPRO tabs after:", tabsAfter.count)
+        await runtime.shutdown()
+        _ = try await connection.call("end_session", arguments: ["session": .string(session)])
+        await connection.close()
+
+        XCTAssertFalse(work.message.contains("Which window"), "Phantom windows must not surface a question")
+        // A fresh tab is labeled "New Tab" until navigated; suspensions rename
+        // other tabs, so assert on the label that could only come from creation.
+        let newTabs = { (labels: [String]) in labels.filter { $0.hasPrefix("New Tab") }.count }
+        XCTAssertTrue(newTabs(tabsAfter) > newTabs(tabsBefore) || tabsAfter.count > tabsBefore.count,
+                      "A new tab must actually exist in the Chrome window (before: \(tabsBefore), after: \(tabsAfter))")
+    }
+
+    /// Temporary diagnostic: feed the reported "open a new tab" transcripts
+    /// through the real decide() path and print Jev's decisions, then replay
+    /// an answer utterance against a synthetic pending question to see whether
+    /// it routes back or loops into a fresh clarification.
+    func testChromeTabClarificationProbeOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_DECIDE_PROBE"] == "1" else {
+            throw XCTSkip("Opt-in decide() probe against real Jev")
+        }
+        let key = try CuaLiveCredential.jev()
+        let model = JevClient(apiKey: key)
+        let apps: JSONValue = .object(["apps": .array([
+            .object(["name": .string("Google Chrome"), "bundle_id": .string("com.google.Chrome"), "pid": .number(0)]),
+            .object(["name": .string("Safari"), "bundle_id": .string("com.apple.Safari"), "pid": .number(0)]),
+            .object(["name": .string("Calculator"), "bundle_id": .string("com.apple.calculator"), "pid": .number(0)])
+        ])])
+        func makeHandoff(_ text: String, taskContext: JSONValue = .object([:])) throws -> TranscriptHandoff {
+            var audio = RangedTranscript()
+            try audio.apply(.init(start: 0, end: 2, text: text, isFinal: true))
+            return TranscriptHandoff(id: UUID(), captureID: UUID(), revision: audio.revision,
+                transcript: text, pendingWordStart: 0,
+                pendingWordEnd: text.split(whereSeparator: \.isWhitespace).count,
+                final: true, receivedAt: 123.5, audioRanges: audio.segments, taskContext: taskContext)
+        }
+        let agent = CuaTaskAgent(call: { tool, _ in
+            if tool == "list_apps" { return apps }
+            throw DriverConnectionError.malformed
+        }, judge: { state, questions in
+            let response = try await model.systemOne(state: state, questions: questions).response.answers
+            for (key, answer) in response.sorted(by: { $0.key < $1.key }) {
+                guard case let .choice(choice, _, _) = answer,
+                      case let .choice(_, criteria)? = questions[key] else { continue }
+                print("PROBE   \(key):", criteria[choice].flatMap { $0 } ?? choice)
+            }
+            return response
+        })
+
+        for text in [
+            "can you open a new tab in google with my google chrome open",
+            "open a new tab in google chrome",
+            "open a new tab",
+            "new tab in chrome",
+        ] {
+            print("PROBE ===> \"\(text)\"")
+            do {
+                let decision = try await agent.decide(handoff: makeHandoff(text), installedApps: apps)
+                print("PROBE decision: op=\(decision.operation) clarification=\(decision.clarification.map { "\($0)" } ?? "nil") request=\(decision.request ?? "nil") app=\(decision.appName ?? "nil") scope=\(decision.scope.map { "\($0)" } ?? "nil")")
+            } catch { print("PROBE threw:", error) }
+        }
+
+        // A pending task-clarification question, then a short reply that should route as an answer.
+        let questionID = UUID()
+        let ctx: JSONValue = .object([
+            "questions": .array([.object([
+                "id": .string(questionID.uuidString),
+                "question": .string("Which task do you mean?"),
+                "task": .string("open a new tab in google chrome")
+            ])]),
+            "tasks": .array([])
+        ])
+        for reply in ["open a new tab in chrome", "the new tab", "that one", "yes"] {
+            print("PROBE reply ===> \"\(reply)\"")
+            do {
+                let decision = try await agent.decide(handoff: makeHandoff(reply, taskContext: ctx), installedApps: apps)
+                print("PROBE reply decision: op=\(decision.operation) clarification=\(decision.clarification.map { "\($0)" } ?? "nil") questionID=\(decision.questionID?.uuidString ?? "nil") request=\(decision.request ?? "nil")")
+            } catch { print("PROBE reply threw:", error) }
+        }
     }
 
     /// Opt-in clarification workflow on a disposable two-window fixture: an
@@ -808,5 +1063,398 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             throw error
         }
         await restoreAndClean()
+    }
+
+    /// Broad smoke: one runtime, one driver session, real commands across many
+    /// real apps — the same path the typed command box and voice capture use.
+    /// Every row is verified by independent observation, never by trusting a
+    /// dispatch response. One command failing must not hide the rest, so rows
+    /// collect their verdicts and report together.
+    func testBroadAppCommandMatrixOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_MATRIX_TEST"] == "1" else {
+            throw XCTSkip("Opt-in broad real-app command matrix under the desktop lock")
+        }
+        let key = try CuaLiveCredential.jev()
+        let observer = try CuaLiveDriver.connection()
+        try await observer.connect()
+        let observerSession = "Jarvis matrix observer \(UUID().uuidString.prefix(8))"
+        _ = try await observer.call("start_session", arguments: ["session": .string(observerSession)])
+
+        let priorPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let model = JevClient(apiKey: key)
+        let toolCalls = ToolCalls()
+        let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeMatrix-\(UUID().uuidString)")!,
+                            keyStore: FixtureKeyStore(key: key), environment: [:])
+        let runtime = CuaVoiceRuntime(config: config,
+            makeConnection: { CuaConnection(onToolCall: { tool, length in
+                print("MATRIX driver call:", tool)
+                toolCalls.record(tool, textLength: length)
+            }) },
+            judge: { state, questions in
+                let answers = try await model.systemOne(state: state, questions: questions).response.answers
+                for (key, answer) in answers {
+                    guard case let .choice(choice, _, _) = answer,
+                          case let .choice(_, criteria)? = questions[key] else { continue }
+                    print("MATRIX Jev \(key):", criteria[choice].flatMap { $0 } ?? choice)
+                }
+                return answers
+            })
+
+        func frontmost(_ bundleID: String) async -> Bool {
+            // The open lane verifies with the driver's own is_frontmost read;
+            // NSWorkspace can lag a moment behind a just-raised window.
+            for _ in 0..<25 {
+                if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID { return true }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            return false
+        }
+        func onScreenWindows(_ bundleID: String) async throws -> Int {
+            guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else { return 0 }
+            let listed = try await observer.call("list_windows", arguments: [
+                "pid": .number(Double(running.processIdentifier)), "session": .string(observerSession)])
+            return (listed["windows"]?.array ?? []).filter { $0["is_on_screen"] != .bool(false) }.count
+        }
+        func isRunning(_ bundleID: String) async -> Bool {
+            for _ in 0..<25 {
+                if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty { return false }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            return true
+        }
+        func awaitingCount() -> Int {
+            runtime.dialogue.entries.filter {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            }.count
+        }
+        func lastQuestion() -> String {
+            runtime.dialogue.entries.last {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            }?.question?.prompt ?? ""
+        }
+
+        struct Row {
+            let command: String
+            let label: String
+            let verify: () async throws -> Bool
+        }
+        let rows: [Row] = [
+            Row(command: "open Calculator", label: "open Calculator → frontmost",
+                verify: { await frontmost("com.apple.calculator") }),
+            Row(command: "open TextEdit", label: "open TextEdit → frontmost",
+                verify: { await frontmost("com.apple.TextEdit") }),
+            Row(command: "open Notes", label: "open Notes → frontmost",
+                verify: { await frontmost("com.apple.Notes") }),
+            Row(command: "open Music", label: "open Music → frontmost",
+                verify: { await frontmost("com.apple.Music") }),
+            Row(command: "open Terminal", label: "open Terminal → frontmost",
+                verify: { await frontmost("com.apple.Terminal") }),
+            Row(command: "open Finder", label: "open Finder → frontmost",
+                verify: { await frontmost("com.apple.finder") }),
+            Row(command: "open System Settings", label: "open System Settings → frontmost",
+                verify: { await frontmost("com.apple.systempreferences") }),
+            // Calculator returns to front so window verbs target unambiguously.
+            Row(command: "open Calculator", label: "raise existing Calculator → frontmost",
+                verify: { await frontmost("com.apple.calculator") }),
+            Row(command: "hide Calculator", label: "hide Calculator → no on-screen windows",
+                verify: { try await onScreenWindows("com.apple.calculator") == 0 }),
+            Row(command: "show Calculator", label: "show Calculator → frontmost again",
+                verify: { await frontmost("com.apple.calculator") }),
+            Row(command: "minimize the Calculator window", label: "minimize → no on-screen windows",
+                verify: { try await onScreenWindows("com.apple.calculator") == 0 }),
+            Row(command: "quit Calculator", label: "quit Calculator → process gone",
+                verify: { await !isRunning("com.apple.calculator") }),
+        ]
+
+        var failures: [String] = []
+        for row in rows {
+            let countBefore = runtime.tasks.count
+            runtime.begin(app: nil)
+            runtime.update(row.command, final: true)
+            let deadline = Date().addingTimeInterval(90)
+            let askedBefore = awaitingCount()
+            while Date() < deadline {
+                if runtime.tasks.count > countBefore,
+                   let work = runtime.tasks.last, !work.active { break }
+                if let work = runtime.tasks.last, work.approval != nil {
+                    print("MATRIX approving:", work.approval ?? "")
+                    runtime.resolveApproval(work.id, approved: true)
+                }
+                if awaitingCount() > askedBefore { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            let work = runtime.tasks.count > countBefore ? runtime.tasks.last : nil
+            // A task still working at the deadline keeps dispatching into the
+            // next row's apps; stop it so its strays cannot contaminate.
+            if let work, work.active { runtime.cancel(work.id) }
+            let status = work?.status ?? (awaitingCount() > askedBefore ? "asked a question" : "no task created")
+            let verified = (try? await row.verify()) ?? false
+            let detail = work?.message ?? lastQuestion()
+            if !(status == "Completed" && verified) {
+                failures.append("\(row.label): status=\(status) verified=\(verified) msg=\(detail)")
+            }
+            print("MATRIX \(verified ? "✓" : "✗") \(row.command) → \(status); verified=\(verified); \(detail)")
+        }
+
+        await runtime.shutdown()
+        let snapshot = toolCalls.snapshot()
+        print("MATRIX tools:", snapshot.tools)
+        _ = try? await observer.call("end_session", arguments: ["session": .string(observerSession)])
+        await observer.close()
+        if let priorPID, let prior = NSRunningApplication(processIdentifier: priorPID) {
+            _ = prior.activate(options: [])
+        }
+
+        XCTAssertEqual(snapshot.tools["start_session"], 1,
+            "Eleven commands must ride one driver session")
+        XCTAssertEqual(snapshot.tools["set_agent_cursor_enabled"], 1,
+            "The cursor policy is applied once per session")
+        XCTAssertEqual(snapshot.tools["end_session"], 1,
+            "The shared session ends exactly once at shutdown")
+        XCTAssertTrue(failures.isEmpty, "Matrix failures:\n\(failures.joined(separator: "\n"))")
+    }
+
+    /// Real-person workflows: compound requests that open an app and then do
+    /// work inside it — the way someone actually talks to their computer.
+    /// Every row is verified by an independent read of the resulting app
+    /// state (window titles, field values, process state), never by trusting
+    /// a dispatch response. Rows report together so one failure cannot hide
+    /// the rest.
+    func testWorkflowMatrixOptIn() async throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_CUA_MATRIX_TEST"] == "1" else {
+            throw XCTSkip("Opt-in real-person workflow matrix under the desktop lock")
+        }
+        if let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+           (session["CGSSessionScreenIsLocked"] as? Bool) == true
+           || ((session["IOConsoleUsers"] as? [[String: Any]]) ?? []).contains(where: { ($0["CGSSessionScreenIsLocked"] as? Bool) == true }) {
+            throw XCTSkip("The screen is locked; desktop control cannot be exercised. Unlock and re-run.")
+        }
+        let key = try CuaLiveCredential.jev()
+        let observer = try CuaLiveDriver.connection()
+        try await observer.connect()
+        let observerSession = "Jarvis workflow observer \(UUID().uuidString.prefix(8))"
+        _ = try await observer.call("start_session", arguments: ["session": .string(observerSession)])
+
+        let priorPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let model = JevClient(apiKey: key)
+        let toolCalls = ToolCalls()
+        let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceWorkflowMatrix-\(UUID().uuidString)")!,
+                            keyStore: FixtureKeyStore(key: key), environment: [:])
+        let runtime = CuaVoiceRuntime(config: config,
+            makeConnection: { CuaConnection(onToolCall: { tool, length in
+                print("WORKFLOW driver call:", tool)
+                toolCalls.record(tool, textLength: length)
+            }) },
+            judge: { state, questions in
+                let answers = try await model.systemOne(state: state, questions: questions).response.answers
+                for (key, answer) in answers {
+                    guard case let .choice(choice, _, _) = answer,
+                          case let .choice(_, criteria)? = questions[key] else { continue }
+                    print("WORKFLOW Jev \(key):", criteria[choice].flatMap { $0 } ?? choice)
+                }
+                return answers
+            })
+
+        func frontmost(_ bundleID: String) async -> Bool {
+            for _ in 0..<25 {
+                if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID { return true }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            return false
+        }
+        func windowTitles(_ bundleID: String) async -> [String] {
+            // Every running instance — an isolated-profile browser is a second
+            // process under the same bundle id, so .first can pick the wrong one.
+            var titles: [String] = []
+            for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+                guard let listed = try? await observer.call("list_windows", arguments: [
+                    "pid": .number(Double(running.processIdentifier)), "session": .string(observerSession)]) else { continue }
+                titles += (listed["windows"]?.array ?? []).compactMap { $0["title"]?.string }
+            }
+            return titles
+        }
+        /// Every string-valued element across every on-screen window of every
+        /// running instance — address bars, text areas, terminal buffers.
+        func fieldTexts(_ bundleID: String) async -> [String] {
+            var texts: [String] = []
+            for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+                guard let listed = try? await observer.call("list_windows", arguments: [
+                    "pid": .number(Double(running.processIdentifier)), "session": .string(observerSession)]) else { continue }
+                for window in (listed["windows"]?.array ?? []).filter({ $0["is_on_screen"] != .bool(false) }) {
+                    guard let wid = window["window_id"]?.integer,
+                          let state = try? await observer.call("get_window_state", arguments: [
+                              "pid": .number(Double(running.processIdentifier)), "window_id": .number(Double(wid)),
+                              "include_screenshot": .bool(false), "max_elements": .number(220),
+                              "session": .string(observerSession)]) else { continue }
+                    texts += (state["elements"]?.array ?? []).compactMap { $0["value"]?.string }
+                }
+            }
+            return texts
+        }
+        func observed(_ bundleID: String, _ needle: String) async -> Bool {
+            for _ in 0..<25 {
+                if await windowTitles(bundleID).contains(where: { $0.localizedCaseInsensitiveContains(needle) }) { return true }
+                if await fieldTexts(bundleID).contains(where: { $0.localizedCaseInsensitiveContains(needle) }) { return true }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            return false
+        }
+        /// OCR text of windows exposing no readable elements — a terminal's
+        /// scrollback is pixels, not AX values, so semantic reads see nothing.
+        /// Vision reads the same capture first; the driver's ONNX parse is the
+        /// fallback when no text is found.
+        func visualTexts(_ bundleID: String) async -> [String] {
+            var texts: [String] = []
+            for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+                guard let listed = try? await observer.call("list_windows", arguments: [
+                    "pid": .number(Double(running.processIdentifier)), "session": .string(observerSession)]) else { continue }
+                for window in (listed["windows"]?.array ?? []).filter({ $0["is_on_screen"] != .bool(false) }) {
+                    guard let wid = window["window_id"]?.integer else { continue }
+                    let file = URL(fileURLWithPath: NSTemporaryDirectory())
+                        .appendingPathComponent("jarvis-test-capture-\(UUID().uuidString).png")
+                    guard let capture = try? await observer.call("get_window_state", arguments: [
+                        "pid": .number(Double(running.processIdentifier)), "window_id": .number(Double(wid)),
+                        "include_screenshot": .bool(true), "include_accessibility_tree": .bool(false),
+                        "screenshot_out_file": .string(file.path),
+                        "session": .string(observerSession)]) else { continue }
+                    defer { try? FileManager.default.removeItem(at: file) }
+                    let regions = await Task.detached(priority: .utility) {
+                        CuaVisionRegions.recognize(file: file,
+                            width: capture["screenshot_width"]?.integer ?? 0,
+                            height: capture["screenshot_height"]?.integer ?? 0)
+                    }.value
+                    if let regions, !regions.isEmpty {
+                        texts += regions.compactMap { $0["text"]?.string }
+                        continue
+                    }
+                    guard let captureID = capture["capture_id"]?.string,
+                          let parsed = try? await observer.call("parse_visual_regions", arguments: [
+                              "capture_id": .string(captureID), "session": .string(observerSession)]) else { continue }
+                    texts += (parsed["regions"]?.array ?? []).compactMap { $0["text"]?.string ?? $0["label"]?.string }
+                }
+            }
+            return texts
+        }
+        /// A terminal-style run is proven by output, not by the command line —
+        /// the typed command itself carries the token. Executed output appears
+        /// as a bare-token line (or a second occurrence) that a mistyped
+        /// command's error output does not produce.
+        func ranAndShowed(_ bundleID: String, _ token: String) async -> Bool {
+            for _ in 0..<30 {
+                let texts = await fieldTexts(bundleID) + visualTexts(bundleID)
+                // A "command not found" line also carries the token but proves
+                // the run FAILED — exclude errors before counting.
+                let hits = texts.filter { $0.localizedCaseInsensitiveContains(token) }
+                    .filter { !$0.localizedCaseInsensitiveContains("not found") }
+                if hits.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .localizedCaseInsensitiveCompare(token) == .orderedSame })
+                    || hits.count >= 2 { return true }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            return false
+        }
+        func awaitingCount() -> Int {
+            runtime.dialogue.entries.filter {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            }.count
+        }
+        func lastQuestion() -> String {
+            runtime.dialogue.entries.last {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            }?.question?.prompt ?? ""
+        }
+
+        /// Only window *titles* prove a navigation happened — an omnibox field
+        /// value echoing the typed text does not.
+        func titled(_ bundleID: String, _ needle: String) async -> Bool {
+            for _ in 0..<30 {
+                if await windowTitles(bundleID).contains(where: { $0.localizedCaseInsensitiveContains(needle) }) { return true }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            return false
+        }
+
+        struct Row {
+            let command: String
+            let label: String
+            let verify: () async throws -> Bool
+        }
+        // A fresh token each run keeps earlier scrollback from satisfying the
+        // check, and plain words survive OCR — digits and hyphens fragment.
+        let wordBank = ["mango", "orchid", "thunder", "harbor", "cobalt",
+                        "willow", "ember", "prism", "falcon", "maple",
+                        "juniper", "saffron", "beacon", "copper", "drift"]
+        let terminalToken = (0..<3).compactMap { _ in wordBank.randomElement() }.joined(separator: " ")
+        // Same for document bodies — a leftover doc/note from an earlier run
+        // must not satisfy a create/write request it never produced.
+        let textEditToken = (0..<3).compactMap { _ in wordBank.randomElement() }.joined(separator: " ")
+        let notesToken = (0..<3).compactMap { _ in wordBank.randomElement() }.joined(separator: " ")
+        let rows: [Row] = [
+            // The reported failing command — verbatim.
+            Row(command: "open google and search for the weather today in yuba city",
+                label: "google search → results page title",
+                verify: { await frontmost("com.google.Chrome") ? await titled("com.google.Chrome", "yuba") : false }),
+            Row(command: "open TextEdit and create a new document then type \(textEditToken)",
+                label: "TextEdit new doc + type → text in document",
+                verify: { await frontmost("com.apple.TextEdit") ? await observed("com.apple.TextEdit", textEditToken) : false }),
+            Row(command: "open Notes and write a note that says \(notesToken)",
+                label: "Notes write → text in note body",
+                verify: { await frontmost("com.apple.Notes") ? await observed("com.apple.Notes", notesToken) : false }),
+            Row(command: "open Terminal and run echo \(terminalToken)",
+                label: "Terminal run → command output visible",
+                verify: { await frontmost("com.apple.Terminal") ? await ranAndShowed("com.apple.Terminal", terminalToken) : false }),
+            Row(command: "open a new tab in Chrome and go to apple.com",
+                label: "new tab + navigate → Apple page title",
+                verify: { await titled("com.google.Chrome", "apple") }),
+        ]
+
+        var failures: [String] = []
+        for row in rows {
+            let countBefore = runtime.tasks.count
+            runtime.begin(app: nil)
+            runtime.update(row.command, final: true)
+            let deadline = Date().addingTimeInterval(120)
+            let askedBefore = awaitingCount()
+            while Date() < deadline {
+                if runtime.tasks.count > countBefore,
+                   let work = runtime.tasks.last, !work.active { break }
+                if let work = runtime.tasks.last, work.approval != nil {
+                    print("WORKFLOW approving:", work.approval ?? "")
+                    runtime.resolveApproval(work.id, approved: true)
+                }
+                if awaitingCount() > askedBefore { break }
+                try await Task.sleep(for: .milliseconds(120))
+            }
+            let work = runtime.tasks.count > countBefore ? runtime.tasks.last : nil
+            // A task still working at the deadline keeps dispatching into the
+            // next row's apps; stop it so its strays cannot contaminate.
+            if let work, work.active { runtime.cancel(work.id) }
+            let status = work?.status ?? (awaitingCount() > askedBefore ? "asked a question" : "no task created")
+            let verified = (try? await row.verify()) ?? false
+            let detail = work?.message ?? lastQuestion()
+            if !(status == "Completed" && verified) {
+                failures.append("\(row.label): status=\(status) verified=\(verified) msg=\(detail)")
+            }
+            print("WORKFLOW \(verified ? "✓" : "✗") \(row.command) → \(status); verified=\(verified); \(detail)")
+        }
+
+        await runtime.shutdown()
+        let snapshot = toolCalls.snapshot()
+        print("WORKFLOW tools:", snapshot.tools)
+        _ = try? await observer.call("end_session", arguments: ["session": .string(observerSession)])
+        await observer.close()
+        if let priorPID, let prior = NSRunningApplication(processIdentifier: priorPID) {
+            _ = prior.activate(options: [])
+        }
+
+        XCTAssertEqual(snapshot.tools["start_session"], 1,
+            "All workflows ride one driver session")
+        XCTAssertEqual(snapshot.tools["end_session"], 1,
+            "The shared session ends exactly once at shutdown")
+        XCTAssertTrue(failures.isEmpty, "Workflow failures:\n\(failures.joined(separator: "\n"))")
     }
 }

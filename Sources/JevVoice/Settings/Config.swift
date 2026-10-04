@@ -22,6 +22,12 @@ final class Config: ObservableObject {
         didSet { defaults.set(autoExecute, forKey: "autoExecute") }
     }
 
+    /// Whether the driver draws its animated agent cursor while acting.
+    /// Off = silent direct dispatch; on = the overlay glides to each click.
+    @Published var agentCursorEnabled: Bool {
+        didSet { defaults.set(agentCursorEnabled, forKey: "agentCursorEnabled") }
+    }
+
     init(
         defaults: UserDefaults = .standard,
         keyStore: APIKeyStore = KeychainAPIKeyStore(),
@@ -35,6 +41,7 @@ final class Config: ObservableObject {
             ? 0.7
             : defaults.double(forKey: "confidenceThreshold")
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
+        self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? false
 
         do {
             if let stored = try keyStore.read() {

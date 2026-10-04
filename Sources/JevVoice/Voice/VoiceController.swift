@@ -283,6 +283,17 @@ final class VoiceController: ObservableObject {
         default: return false
         }
     }
+    /// Same gates as `canBegin` minus microphone availability — a typed
+    /// command never touches the mic.
+    var canSubmitCommand: Bool {
+        if !held, !cua.speech.busy, cleanupTask == nil, startupTask == nil,
+           [.executing, .thinking].contains(status) { return true }
+        if isMicrophoneTest && status != .stopping { return true }
+        switch status {
+        case .idle, .done, .error, .awaitingAnswer: return cleanupTask == nil
+        default: return false
+        }
+    }
     var operationActive: Bool {
         if cua.active { return true }
         switch status { case .idle, .done, .error: return false; default: return true }
@@ -438,6 +449,26 @@ final class VoiceController: ObservableObject {
     func acceptTranscript() {
         guard status == .reviewTranscript, let id = sessionID else { return }
         submit(transcript, session: id)
+    }
+
+    /// A typed command is a final transcript — it enters the identical
+    /// handoff as a finished capture: `cua.begin` then `submit`, which honours
+    /// `autoExecute` the same way voice does.
+    func submitTypedCommand(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, canSubmitCommand else { return }
+        startupTask?.cancel()
+        speech.cancel()
+        isMicrophoneTest = false
+        held = false
+        let id = newSession()
+        commandFrontmostApp = lastExternalApp
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
+            commandFrontmostApp = frontmost() ?? lastExternalApp
+        }
+        cua.begin(app: commandFrontmostApp, captureID: id)
+        trace("typed_command")
+        submit(trimmed, session: id)
     }
 
     func confirm() {

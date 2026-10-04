@@ -26,7 +26,12 @@ app: build
 	cp ThirdParty/FluidVoice/LICENSE ThirdParty/FluidVoice/NOTICE.md "$(APP)/Contents/Resources/ThirdParty/FluidVoice/"
 	# Finder metadata on a generated bundle prevents signing; retain security attributes.
 	xattr -dr com.apple.FinderInfo "$(APP)" 2>/dev/null || true
-	codesign --force --deep --sign - "$(APP)"
+	# A stable self-signed identity keeps macOS TCC grants (Accessibility,
+	# Screen Recording, Microphone) across rebuilds — adhoc signatures key on
+	# cdhash, so every rebuild invalidates permissions and macOS re-prompts.
+	@IDENTITY=$$(security find-identity -v -p codesigning | sed -n 's/.*"\(Jev Voice Local Dev\)"/\1/p' | head -1); \
+	if [ -n "$$IDENTITY" ]; then codesign --force --deep --sign "$$IDENTITY" "$(APP)"; \
+	else codesign --force --deep --sign - "$(APP)"; fi
 
 run: app
 	open "$(APP)"

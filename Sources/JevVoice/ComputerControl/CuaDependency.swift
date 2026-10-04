@@ -2,12 +2,12 @@ import Foundation
 import CryptoKit
 import JevVoiceCore
 
-/// Exact local integration tested for this migration. Stock auto-updates must
-/// not silently remove the source patches required by the host.
+/// Exact upstream integration tested for this migration. Stock auto-updates
+/// must not silently replace the verified build.
 enum CuaDependency {
-    static let sourceRevision = "662e9ddb2e2fd6ded048635713e199b3476926a6"
-    static let executable = URL(fileURLWithPath: "/Applications/CuaDriverLocal.app/Contents/MacOS/cua-driver-local")
-    static let executableSHA256 = "699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a"
+    static let sourceRevision = "58aba84" // cua-driver-rs-v0.32.0
+    static let executable = URL(fileURLWithPath: "/Applications/CuaDriver.app/Contents/MacOS/cua-driver")
+    static let executableSHA256 = "656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66"
 
     static func verify(_ file: URL, expectedSHA256: String) throws {
         guard FileManager.default.isExecutableFile(atPath: file.path) else {

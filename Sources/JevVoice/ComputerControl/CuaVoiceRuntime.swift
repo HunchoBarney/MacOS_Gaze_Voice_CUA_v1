@@ -1,5 +1,7 @@
+import CoreGraphics
 import Foundation
 import JevVoiceCore
+import OSLog
 
 @MainActor
 final class CuaVoiceRuntime {
@@ -87,6 +89,9 @@ final class CuaVoiceRuntime {
     private let judge: CuaTaskAgent.Judge
     private let requiresAPIKey: Bool
     private let makeConnection: () -> CuaConnection
+    /// Injectable probe — unit tests must not depend on the host's real
+    /// console lock state; production uses the CGSession read below.
+    private let screenLocked: () -> Bool
     private let queue = CuaWorkQueue()
     private let appInventory = CuaAppInventory()
     private(set) var tasks: [Work] = []
@@ -94,6 +99,15 @@ final class CuaVoiceRuntime {
     private var initialApp = ""
     private var nextLabel = 0
     private let instanceLabel = String(UUID().uuidString.prefix(6))
+    /// One driver session per runtime: protected-resource grants — including
+    /// existing-profile browser attach — are keyed to (session, transport,
+    /// resource). A per-task session re-ran the browser's visible
+    /// remote-debugging setup on every command; a per-run session makes the
+    /// standing approval actually stick. `end_session` fires at shutdown.
+    private var sessionConnection: CuaConnection?
+
+    private var sessionStartTask: Task<CuaConnection, Error>?
+    private var sessionLabel: String { "Jarvis runtime · \(instanceLabel)" }
     /// The single owner of intents, attempts, relationships, questions and facts.
     /// Readable for diagnostics and tests; only the runtime mutates it.
     private(set) var dialogue = CuaDialogueState()
@@ -129,11 +143,21 @@ final class CuaVoiceRuntime {
         return coordinator
     }()
 
+    /// The CGSession screen-lock read used as the default probe.
+    nonisolated static var consoleScreenLocked: Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+        if let locked = session["CGSSessionScreenIsLocked"] as? Bool { return locked }
+        let users = session["IOConsoleUsers"] as? [[String: Any]] ?? []
+        return users.contains { ($0["CGSSessionScreenIsLocked"] as? Bool) == true }
+    }
+
     init(config: Config, makeConnection: @escaping () -> CuaConnection = { CuaConnection() },
-         judge: CuaTaskAgent.Judge? = nil, dialogue: CuaDialogueState = CuaDialogueState()) {
+         judge: CuaTaskAgent.Judge? = nil, dialogue: CuaDialogueState = CuaDialogueState(),
+         screenLocked: @escaping () -> Bool = { CuaVoiceRuntime.consoleScreenLocked }) {
         self.config = config
         self.makeConnection = makeConnection
         self.dialogue = dialogue
+        self.screenLocked = screenLocked
         if let judge {
             self.judge = judge
             self.requiresAPIKey = false
@@ -189,6 +213,7 @@ final class CuaVoiceRuntime {
                     "id": .string(question.id.uuidString),
                     "question": .string(question.prompt),
                     "prompt": .string(question.prompt),
+                    "options": .array(question.options.map { .string($0) }),
                     "task": .string(publishedID),
                     "request": .string(entry.intent.utterance),
                     "revision": .number(Double(entry.revision)),
@@ -313,12 +338,33 @@ final class CuaVoiceRuntime {
         return accepted
     }
     func select(_ id: UUID) { selectedID = id; onChange() }
+    /// The daemon's first calls after system wake stall while its own
+    /// session/license checks wait on the returning network — a real user
+    /// command shouldn't pay that warm-up. Best-effort: rebuilds a dead
+    /// transport and exercises one read; failures are ignored by design.
+    func wakeDriverSession() {
+        Task { [weak self] in
+            guard let connection = try? await self?.sessionTransport() else { return }
+            _ = try? await connection.call("check_permissions", arguments: [:])
+        }
+    }
     func shutdown() async {
         let pendingDecision = speech.cancel()
         for work in tasks where work.active { cancel(work.id) }
         onChange()
         await pendingDecision?.value
         for work in tasks { await work.worker?.value }
+        // A session bootstrap can still be in flight when shutdown starts:
+        // let it finish so its session is released rather than leaked.
+        _ = try? await sessionStartTask?.value
+        sessionStartTask = nil
+        // One `end_session` per run: the driver releases the run's grants and
+        // rolls back remote-debugging setup it performed.
+        if let connection = sessionConnection {
+            sessionConnection = nil
+            _ = try? await connection.call("end_session", arguments: ["session": .string(sessionLabel)], timeout: 5)
+            await connection.close()
+        }
     }
 
     private func receive(_ handoff: TranscriptHandoff) async throws {
@@ -327,9 +373,8 @@ final class CuaVoiceRuntime {
         }
         nextLabel += 1
         let label = "Jarvis \(nextLabel) · \(instanceLabel)"
-        let connection = makeConnection()
         let invocation = Invocation(receivedAt: handoff.receivedAt)
-        let agent = makeAgent(connection: connection, label: label, invocation: invocation)
+        let agent = makeAgent(invocation: invocation)
         do {
             let previousContext = handoff.taskContext["initial_app"]?.string ?? initialApp
             let decision: CuaExecutorDecision
@@ -338,9 +383,7 @@ final class CuaVoiceRuntime {
                     previousContext: previousContext, installedApps: cachedInventory)
                 if cachedDecision.operation == .execute ||
                     (cachedDecision.operation == .clarify && cachedDecision.clarification == .target) {
-                    try await startSession(connection, label: label)
-                    let currentInventory = try await makeToolCall(connection: connection, label: label,
-                        invocation: invocation)("list_apps", [:])
+                    let currentInventory = try await makeToolCall(invocation: invocation)("list_apps", [:])
                     decision = currentInventory == cachedInventory ? cachedDecision :
                         try await agent.decide(handoff: handoff, previousContext: previousContext,
                             installedApps: currentInventory)
@@ -348,9 +391,7 @@ final class CuaVoiceRuntime {
                     decision = cachedDecision
                 }
             } else {
-                try await startSession(connection, label: label)
-                let inventory = try await makeToolCall(connection: connection, label: label,
-                    invocation: invocation)("list_apps", [:])
+                let inventory = try await makeToolCall(invocation: invocation)("list_apps", [:])
                 decision = try await agent.decide(handoff: handoff,
                     previousContext: previousContext, installedApps: inventory)
             }
@@ -361,7 +402,6 @@ final class CuaVoiceRuntime {
             switch decision.operation {
             case .wait:
                 speech.report(handoff, outcome: "incomplete", message: handoff.final ? "The request is incomplete; no action was taken." : "Listening for a complete request…")
-                await finishSession(connection, label: label)
             case .clarify:
                 // Record the ambiguous request as an intent awaiting an answer so
                 // the next hold's reply binds a real question owner, then present
@@ -370,7 +410,6 @@ final class CuaVoiceRuntime {
                 let range = decision.consumedRange ?? handoff.pendingWordStart..<handoff.pendingWordEnd
                 guard !range.isEmpty, let acceptance = speech.validateSource(handoff, wordRange: range) else {
                     speech.report(handoff, outcome: "clarification", message: prompt)
-                    await finishSession(connection, label: label)
                     return
                 }
                 do {
@@ -380,21 +419,16 @@ final class CuaVoiceRuntime {
                 } catch {
                     speech.publishOutcome("clarification", message: error.localizedDescription)
                 }
-                await finishSession(connection, label: label)
                 speech.resumePending()
             case .ignore:
                 if let range = decision.consumedRange { _ = speech.consume(handoff, wordRange: range) }
-                await finishSession(connection, label: label)
             case .stopAll:
                 guard let range = decision.consumedRange, speech.consume(handoff, wordRange: range) else {
-                    await finishSession(connection, label: label)
                     return
                 }
                 stopAll()
-                await finishSession(connection, label: label)
             case .execute, .stop, .correction:
                 guard let range = decision.consumedRange, decision.request != nil else {
-                    await finishSession(connection, label: label)
                     throw DriverConnectionError.malformed
                 }
                 // Only the utterance's own live text waits for release: a resumed
@@ -406,14 +440,12 @@ final class CuaVoiceRuntime {
                         ? "Dictation will be inserted after you finish speaking."
                         : "Text will be inserted after you finish speaking."
                     speech.report(handoff, outcome: "dictationWaitingForFinal", message: message)
-                    await finishSession(connection, label: label)
                     return
                 }
                 // One no-await acceptance transition: validate the source/read set,
                 // publish known intent metadata, claim the source, then schedule
                 // the worker and the remaining speech.
                 guard let acceptance = speech.validateSource(handoff, wordRange: range) else {
-                    await finishSession(connection, label: label)
                     return
                 }
                 let work: Work
@@ -423,23 +455,20 @@ final class CuaVoiceRuntime {
                                             invocation: invocation)
                 } catch {
                     speech.report(handoff, outcome: "clarification", message: error.localizedDescription)
-                    await finishSession(connection, label: label)
                     return
                 }
                 if work.active {
                     work.worker = Task { [weak self] in
-                        guard let self else { await connection.close(); return }
+                        guard let self else { return }
                         await self.runSelected(decision, handoff: handoff, work: work, agent: agent,
-                                               connection: connection, label: label, invocation: invocation)
+                                               invocation: invocation)
                     }
                     speech.resumePending()
                 } else {
-                    await finishSession(connection, label: label)
                     speech.resumePending()
                 }
             }
         } catch {
-            await finishSession(connection, label: label)
             throw error
         }
     }
@@ -778,8 +807,8 @@ final class CuaVoiceRuntime {
         intentPayloads = intentPayloads.filter { liveIntentIDs.contains($0.key) }
     }
 
-    private func makeAgent(connection: CuaConnection, label: String, invocation: Invocation) -> CuaTaskAgent {
-        CuaTaskAgent(call: makeToolCall(connection: connection, label: label, invocation: invocation),
+    private func makeAgent(invocation: Invocation) -> CuaTaskAgent {
+        CuaTaskAgent(call: makeToolCall(invocation: invocation),
             judge: makeTimedJudge(invocation), generate: { prompt, context, reasoning in
                 let accessStarted = ProcessInfo.processInfo.systemUptime
                 let client = try {
@@ -789,15 +818,42 @@ final class CuaVoiceRuntime {
                 let generationStarted = ProcessInfo.processInfo.systemUptime
                 defer { invocation.timings["Text generation", default: 0] += (ProcessInfo.processInfo.systemUptime - generationStarted) * 1000 }
                 return try await client.generate(prompt: prompt, context: context, reasoning: reasoning)
-            }, reasoningAvailable: TextProviderSettings.shared.configured, approve: { [weak self] description in
+            }, reasoningAvailable: TextProviderSettings.shared.configured, allowConfirmedRepetition: true, approve: { [weak self] description in
                 guard let self, let work = invocation.work else { return false }
                 return try await self.requestApproval(description, for: work)
+            }, payload: { request, purpose in
+                try await JevSpeechIntent(client: JevClient(apiKey: self.config.apiKey)).textPayload(request: request, purpose: purpose)
             })
     }
 
-    private func startSession(_ connection: CuaConnection, label: String) async throws {
-        try await connection.connect()
-        _ = try await connection.call("start_session", arguments: ["session": .string(label)])
+    /// The shared live transport, created lazily. A dead one is replaced
+    /// wholesale — a fresh proxy must `start_session` again before any tool
+    /// call. Two tasks racing to build the first connection funnel through one
+    /// serialized bootstrap so neither can orphan a transport or run calls on
+    /// a session that was never started.
+    private func sessionTransport() async throws -> CuaConnection {
+        if let inFlight = sessionStartTask {
+            _ = try await inFlight.value
+            if let connection = sessionConnection, await connection.connected { return connection }
+        }
+        if let connection = sessionConnection, await connection.connected { return connection }
+        let task = Task { () throws -> CuaConnection in
+            if let connection = self.sessionConnection, await connection.connected { return connection }
+            let connection = self.makeConnection()
+            try await connection.connect()
+            _ = try await connection.call("start_session", arguments: ["session": .string(self.sessionLabel)])
+            // Session-scoped cursor policy: the user picks animated-overlay or
+            // silent dispatch once, never a per-action mix. Best-effort — a
+            // daemon too old for the cursor tools still serves the session.
+            _ = try? await connection.call("set_agent_cursor_enabled", arguments: [
+                "session": .string(self.sessionLabel),
+                "enabled": .bool(self.config.agentCursorEnabled)])
+            self.sessionConnection = connection
+            return connection
+        }
+        sessionStartTask = task
+        defer { sessionStartTask = nil }
+        return try await task.value
     }
 
     private func makeTimedJudge(_ invocation: Invocation) -> CuaTaskAgent.Judge {
@@ -808,7 +864,7 @@ final class CuaVoiceRuntime {
         }
     }
 
-    private func makeToolCall(connection: CuaConnection, label: String, invocation: Invocation,
+    private func makeToolCall(invocation: Invocation,
                               useInstalledAppCache: Bool = true) -> CuaTaskAgent.Call {
         { tool, arguments in
             try Task.checkCancellation()
@@ -823,7 +879,11 @@ final class CuaVoiceRuntime {
             }
             let started = ProcessInfo.processInfo.systemUptime
             defer { invocation.timings["Cua \(tool)", default: 0] += (ProcessInfo.processInfo.systemUptime - started) * 1000 }
-            let arguments = arguments.merging(["session": .string(label)]) { _, current in current }
+            let arguments = arguments.merging(["session": .string(self.sessionLabel)]) { _, current in current }
+            // Resolve the transport per call: a dead connection is replaced
+            // and re-sessioned inside sessionTransport, so a reconnect
+            // mid-task never strands this closure on a stale transport.
+            let connection = try await self.sessionTransport()
             if tool == "list_apps", useInstalledAppCache {
                 return try await self.appInventory.read { try await connection.call(tool, arguments: arguments) }
             }
@@ -832,21 +892,29 @@ final class CuaVoiceRuntime {
     }
 
     private func runSelected(_ decision: CuaExecutorDecision, handoff: TranscriptHandoff, work: Work,
-                             agent: CuaTaskAgent, connection: CuaConnection, label: String,
-                             invocation: Invocation) async {
+                             agent: CuaTaskAgent, invocation: Invocation) async {
         let start = ContinuousClock.now
         do {
             try Task.checkCancellation()
             if work.stopRequested { throw CancellationError() }
             try await beginAttempt(for: work)
             work.phase = .working
+            // On a locked console every activation and key event silently
+            // no-ops — the driver reports `partial` for each bring_to_front
+            // and each step fails with a different confusing message. One
+            // session read up front turns the whole class into a single
+            // honest refusal instead of a per-step failure trail. `.stop`
+            // is bookkeeping only; it still runs.
+            if decision.operation != .stop, screenLocked() {
+                throw DriverConnectionError.refused("The screen is locked. Unlock it before running computer commands.")
+            }
             let outcome: CuaDialogueState.Outcome
             switch decision.operation {
             case .stop:
                 outcome = try executeStop(decision, work: work)
             case .correction:
-                outcome = try await applyCorrection(decision, work: work, agent: agent, connection: connection,
-                    label: label, initialApp: handoff.taskContext["initial_app"]?.string ?? "",
+                outcome = try await applyCorrection(decision, work: work, agent: agent,
+                    initialApp: handoff.taskContext["initial_app"]?.string ?? "",
                     invocation: invocation)
             case .execute:
                 let result = await execute(decision, work: work, agent: agent, invocation: invocation,
@@ -855,17 +923,25 @@ final class CuaVoiceRuntime {
                     // The attempt observed an ambiguity: finish it honestly,
                     // re-open the intent and attach the question the next hold
                     // answers through an .answer decision.
+                    let alreadyAnswered = !(dialogue.entry(for: work.intentID)?.answers.isEmpty ?? true)
                     try? dialogue.finish(attemptID: work.attemptID, intentID: work.intentID,
                                          outcome: .blocked(reason: question))
-                    try? dialogue.revise(intentID: work.intentID)
-                    if let revision = dialogue.entry(for: work.intentID)?.revision {
-                        try? dialogue.ask(.init(intentID: work.intentID, prompt: question,
-                                                options: agent.pendingQuestionOptions,
-                                                target: dialogue.entry(for: work.intentID)?.intent.target,
-                                                revision: revision))
+                    if alreadyAnswered {
+                        // The user already answered this intent's question and
+                        // it still cannot resolve; re-asking only loops.
+                        work.message = "Your answer did not resolve it — try restating the request."
+                        outcome = .blocked(reason: question)
+                    } else {
+                        try? dialogue.revise(intentID: work.intentID)
+                        if let revision = dialogue.entry(for: work.intentID)?.revision {
+                            try? dialogue.ask(.init(intentID: work.intentID, prompt: question,
+                                                    options: agent.pendingQuestionOptions,
+                                                    target: dialogue.entry(for: work.intentID)?.intent.target,
+                                                    revision: revision))
+                        }
+                        work.message = question
+                        outcome = .blocked(reason: question)
                     }
-                    work.message = question
-                    outcome = .blocked(reason: question)
                 } else {
                     outcome = mapOutcome(result, work: work)
                 }
@@ -888,7 +964,6 @@ final class CuaVoiceRuntime {
             }
             settle(work: work, outcome: mapped)
         }
-        await finishSession(connection, label: label)
         for (name, milliseconds) in invocation.timings { work.timings[name] = milliseconds }
         queue.release(work.id)
         let duration = start.duration(to: .now).components
@@ -965,8 +1040,13 @@ final class CuaVoiceRuntime {
             // did not name, and its previous attempt retains the literal payload
             // so a retry re-executes the same request instead of the empty reply.
             let previous = tasks.last { $0.intentID == work.intentID && $0.id != work.id }
-            var literalText = decision.literalText
-            var contentMode = decision.contentMode
+            // An answer/retry utterance is the reply to a question, never the
+            // payload itself — "Untitled 21" answers which window, it is not
+            // text to insert. Dropping the reply's own literal lets the
+            // intent's stored payload restore below.
+            let replyOnly = decision.relationship == .answer || decision.relationship == .retry
+            var literalText = replyOnly ? nil : decision.literalText
+            var contentMode = replyOnly ? .control : decision.contentMode
             // The intent's recorded contract outlives its attempts: a reply that
             // names no payload still re-executes the original literal, and the
             // reply's own scope/visibility can never narrow the request (an
@@ -986,7 +1066,20 @@ final class CuaVoiceRuntime {
                 selectedTaskID: nil, dependencyTaskID: nil,
                 appName: decision.appName ?? entry.intent.target?.bundle.map { $0.displayName ?? $0.bundleID },
                 bundleID: decision.bundleID ?? entry.intent.target?.bundle?.bundleID,
-                scope: payload?.scope ?? decision.scope,
+                scope: {
+                    // An answer naming one of the offered options picks a
+                    // concrete existing target; a stored "create" contract is
+                    // contradicted by that choice — the user pointed at the
+                    // window to work in, not at a document to make.
+                    if payload?.scope == "create",
+                       let options = entry.question?.options, !options.isEmpty,
+                       let answer = entry.answers.last?.utterance,
+                       options.contains(where: {
+                           $0.trimmingCharacters(in: .whitespaces).lowercased()
+                               == answer.trimmingCharacters(in: .whitespaces).lowercased()
+                       }) { return "work" }
+                    return payload?.scope ?? decision.scope
+                }(),
                 visibility: payload?.visibility ?? decision.visibility,
                 literalText: literalText, contentMode: contentMode)
             resumed.relationship = decision.relationship
@@ -1121,7 +1214,7 @@ final class CuaVoiceRuntime {
     }
 
     private func applyCorrection(_ decision: CuaExecutorDecision, work: Work, agent: CuaTaskAgent,
-                                 connection: CuaConnection, label: String, initialApp: String,
+                                 initialApp: String,
                                  invocation: Invocation) async throws -> CuaDialogueState.Outcome {
         guard let id = decision.selectedTaskID, let target = workForPublishedID(id), target.id != work.id else {
             throw DriverConnectionError.refused("The selected task is no longer available to correct.")
@@ -1140,17 +1233,15 @@ final class CuaVoiceRuntime {
         }
         await target.worker?.value
         try Task.checkCancellation()
-        var sessionStarted = false
         if let receipt = target.launchReceipt {
-            try await startSession(connection, label: label)
-            sessionStarted = true
+            _ = try await sessionTransport()
             work.phase = .waiting
             work.message = "Checking whether the original launch is unchanged…"
             noteChange(progressOnly: true)
             let queued = ProcessInfo.processInfo.systemUptime
             try await queue.acquire(work.id, app: receipt.bundle)
             invocation.timings["Queue wait", default: 0] += (ProcessInfo.processInfo.systemUptime - queued) * 1000
-            work.message = try await receipt.reverse(call: makeToolCall(connection: connection, label: label, invocation: invocation,
+            work.message = try await receipt.reverse(call: makeToolCall(invocation: invocation,
                 useInstalledAppCache: false),
                 judge: makeTimedJudge(invocation), approveFocus: {
                     try await self.requestApproval("Temporarily focus \(receipt.bundle) to normally quit the unchanged app launched by \(target.label). No work will be discarded.", for: work)
@@ -1166,16 +1257,10 @@ final class CuaVoiceRuntime {
             return .verified(evidence: work.message.isEmpty
                 ? "The earlier request was retracted." : work.message)
         }
-        if !sessionStarted { try await startSession(connection, label: label) }
+        _ = try await sessionTransport()
         let result = await execute(replacement, work: work, agent: agent, invocation: invocation,
                                    initialApp: initialApp)
         return mapOutcome(result, work: work)
     }
 
-    private func finishSession(_ connection: CuaConnection, label: String) async {
-        await Task.detached {
-            _ = try? await connection.call("end_session", arguments: ["session": .string(label)], timeout: 5)
-            await connection.close()
-        }.value
-    }
 }

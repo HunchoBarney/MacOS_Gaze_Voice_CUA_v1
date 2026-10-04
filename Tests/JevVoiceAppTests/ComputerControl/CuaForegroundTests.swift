@@ -21,7 +21,7 @@ final class CuaForegroundTests: XCTestCase {
             }
         }, judge: { _, questions in
             Dictionary(uniqueKeysWithValues: questions.keys.map { key in
-                let answer = key == "app" ? "app_0" : key == "visibility" ? visibility : key == "scope" ? "launch" : "done"
+                let answer = key == "app" ? "app_0" : key == "visibility" ? visibility : key == "scope" ? "launch" : key == "doneEvidence" ? "proven" : "done"
                 return (key, .choice(choice: answer, confidence: 1, probabilities: [:]))
             })
         }, approve: { _ in XCTFail("Explicit opening must not ask again"); return false })

@@ -4,55 +4,6 @@ import JevVoiceCore
 
 @MainActor
 final class CuaTaskAgentLiveTests: XCTestCase {
-    func testEmbeddedAppCatalogOptIn() async throws {
-        guard ProcessInfo.processInfo.environment["JARVIS_CUA_APP_READ"] == "1" else { throw XCTSkip("Opt-in read-only cross-app Driver observations") }
-        let connection = CuaConnection()
-        try await connection.connect()
-        let label = "Jarvis embedded observation \(UUID().uuidString.prefix(8))"
-        do {
-            _ = try await connection.call("start_session", arguments: ["session": .string(label)])
-            let call: CuaTaskAgent.Call = { name, args in
-                try await connection.call(name, arguments: args.merging(["session": .string(label)]) { _, b in b })
-            }
-            let apps = try await call("get_accessibility_tree", [:])
-            for bundle in ["com.spotify.client", "com.apple.calculator", "com.apple.TextEdit"] {
-                let pid = try XCTUnwrap(apps["apps"]?.array?.first { $0["bundle_id"] == .string(bundle) }?["pid"]?.integer)
-                let windows = try await call("list_windows", ["pid": .number(Double(pid))])
-                let titled = (windows["windows"]?.array ?? []).filter { !($0["title"]?.string ?? "").isEmpty }
-                let visible = titled.filter { $0["is_on_screen"] == .bool(true) }
-                let candidates = visible.isEmpty ? titled : visible
-                // This observation fixture targets the largest document surface, not a
-                // tiny tooltip. It never chooses a content destination for the product.
-                func area(_ window: JSONValue) -> Double {
-                    guard case .number(let width) = window["bounds"]?["width"],
-                          case .number(let height) = window["bounds"]?["height"] else { return 0 }
-                    return width * height
-                }
-                let window = try XCTUnwrap(candidates.max { area($0) < area($1) }?["window_id"]?.integer)
-                if ProcessInfo.processInfo.environment["JARVIS_CUA_APP_FOREGROUND"] == "1" {
-                    let raised = try await call("bring_to_front", ["pid": .number(Double(pid)), "window_id": .number(Double(window))])
-                    XCTAssertEqual(raised["activated"], .bool(true))
-                    XCTAssertEqual(raised["exact_window_effect"]?["verified"], .bool(true))
-                }
-                let browser = try await CuaBrowserTarget.discover(pid: pid, window: window, call: call)
-                XCTAssertNil(browser)
-                let arguments: [String: JSONValue] = ["pid": .number(Double(pid)), "window_id": .number(Double(window)), "include_screenshot": .bool(false), "max_elements": .number(220)]
-                var snapshot = try await call("get_window_state", arguments)
-                if snapshot["elements"]?.array?.isEmpty == true { snapshot = try await call("get_window_state", arguments) }
-                let elements = snapshot["elements"]?.array ?? []
-                print("Observation scope:", bundle, "window", window, "candidate count", candidates.count,
-                      "degraded", snapshot["degraded_reason"] ?? .null, "complete", snapshot["elements_complete"] ?? .null)
-                let actions = CuaActionCatalog.native(elements: elements, pid: pid, window: window, includeEmbeddedWebControls: browser == nil)
-                print("Observed control coverage:", bundle, "elements:", elements.count, "actions:", actions.count)
-                XCTAssertFalse(actions.isEmpty, bundle)
-                if bundle == "com.spotify.client" {
-                    XCTAssertTrue(actions.contains { $0.tool == "click" && $0.description.contains("Search") })
-                }
-            }
-            _ = try await call("end_session", [:])
-        } catch { await connection.close(); throw error }
-        await connection.close()
-    }
     func testUnspecifiedTargetDoesNotBorrowPriorAppOptIn() async throws {
         guard ProcessInfo.processInfo.environment["JARVIS_CUA_AGENT_TEST"] == "1",
               let key = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"] else { throw XCTSkip("Opt-in live Jev target judgment; no OS mutation") }

@@ -91,10 +91,14 @@ for line in sys.stdin:
     path=r['params']['arguments'].get('path',[])
     if path and path[-1]=='Quit': running=False; save_state()
     value={'status':'invoked','resolved_path':path}
+   elif name=='hotkey': value={'status':'pressed'}
    elif name in ('start_session','end_session'):
     if name=='start_session' and session_delay: time.sleep(session_delay)
     if name=='end_session' and session_end_delay: time.sleep(session_end_delay)
     value={'active':name=='start_session'}
+   elif name=='set_agent_cursor_enabled':
+    with open(__file__+'.cursor','a') as f: f.write(str(r['params']['arguments'].get('enabled'))+'\n')
+    value={'session':r['params']['arguments'].get('session',''),'enabled':r['params']['arguments'].get('enabled',False)}
    else: raise RuntimeError('Unexpected fixture tool '+name)
    out={'structuredContent':value}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':out}),flush=True)
@@ -118,6 +122,7 @@ for line in sys.stdin:
         }
         addTeardownBlock {
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".calls"))
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".cursor"))
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".dropped"))
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: fixture.path + ".typedropped"))
             try? FileManager.default.removeItem(at: unavailableFixture)
@@ -195,8 +200,9 @@ for line in sys.stdin:
                         : appAnswers[min(executorCalls - 1, appAnswers.count - 1)]
                 case "window":
                     windowCalls += 1
-                    value = windowAnswers.isEmpty ? "none"
+                    let raw = windowAnswers.isEmpty ? "none"
                         : windowAnswers[min(windowCalls - 1, windowAnswers.count - 1)]
+                    value = raw == "none" ? raw : "w\(raw)"
                 case "visibility": value = "background"
                 case "scope": value = taskScopes.isEmpty ? "launch" : taskScopes[min(executorCalls - 1, taskScopes.count - 1)]
                 case "contentMode":
@@ -217,22 +223,24 @@ for line in sys.stdin:
                         throw DriverConnectionError.refused("Cua could not confirm the remaining requested change. The task is incomplete; no further action was dispatched.")
                     }
                     if let nextCandidateMatch, case let .choice(_, choices) = questions[key],
-                       let action = choices.first(where: { $0.key.hasPrefix("candidate_") && ($0.value ?? "").contains(nextCandidateMatch) }) {
+                       let action = choices.first(where: { ($0.value ?? "").contains(nextCandidateMatch) }) {
                         value = action.key
                     } else if ["dictate", "literal"].contains(intentKind), case let .choice(_, choices) = questions[key],
-                       let action = choices.first(where: { $0.key.hasPrefix("candidate_") && ($0.value ?? "").contains("Insert supplied text") }) {
+                       let action = choices.first(where: { ($0.value ?? "").contains("Type the supplied text") }) {
                         value = action.key
                     } else { value = "done" }
                 case "risk": value = "ordinary"
                 case "windowEffect": value = "same"
                 case "quit": value = "0"
+                case "doneEvidence": value = "proven"
                 default: throw DriverConnectionError.malformed
                 }
                 answers[key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
             }
             return answers
         }, dialogue: CuaDialogueState(resolvedHistoryLimit: resolvedHistoryLimit ?? 32,
-                                    unresolvedLimit: unresolvedLimit ?? 32))
+                                    unresolvedLimit: unresolvedLimit ?? 32),
+            screenLocked: { false })
         let capture = Capture()
         let controller = VoiceController(config: config, speech: capture, authorize: { true }, frontmost: { "Fixture" }, cuaRuntime: runtime)
         return (controller, capture, fixture, defaults)
@@ -346,10 +354,12 @@ for line in sys.stdin:
 
         XCTAssertEqual(launched.status, "Cancelled")
         XCTAssertNotNil(launched.launchReceipt, "Cancellation must retain the CUA-verified receipt captured before the later Jev await")
+        await controller.shutdown()
+
+        // The shared run-scoped session ends once at shutdown — never per task.
         let calls = try String(contentsOf: URL(fileURLWithPath: file.path + ".calls"), encoding: .utf8)
         XCTAssertTrue(calls.split(separator: "\n").contains("end_session"),
-            "Cancellation must give the external session a chance to clean up")
-        await controller.shutdown()
+            "Shutdown must give the shared external session a chance to clean up")
     }
 
     func testRuntimeShutdownAwaitsInflightFirstDecisionSessionCleanup() async throws {
@@ -504,7 +514,7 @@ for line in sys.stdin:
         await controller.shutdown()
     }
     func testManualModeHasNoEarlyEffectsAndApprovalCannotReplay() async throws {
-        let (controller, capture, file, _) = try setup(automatic: false)
+        let (controller, capture, file, _) = try setup(automatic: false, windowedFixture: true)
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin(); try await until { controller.status == .listening }
         capture.emit(.partial("open Fixture"))
@@ -796,6 +806,7 @@ for line in sys.stdin:
     /// dependency: a continuation of it still runs on its own.
     func testFailedReferenceDoesNotBlockIndependentContinuation() async throws {
         let (controller, capture, file, _) = try setup(windowedFixture: true,
+            runningFixture: true,
             taskScopes: ["create", "launch"], relationships: ["independent", "continuation"])
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin(); try await until { controller.status == .listening }
@@ -825,6 +836,7 @@ for line in sys.stdin:
     /// verified fact the dependent intent refuses honestly instead of running.
     func testPrerequisiteBlocksWhenRequiredFactMissing() async throws {
         let (controller, capture, file, _) = try setup(windowedFixture: true,
+            runningFixture: true,
             taskScopes: ["create", "launch"], relationships: ["independent", "prerequisite"])
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin(); try await until { controller.status == .listening }
@@ -1158,6 +1170,7 @@ for line in sys.stdin:
    if args.get('action')!='inspect': raise RuntimeError('Unexpected browser dialog mutation')
    value={'status':'ok','target_id':'target','tab_id':'tab','present':False}
   elif name in ('start_session','end_session'): value={'active':name=='start_session'}
+  elif name=='set_agent_cursor_enabled': value={'session':args.get('session',''),'enabled':args.get('enabled',False)}
   else: raise RuntimeError('Unexpected fixture tool '+name)
   out={'structuredContent':value}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':out}),flush=True)
@@ -1183,13 +1196,14 @@ for line in sys.stdin:
                 case "app": value = "app_0"
                 case "scope": value = "work"
                 case "visibility": value = "background"
-                case "next": value = "blocked"
+                case "next": value = "stuck"
+                case "doneEvidence": value = "unproven"
                 default: throw DriverConnectionError.malformed
                 }
                 answers[key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
             }
             return answers
-        })
+        }, screenLocked: { false })
 
         runtime.begin(app: "Google Chrome")
         runtime.update("Inspect the current browser page", final: true)
@@ -1197,7 +1211,7 @@ for line in sys.stdin:
 
         let work = try XCTUnwrap(runtime.tasks.first)
         XCTAssertEqual(work.status, "Failed")
-        XCTAssertTrue(work.message.contains("safe next action"), work.message)
+        XCTAssertTrue(work.message.contains("could not be completed"), work.message)
         XCTAssertFalse(work.dispatchedEffect, "Dialog inspection is an observation, not a dispatched mutation")
         await runtime.shutdown()
     }
@@ -1511,22 +1525,20 @@ for line in sys.stdin:
         await controller.shutdown()
     }
 
-    /// A task that already settled must not be re-cancelled during its session
-    /// teardown window: a resolved intent is terminal, and rewriting it would
-    /// bump the revision that bound its verified facts while flipping the
-    /// task's honest status to Cancelled.
+    /// A task that already settled must not be re-cancelled afterward: a
+    /// resolved intent is terminal, and rewriting it would bump the revision
+    /// that bound its verified facts while flipping the task's honest status
+    /// to Cancelled.
     func testResolvedIntentCannotBeRewrittenByTeardownWindowCancel() async throws {
-        let (controller, capture, file, _) = try setup(sessionEndDelayMs: 600)
+        let (controller, capture, file, _) = try setup()
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin(); try await until { controller.status == .listening }
         capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture", isFinal: true))
-        // The intent resolves as soon as the outcome lands; the worker still
-        // holds active=true while the delayed end_session call is in flight.
-        try await until { controller.cuaTasks.first != nil }
+        try await until { controller.cuaTasks.first?.active == false }
         let work = try XCTUnwrap(controller.cuaTasks.first)
-        try await until {
-            work.active &&
-            controller.cua.dialogue.entry(for: work.intentID)?.status.isResolved == true
+        guard controller.cua.dialogue.entry(for: work.intentID)?.status.isResolved == true else {
+            XCTFail("A completed task must leave a resolved intent")
+            return
         }
 
         let revision = controller.cua.dialogue.entry(for: work.intentID)?.revision
@@ -1551,6 +1563,7 @@ for line in sys.stdin:
     /// as immutable evidence instead of being replayed or forgotten.
     func testFailedIntentRetriesInPlaceThroughRevise() async throws {
         let (controller, capture, file, _) = try setup(windowedFixture: true,
+            runningFixture: true,
             taskScopes: ["create", "launch"], relationships: ["independent", "retry"])
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin(); try await until { controller.status == .listening }
@@ -1998,5 +2011,122 @@ for line in sys.stdin:
         XCTAssertFalse(controller.cuaTasks.contains { $0.intentID == oldIntentID },
             "No work may be resumed for an intent from before the restart")
         await controller.shutdown()
+    }
+
+    // MARK: - Typed commands
+
+    /// The settings-page command box is the same voice→Cua pipeline minus the
+    /// microphone: a typed string is a final transcript — same decide/execute/
+    /// verify route, no capture ever starts.
+    func testTypedCommandExecutesWithoutMicrophone() async throws {
+        // windowedFixture: an "open" request verifies a real window in front;
+        // a windowless stub would stall the launch-window wait for seconds.
+        let (controller, capture, file, _) = try setup(windowedFixture: true)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        controller.submitTypedCommand("open Fixture")
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+
+        XCTAssertNil(capture.id, "A typed command must never start the microphone")
+        XCTAssertEqual(controller.transcript, "open Fixture")
+        let calls = try String(contentsOf: URL(fileURLWithPath: file.path + ".calls"), encoding: .utf8)
+            .split(separator: "\n").map(String.init)
+        XCTAssertTrue(calls.contains("start_session"))
+        XCTAssertTrue(calls.contains("launch_app"))
+        XCTAssertTrue(calls.contains("bring_to_front"))
+        await controller.shutdown()
+    }
+
+    func testTypedCommandRejectsEmptyInput() async throws {
+        let (controller, _, file, _) = try setup()
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        controller.submitTypedCommand("   ")
+        controller.submitTypedCommand("")
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertTrue(controller.cuaTasks.isEmpty, "Whitespace is not a command")
+        XCTAssertTrue(controller.status == .idle || controller.status == .done,
+            "An empty typed command must not occupy the controller: \(controller.status)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path + ".calls"),
+            "An empty command must never reach the driver")
+        await controller.shutdown()
+    }
+
+    /// With auto-confirm off, a typed command still obeys the same manual gate
+    /// a finished capture would — nothing dispatches before Run.
+    func testTypedCommandRespectsManualConfirmation() async throws {
+        let (controller, _, file, _) = try setup(automatic: false, windowedFixture: true)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        controller.submitTypedCommand("open Fixture")
+        try await until { controller.status == .awaitingConfirm }
+        XCTAssertTrue(controller.cuaTasks.isEmpty, "Nothing may dispatch before confirmation")
+
+        controller.confirm()
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+        await controller.shutdown()
+    }
+
+    /// Regression: the driver keys protected-resource grants to (session,
+    /// transport, resource). Two commands must share one session/transport —
+    /// a per-task session re-ran the browser's visible consent setup every time.
+    func testSequentialTypedCommandsShareOneDriverSession() async throws {
+        let (controller, _, file, _) = try setup(windowedFixture: true)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        controller.submitTypedCommand("open Fixture")
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+        controller.submitTypedCommand("open Fixture")
+        try await until { controller.cuaTasks.count == 2 && controller.cuaTasks.allSatisfy { $0.status == "Completed" } }
+        await controller.shutdown()
+
+        let calls = try String(contentsOf: URL(fileURLWithPath: file.path + ".calls"), encoding: .utf8)
+            .split(separator: "\n").map(String.init)
+        XCTAssertEqual(calls.filter { $0 == "start_session" }.count, 1,
+            "Two commands must ride one driver session, not two")
+        XCTAssertEqual(calls.filter { $0 == "set_agent_cursor_enabled" }.count, 1,
+            "The cursor policy is applied once when the session opens")
+        XCTAssertEqual(calls.filter { $0 == "end_session" }.count, 1,
+            "The shared session ends once at shutdown, not per task")
+    }
+
+    /// The session bootstrap races a worker path (applyCorrection) and the
+    /// next receive — the cursor configuration is sent once for the run.
+    func testCursorSettingPropagatesToSessionStart() async throws {
+        let (controller, _, file, _) = try setup(windowedFixture: true)
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: file.path + ".cursor"))
+        }
+        controller.config.agentCursorEnabled = true
+
+        controller.submitTypedCommand("open Fixture")
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+        await controller.shutdown()
+
+        let raw = try String(contentsOf: URL(fileURLWithPath: file.path + ".calls"), encoding: .utf8)
+        XCTAssertTrue(raw.contains("set_agent_cursor_enabled"),
+            "Session start must configure the driver-side cursor mode")
+        let cursor = try String(contentsOf: URL(fileURLWithPath: file.path + ".cursor"), encoding: .utf8)
+        XCTAssertEqual(cursor.trimmingCharacters(in: .whitespacesAndNewlines), "True",
+            "The enabled setting must reach the driver verbatim")
+    }
+
+    /// Default is silent direct dispatch: `enabled` reaches the driver false.
+    func testCursorDisabledByDefaultReachesDriver() async throws {
+        let (controller, _, file, _) = try setup(windowedFixture: true)
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: file.path + ".cursor"))
+        }
+
+        controller.submitTypedCommand("open Fixture")
+        try await until { controller.cuaTasks.first?.status == "Completed" }
+        await controller.shutdown()
+
+        let cursor = try String(contentsOf: URL(fileURLWithPath: file.path + ".cursor"), encoding: .utf8)
+        XCTAssertEqual(cursor.trimmingCharacters(in: .whitespacesAndNewlines), "False",
+            "Default dispatch must report cursor disabled to the driver")
     }
 }
