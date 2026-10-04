@@ -51,13 +51,21 @@ public actor CodexRuntimeBridge {
         /// Extra child-process env — API key under `provider.envKey`, MCP
         /// bearer tokens under each server's `bearerTokenEnvVar`.
         public var environment: [String: String]
+        /// Per-agent overrides — installed by the coordinator when each agent
+        /// gets its own loopback MCP endpoints + bearer tokens. Nil keeps the
+        /// shared `mcpServers`/`environment` behavior.
+        public var mcpServersFor: (@Sendable (CompanionAgent) -> [CodexMCPServer])?
+        public var environmentFor: (@Sendable (CompanionAgent) -> [String: String])?
         public var onStderrLine: (@Sendable (String) -> Void)?
         public init(codexBinary: URL, provider: CodexModelProvider,
                     mcpServers: [CodexMCPServer] = [],
                     environment: [String: String] = [:],
+                    mcpServersFor: (@Sendable (CompanionAgent) -> [CodexMCPServer])? = nil,
+                    environmentFor: (@Sendable (CompanionAgent) -> [String: String])? = nil,
                     onStderrLine: (@Sendable (String) -> Void)? = nil) {
             self.codexBinary = codexBinary; self.provider = provider
             self.mcpServers = mcpServers; self.environment = environment
+            self.mcpServersFor = mcpServersFor; self.environmentFor = environmentFor
             self.onStderrLine = onStderrLine
         }
     }
@@ -69,7 +77,7 @@ public actor CodexRuntimeBridge {
         var forwarder: Task<Void, Never>
     }
 
-    private let configuration: Configuration
+    private var configuration: Configuration
     private var sessions: [String: Session] = [:]
     /// Cold starts in flight — a second send for the same slug awaits the
     /// first's spawn instead of binding a second app-server to the same
@@ -83,6 +91,15 @@ public actor CodexRuntimeBridge {
         var continuation: AsyncStream<AgentCodexEvent>.Continuation!
         events = AsyncStream { continuation = $0 }
         eventContinuation = continuation
+    }
+
+    /// Per-agent MCP/env providers — installed by the coordinator once
+    /// endpoints can be minted lazily. Must land before the first spawn;
+    /// already-running sessions keep the config they spawned with.
+    public func installHooks(mcpServersFor: (@Sendable (CompanionAgent) -> [CodexMCPServer])?,
+                             environmentFor: (@Sendable (CompanionAgent) -> [String: String])?) {
+        configuration.mcpServersFor = mcpServersFor
+        configuration.environmentFor = environmentFor
     }
 
     /// In-flight spawns retain the bridge, so a deinit means only registered
@@ -168,7 +185,7 @@ public actor CodexRuntimeBridge {
     /// mid-spawn closes the session instead of publishing it.
     private func spawnAndRegister(_ agent: CompanionAgent) async throws -> Session {
         try writeConfig(for: agent)
-        var environment = configuration.environment
+        var environment = configuration.environmentFor?(agent) ?? configuration.environment
         environment["CODEX_HOME"] = agent.codexHomePath
         let client = CodexProtocolClient(executable: configuration.codexBinary,
                                        environment: environment,
@@ -233,7 +250,7 @@ public actor CodexRuntimeBridge {
         let home = URL(fileURLWithPath: agent.codexHomePath, isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let toml = Self.configTOML(provider: configuration.provider,
-                                   mcpServers: configuration.mcpServers)
+                                   mcpServers: configuration.mcpServersFor?(agent) ?? configuration.mcpServers)
         try toml.write(to: home.appendingPathComponent("config.toml"),
                        atomically: true, encoding: .utf8)
     }

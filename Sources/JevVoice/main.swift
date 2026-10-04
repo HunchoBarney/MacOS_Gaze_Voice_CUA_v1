@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windows: VoiceWindows!
     private let speechOutput = SpeechOutput()
     private lazy var controller = VoiceController(speaker: speechOutput)
+    private var agentRuntime: AgentRuntime?
     private let microphones = MicrophoneCatalog()
     private let input = FnInputMonitor()
     private var subscriptions: Set<AnyCancellable> = []
@@ -63,6 +64,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &subscriptions)
         controller.config.$ttsEnabled.sink { [weak self] in self?.speechOutput.enabled = $0 }
             .store(in: &subscriptions)
+
+        agentRuntime = Self.makeAgentRuntime()
+        agentRuntime?.onConsentAsk = { [weak self] request in
+            self?.speechOutput.speak(request.summary)
+        }
+        agentRuntime?.onAgentReply = { [weak self] _, text in
+            // Agent replies are documents — speak a bounded lead, not the whole thing.
+            let lead = String((text.split(separator: ".").first.map(String.init) ?? text).prefix(200))
+            self?.speechOutput.speak(lead)
+        }
+        agentRuntime?.start()
+        controller.pendingConsent = { [weak self] in self?.agentRuntime?.solePendingAsk }
+        controller.onConsentResolution = { [weak self] request, approved in
+            self?.agentRuntime?.resolveConsent(request, approved: approved)
+        }
         input.$ready.removeDuplicates().sink { [weak self] ready in
             guard let self, self.canPrepareMicrophone else { return }
             if ready { self.controller.prepareMicrophone() }
@@ -160,7 +176,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    func applicationWillTerminate(_ notification: Notification) { input.stop(); microphones.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        input.stop(); microphones.stop(); agentRuntime?.stopAll()
+    }
+
+    /// Agents need a codex binary (vendored in the bundle, dev fallback
+    /// ~/.local/bin) and a configured model provider — without either the
+    /// roster stays empty and the feature stays off rather than half-working.
+    private static func makeAgentRuntime() -> AgentRuntime? {
+        let bundled = Bundle.main.resourceURL?
+            .appendingPathComponent("CodexRuntime/codex")
+        let dev = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/codex")
+        guard let codex = [bundled, dev].compactMap({ $0 })
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else {
+            return nil
+        }
+        let settings = TextProviderSettings.shared
+        guard settings.configured else { return nil }
+        let envKey = "JEV_CODEX_API_KEY"
+        let provider = CodexModelProvider(name: "jev", baseURL: settings.endpoint,
+                                        wireAPI: "chat", envKey: envKey,
+                                        model: settings.model)
+        let bridge = CodexRuntimeBridge(configuration: .init(
+            codexBinary: codex, provider: provider,
+            environment: [envKey: (try? settings.providerKey()) ?? ""]))
+        let jevKey = Config.shared.apiKey
+        let store = AgentStore(directory: AgentWorkspace.root())
+        let runtime = AgentRuntime(store: store, bridge: bridge,
+                                   connection: CuaConnection(), apiKey: { jevKey })
+        return runtime
+    }
     /// Relaunching a running accessory app (Spotlight, Finder, `open`) sends
     /// reopen — without this the user gets no window and the status item may
     /// be hidden in a crowded menu bar.

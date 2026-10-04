@@ -43,6 +43,12 @@ final class TextProviderSettings: ObservableObject {
         do { try store(TextGenerationClient.endpoint(endpoint)).delete(); cancel(); message = "Provider key removed." }
         catch { message = error.localizedDescription }
     }
+    /// Raw key for the configured endpoint — the codex runtime needs the
+    /// value itself to inject as a child env var, not a built client.
+    func providerKey() throws -> String {
+        try store(TextGenerationClient.endpoint(endpoint)).read() ?? ""
+    }
+
     func client() throws -> TextGenerationClient {
         let url = try TextGenerationClient.endpoint(endpoint)
         let key = try store(url).read() ?? ""

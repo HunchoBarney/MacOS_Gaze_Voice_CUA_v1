@@ -147,6 +147,17 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
         }
     }
 
+    /// Same check keyed to the agent's live turn — the resolution callTool
+    /// performs internally, exposed for tool surfaces that execute work
+    /// outside a tools/call envelope (jev-use drive_until).
+    func assertPermittedNow(tool: String, agentSlug: String?) throws {
+        try locked { state in
+            try state.assertPermitted(tool: tool,
+                key: ConsentKey(agent: agentSlug, turn: state.activeTurns[agentSlug] ?? nil),
+                now: now(), nilTurnDenialTTL: nilTurnDenialTTL)
+        }
+    }
+
     // MARK: Forwarding
 
     private func forward(_ name: String, _ args: [String: JSONValue]) async -> JSONValue {

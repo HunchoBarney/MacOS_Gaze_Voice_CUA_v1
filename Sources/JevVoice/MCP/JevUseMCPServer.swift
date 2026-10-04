@@ -19,10 +19,20 @@ protocol ActionSuggesting: Sendable {
 struct JevUseMCPServer: Sendable {
     private let executor: any DriveExecuting
     private let suggester: (any ActionSuggesting)?
+    /// drive_until mutates the desktop through the loop's internal driver
+    /// calls — without a gate here an agent could bypass the consent shim
+    /// entirely. One approval arms the whole call's steps for this turn.
+    /// The gate resolves the agent's live turn itself, so one "yes" covers
+    /// both tool surfaces.
+    private let consent: ComputerUseGate?
+    private let agentSlug: String?
 
-    init(executor: any DriveExecuting, suggester: (any ActionSuggesting)? = nil) {
+    init(executor: any DriveExecuting, suggester: (any ActionSuggesting)? = nil,
+         consent: ComputerUseGate? = nil, agentSlug: String? = nil) {
         self.executor = executor
         self.suggester = suggester
+        self.consent = consent
+        self.agentSlug = agentSlug
     }
 
     /// The loopback endpoint the coordinator writes into `mcp_servers`.
@@ -48,6 +58,11 @@ struct JevUseMCPServer: Sendable {
             task.deny = Self.stringList(args["deny"])
             task.successContains = Self.stringList(args["success_contains"])
             if let maxSteps = args["max_steps"]?.integer, maxSteps > 0 { task.maxSteps = maxSteps }
+            do {
+                try consent?.assertPermittedNow(tool: JevUseTools.driveUntil, agentSlug: agentSlug)
+            } catch GateError.blockedByConsent(let summary) {
+                return Self.error("blocked_by_consent", summary)
+            }
             return Self.result(Self.driveResultJSON(try await executor.drive(task)))
         case JevUseTools.suggestAction:
             guard let pid = args["pid"]?.integer, let windowID = args["window_id"]?.integer else {
