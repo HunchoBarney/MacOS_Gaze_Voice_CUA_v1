@@ -764,6 +764,7 @@ final class VoiceController: ObservableObject {
     private func complete(_ message: String, session id: UUID) {
         resultMessage = message
         if !dictating { speak(message) }
+        dictating = false
         status = .done
         hideTask = Task { [weak self] in
             guard let self else { return }
