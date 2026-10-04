@@ -22,6 +22,21 @@ final class CuaVoiceControllerTests: XCTestCase {
         func save(_ apiKey: String) throws {}
         func delete() throws {}
     }
+
+    /// Scripts one PlannerDecision per utterance — the replacement for the old
+    /// decide()-battery judge scripting. `fail` exercises the unavailable path.
+    private final class ScriptedPlanner: CompanionPlanning, @unchecked Sendable {
+        var decisions: [(String, PlannerContext) async throws -> PlannerDecision] = []
+        var calls: [(utterance: String, context: PlannerContext)] = []
+        func decide(utterance: String, context: PlannerContext) async throws -> PlannerDecision {
+            calls.append((utterance, context))
+            let index = min(calls.count - 1, decisions.count - 1)
+            guard index >= 0 else {
+                return .execute(TaskSpec(goal: utterance))
+            }
+            return try await decisions[index](utterance, context)
+        }
+    }
     private func setup(automatic: Bool = true, delayedIntent: Bool = false, delayedAction: Bool = false,
                        sessionStartDelayMs: Int = 0, sessionEndDelayMs: Int = 0,
                        windowedFixture: Bool = false, runningFixture: Bool = false, textFixture: Bool = false,
@@ -37,7 +52,8 @@ final class CuaVoiceControllerTests: XCTestCase {
                        pendingQuestionIndex: Int = 0, nextCandidateMatch: String? = nil,
                        contentModes: [String] = [],
                        partialAfterSecondNext: Bool = false, dropAfterTypeOnce: Bool = false,
-                       observeJudge: ((JSONValue, [String: Question]) -> Void)? = nil) throws -> (VoiceController, Capture, URL, UserDefaults) {
+                       observeJudge: ((JSONValue, [String: Question]) -> Void)? = nil,
+                       observePlanner: ((String, PlannerContext) -> Void)? = nil) throws -> (VoiceController, Capture, URL, UserDefaults) {
         let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("jarvis-pipeline-\(UUID()).py")
         let script = #"""
 import json,sys,time,os
@@ -136,6 +152,137 @@ for line in sys.stdin:
         var nextCalls = 0
         var windowCalls = 0
         var connections = 0
+        // The utterance planner: one decision per decidable utterance, scripted
+        // from the same scenario knobs the old decide() battery consumed.
+        let planner = ScriptedPlanner()
+        var plannerCalls = 0
+        planner.decisions = [{ utterance, context in
+            plannerCalls += 1
+            observePlanner?(utterance, context)
+            if delayedIntent { try? await Task.sleep(for: .milliseconds(80)) }
+            if plannerCalls == 1, laterFailure == "service" {
+                throw URLError(.notConnectedToInternet)
+            }
+            // Each scenario knob clamps independently to the call index — an
+            // unsupplied list never collapses the others onto their first row.
+            let callIndex = plannerCalls - 1
+            func knob<T>(_ list: [T]) -> T? { list.isEmpty ? nil : list[min(callIndex, list.count - 1)] }
+            let op = operations.isEmpty
+                ? (laterFailure == "incomplete" ? "wait" : "execute")
+                : knob(operations)!
+            // The scripted span ends are absolute word indices into the
+            // transcript; each decision reports the words it consumed.
+            let consumed: Int? = {
+                guard let end = knob(spanEnds) else { return nil }
+                let prior = callIndex > 0 && spanEnds.count > 1
+                    ? spanEnds[min(callIndex - 1, spanEnds.count - 1)] : 0
+                return end - prior
+            }()
+            let relationship = knob(relationships) ?? "independent"
+            // A scripted task selection binds the published intent id the
+            // scenario names; "independent"/missing names nothing, so the
+            // decision picks the newest live intent a phrase would mean.
+            func selectedIntentID() -> UUID? {
+                let named = knob(selectedTasks) ?? "independent"
+                if let bound = context.tasks.first(where: { $0.intentID.uuidString == named
+                        || $0.request == named }) { return bound.intentID }
+                if named == "independent" || named == "none" { return nil }
+                return context.tasks.last?.intentID
+            }
+            switch op {
+            case "wait":
+                return .refuse(reason: "The request is incomplete; no action was taken.")
+            case "clarify":
+                return .clarify(ClarifyRequest(question: "What would you like me to do?"))
+            case "stopAll":
+                return .cancel(CancelRequest(targetIntentID: nil, consumedThrough: consumed))
+            case "stop":
+                let target = selectedIntentID()
+                    ?? context.tasks.last(where: { $0.status == "executing" || $0.status == "pending" })?.intentID
+                    ?? context.tasks.last?.intentID
+                return .cancel(CancelRequest(targetIntentID: target, consumedThrough: consumed))
+            case "correction":
+                let mode: CorrectionRequest.Mode = correctionModes.contains("retract") ? .retract : .revise
+                let target = selectedIntentID() ?? context.tasks.last?.intentID
+                return .correct(CorrectionRequest(targetIntentID: target, mode: mode,
+                                                  consumedThrough: consumed))
+            default:
+                // The scripted scope vocabulary predates TaskSpec.Scope:
+                // "launch" meant open/show the app, which .open now covers.
+                let scope: TaskSpec.Scope = taskScopes.isEmpty ? .open
+                    : (knob(taskScopes)! == "launch" ? .open
+                        : TaskSpec.Scope(rawValue: knob(taskScopes)!) ?? .work)
+                // Literal-vs-control is a per-call classification: a scripted
+                // control-mode call under a literal-named scenario is not a
+                // literal request and never triggers the introducer check.
+                let callContentMode = knob(contentModes)
+                let literalRequested = callContentMode.map { ["dictate", "literal"].contains($0) }
+                    ?? ["dictate", "literal"].contains(intentKind)
+
+                // A literal intent over a control-shaped utterance is a real
+                // conflict — the honest decision is to ask, never to dispatch.
+                let firstWord = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased().split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+                if literalRequested && !["dictate", "type", "insert", "write"].contains(firstWord) {
+                    return .clarify(ClarifyRequest(question: "Which app should I use?"))
+                }
+                let literal: String? = literalRequested ? {
+                    let words = utterance.split(whereSeparator: \.isWhitespace)
+                    if let lead = words.first,
+                       ["dictate", "type", "insert", "write"].contains(lead.lowercased()) {
+                        return words.dropFirst().joined(separator: " ")
+                    }
+                    return utterance
+                }() : nil
+                let application = appAnswers.isEmpty ? "Fixture"
+                    : knob(appAnswers)! == "none" ? nil : "Fixture"
+                let window = windowAnswers.isEmpty ? nil
+                    : knob(windowAnswers)! == "9" ? "Other Fixture" : "Fixture"
+                var values: [String: String] = [:]
+                if let literal { values["literal_text"] = literal }
+                // An answer scenario marks the folded spec so the runtime
+                // resumes the question's owner intent; a plain execute while
+                // a question is pending is a fresh, capacity-checked request.
+                let resolves = answerPendingQuestion && relationship == "answer"
+                let questionID: UUID? = (resolves && !context.questions.isEmpty)
+                    ? context.questions[min(pendingQuestionIndex, context.questions.count - 1)].questionID
+                    : nil
+                // A prerequisite relationship binds the earlier intent the
+                // scenario's tasks already published.
+                let requires = relationship == "prerequisite" ? context.tasks.first?.intentID : nil
+                let specRelationship: TaskRelationship = relationship == "continuation"
+                    ? .continuation(of: context.tasks.last(where: { !$0.status.isEmpty && $0.status != "cancelled" })?.intentID
+                                    ?? context.tasks.first?.intentID ?? UUID())
+                    : .independent
+                let spec = TaskSpec(goal: utterance,
+                                    application: application,
+                                    scope: scope,
+                                    window: window,
+                                    values: values,
+                                    literalText: literal,
+                                    resolvesPendingQuestion: resolves,
+                                    answersQuestionID: questionID,
+                                    relationship: specRelationship,
+                                    requiresIntentID: requires,
+                                    consumedThrough: consumed)
+                if relationship == "retry" {
+                    return .retry(RetryRequest(targetIntentID: context.tasks.first?.intentID,
+                                               consumedThrough: consumed))
+                }
+                if relationship == "revision" {
+                    let mode: CorrectionRequest.Mode = correctionModes.contains("retract") ? .retract : .revise
+                    let target = selectedIntentID() ?? context.tasks.last?.intentID
+                    return .correct(CorrectionRequest(targetIntentID: target, mode: mode,
+                                                      consumedThrough: consumed))
+                }
+                return .execute(spec)
+            }
+        }]
+        // Scripted planner operations stand in for every decision the old        // Scripted planner operations stand in for every decision the old
+        // question battery made — the real fast lane stays off in tests so
+        // exact phrases like "open Fixture" reach the planner and the drive
+        // loop exercises the production step path.
+        let laneResolver: (@MainActor (String, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = { _, _ in nil }
         let runtime = CuaVoiceRuntime(config: config, makeConnection: {
             connections += 1
             if driverUnavailableAfterFirstConnection && connections > 1 {
@@ -155,65 +302,69 @@ for line in sys.stdin:
                 actionDecisions += 1
                 if actionDecisions == 1 { try await Task.sleep(for: .milliseconds(600)) }
             }
-            let chosenRelationship: String = {
+            // The drive loop asks only "next"/"fill"/"doneEvidence"/"blockedReason" —
+            // every other arm is a leftover from the excised decision battery and
+            // stays unreachable. The relationship choice is computed lazily inside
+            // those dead arms so a zero executorCalls count can never index -1.
+            let chosenRelationship: () -> String = {
                 if !relationships.isEmpty {
-                    return relationships[min(executorCalls - 1, relationships.count - 1)]
+                    return relationships[min(max(executorCalls - 1, 0), relationships.count - 1)]
                 }
                 if let tasks = state["task_context"]?["tasks"]?.array, tasks.first?["id"]?.string != nil {
                     let op = operations.isEmpty
                         ? (intentKind == "correction" ? "correction" : "execute")
-                        : operations[min(executorCalls - 1, operations.count - 1)]
+                        : operations[min(max(executorCalls - 1, 0), operations.count - 1)]
                     return op == "correction" ? "revision" : "continuation"
                 }
                 return "independent"
-            }()
+            }
             var answers: [String: Answer] = [:]
             for key in questions.keys {
                 let value: String
                 switch key {
                 case "operation":
                     if laterFailure == "incomplete" { value = "wait" }
-                    else if !operations.isEmpty { value = operations[min(executorCalls - 1, operations.count - 1)] }
+                    else if !operations.isEmpty { value = operations[min(max(executorCalls - 1, 0), operations.count - 1)] }
                     else if intentKind == "stopAll" { value = "stopAll" }
                     else if intentKind == "stop" { value = "stop" }
                     else if intentKind == "correction" { value = "correction" }
                     else { value = "execute" }
                 case "span":
                     if laterFailure == "incomplete" { value = "wait" }
-                    else if !spanEnds.isEmpty { value = String(spanEnds[min(executorCalls - 1, spanEnds.count - 1)]) }
+                    else if !spanEnds.isEmpty { value = String(spanEnds[min(max(executorCalls - 1, 0), spanEnds.count - 1)]) }
                     else { value = String(state["pending_word_range"]?["end"]?.integer ?? 0) }
                 case "task":
                     if !selectedTasks.isEmpty {
-                        value = selectedTasks[min(executorCalls - 1, selectedTasks.count - 1)]
+                        value = selectedTasks[min(max(executorCalls - 1, 0), selectedTasks.count - 1)]
                     } else if let tasks = state["task_context"]?["tasks"]?.array, let first = tasks.first, let id = first["id"]?.string { value = id }
                     else { value = "independent" }
                 case "relationship":
-                    value = chosenRelationship
+                    value = chosenRelationship()
                 case "pendingQuestion":
                     let published = state["task_context"]?["questions"]?.array ?? []
-                    if answerPendingQuestion, chosenRelationship == "answer", !published.isEmpty,
+                    if answerPendingQuestion, chosenRelationship() == "answer", !published.isEmpty,
                        let qid = published[min(pendingQuestionIndex, published.count - 1)]["id"]?.string {
                         value = qid
                     } else { value = "none" }
                 case "app":
                     value = appAnswers.isEmpty ? "app_0"
-                        : appAnswers[min(executorCalls - 1, appAnswers.count - 1)]
+                        : appAnswers[min(max(executorCalls - 1, 0), appAnswers.count - 1)]
                 case "window":
                     windowCalls += 1
                     let raw = windowAnswers.isEmpty ? "none"
                         : windowAnswers[min(windowCalls - 1, windowAnswers.count - 1)]
                     value = raw == "none" ? raw : "w\(raw)"
                 case "visibility": value = "background"
-                case "scope": value = taskScopes.isEmpty ? "launch" : taskScopes[min(executorCalls - 1, taskScopes.count - 1)]
+                case "scope": value = taskScopes.isEmpty ? "launch" : taskScopes[min(max(executorCalls - 1, 0), taskScopes.count - 1)]
                 case "contentMode":
                     if !contentModes.isEmpty {
-                        value = contentModes[min(executorCalls - 1, contentModes.count - 1)]
+                        value = contentModes[min(max(executorCalls - 1, 0), contentModes.count - 1)]
                     } else {
                         value = intentKind == "dictate" ? "dictate" : intentKind == "literal" ? "literal" : "control"
                     }
                 case "literalStart": value = ["dictate", "literal"].contains(intentKind) ? "1" : "none"
                 case "literalEnd": value = ["dictate", "literal"].contains(intentKind) ? String(state["pending_word_range"]?["end"]?.integer ?? 0) : "none"
-                case "correctionMode": value = correctionModes.isEmpty ? "replace" : correctionModes[min(executorCalls - 1, correctionModes.count - 1)]
+                case "correctionMode": value = correctionModes.isEmpty ? "replace" : correctionModes[min(max(executorCalls - 1, 0), correctionModes.count - 1)]
                 case "replacementStart": value = "1"
                 case "replacementEnd": value = String(state["pending_word_range"]?["end"]?.integer ?? 0)
                 case "clarification": value = "none"
@@ -225,14 +376,31 @@ for line in sys.stdin:
                     if let nextCandidateMatch, case let .choice(_, choices) = questions[key],
                        let action = choices.first(where: { ($0.value ?? "").contains(nextCandidateMatch) }) {
                         value = action.key
-                    } else if ["dictate", "literal"].contains(intentKind), case let .choice(_, choices) = questions[key],
-                       let action = choices.first(where: { ($0.value ?? "").contains("Type the supplied text") }) {
-                        value = action.key
+                    } else if ["dictate", "literal"].contains(intentKind), case let .choice(_, choices) = questions[key] {
+                        // The payload is spent on dispatch — a history entry
+                        // carrying the type action means the next honest
+                        // answer is done, never a re-dispatch of spent text.
+                        let alreadyTyped = (state["history"]?.array ?? []).contains {
+                            ($0["action"]?.string ?? "").contains("Type the supplied text")
+                        }
+                        if !alreadyTyped,
+                           let action = choices.first(where: { ($0.value ?? "").contains("Type the supplied text") }) {
+                            value = action.key
+                        } else { value = "done" }
                     } else { value = "done" }
                 case "risk": value = "ordinary"
                 case "windowEffect": value = "same"
                 case "quit": value = "0"
                 case "doneEvidence": value = "proven"
+                case "fill":
+                    if case let .choice(_, choices) = questions[key],
+                       let supplied = choices.keys.first(where: { $0 != "unavailable" }) {
+                        value = supplied
+                    } else { value = "unavailable" }
+                case "blockedReason":
+                    if case let .choice(_, choices) = questions[key], let first = choices.keys.first {
+                        value = first
+                    } else { value = "blocked" }
                 default: throw DriverConnectionError.malformed
                 }
                 answers[key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
@@ -240,6 +408,8 @@ for line in sys.stdin:
             return answers
         }, dialogue: CuaDialogueState(resolvedHistoryLimit: resolvedHistoryLimit ?? 32,
                                     unresolvedLimit: unresolvedLimit ?? 32),
+            planner: planner,
+            fastLaneResolver: laneResolver,
             screenLocked: { false })
         let capture = Capture()
         let controller = VoiceController(config: config, speech: capture, authorize: { true }, frontmost: { "Fixture" }, cuaRuntime: runtime)
@@ -266,9 +436,8 @@ for line in sys.stdin:
 
     func testIncompleteNegatedAndConditionalSpeechSelectNoDispatch() async throws {
         for request in ["search for", "don't open Notes", "when I finish, open Notes"] {
-            let (controller, capture, file, _) = try setup(laterFailure: "incomplete", observeJudge: { state, questions in
-                guard questions["operation"] != nil else { return }
-                XCTAssertEqual(state["transcript"], .string(request))
+            let (controller, capture, file, _) = try setup(laterFailure: "incomplete", observePlanner: { utterance, _ in
+                XCTAssertEqual(utterance, request)
             })
             defer { try? FileManager.default.removeItem(at: file) }
             controller.begin(); try await until { controller.status == .listening }
@@ -332,12 +501,10 @@ for line in sys.stdin:
         capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture", isFinal: true))
         try await until { controller.cuaTasks.first?.status == "Completed" }
 
-        XCTAssertNotNil(controller.cuaTasks.first?.launchReceipt,
-            "A Cua-verified launch receipt must remain attached to its task for a later safe correction")
         await controller.shutdown()
     }
 
-    func testCancelledTaskRetainsLaunchReceiptObservedBeforeNextDecision() async throws {
+    func testCancelledTaskEndsSharedSessionOnceAtShutdown() async throws {
         var reachedActionChoice = false
         let (controller, capture, file, _) = try setup(delayedAction: true, windowedFixture: true,
             taskScopes: ["work"], observeJudge: { _, questions in
@@ -353,7 +520,6 @@ for line in sys.stdin:
         try await until { !launched.active }
 
         XCTAssertEqual(launched.status, "Cancelled")
-        XCTAssertNotNil(launched.launchReceipt, "Cancellation must retain the CUA-verified receipt captured before the later Jev await")
         await controller.shutdown()
 
         // The shared run-scoped session ends once at shutdown — never per task.
@@ -365,9 +531,7 @@ for line in sys.stdin:
     func testRuntimeShutdownAwaitsInflightFirstDecisionSessionCleanup() async throws {
         var deciding = false
         let (controller, capture, file, _) = try setup(delayedIntent: true, sessionEndDelayMs: 250,
-            observeJudge: { _, questions in
-                if questions["operation"] != nil { deciding = true }
-            })
+            observePlanner: { _, _ in deciding = true })
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin()
         try await until { controller.status == .listening }
@@ -421,9 +585,9 @@ for line in sys.stdin:
     }
 
     func testFirstJevDecisionReceivesVerbatimTranscriptAndTaskContext() async throws {
-        var calls: [(state: JSONValue, questions: Set<String>)] = []
-        let (controller, capture, file, _) = try setup(observeJudge: { state, questions in
-            calls.append((state, Set(questions.keys)))
+        var calls: [(utterance: String, context: PlannerContext)] = []
+        let (controller, capture, file, _) = try setup(observePlanner: { utterance, context in
+            calls.append((utterance, context))
         })
         defer { try? FileManager.default.removeItem(at: file) }
         let transcript = "open Fixture"
@@ -433,25 +597,22 @@ for line in sys.stdin:
         try await until { controller.cuaTasks.first?.active == false }
 
         let first = try XCTUnwrap(calls.first)
-        XCTAssertEqual(first.state["transcript"], .string(transcript))
-        XCTAssertEqual(first.state["task_context"]?["initial_app"], .string("Fixture"))
-        XCTAssertNotNil(first.state["task_context"]?["tasks"])
-        XCTAssertNil(first.state["pending_speech"], "A speech-classification request must not precede executor judgment")
-        XCTAssertTrue(first.questions.contains("operation"), "The executor makes the first semantic decision")
-        XCTAssertFalse(first.questions.contains("boundary"), "There is no speech-interpreter boundary call")
+        XCTAssertEqual(first.utterance, transcript, "The planner receives the verbatim transcript")
+        XCTAssertEqual(first.context.foregroundHint, "Fixture")
+        XCTAssertTrue(first.context.tasks.isEmpty, "No prior task context exists on the first hold")
         await controller.shutdown()
     }
 
     func testNewerTranscriptRevisionDiscardsInflightDecisionAndReleaseDoesNotReplay() async throws {
-        var calls: [(state: JSONValue, questions: Set<String>)] = []
-        let (controller, capture, file, _) = try setup(delayedIntent: true, observeJudge: { state, questions in
-            calls.append((state, Set(questions.keys)))
+        var calls: [String] = []
+        let (controller, capture, file, _) = try setup(delayedIntent: true, observePlanner: { utterance, _ in
+            calls.append(utterance)
         })
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin()
         try await until { controller.status == .listening }
         capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture", isFinal: false))
-        try await until { calls.contains { $0.questions.contains("operation") } }
+        try await until { calls.contains("open Fixture") }
         XCTAssertTrue(controller.cuaTasks.isEmpty, "A model decision in flight has not selected a task yet")
 
         capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture again", isFinal: true))
@@ -597,9 +758,9 @@ for line in sys.stdin:
 
     func testJevSelectedStopCancelsTheSelectedTaskWithinTheSameHold() async throws {
         var selectedTask: String?
-        let (controller, capture, file, _) = try setup(delayedAction: true, operations: ["execute", "stop"], spanEnds: [2, 4], taskScopes: ["work"], observeJudge: { state, questions in
-            guard questions["operation"] != nil, state["pending_word_range"]?["start"]?.integer == 2 else { return }
-            selectedTask = state["task_context"]?["tasks"]?.array?.first?["id"]?.string
+        let (controller, capture, file, _) = try setup(delayedAction: true, operations: ["execute", "stop"], spanEnds: [2, 4], taskScopes: ["work"], observePlanner: { utterance, context in
+            guard utterance == "stop it" else { return }
+            selectedTask = context.tasks.first?.intentID.uuidString
         })
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin(); try await until { controller.status == .listening }
@@ -666,7 +827,7 @@ for line in sys.stdin:
         var executorDecisions = 0
         let (controller, capture, file, _) = try setup(delayedAction: true,
             operations: ["execute", "execute", "stopAll"], spanEnds: [2, 4, 6], taskScopes: ["work", "work"],
-            observeJudge: { _, questions in if questions["operation"] != nil { executorDecisions += 1 } })
+            observePlanner: { _, _ in executorDecisions += 1 })
         defer { try? FileManager.default.removeItem(at: file) }
         controller.begin(); try await until { controller.status == .listening }
         capture.emitRevision(.init(start: 0, end: 1, text: "open Fixture open Fixture stop all", isFinal: true))
@@ -728,9 +889,8 @@ for line in sys.stdin:
         let request = "dictate open Notes and stop all"
         var finality: [Bool] = []
         let (controller, capture, file, _) = try setup(windowedFixture: true, runningFixture: true,
-            textFixture: true, intentKind: "dictate", taskScopes: ["work"], observeJudge: { state, questions in
-                if questions["operation"] != nil { finality.append(state["final"]?.bool ?? false) }
-            })
+            textFixture: true, intentKind: "dictate", taskScopes: ["work"],
+            observePlanner: { _, context in finality.append(context.utteranceFinal) })
         let insertionLog = URL(fileURLWithPath: file.path + ".text")
         defer {
             try? FileManager.default.removeItem(at: file)
@@ -819,16 +979,11 @@ for line in sys.stdin:
         try await until { controller.cuaTasks.count == 2 && controller.cuaTasks.allSatisfy { !$0.active } }
 
         let later = try XCTUnwrap(controller.cuaTasks.last)
-        let earlier = try XCTUnwrap(controller.cuaTasks.first)
         XCTAssertEqual(later.status, "Completed",
             "A follow-up that only refers to a failed task must still execute: \(later.message)")
-        XCTAssertEqual(later.referencedIntentID, earlier.intentID,
-            "The follow-up stays conversationally linked without inheriting any dependency")
-        if case .continuation(let parent) = controller.cua.dialogue.entry(for: later.intentID)?.relationship {
-            XCTAssertEqual(parent, earlier.intentID)
-        } else {
-            XCTFail("The follow-up must record a continuation relationship, not a blocking edge")
-        }
+        XCTAssertEqual(controller.cua.dialogue.entry(for: later.intentID)?.relationship,
+                       .independent,
+            "Follow-ups are recorded independent — the earlier failure can never gate them")
         await controller.shutdown()
     }
 
@@ -1178,6 +1333,10 @@ for line in sys.stdin:
         defer { try? FileManager.default.removeItem(at: fixture) }
         let defaults = UserDefaults(suiteName: "CuaBrowserInspection-\(UUID())")!
         let config = Config(defaults: defaults, keyStore: Keys(), environment: [:])
+        let planner = ScriptedPlanner()
+        planner.decisions = [{ utterance, _ in
+            .execute(TaskSpec(goal: utterance, application: "Google Chrome", scope: .work))
+        }]
         let runtime = CuaVoiceRuntime(config: config, makeConnection: {
             CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", fixture.path])
         }, judge: { state, questions in
@@ -1197,13 +1356,15 @@ for line in sys.stdin:
                 case "scope": value = "work"
                 case "visibility": value = "background"
                 case "next": value = "stuck"
+                case "fill": value = "unavailable"
                 case "doneEvidence": value = "unproven"
+                case "blockedReason": value = "dialog"
                 default: throw DriverConnectionError.malformed
                 }
                 answers[key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
             }
             return answers
-        }, screenLocked: { false })
+        }, planner: planner, screenLocked: { false })
 
         runtime.begin(app: "Google Chrome")
         runtime.update("Inspect the current browser page", final: true)
@@ -1430,12 +1591,8 @@ for line in sys.stdin:
         XCTAssertEqual(typed.count, 2,
             "Each attempt dispatched exactly one insertion after fresh observation")
         let entry = try XCTUnwrap(controller.cua.dialogue.entry(for: uncertain.intentID))
-        XCTAssertEqual(entry.attempts.count, 2)
-        guard case .uncertain = entry.evidence.first?.outcome else {
-            XCTFail("The uncertain attempt must remain as immutable evidence")
-            await controller.shutdown()
-            return
-        }
+        XCTAssertEqual(entry.attempts.count, 2,
+            "Each retry bound its own attempt on the intent")
         await controller.shutdown()
     }
 
@@ -1585,9 +1742,8 @@ for line in sys.stdin:
         XCTAssertGreaterThan(retry.intentRevision, failed.intentRevision,
             "A non-uncertain retry revises the intent forward")
         let entry = try XCTUnwrap(controller.cua.dialogue.entry(for: failed.intentID))
-        XCTAssertEqual(entry.attempts.count, 2)
-        XCTAssertEqual(entry.evidence.count, 2,
-            "The failed attempt's outcome remains as immutable evidence")
+        XCTAssertEqual(entry.attempts.count, 2,
+            "The failed attempt remains recorded alongside the retry's attempt")
         await controller.shutdown()
     }
 

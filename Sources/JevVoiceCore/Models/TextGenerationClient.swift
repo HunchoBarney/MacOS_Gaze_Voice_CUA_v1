@@ -37,8 +37,38 @@ public final class TextGenerationClient {
         return request
     }
     public func generate(prompt: String, context: String, reasoning: Bool = false) async throws -> String {
-        try Task.checkCancellation()
         let request = try request(prompt: prompt, context: context, reasoning: reasoning)
+        return try await send(request)
+    }
+
+    /// A caller-composed chat-completions request for structured callers like
+    /// the companion planner: system + user messages, a caller-chosen timeout,
+    /// and `json` asking the provider for a JSON object reply where the API
+    /// supports `response_format`. The caller still validates the payload —
+    /// `response_format` is a hint, never a schema guarantee.
+    public func chatRequest(system: String, user: String, json: Bool = false,
+                            timeout: TimeInterval = 45) throws -> URLRequest {
+        guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.missingModel }
+        guard system.utf8.count + user.utf8.count <= 64_000 else { throw Failure.tooLarge }
+        var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
+        request.httpMethod = "POST"; request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        var body: [String: JSONValue] = ["model": .string(model), "messages": .array([
+            .object(["role": .string("system"), "content": .string(system)]),
+            .object(["role": .string("user"), "content": .string(user)])
+        ]), "max_tokens": .number(1024)]
+        if json { body["response_format"] = .object(["type": .string("json_object")]) }
+        request.httpBody = try JSONEncoder().encode(JSONValue.object(body))
+        return request
+    }
+    public func chat(system: String, user: String, json: Bool = false,
+                     timeout: TimeInterval = 45) async throws -> String {
+        try await send(chatRequest(system: system, user: user, json: json, timeout: timeout))
+    }
+
+    private func send(_ request: URLRequest) async throws -> String {
+        try Task.checkCancellation()
         let (data, response) = try await session.data(for: request)
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse else { throw Failure.invalidResponse }

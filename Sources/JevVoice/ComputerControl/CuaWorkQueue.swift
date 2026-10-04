@@ -14,6 +14,9 @@ final class CuaWorkQueue {
     init(limit: Int = 3) { self.limit = max(1, limit) }
 
     func acquire(_ id: UUID, app: String) async throws {
+        // Re-entrant per work: a nested execution stage (a consent follow-up
+        // re-entering the loop) must not wait on the lease it already holds.
+        guard active[id] == nil else { return }
         try Task.checkCancellation()
         do {
             try await withTaskCancellationHandler {

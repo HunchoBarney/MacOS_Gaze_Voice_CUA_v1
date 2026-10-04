@@ -88,11 +88,23 @@ for line in sys.stdin:
                     }
                     result[item.key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
                 }
-            })
+            }, planner: RecordingRefusingPlanner(decide: { utterance, _ in
+                judged(utterance)
+                return .refuse(reason: "ignored")
+            }))
         return VoiceController(config: config, speech: speech, authorize: { true },
                                timings: timings, frontmost: { "Fixture" }, cuaRuntime: runtime)
     }
     private func settle() async { for _ in 0..<50 { await Task.yield() } }
+
+    /// A planner that hands each submitted utterance to a closure and returns
+    /// its decision — the lifecycle tests only need to observe submission.
+    private struct RecordingRefusingPlanner: CompanionPlanning {
+        let decide: @Sendable (String, PlannerContext) -> PlannerDecision
+        func decide(utterance: String, context: PlannerContext) async throws -> PlannerDecision {
+            decide(utterance, context)
+        }
+    }
 
     func testSuspensionDoesNotWaitForPreparationToFinish() async {
         let speech = FakeSpeech(); speech.delayPreparation = true

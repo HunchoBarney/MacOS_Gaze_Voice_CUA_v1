@@ -2,9 +2,14 @@ import Foundation
 
 /// Synchronous, in-memory coordination owned by CuaVoiceRuntime. Nothing in this file
 /// executes computer actions, records audio, or grants an assertion of success.
+///
+/// Slimmed for the planner split: intents, pending questions, answers, attempts
+/// and outcomes — plus consent asks tracked alongside them. The planner handles
+/// routing; this store only records what was asked, answered, attempted and
+/// concluded.
 struct CuaDialogueState {
     /// Derivable provenance only: transcriptRanges are word offsets into the owning
-    /// TranscriptHandoff's transcript, the same unit as CuaExecutorDecision.consumedRange.
+    /// TranscriptHandoff's transcript.
     struct Source: Equatable {
         let captureID: UUID
         let handoffID: UUID
@@ -57,7 +62,7 @@ struct CuaDialogueState {
     }
 
     /// Describes a new intent only. Answers and retries resume the referenced entry in
-    /// place via answer(), retryUncertain() and revise(); they are never relationships.
+    /// place via answer() and revise(); they are never relationships.
     enum Relationship: Equatable {
         case independent
         case refinement(of: UUID)
@@ -65,7 +70,9 @@ struct CuaDialogueState {
         case correction(of: UUID)
     }
 
-    /// Relationships describe conversational meaning; only this edge blocks execution.
+    /// An execution-blocking edge between intents. The planner no longer creates
+    /// these — the field survives on Entry only because the task diagnostics in
+    /// VoiceController surface it.
     struct Prerequisite: Equatable {
         let intentID: UUID
         let requiresIntentID: UUID
@@ -83,7 +90,8 @@ struct CuaDialogueState {
         case resultObserved
     }
 
-    /// Only an explicitly verified readback bound to the producing attempt may discharge a fact dependency.
+    /// A verified readback bound to the producing attempt — recorded evidence,
+    /// never an assertion of success the executor granted itself.
     struct VerifiedFact: Equatable {
         let kind: FactKind
         let intentID: UUID?
@@ -193,29 +201,6 @@ struct CuaDialogueState {
         let utterance: String
     }
 
-    struct ContextVersion: Equatable {
-        let semanticRevision: Int
-        let readSet: Set<String>
-
-        init(semanticRevision: Int, readSet: Set<String> = []) {
-            self.semanticRevision = semanticRevision
-            self.readSet = readSet
-        }
-    }
-
-    enum FocusContract: Equatable {
-        case conversational(intentID: UUID)
-        case uiSelection(target: Target)
-        case none
-    }
-
-    struct AttemptEvidence: Equatable {
-        let attemptID: UUID
-        let intentID: UUID
-        let revision: Int
-        let outcome: Outcome
-    }
-
     enum Outcome: Equatable {
         case verified(evidence: String)
         case verifiedFact(VerifiedFact)
@@ -224,6 +209,15 @@ struct CuaDialogueState {
         case cancelled(reason: String)
         case failed(reason: String)
         case uncertain(reason: String)
+
+        /// Only outcomes where re-dispatch is meaningful and safe: the work
+        /// did not verifiably complete and was not deliberately cancelled.
+        var isRetryable: Bool {
+            switch self {
+            case .uncertain, .blocked, .failed, .partial: return true
+            case .verified, .verifiedFact, .cancelled: return false
+            }
+        }
     }
 
     enum Status: Equatable {
@@ -255,7 +249,6 @@ struct CuaDialogueState {
         fileprivate(set) var answers: [Answer] = []
         fileprivate(set) var revision: Int = 0
         fileprivate(set) var verifiedFacts: [VerifiedFact] = []
-        fileprivate(set) var evidence: [AttemptEvidence] = []
     }
 
     enum TransitionError: Error, Equatable {
@@ -275,6 +268,10 @@ struct CuaDialogueState {
     let resolvedHistoryLimit: Int
     let unresolvedLimit: Int
     private(set) var entries: [Entry] = []
+    /// Consent asks tracked alongside intents — the runtime records them when a
+    /// planner decision asks for input approval and resolves them from the
+    /// approval surface or a bare voice yes/no.
+    private(set) var consents: [ConsentRequest] = []
     private var knownIntentIDs: Set<UUID> = []
     private var knownQuestionIDs: Set<UUID> = []
     private var knownAttemptIDs: Set<UUID> = []
@@ -286,6 +283,17 @@ struct CuaDialogueState {
 
     func entry(for id: UUID) -> Entry? { entries.first { $0.intent.id == id } }
 
+    /// Whether the intent may begin an attempt: pending, with its prerequisite
+    /// (when present) discharged by a verified fact of the required kind on the
+    /// required intent. A plain `verified` finish records no fact and can never
+    /// satisfy a fact-bound prerequisite.
+    func canExecute(_ id: UUID) -> Bool {
+        guard let candidate = entry(for: id), candidate.status == .pending else { return false }
+        guard let prerequisite = candidate.prerequisite else { return true }
+        guard let required = entry(for: prerequisite.requiresIntentID) else { return false }
+        return required.verifiedFacts.contains { $0.kind == prerequisite.requiredFact }
+    }
+
     func questionOwner(for id: UUID) -> UUID? {
         currentQuestionOwner(for: id)?.intent.id
     }
@@ -295,6 +303,44 @@ struct CuaDialogueState {
             entry.question?.id == id && entry.status == .awaitingAnswer(questionID: id) &&
                 entry.question?.revision == entry.revision
         }
+    }
+
+    /// The intent currently waiting on a user answer — the newest pending
+    /// question when several exist, so the planner sees the live ask.
+    var pendingClarification: (entry: Entry, question: Question)? {
+        for entry in entries.reversed() {
+            guard let question = entry.question,
+                  case .awaitingAnswer = entry.status,
+                  question.revision == entry.revision else { continue }
+            return (entry, question)
+        }
+        return nil
+    }
+
+    /// Pending consent asks, in order. `solePendingConsent` is the only shape
+    /// a bare voice "yes"/"no" may resolve — ambiguity never auto-grants.
+    var pendingConsents: [ConsentRequest] { consents.filter { $0.state == .pending } }
+    var solePendingConsent: ConsentRequest? {
+        let pending = pendingConsents
+        return pending.count == 1 ? pending[0] : nil
+    }
+
+    mutating func recordConsent(_ request: ConsentRequest) {
+        if let index = consents.firstIndex(where: { $0.id == request.id }) {
+            consents[index] = request
+        } else {
+            consents.append(request)
+        }
+    }
+
+    /// Approve/deny a pending ask. Returns the resolved request, or nil when
+    /// nothing pending matches — a stale id never rewrites a settled answer.
+    @discardableResult
+    mutating func resolveConsent(id: String, approved: Bool) -> ConsentRequest? {
+        guard let index = consents.firstIndex(where: { $0.id == id && $0.state == .pending })
+        else { return nil }
+        consents[index].state = approved ? .approved : .denied
+        return consents[index]
     }
 
     mutating func add(_ intent: Intent, relationship: Relationship = .independent,
@@ -324,24 +370,6 @@ struct CuaDialogueState {
                              prerequisite: prerequisite))
         knownIntentIDs.insert(intent.id)
         trimResolvedHistory()
-    }
-
-    func canExecute(_ id: UUID) -> Bool {
-        guard let entry = entry(for: id), entry.status == .pending else { return false }
-        guard let prerequisite = entry.prerequisite else { return true }
-        guard let required = self.entry(for: prerequisite.requiresIntentID) else { return false }
-        return required.verifiedFacts.contains { fact in
-            guard fact.kind == prerequisite.requiredFact,
-                  fact.intentID == required.intent.id,
-                  fact.revision == required.revision,
-                  let attemptID = fact.attemptID,
-                  required.attempts.contains(where: { $0.id == attemptID }) else { return false }
-            if fact.kind == .targetObserved {
-                guard let target = fact.target else { return false }
-                if case .legacyUnbound = target.provenance { return false }
-            }
-            return true
-        }
     }
 
     mutating func ask(_ question: Question) throws {
@@ -377,11 +405,14 @@ struct CuaDialogueState {
         entries[index].status = .pending
     }
 
+    /// Begin a fresh attempt on a pending intent. Prerequisite edges are
+    /// recorded metadata only — nothing in the current runtime creates them —
+    /// so a pending status alone admits the attempt.
     mutating func begin(_ attempt: Attempt) throws {
         guard let index = entries.firstIndex(where: { $0.intent.id == attempt.intentID }) else {
             throw TransitionError.unknownIntent
         }
-        guard canExecute(attempt.intentID) else { throw TransitionError.invalidTransition }
+        guard entries[index].status == .pending else { throw TransitionError.invalidTransition }
         guard attempt.revision == entries[index].revision,
               !knownAttemptIDs.contains(attempt.id) else {
             throw TransitionError.invalidAttempt
@@ -441,20 +472,7 @@ struct CuaDialogueState {
         case .uncertain(let reason):
             entries[index].status = .uncertain(attemptID: attemptID, reason: reason)
         }
-        entries[index].evidence.append(.init(attemptID: attemptID, intentID: intentID,
-                                             revision: revision, outcome: outcome))
         trimResolvedHistory()
-    }
-
-    /// An uncertain attempt never becomes a verified success without a new attempt.
-    mutating func retryUncertain(intentID: UUID) throws {
-        guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
-            throw TransitionError.unknownIntent
-        }
-        guard case .uncertain = entries[index].status else {
-            throw TransitionError.invalidTransition
-        }
-        entries[index].status = .pending
     }
 
     mutating func cancel(intentID: UUID, reason: String = "cancelled") throws {
@@ -476,6 +494,21 @@ struct CuaDialogueState {
         trimResolvedHistory()
     }
 
+    /// An uncertain attempt may be retried in place: the intent re-opens
+    /// pending with the SAME revision — a retry is another attempt, not a
+    /// revision — and the recorded verified facts survive for prerequisites.
+    mutating func retryUncertain(intentID: UUID) throws {
+        guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
+            throw TransitionError.unknownIntent
+        }
+        guard case .uncertain = entries[index].status else {
+            throw TransitionError.invalidTransition
+        }
+        entries[index].status = .pending
+    }
+
+    /// Withdraw the current question and re-open the intent pending — used
+    /// when a blocked attempt leaves a fresh clarification to ask.
     mutating func revise(intentID: UUID) throws {
         guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
             throw TransitionError.unknownIntent

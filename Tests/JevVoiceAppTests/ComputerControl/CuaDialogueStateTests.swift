@@ -122,8 +122,9 @@ final class CuaDialogueStateTests: XCTestCase {
         XCTAssertFalse(state.canExecute(work.id))
         XCTAssertThrowsError(try state.finish(attemptID: first.id, intentID: work.id,
                                               outcome: .verified(evidence: "claimed")))
-        try state.retryUncertain(intentID: work.id)
-        let second = CuaDialogueState.Attempt(intentID: work.id, instruction: work.instruction)
+        try state.revise(intentID: work.id)
+        let second = CuaDialogueState.Attempt(intentID: work.id, instruction: work.instruction,
+                                            revision: 1)
         try state.begin(second)
         XCTAssertThrowsError(try state.finish(attemptID: second.id, intentID: work.id,
                                               outcome: .verified(evidence: " ")))
@@ -336,15 +337,15 @@ final class CuaDialogueStateTests: XCTestCase {
             XCTAssertEqual(error as? CuaDialogueState.TransitionError, .invalidTransition)
         }
         XCTAssertEqual(state.entry(for: work.id)?.status, .executing(attemptID: attempt.id))
-        XCTAssertEqual(state.entry(for: work.id)?.evidence, [])
+        XCTAssertEqual(state.entry(for: work.id)?.verifiedFacts, [])
         XCTAssertThrowsError(try state.cancel(intentID: work.id)) { error in
             XCTAssertEqual(error as? CuaDialogueState.TransitionError, .invalidTransition)
         }
         try state.finish(attemptID: attempt.id, intentID: work.id,
                          outcome: .partial(evidence: "paused safely", blockedReason: "needs revision"))
-        XCTAssertEqual(state.entry(for: work.id)?.evidence,
-                       [.init(attemptID: attempt.id, intentID: work.id, revision: 0,
-                              outcome: .partial(evidence: "paused safely", blockedReason: "needs revision"))])
+        XCTAssertEqual(state.entry(for: work.id)?.status,
+                       .partial(attemptID: attempt.id, evidence: "paused safely",
+                                blockedReason: "needs revision"))
         try state.revise(intentID: work.id)
         XCTAssertEqual(state.entry(for: work.id)?.revision, 1)
         XCTAssertEqual(state.entry(for: work.id)?.status, .pending)
@@ -362,9 +363,6 @@ final class CuaDialogueStateTests: XCTestCase {
                          outcome: .partial(evidence: "moved one file", blockedReason: "permission"))
         XCTAssertEqual(state.entry(for: partial.id)?.status,
                        .partial(attemptID: first.id, evidence: "moved one file", blockedReason: "permission"))
-        XCTAssertEqual(state.entry(for: partial.id)?.evidence,
-                       [.init(attemptID: first.id, intentID: partial.id, revision: 0,
-                              outcome: .partial(evidence: "moved one file", blockedReason: "permission"))])
         let second = CuaDialogueState.Attempt(intentID: blocked.id, instruction: "blocked")
         try state.begin(second)
         try state.finish(attemptID: second.id, intentID: blocked.id,
@@ -403,7 +401,6 @@ final class CuaDialogueStateTests: XCTestCase {
                        .partial(attemptID: attempt.id, evidence: "target identified",
                                 blockedReason: "remaining operation uncertain"))
         XCTAssertEqual(state.entry(for: source.id)?.verifiedFacts, [fact])
-        XCTAssertEqual(state.entry(for: source.id)?.evidence.last?.outcome, outcome)
         XCTAssertTrue(state.canExecute(targetDependent.id))
         XCTAssertFalse(state.canExecute(resultDependent.id), "partial does not verify remaining effects")
         XCTAssertFalse(state.canExecute(source.id), "partial is not general completion")
@@ -450,23 +447,9 @@ final class CuaDialogueStateTests: XCTestCase {
                                                                      blockedReason: "not finished",
                                                                      verifiedFacts: [valid, fact])))
             XCTAssertEqual(state.entry(for: source.id)?.verifiedFacts, [])
-            XCTAssertEqual(state.entry(for: source.id)?.evidence, [])
             XCTAssertEqual(state.entry(for: source.id)?.status, .executing(attemptID: attempt.id))
             XCTAssertFalse(state.canExecute(dependent.id))
         }
-    }
-
-    func testContextVersionAndFocusContractsAreDistinct() {
-        let uiTarget = CuaDialogueState.Target(
-            bundle: .init(bundleID: "com.apple.Notes", displayName: "Notes"),
-            window: .init(windowID: "w", title: "Notes"),
-            description: "selection",
-            provenance: .source(intent().source))
-        let context = CuaDialogueState.ContextVersion(semanticRevision: 3,
-                                                      readSet: ["selection", "frontmostApp"])
-        XCTAssertEqual(context.readSet, ["selection", "frontmostApp"])
-        XCTAssertNotEqual(CuaDialogueState.FocusContract.uiSelection(target: uiTarget),
-                          .conversational(intentID: UUID()))
     }
 
     func testTransitiveRetentionAndUnresolvedCapacity() throws {

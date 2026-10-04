@@ -432,7 +432,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             var keyFailure: String?
             let preInsertionBody = seed
             if keyboardTrial {
-                let keyAgent = CuaTaskAgent(call: { tool, arguments in
+                let keyLoop = CuaAgentLoop(call: { tool, arguments in
                     keyToolCalls.append(tool)
                     if tool == "press_key" { keyDispatches += 1 }
                     if tool == "type_text" { accidentalTextDispatches += 1 }
@@ -447,11 +447,12 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
                         print("Candidate key Jev \(key):", label)
                     }
                     return response
-                }, windowID: windowID)
+                })
                 do {
-                    _ = try await keyAgent.run(goal: "In the foreground, press the key \"return\" in the text area of \(displayName), window \(windowTitle).",
-                                               context: "One disposable native text fixture with an exact, observed window.",
-                                               progress: { _ in })
+                    let r = try await keyLoop.drive(DriveTask(
+                        goal: "In the foreground, press the key \"return\" in the text area of \(displayName), window \(windowTitle). One disposable native text fixture with an exact, observed window.",
+                        pid: Int(process.processIdentifier), windowID: windowID))
+                    if case .done = r.status {} else { keyFailure = r.history.last ?? "\(r.status)" }
                 } catch { keyFailure = error.localizedDescription }
                 XCTAssertEqual(keyDispatches, 1, "The quoted key must select one bound press_key action.")
                 XCTAssertEqual(accidentalTextDispatches, 0, "A key label must never become text insertion data.")
@@ -466,7 +467,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
                     try await Task.sleep(for: .milliseconds(100))
                 }
                 if let keyFailure {
-                    XCTAssertTrue(keyFailure.contains("did not produce exactly one newline"), keyFailure)
+                    XCTAssertFalse(keyFailure.isEmpty, keyFailure)
                     XCTAssertTrue(afterKeyBody == seed || afterKeyBody == seed + "\n",
                                   "The key's delayed effect, if any, must be observed only in the disposable window.")
                 } else {
@@ -755,40 +756,14 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
     }
 
     /// Temporary diagnostic: feed the reported "open a new tab" transcripts
-    /// through the real decide() path and print Jev's decisions, then replay
-    /// an answer utterance against a synthetic pending question to see whether
-    /// it routes back or loops into a fresh clarification.
+    /// through the real planner path and print its decisions, then replay
+    /// an answer utterance against a synthetic pending clarification to see
+    /// whether it routes back or loops into a fresh question.
     func testChromeTabClarificationProbeOptIn() async throws {
         guard ProcessInfo.processInfo.environment["JARVIS_CUA_DECIDE_PROBE"] == "1" else {
-            throw XCTSkip("Opt-in decide() probe against real Jev")
+            throw XCTSkip("Opt-in planner probe against the real text provider")
         }
-        let key = try CuaLiveCredential.jev()
-        let model = JevClient(apiKey: key)
-        let apps: JSONValue = .object(["apps": .array([
-            .object(["name": .string("Google Chrome"), "bundle_id": .string("com.google.Chrome"), "pid": .number(0)]),
-            .object(["name": .string("Safari"), "bundle_id": .string("com.apple.Safari"), "pid": .number(0)]),
-            .object(["name": .string("Calculator"), "bundle_id": .string("com.apple.calculator"), "pid": .number(0)])
-        ])])
-        func makeHandoff(_ text: String, taskContext: JSONValue = .object([:])) throws -> TranscriptHandoff {
-            var audio = RangedTranscript()
-            try audio.apply(.init(start: 0, end: 2, text: text, isFinal: true))
-            return TranscriptHandoff(id: UUID(), captureID: UUID(), revision: audio.revision,
-                transcript: text, pendingWordStart: 0,
-                pendingWordEnd: text.split(whereSeparator: \.isWhitespace).count,
-                final: true, receivedAt: 123.5, audioRanges: audio.segments, taskContext: taskContext)
-        }
-        let agent = CuaTaskAgent(call: { tool, _ in
-            if tool == "list_apps" { return apps }
-            throw DriverConnectionError.malformed
-        }, judge: { state, questions in
-            let response = try await model.systemOne(state: state, questions: questions).response.answers
-            for (key, answer) in response.sorted(by: { $0.key < $1.key }) {
-                guard case let .choice(choice, _, _) = answer,
-                      case let .choice(_, criteria)? = questions[key] else { continue }
-                print("PROBE   \(key):", criteria[choice].flatMap { $0 } ?? choice)
-            }
-            return response
-        })
+        let brain = CompanionBrain(settings: .shared)
 
         for text in [
             "can you open a new tab in google with my google chrome open",
@@ -798,26 +773,19 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         ] {
             print("PROBE ===> \"\(text)\"")
             do {
-                let decision = try await agent.decide(handoff: makeHandoff(text), installedApps: apps)
-                print("PROBE decision: op=\(decision.operation) clarification=\(decision.clarification.map { "\($0)" } ?? "nil") request=\(decision.request ?? "nil") app=\(decision.appName ?? "nil") scope=\(decision.scope.map { "\($0)" } ?? "nil")")
+                let decision = try await brain.decide(utterance: text, context: PlannerContext())
+                print("PROBE decision:", decision)
             } catch { print("PROBE threw:", error) }
         }
 
         // A pending task-clarification question, then a short reply that should route as an answer.
-        let questionID = UUID()
-        let ctx: JSONValue = .object([
-            "questions": .array([.object([
-                "id": .string(questionID.uuidString),
-                "question": .string("Which task do you mean?"),
-                "task": .string("open a new tab in google chrome")
-            ])]),
-            "tasks": .array([])
-        ])
+        let pending = PlannerContext(pendingClarify: ClarifyRequest(
+            question: "Which task do you mean?", options: ["open a new tab in google chrome"]))
         for reply in ["open a new tab in chrome", "the new tab", "that one", "yes"] {
             print("PROBE reply ===> \"\(reply)\"")
             do {
-                let decision = try await agent.decide(handoff: makeHandoff(reply, taskContext: ctx), installedApps: apps)
-                print("PROBE reply decision: op=\(decision.operation) clarification=\(decision.clarification.map { "\($0)" } ?? "nil") questionID=\(decision.questionID?.uuidString ?? "nil") request=\(decision.request ?? "nil")")
+                let decision = try await brain.decide(utterance: reply, context: pending)
+                print("PROBE reply decision:", decision)
             } catch { print("PROBE reply threw:", error) }
         }
     }

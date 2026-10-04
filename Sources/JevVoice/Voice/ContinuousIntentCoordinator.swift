@@ -98,6 +98,10 @@ final class ContinuousIntentCoordinator {
     private(set) var message = ""
     private(set) var error: String?
     private(set) var busy = false
+    /// Finality last seen over the pending span — a volatile span that
+    /// finalizes with identical text is still a semantic change worth a fresh
+    /// decision, so the early-return guard compares it every update.
+    private var lastSeenPendingFinal = false
     var remainder: String { ledger.pending }
 
     init(submit: @escaping Submit) {
@@ -119,6 +123,7 @@ final class ContinuousIntentCoordinator {
         error = nil
         message = ""
         outcome = "idle"
+        lastSeenPendingFinal = false
     }
 
     func record(_ snapshot: RangedTranscript) {
@@ -126,8 +131,18 @@ final class ContinuousIntentCoordinator {
     }
 
     func update(_ text: String, final: Bool) {
-        guard text != currentText || final != self.final || inputRevision != audio.revision else { return }
+        // Finality over the pending span is semantic state: identical text
+        // that finalizes still re-decides. A parked dictation hold is the one
+        // exception — it only lifts on release, so a mid-hold finality flip
+        // would decide again just to re-park the same literal.
+        let pendingFinal = audio.isFinal(throughWord:
+            text.split(whereSeparator: \.isWhitespace).count)
+        let parkedDictation = outcome == "dictationWaitingForFinal" && !final
+        let finalityChanged = pendingFinal != lastSeenPendingFinal && !parkedDictation
+        guard text != currentText || final != self.final
+                || inputRevision != audio.revision || finalityChanged else { return }
         inputRevision = audio.revision
+        lastSeenPendingFinal = pendingFinal
         transcriptReceivedAt = ProcessInfo.processInfo.systemUptime
         do {
             try ledger.update(text)
@@ -147,9 +162,14 @@ final class ContinuousIntentCoordinator {
             onChange()
             return
         }
+        // Only fresh pending work resets the surface — a release with no new
+        // words must leave the published outcome (a refusal, a clarification)
+        // visible instead of blanking it back to the last task's message.
         cancelPendingHandoff()
-        error = nil
-        message = ""
+        if !ledger.pendingWords.isEmpty {
+            error = nil
+            message = ""
+        }
         scheduleHandoff()
     }
 
@@ -461,7 +481,6 @@ final class ContinuousIntentCoordinator {
         return snapshot.text == handoff.transcript && snapshot.isFinal(throughWord: count)
     }
 }
-
 
 private extension JSONValue {
     func value(at path: String) -> JSONValue? {
