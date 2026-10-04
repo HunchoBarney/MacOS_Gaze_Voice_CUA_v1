@@ -274,21 +274,50 @@ public enum GateError: Error, Sendable, Equatable {
     case blockedByConsent(summary: String)
 }
 
-/// Driver input tools the gate refuses pre-consent (Clicky parity: every
-/// tool that delivers input is gated; observation is open).
+/// Consent contract for the computer-use shim (Clicky parity): observation
+/// tools are always open; EVERYTHING else is consent-gated. Fail-closed by
+/// construction — a new/unknown driver tool gates rather than leaks open.
+/// Tool list verified against the pinned driver's mcp-tools.mdx (0.32.0).
 public enum ConsentContract {
-    /// MCP tool names treated as INPUT (consent-gated).
-    public static let inputTools: Set<String> = [
-        "click_element", "press_element", "type_text", "type_into_element",
-        "type_into_window", "press_key", "hotkey", "set_value",
-        "click", "click_window", "pixel_click", "scroll", "drag",
-        "browser_click", "browser_type", "browser_navigate", "browser_dialog",
-        "invoke_menu", "open_url", "launch_app",
+    /// Driver tools permitted without consent (observation only).
+    public static let observationTools: Set<String> = [
+        "list_apps", "list_windows", "get_window_state",
+        "get_accessibility_tree", "get_desktop_state", "get_screen_size",
+        "get_cursor_position", "get_config", "get_recording_state",
+        "get_agent_cursor_state", "check_permissions", "health_report",
+        "check_for_update", "clipboard_read", "get_browser_state",
+        "get_session", "list_sessions", "get_session_state",
+        "parse_visual_regions", "verify_state",
     ]
+    /// Anything not an observation tool is consent-gated input/action —
+    /// launch_app, kill_app, click*, type_*, press_key, hotkey, set_value,
+    /// scroll, drag, move_cursor, zoom, bring_to_front, set_window_frame,
+    /// browser_*, clipboard_write, page, recording/session/config mutators,
+    /// install_*, invoke_menu, escalate_session — including future tools.
+    public static func requiresConsent(_ tool: String) -> Bool {
+        !observationTools.contains(tool)
+    }
     /// `delivery_mode` value required on every forwarded input call.
     public static let requiredDeliveryMode = "background"
-    /// Driver scope values the shim always refuses (no raw desktop control).
-    public static let refusedScopes: Set<String> = ["desktop"]
+    /// Detects desktop-scope requests in BOTH arg shapes: top-level
+    /// `scope:"desktop"` and the driver's preferred nested
+    /// `target:{kind:"desktop",…}` targeting object. Raw desktop-coordinate
+    /// control is always refused (no pointer hijack).
+    public static func requestsDesktopScope(_ args: JSONValue) -> Bool {
+        if args["scope"]?.string == "desktop" { return true }
+        return containsDesktopTarget(args)
+    }
+    private static func containsDesktopTarget(_ value: JSONValue) -> Bool {
+        switch value {
+        case let .object(dict):
+            if dict["kind"]?.string == "desktop" { return true }
+            return dict.values.contains(where: containsDesktopTarget)
+        case let .array(items):
+            return items.contains(where: containsDesktopTarget)
+        default:
+            return false
+        }
+    }
 }
 
 // MARK: Agent cursor identity
