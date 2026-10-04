@@ -304,13 +304,13 @@ public enum ConsentContract {
     /// `target:{kind:"desktop",…}` targeting object. Raw desktop-coordinate
     /// control is always refused (no pointer hijack).
     public static func requestsDesktopScope(_ args: JSONValue) -> Bool {
-        if args["scope"]?.string == "desktop" { return true }
+        if args["scope"]?.string?.lowercased() == "desktop" { return true }
         return containsDesktopTarget(args)
     }
     private static func containsDesktopTarget(_ value: JSONValue) -> Bool {
         switch value {
         case let .object(dict):
-            if dict["kind"]?.string == "desktop" { return true }
+            if dict["kind"]?.string?.lowercased() == "desktop" { return true }
             return dict.values.contains(where: containsDesktopTarget)
         case let .array(items):
             return items.contains(where: containsDesktopTarget)
