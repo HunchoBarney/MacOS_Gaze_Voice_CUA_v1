@@ -5,17 +5,34 @@ import Carbon
 struct FnInputState {
     enum Kind { case flagsChanged, keyDown, keyUp }
     enum Action { case none, begin, finish, cancel, cancelCapture }
-    struct Result { var action: Action = .none; var consume = false }
+    struct Result {
+        var action: Action = .none
+        var consume = false
+        /// Fn+Ctrl chord: on `.begin` the hold is dictation; on `.none` a live
+        /// hold converts to dictation.
+        var dictation = false
+        /// Short Fn tap with latch mode on: release latches instead of finishing.
+        var latch = false
+    }
+    /// Off until the coordinator binds the dictation seams — an armed chord
+    /// with no consumer must fail closed, never start a planner capture.
+    var dictationEnabled = false
+    var latchMode = false
+    var latchThreshold: TimeInterval = 0.4
     private(set) var held = false
+    private(set) var latched = false
     private var armed = false
+    private var dictating = false
     private var escapeConsumed = false
     private var pressedKeys: Set<UInt16> = []
+    private var pressedAt: TimeInterval?
 
     mutating func reconcilePressedKeys(_ keys: Set<UInt16>) { pressedKeys = keys }
 
-    mutating func interrupt() { armed = false }
+    mutating func interrupt() { armed = false; dictating = false; latched = false }
 
     mutating func handle(_ kind: Kind, key: UInt16, fn: Bool, otherModifiers: Bool = false,
+                         dictationChord: Bool = false, now: TimeInterval? = nil,
                          canBegin: Bool, active: Bool) -> Result {
         if kind == .keyDown { pressedKeys.insert(key) }
         if kind == .keyUp { pressedKeys.remove(key) }
@@ -28,6 +45,8 @@ struct FnInputState {
             }
             if kind == .keyDown, active {
                 armed = false
+                dictating = false
+                latched = false
                 escapeConsumed = true
                 return Result(action: .cancel, consume: true)
             }
@@ -36,14 +55,42 @@ struct FnInputState {
             guard fn != held else { return Result(consume: true) }
             held = fn
             if fn {
+                if latched {
+                    // The second latch tap stops capture at Fn down.
+                    latched = false
+                    armed = false
+                    dictating = false
+                    return Result(action: .finish, consume: true)
+                }
+                pressedAt = now
+                if dictationEnabled, dictationChord {
+                    armed = canBegin && pressedKeys.isEmpty
+                    dictating = armed
+                    return Result(action: armed ? .begin : .none, consume: true, dictation: armed)
+                }
                 armed = canBegin && !otherModifiers && pressedKeys.isEmpty
                 return Result(action: armed ? .begin : .none, consume: !otherModifiers)
             }
             let finish = armed
+            let wasDictating = dictating
             armed = false
+            dictating = false
+            let down = pressedAt
+            pressedAt = nil
+            if finish, latchMode, !wasDictating,
+               let down, let now, now - down < latchThreshold {
+                latched = true
+                return Result(action: .finish, consume: true, latch: true)
+            }
             return Result(action: finish ? .finish : .none, consume: true)
         }
-        if held, armed, kind == .keyDown || (kind == .flagsChanged && otherModifiers) {
+        if held, armed, !dictating, dictationEnabled, dictationChord,
+           kind == .flagsChanged, key == 59 || key == 62 {
+            // Ctrl joined an armed Fn hold — the capture becomes dictation.
+            dictating = true
+            return Result(consume: true, dictation: true)
+        }
+        if held, armed, !dictating, kind == .keyDown || (kind == .flagsChanged && otherModifiers) {
             armed = false
             return Result(action: .cancelCapture)
         }
@@ -59,6 +106,19 @@ final class FnInputMonitor: ObservableObject {
     var operationActive: () -> Bool = { false }
     var onAction: (FnInputState.Action) -> Void = { _ in }
     var onInterruption: (String) -> Void = { _ in }
+    /// Fn+Ctrl seams — the coordinator binds these to dictation capture.
+    var onDictationBegin: () -> Void = {}
+    var onDictationConvert: () -> Void = {}
+    /// Latch seam — fires on a tap-short release before `.finish` arrives.
+    var onLatch: () -> Void = {}
+    var dictationChordEnabled: Bool {
+        get { state.dictationEnabled }
+        set { state.dictationEnabled = newValue }
+    }
+    var latchMode: Bool {
+        get { state.latchMode }
+        set { state.latchMode = newValue }
+    }
     private var state = FnInputState()
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
@@ -136,16 +196,33 @@ final class FnInputMonitor: ObservableObject {
             }))
         }
         let other: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        let nonControl: CGEventFlags = [.maskCommand, .maskAlternate, .maskShift]
         let result = state.handle(kind, key: UInt16(event.getIntegerValueField(.keyboardEventKeycode)),
                                   fn: event.flags.contains(.maskSecondaryFn),
                                   otherModifiers: !event.flags.intersection(other).isEmpty,
+                                  dictationChord: event.flags.contains(.maskControl)
+                                      && event.flags.intersection(nonControl).isEmpty,
+                                  now: handlingStarted,
                                   canBegin: ready && canBegin(), active: operationActive())
         if kind == .flagsChanged, event.getIntegerValueField(.keyboardEventKeycode) == 63 {
             observedPhysicalHold = state.held && physicalFnDown
         }
         if result.action == .begin { beginHandlingMs = (ProcessInfo.processInfo.systemUptime - handlingStarted) * 1000 }
-        if result.action != .none { onAction(result.action) }
+        dispatch(result)
         return result.consume ? nil : Unmanaged.passUnretained(event)
+    }
+
+    /// Feature seams fire before the base action so their handlers are
+    /// already in place when begin/finish reaches the controller. A dictation
+    /// result never reaches `onAction`: an unwired or disabled seam leaves the
+    /// event consumed as `.none` rather than starting a planner capture.
+    func dispatch(_ result: FnInputState.Result) {
+        if result.dictation {
+            if result.action == .begin { onDictationBegin() } else { onDictationConvert() }
+            return
+        }
+        if result.latch { onLatch() }
+        if result.action != .none { onAction(result.action) }
     }
 
     private func checkHealth() {
@@ -169,9 +246,11 @@ final class FnInputMonitor: ObservableObject {
     }
 
     private func interrupt(_ reason: String) {
+        // A latched capture depends on the tap as much as a held one does.
+        let captureHeld = state.held || state.latched
         state.interrupt()
         // Only capture depends on keyboard health. App execution may itself enter secure input.
-        if state.held { onInterruption(reason) }
+        if captureHeld { onInterruption(reason) }
     }
 
     private func teardown() {
