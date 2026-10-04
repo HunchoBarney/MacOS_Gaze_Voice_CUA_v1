@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.target = self
         let activity = menu.addItem(withTitle: "Activity", action: #selector(showActivity), keyEquivalent: "")
         activity.target = self
+        let agents = menu.addItem(withTitle: "Agents", action: #selector(showAgents), keyEquivalent: "")
+        agents.target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Jev Voice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -75,6 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.speechOutput.speak(lead)
         }
         agentRuntime?.start()
+        if let runtime = agentRuntime {
+            windows.agents.bind(roster: runtime.store, runtime: runtime.bridge,
+                                consent: runtime.gate)
+        }
         controller.pendingConsent = { [weak self] in self?.agentRuntime?.solePendingAsk }
         controller.onConsentResolution = { [weak self] request, approved in
             self?.agentRuntime?.resolveConsent(request, approved: approved)
@@ -216,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func showSettings() { windows.show(.voice) }
     @objc private func showActivity() { windows.show(.activity) }
+    @objc private func showAgents() { windows.showAgents() }
 
     private func installEditMenu() {
         let mainMenu = NSMenu()
