@@ -68,3 +68,9 @@ struct StubSuggester: ActionSuggesting {
     var judgment = StepJudgment(elementToken: "el-3", kind: .press, confidence: 0.9)
     func suggestAction(pid: Int, windowID: Int) async throws -> StepJudgment { judgment }
 }
+
+/// Controllable clock for TTL-based gate tests.
+final class TestClock: @unchecked Sendable {
+    private(set) var now = Date()
+    func advance(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+}

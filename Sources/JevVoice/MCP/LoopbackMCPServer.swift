@@ -23,16 +23,26 @@ actor LoopbackMCPServer {
     private let serverVersion: String
     private let path: String
     private let token: String
+    /// Per-connection lifetime cap — a stalled or drip-fed peer is cancelled
+    /// once this elapses instead of pinning a connection slot forever.
+    private let readDeadline: TimeInterval
+    /// Hard bound on live connections; extra peers are refused outright.
+    private let maxConnections: Int
     private let toolsProvider: @Sendable () async throws -> [JSONValue]
     private let callHandler: @Sendable (_ name: String, _ arguments: JSONValue) async throws -> JSONValue
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
 
+    /// Live connection count — diagnostics/tests.
+    var connectionCount: Int { connections.count }
+
     init(serverName: String, serverVersion: String = "1", path: String = "/mcp", token: String? = nil,
+         readDeadline: TimeInterval = 30, maxConnections: Int = 64,
          tools: @escaping @Sendable () async throws -> [JSONValue],
          onCall: @escaping @Sendable (_ name: String, _ arguments: JSONValue) async throws -> JSONValue) {
         self.serverName = serverName; self.serverVersion = serverVersion; self.path = path
         self.token = token ?? (UUID().uuidString + UUID().uuidString).replacingOccurrences(of: "-", with: "")
+        self.readDeadline = readDeadline; self.maxConnections = maxConnections
         self.toolsProvider = tools; self.callHandler = onCall
     }
 
@@ -49,25 +59,35 @@ actor LoopbackMCPServer {
             Task { await self?.accept(connection) }
         }
         let path = self.path, token = self.token
-        return try await withCheckedThrowingContinuation { continuation in
-            listener.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    listener.stateUpdateHandler = nil
-                    guard let port = listener.port, let url = URL(string: "http://127.0.0.1:\(port.rawValue)\(path)") else {
-                        continuation.resume(throwing: ServerError.notRunning); return
+        do {
+            return try await withCheckedThrowingContinuation { continuation in
+                listener.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        listener.stateUpdateHandler = nil
+                        guard let port = listener.port, let url = URL(string: "http://127.0.0.1:\(port.rawValue)\(path)") else {
+                            continuation.resume(throwing: ServerError.notRunning); return
+                        }
+                        continuation.resume(returning: Endpoint(url: url, token: token))
+                    case .failed(let error):
+                        listener.stateUpdateHandler = nil
+                        continuation.resume(throwing: error)
+                    case .cancelled:
+                        listener.stateUpdateHandler = nil
+                        continuation.resume(throwing: ServerError.notRunning)
+                    default: break
                     }
-                    continuation.resume(returning: Endpoint(url: url, token: token))
-                case .failed(let error):
-                    listener.stateUpdateHandler = nil
-                    continuation.resume(throwing: error)
-                case .cancelled:
-                    listener.stateUpdateHandler = nil
-                    continuation.resume(throwing: ServerError.notRunning)
-                default: break
                 }
+                listener.start(queue: .global(qos: .userInitiated))
             }
-            listener.start(queue: .global(qos: .userInitiated))
+        } catch {
+            // Reset so a failed listener can be re-started instead of bricking
+            // the server behind `alreadyStarted`.
+            if self.listener === listener { self.listener = nil }
+            listener.stateUpdateHandler = nil
+            listener.newConnectionHandler = nil
+            listener.cancel()
+            throw error
         }
     }
 
@@ -88,6 +108,7 @@ actor LoopbackMCPServer {
     }
 
     private func accept(_ connection: NWConnection) {
+        guard connections.count < maxConnections else { connection.cancel(); return }
         let id = UUID()
         connections[id] = connection
         connection.start(queue: .global(qos: .userInitiated))
@@ -95,7 +116,13 @@ actor LoopbackMCPServer {
     }
 
     private func serve(_ connection: NWConnection, id: UUID) async {
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(readDeadline))
+            guard !Task.isCancelled else { return }
+            connection.cancel()
+        }
         defer {
+            watchdog.cancel()
             connection.cancel()
             connections[id] = nil
         }

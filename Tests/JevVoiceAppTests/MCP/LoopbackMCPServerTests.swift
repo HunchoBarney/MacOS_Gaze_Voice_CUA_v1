@@ -1,4 +1,5 @@
 import XCTest
+import Network
 import JevVoiceCore
 @testable import JevVoice
 
@@ -74,6 +75,49 @@ final class LoopbackMCPServerTests: XCTestCase {
         let (data, response) = try await mcpTestSession.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: data)["error"]?["code"], .number(-32700))
+        await server.stop()
+    }
+
+    func testRestartAfterStop() async throws {
+        let server = makeServer()
+        _ = try await server.start()
+        await server.stop()
+        let endpoint = try await server.start()
+        let (status, response) = try await mcpPost(endpoint, mcpRequest(1, "ping"))
+        XCTAssertEqual(status, 200)
+        XCTAssertNotNil(response?["result"])
+        await server.stop()
+    }
+
+    private func rawPeer(to endpoint: LoopbackMCPServer.Endpoint) throws -> NWConnection {
+        let port = try XCTUnwrap(endpoint.url.port.flatMap { NWEndpoint.Port(rawValue: UInt16($0)) })
+        let connection = NWConnection(to: .hostPort(host: "127.0.0.1", port: port), using: .tcp)
+        connection.start(queue: .global())
+        return connection
+    }
+
+    func testStalledConnectionIsCutByReadDeadline() async throws {
+        let server = LoopbackMCPServer(serverName: "test-mcp", readDeadline: 0.3,
+            tools: { [] }, onCall: { _, _ in .object([:]) })
+        let endpoint = try await server.start()
+        let peer = try rawPeer(to: endpoint)
+        try await Task.sleep(for: .seconds(1.0))
+        let stalled = await server.connectionCount
+        XCTAssertEqual(stalled, 0, "a peer that never sends must be reaped")
+        peer.cancel()
+        await server.stop()
+    }
+
+    func testConnectionMapIsBounded() async throws {
+        let server = LoopbackMCPServer(serverName: "test-mcp", readDeadline: 5, maxConnections: 2,
+            tools: { [] }, onCall: { _, _ in .object([:]) })
+        let endpoint = try await server.start()
+        var peers: [NWConnection] = []
+        for _ in 0..<5 { peers.append(try rawPeer(to: endpoint)) }
+        try await Task.sleep(for: .seconds(0.5))
+        let bounded = await server.connectionCount
+        XCTAssertLessThanOrEqual(bounded, 2)
+        peers.forEach { $0.cancel() }
         await server.stop()
     }
 }

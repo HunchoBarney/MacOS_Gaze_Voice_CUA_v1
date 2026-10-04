@@ -16,9 +16,12 @@ extension CuaConnection: DriverToolCalling {
 
 /// Per-(agent, turn) consent gate in front of the driver's MCP surface —
 /// Clicky's `ClickyComputerUseGate`. Observation calls pass through
-/// untouched; every `ConsentContract.inputTools` call is refused with a
+/// untouched; every `ConsentContract.requiresConsent` call is refused with a
 /// `blocked_by_consent` tool error until the app approves that turn's
 /// `ConsentRequest`. Approving one (agent, turn) never arms another.
+/// Integration mints a real turnID per voice task — a nil-turn approval is
+/// therefore one-shot (spent by the first forwarded input call) and a
+/// nil-turn denial expires after `nilTurnDenialTTL` so it may re-ask.
 ///
 /// `ConsentGating` is synchronous, so state lives behind a lock rather than
 /// actor isolation; the lock is never held across an `await`.
@@ -30,17 +33,29 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
 
     /// Label-ish arguments re-checked against the caller's deny list.
     private static let labelArguments = ["elementLabel", "label", "name"]
+    /// Cap on live asks — `requests` only holds pendings, but a flooding
+    /// caller can mint one per distinct (agent, turn) key.
+    private static let requestLimit = 128
 
     private let driver: any DriverToolCalling
+    private let nilTurnDenialTTL: TimeInterval
+    private let now: @Sendable () -> Date
     private let lock = NSLock()
     private var state = State()
 
-    init(driver: any DriverToolCalling) { self.driver = driver }
+    init(driver: any DriverToolCalling, nilTurnDenialTTL: TimeInterval = 60,
+         now: @escaping @Sendable () -> Date = { Date() }) {
+        self.driver = driver
+        self.nilTurnDenialTTL = nilTurnDenialTTL
+        self.now = now
+    }
 
     /// The coordinator reports the agent's live turn whenever Codex starts
-    /// one; consent arms (agent, turn) pairs, never a bare agent.
+    /// one; consent arms (agent, turn) pairs, never a bare agent. A turn
+    /// change evicts the agent's asks and decisions for every other turn —
+    /// dead-turn pendings must not poison `pending()` or the bare "yes" flow.
     func setActiveTurn(_ turnID: String?, agentSlug: String?) {
-        locked { $0.activeTurns[agentSlug] = turnID }
+        locked { $0.setActiveTurn(turnID, agentSlug: agentSlug) }
     }
 
     /// Per-caller label deny list — the coordinator copies `DriveTask.deny`
@@ -55,25 +70,33 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
     /// working with observation tools.
     func callTool(_ name: String, arguments: JSONValue, agentSlug: String?) async -> JSONValue {
         var args = arguments.object ?? [:]
-        if let scope = args["scope"]?.string, ConsentContract.refusedScopes.contains(scope) {
+        if ConsentContract.requestsDesktopScope(arguments) {
             return Self.refusal("scope_refused",
-                "refused: \(scope) scope moves the user's real pointer. Drive a window_id instead.")
+                "refused: desktop scope moves the user's real pointer. Drive a window_id instead.")
         }
-        if ConsentContract.inputTools.contains(name) {
+        if ConsentContract.requiresConsent(name) {
             if let hit = deniedLabel(in: args, agentSlug: agentSlug) {
                 return Self.refusal("denied_label", "refused: \"\(hit)\" is on this caller's deny list.")
             }
+            if let mode = args["delivery_mode"], mode != .null, mode != .string(ConsentContract.requiredDeliveryMode) {
+                return Self.refusal("delivery_mode_required",
+                    "refused: delivery_mode must be \"\(ConsentContract.requiredDeliveryMode)\" — input never steals focus.")
+            }
             do {
-                try assertPermitted(tool: name, agentSlug: agentSlug, turnID: activeTurn(agentSlug: agentSlug))
+                // Permit + consume in one lock: a nil-turn approval is spent
+                // the moment this call forwards, so one "yes" never arms a
+                // session and racing calls can't share a single approval.
+                try locked { state in
+                    let key = ConsentKey(agent: agentSlug, turn: state.activeTurns[agentSlug] ?? nil)
+                    try state.assertPermitted(tool: name, key: key,
+                        now: now(), nilTurnDenialTTL: nilTurnDenialTTL)
+                    if key.turn == nil { state.approved.remove(key) }
+                }
             } catch GateError.blockedByConsent(let summary) {
                 return Self.refusal("blocked_by_consent", summary)
             } catch {
                 return Self.refusal("blocked_by_consent",
                     "computer use input is off until the user allows this turn. Observation tools still work.")
-            }
-            if let mode = args["delivery_mode"], mode != .null, mode != .string(ConsentContract.requiredDeliveryMode) {
-                return Self.refusal("delivery_mode_required",
-                    "refused: delivery_mode must be \"\(ConsentContract.requiredDeliveryMode)\" — input never steals focus.")
             }
             args["delivery_mode"] = .string(ConsentContract.requiredDeliveryMode)
         }
@@ -98,37 +121,29 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
         locked { state in
             let key = ConsentKey(agent: request.agentSlug, turn: request.turnID)
             state.approved.insert(key)
-            state.denied.remove(key)
-            state.resolve(request, mark: .approved)
+            state.denied[key] = nil
+            state.asked.remove(key)
+            state.resolve(request)
         }
     }
 
     func deny(_ request: ConsentRequest) {
         locked { state in
             let key = ConsentKey(agent: request.agentSlug, turn: request.turnID)
-            state.denied.insert(key)
+            state.denied[key] = now()
             state.approved.remove(key)
-            state.resolve(request, mark: .denied)
+            state.asked.remove(key)
+            state.resolve(request)
         }
     }
 
-    /// Observation is always permitted. Input needs an approved (agent, turn);
-    /// the first refusal records the pending ask so a bare voice "yes" or a
-    /// consent card can resolve it.
+    /// Observation is always permitted. Anything `requiresConsent` gates needs
+    /// an approved (agent, turn); the first refusal records the pending ask so
+    /// a bare voice "yes" or a consent card can resolve it.
     func assertPermitted(tool: String, agentSlug: String?, turnID: String?) throws {
-        guard ConsentContract.inputTools.contains(tool) else { return }
         try locked { state in
-            let key = ConsentKey(agent: agentSlug, turn: turnID)
-            guard !state.approved.contains(key) else { return }
-            if !state.denied.contains(key), state.asked.insert(key).inserted {
-                let ask = ConsentRequest(agentSlug: agentSlug, turnID: turnID,
-                    summary: "\(agentSlug ?? "Jev") wants computer input for this turn.",
-                    reason: "\(tool) requires user approval before it can run.")
-                state.requests[ask.id] = ask
-            }
-            throw GateError.blockedByConsent(summary: state.denied.contains(key)
-                ? "computer use input was denied for this turn. Observation tools still work."
-                : "computer use input is off until the user allows this turn. Observation tools still work.")
+            try state.assertPermitted(tool: tool, key: ConsentKey(agent: agentSlug, turn: turnID),
+                now: now(), nilTurnDenialTTL: nilTurnDenialTTL)
         }
     }
 
@@ -164,10 +179,6 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
         }
     }
 
-    private func activeTurn(agentSlug: String?) -> String? {
-        locked { $0.activeTurns[agentSlug] ?? nil }
-    }
-
     private func locked<T>(_ body: (inout State) throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -195,20 +206,57 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
     private struct State {
         var requests: [String: ConsentRequest] = [:]
         var approved: Set<ConsentKey> = []
-        var denied: Set<ConsentKey> = []
+        var denied: [ConsentKey: Date] = [:]
         var asked: Set<ConsentKey> = []
         var activeTurns: [String?: String] = [:]
         var denyLists: [String?: [String]] = [:]
 
-        mutating func resolve(_ request: ConsentRequest, mark: ConsentRequest.State) {
-            var stored = request
-            stored.state = mark
-            requests[stored.id] = stored
-            for (id, existing) in requests where existing.state == .pending
-                && existing.agentSlug == request.agentSlug && existing.turnID == request.turnID {
-                var copy = existing
-                copy.state = mark
-                requests[id] = copy
+        mutating func setActiveTurn(_ turnID: String?, agentSlug: String?) {
+            guard activeTurns[agentSlug] != turnID else { return }
+            activeTurns[agentSlug] = turnID
+            requests = requests.filter { $0.value.agentSlug != agentSlug || $0.value.turnID == turnID }
+            approved = approved.filter { $0.agent != agentSlug || $0.turn == turnID }
+            asked = asked.filter { $0.agent != agentSlug || $0.turn == turnID }
+            denied = denied.filter { $0.key.agent != agentSlug || $0.key.turn == turnID }
+        }
+
+        mutating func assertPermitted(tool: String, key: ConsentKey, now: Date,
+                                      nilTurnDenialTTL: TimeInterval) throws {
+            guard ConsentContract.requiresConsent(tool) else { return }
+            if approved.contains(key) { return }
+            if let deniedAt = denied[key] {
+                if key.turn == nil, now.timeIntervalSince(deniedAt) >= nilTurnDenialTTL {
+                    denied[key] = nil
+                } else {
+                    throw GateError.blockedByConsent(summary:
+                        "computer use input was denied for this turn. Observation tools still work.")
+                }
+            }
+            if asked.insert(key).inserted {
+                let ask = ConsentRequest(agentSlug: key.agent, turnID: key.turn,
+                    summary: "\(key.agent ?? "Jev") wants computer input for this turn.",
+                    reason: "\(tool) requires user approval before it can run.")
+                requests[ask.id] = ask
+                pruneRequests()
+            }
+            throw GateError.blockedByConsent(summary:
+                "computer use input is off until the user allows this turn. Observation tools still work.")
+        }
+
+        /// Resolved asks leave `requests` entirely so `pending()` only ever
+        /// holds live asks and resolved history can't accumulate.
+        mutating func resolve(_ request: ConsentRequest) {
+            requests[request.id] = nil
+            for (id, existing) in requests
+                where existing.agentSlug == request.agentSlug && existing.turnID == request.turnID {
+                requests[id] = nil
+            }
+        }
+
+        private mutating func pruneRequests() {
+            guard requests.count > ComputerUseGate.requestLimit else { return }
+            for id in requests.keys.sorted().prefix(requests.count - ComputerUseGate.requestLimit) {
+                requests[id] = nil
             }
         }
     }

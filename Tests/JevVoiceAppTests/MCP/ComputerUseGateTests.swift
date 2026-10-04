@@ -102,6 +102,112 @@ final class ComputerUseGateTests: XCTestCase {
         XCTAssertTrue(gate.pending().isEmpty)
     }
 
+    func testNestedDesktopTargetRefused() async throws {
+        let (gate, driver) = fixture()
+        gate.setActiveTurn("t1", agentSlug: "a")
+        gate.approve(ConsentRequest(agentSlug: "a", turnID: "t1", summary: "allow", reason: "test"))
+        let nested = await gate.callTool("click",
+            arguments: .object(["target": .object(["kind": .string("desktop"), "x": .number(10), "y": .number(20)])]),
+            agentSlug: "a")
+        XCTAssertEqual(refusalCode(nested), "scope_refused")
+        let inArray = await gate.callTool("click",
+            arguments: .object(["targets": .array([
+                .object(["kind": .string("window"), "window_id": .number(9)]),
+                .object(["kind": .string("desktop")])
+            ])]), agentSlug: "a")
+        XCTAssertEqual(refusalCode(inArray), "scope_refused")
+        let deep = await gate.callTool("click",
+            arguments: .object(["target": .object(["kind": .string("element"),
+                "fallback": .object(["kind": .string("desktop")])])]), agentSlug: "a")
+        XCTAssertEqual(refusalCode(deep), "scope_refused")
+        let calls = await driver.calls
+        XCTAssertEqual(calls.count, 0)
+        XCTAssertTrue(gate.pending().isEmpty, "a refused scope must not record a consent ask")
+    }
+
+    func testUnknownAndMutatorToolsAreConsentGated() async throws {
+        let (gate, driver) = fixture()
+        gate.setActiveTurn("t1", agentSlug: "a")
+        for tool in ["kill_app", "move_cursor", "right_click", "clipboard_write",
+                     "bring_to_front", "browser_download", "page", "replay_trajectory",
+                     "install_helper", "set_config", "some_future_tool"] {
+            let refused = await gate.callTool(tool, arguments: .object([:]), agentSlug: "a")
+            XCTAssertEqual(refused["isError"], .bool(true), tool)
+            XCTAssertEqual(refusalCode(refused), "blocked_by_consent", tool)
+        }
+        var calls = await driver.calls
+        XCTAssertEqual(calls.count, 0)
+
+        gate.approve(ConsentRequest(agentSlug: "a", turnID: "t1", summary: "allow", reason: "test"))
+        let allowed = await gate.callTool("some_future_tool", arguments: .object([:]), agentSlug: "a")
+        XCTAssertNil(allowed["isError"])
+        calls = await driver.calls
+        XCTAssertEqual(calls.map(\.name), ["some_future_tool"])
+        XCTAssertEqual(calls[0].args["delivery_mode"], .string(ConsentContract.requiredDeliveryMode))
+    }
+
+    func testNilTurnApprovalIsOneShot() async throws {
+        let (gate, driver) = fixture()
+        gate.approve(ConsentRequest(agentSlug: "a", turnID: nil, summary: "allow", reason: "test"))
+        let first = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        XCTAssertNil(first["isError"])
+        let second = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        XCTAssertEqual(refusalCode(second), "blocked_by_consent")
+        var calls = await driver.calls
+        XCTAssertEqual(calls.count, 1, "one yes forwards exactly one input call")
+
+        // The consumed approval produced a fresh ask; approving it re-arms once.
+        let ask = try XCTUnwrap(gate.pending().first)
+        gate.approve(ask)
+        let third = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        XCTAssertNil(third["isError"])
+        calls = await driver.calls
+        XCTAssertEqual(calls.count, 2)
+    }
+
+    func testNilTurnDenialExpiresAndReAsks() async throws {
+        let clock = TestClock()
+        let driver = StubDriverToolCaller()
+        let gate = ComputerUseGate(driver: driver, nilTurnDenialTTL: 60, now: { clock.now })
+        _ = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        let ask = try XCTUnwrap(gate.pending().first)
+        gate.deny(ask)
+        let refused = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        XCTAssertEqual(refusalCode(refused), "blocked_by_consent")
+        XCTAssertTrue(gate.pending().isEmpty, "a fresh denial must not re-ask")
+
+        clock.advance(61)
+        _ = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        XCTAssertEqual(gate.pending().count, 1, "an expired nil-turn denial must re-ask")
+    }
+
+    func testTurnChangePrunesDeadAsksAndApprovals() async throws {
+        let (gate, driver) = fixture()
+        gate.setActiveTurn("t1", agentSlug: "a")
+        _ = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        XCTAssertEqual(gate.pending().count, 1)
+        gate.approve(ConsentRequest(agentSlug: "a", turnID: "t1", summary: "allow", reason: "test"))
+
+        gate.setActiveTurn("t2", agentSlug: "a")
+        XCTAssertTrue(gate.pending().isEmpty, "dead-turn asks must not poison pending()")
+
+        // Returning to the old turn does not resurrect its approval.
+        gate.setActiveTurn("t1", agentSlug: "a")
+        let refused = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
+        XCTAssertEqual(refusalCode(refused), "blocked_by_consent")
+        let calls = await driver.calls
+        XCTAssertEqual(calls.count, 0)
+    }
+
+    func testPendingAsksAreCapped() async throws {
+        let (gate, _) = fixture()
+        for index in 0..<140 {
+            gate.setActiveTurn("t-\(index)", agentSlug: "agent-\(index)")
+            _ = await gate.callTool("click", arguments: .object([:]), agentSlug: "agent-\(index)")
+        }
+        XCTAssertLessThanOrEqual(gate.pending().count, 128)
+    }
+
     func testForegroundDeliveryModeRefused() async throws {
         let (gate, driver) = fixture()
         gate.approve(ConsentRequest(agentSlug: "a", turnID: nil, summary: "allow", reason: "test"))
