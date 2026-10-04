@@ -15,12 +15,17 @@ private final class OverlayHostingView<Content: View>: NSHostingView<Content> {
 @MainActor
 final class VoiceWindows: NSObject, NSWindowDelegate {
     let navigation = SettingsNavigation()
+    /// Agents surface — coordinator binds store/runtime/gate via
+    /// `agents.bind(...)`; cursorLabels receives per-agent cursor positions.
+    let agents = AgentsViewModel()
+    let cursorLabels = AgentCursorLabels()
     private let controller: VoiceController
     private let microphones: MicrophoneCatalog
     private let input: FnInputMonitor
     private var panel: VoicePanel!
     private var overlay: OverlayHostingView<OverlayView>!
     private var settingsWindow: NSWindow?
+    private var agentsWindow: NSWindow?
     private var targetScreen: NSScreen?
     private var subscriptions: Set<AnyCancellable> = []
     private var refreshQueued = false
@@ -62,13 +67,32 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
             window.minSize = NSSize(width: 740, height: 520)
             window.contentView = NSHostingView(rootView: SettingsView(controller: controller, config: controller.config,
                 microphones: microphones, input: input, navigation: navigation,
-                collapse: { [weak self] in self?.settingsWindow?.close() }))
+                collapse: { [weak self] in self?.settingsWindow?.close() })
+                .environmentObject(agents)
+                .environment(\.openAgents) { [weak self] in self?.showAgents() })
             window.delegate = self
             window.center()
             settingsWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Roster + per-agent chat window. Lives outside SettingsNavigation —
+    /// its Section enum is owned by SettingsView.
+    func showAgents() {
+        if agentsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 560),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.title = "Agents"
+            window.isReleasedWhenClosed = false
+            window.minSize = NSSize(width: 720, height: 440)
+            window.contentView = NSHostingView(rootView: AgentsView(model: agents))
+            window.center()
+            agentsWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        agentsWindow?.makeKeyAndOrderFront(nil)
     }
 
     func windowWillClose(_ notification: Notification) { controller.stopMicrophoneTest() }

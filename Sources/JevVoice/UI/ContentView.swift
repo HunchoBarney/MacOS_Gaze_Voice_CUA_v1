@@ -141,6 +141,8 @@ struct CuaTasksView: View {
 
 struct ActivityView: View {
     @ObservedObject var controller: VoiceController
+    @EnvironmentObject private var agentsModel: AgentsViewModel
+    @Environment(\.openAgents) private var openAgents
     @State private var showDiagnostics = false
     @State private var commandText = ""
 
@@ -174,6 +176,31 @@ struct ActivityView: View {
                 }
             }
             CuaTasksView(controller: controller)
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("Agents", systemImage: "sparkles").font(.headline)
+                        Spacer()
+                        Button("Open agents", action: openAgents).controlSize(.small)
+                    }
+                    if agentsModel.agents.isEmpty {
+                        Text("No agents yet — ask Jev for a recurring job and a helper appears here.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(agentsModel.agents) { agent in
+                            HStack(spacing: 8) {
+                                Circle().fill(Color(agentHex: AgentCursor.palette(for: agent.slug)))
+                                    .frame(width: 7, height: 7)
+                                Text(agent.name).font(.callout)
+                                Text(agentsModel.chat(for: agent.slug).busy ? "Working…" : agent.role)
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .task { await agentsModel.refresh() }
+            }
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(controller.status.title, systemImage: controller.status.symbol).font(.headline)
