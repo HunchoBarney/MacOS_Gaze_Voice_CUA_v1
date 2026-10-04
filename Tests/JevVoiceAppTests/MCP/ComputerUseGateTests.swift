@@ -262,4 +262,56 @@ final class ComputerUseGateTests: XCTestCase {
         XCTAssertEqual(calls.first?.args["delivery_mode"], .string("background"))
         await server.stop()
     }
+
+    // MARK: Integration additions (assertPermittedNow + per-agent sessions)
+
+    /// jev-use's drive_until asserts through the gate's live-turn resolution —
+    /// the same key callTool builds internally, so one approval covers both
+    /// tool surfaces.
+    func testAssertPermittedNowUsesLiveTurn() async throws {
+        let (gate, _) = fixture()
+        gate.setActiveTurn("turn-9", agentSlug: "inbox")
+        XCTAssertThrowsError(try gate.assertPermittedNow(tool: "drive_until", agentSlug: "inbox"))
+        gate.approve(ConsentRequest(agentSlug: "inbox", turnID: "turn-9",
+                                    summary: "ask", reason: "test"))
+        XCTAssertNoThrow(try gate.assertPermittedNow(tool: "drive_until", agentSlug: "inbox"))
+        // Approval is (agent, turn)-scoped — a different turn re-blocks.
+        gate.setActiveTurn("turn-10", agentSlug: "inbox")
+        XCTAssertThrowsError(try gate.assertPermittedNow(tool: "drive_until", agentSlug: "inbox"))
+    }
+
+    /// A stale assertPermittedNow call can never arm another agent's turn.
+    func testAssertPermittedNowNeverCrossesAgents() async throws {
+        let (gate, _) = fixture()
+        gate.setActiveTurn("turn-1", agentSlug: "inbox")
+        gate.approve(ConsentRequest(agentSlug: "inbox", turnID: "turn-1",
+                                    summary: "ask", reason: "test"))
+        gate.setActiveTurn("turn-2", agentSlug: "research")
+        XCTAssertThrowsError(try gate.assertPermittedNow(tool: "drive_until", agentSlug: "research"))
+        XCTAssertNoThrow(try gate.assertPermittedNow(tool: "drive_until", agentSlug: "inbox"))
+    }
+
+    /// Agent calls carry a per-agent driver session — the badge + session
+    /// cursor the driver renders are this agent's visible identity.
+    func testAgentCallsInjectPerAgentSession() async throws {
+        let (gate, driver) = fixture()
+        _ = await gate.callTool("list_windows", arguments: .object([:]), agentSlug: "inbox-desk")
+        _ = await gate.callTool("list_windows", arguments: .object([:]), agentSlug: "research")
+        let calls = await driver.calls
+        XCTAssertEqual(calls[0].args["session"], .string("agent-inbox-desk"))
+        XCTAssertEqual(calls[1].args["session"], .string("agent-research"))
+    }
+
+    /// The companion's direct path (nil agent) never gains a session rewrite —
+    /// and a caller-supplied session is never clobbered.
+    func testSessionInjectionLeavesDirectAndExplicitCallsAlone() async throws {
+        let (gate, driver) = fixture()
+        _ = await gate.callTool("list_windows", arguments: .object([:]), agentSlug: nil)
+        _ = await gate.callTool("list_windows",
+                                arguments: .object(["session": .string("caller")]),
+                                agentSlug: "inbox")
+        let calls = await driver.calls
+        XCTAssertNil(calls[0].args["session"])
+        XCTAssertEqual(calls[1].args["session"], .string("caller"))
+    }
 }
