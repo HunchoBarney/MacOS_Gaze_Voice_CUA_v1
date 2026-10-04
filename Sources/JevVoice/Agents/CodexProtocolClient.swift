@@ -251,12 +251,16 @@ public actor CodexProtocolClient {
     }
 
     /// Env allowlist — a long-lived app-server child must not inherit host
-    /// secrets. Only launch essentials pass through; every injected var (API
-    /// env_key token, MCP bearer vars, CODEX_HOME) is carried explicitly.
+    /// secrets. Only launch essentials and network config (proxy/custom CA —
+    /// needed to reach the model API in managed environments) pass through;
+    /// every injected var (API env_key token, MCP bearer vars, CODEX_HOME) is
+    /// carried explicitly.
     static func filteredEnvironment(parent: [String: String],
                                     injected: [String: String]) -> [String: String] {
         let allowed: Set<String> = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR",
-                                    "USER", "SHELL", "__CF_USER_TEXT_ENCODING"]
+                                    "USER", "SHELL", "__CF_USER_TEXT_ENCODING",
+                                    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                                    "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS"]
         var environment: [String: String] = [:]
         for (key, value) in parent where allowed.contains(key) || key.hasPrefix("XDG_") {
             environment[key] = value

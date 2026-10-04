@@ -66,22 +66,25 @@ public enum AgentMarkers {
     /// close (stream cut mid-marker) is stripped through end of string.
     public static func strippingMarkers(_ text: String) -> String {
         var stripped = "", cursor = text.startIndex
-        let all = (markers(in: text, tag: "ROUTINE")
-            + markers(in: text, tag: "COMPUTER_USE_REQUEST"))
-            .sorted { $0.whole.lowerBound < $1.whole.lowerBound }
-        for marker in all {
-            stripped += text[cursor..<marker.whole.lowerBound]
-            cursor = marker.whole.upperBound
+        while cursor < text.endIndex {
+            // Earliest open tag of either kind wins; its span — including
+            // any nested tags — is consumed whole, so no range constructed
+            // here can ever index backwards into the string.
+            var open: Range<String.Index>?, tag = ""
+            for name in ["ROUTINE", "COMPUTER_USE_REQUEST"] {
+                if let range = text.range(of: "<\(name)>", range: cursor..<text.endIndex),
+                   open == nil || range.lowerBound < open!.lowerBound {
+                    open = range; tag = name
+                }
+            }
+            guard let open else { break }
+            stripped += text[cursor..<open.lowerBound]
+            guard let close = closeRange(in: text, tag: tag, after: open.upperBound) else {
+                return stripped.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            cursor = close.upperBound
         }
         stripped += text[cursor...]
-        var dangling: String.Index?
-        for tag in ["<ROUTINE>", "<COMPUTER_USE_REQUEST>"] {
-            if let range = stripped.range(of: tag),
-               dangling == nil || range.lowerBound < dangling! {
-                dangling = range.lowerBound
-            }
-        }
-        if let dangling { stripped = String(stripped[..<dangling]) }
         return stripped.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -89,22 +92,28 @@ public enum AgentMarkers {
     /// text; `whole` covers open tag through close tag.
     private static func markers(in text: String, tag: String)
         -> [(whole: Range<String.Index>, content: Range<String.Index>)] {
-        let open = "<\(tag)>", closes = ["</\(tag)>", "</>"]
+        let open = "<\(tag)>"
         var found: [(Range<String.Index>, Range<String.Index>)] = []
         var cursor = text.startIndex
-        while let openRange = text.range(of: open, range: cursor..<text.endIndex) {
-            var best: Range<String.Index>?
-            for close in closes {
-                if let r = text.range(of: close, range: openRange.upperBound..<text.endIndex),
-                   best == nil || r.lowerBound < best!.lowerBound {
-                    best = r
-                }
-            }
-            guard let close = best else { break }
+        while let openRange = text.range(of: open, range: cursor..<text.endIndex),
+              let close = closeRange(in: text, tag: tag, after: openRange.upperBound) {
             found.append((openRange.lowerBound..<close.upperBound,
                           openRange.upperBound..<close.lowerBound))
             cursor = close.upperBound
         }
         return found
+    }
+
+    /// The close tag for a marker opened at `index`: `</TAG>` wins over the
+    /// sloppy `</>` variant when both are present — the fork only emits `</>`
+    /// when the tag is the last thing in the message, so an earlier `</>` is
+    /// usually literal payload (e.g. inside a JSON string). Nil when the
+    /// marker was never closed.
+    private static func closeRange(in text: String, tag: String,
+                                   after index: String.Index) -> Range<String.Index>? {
+        if let tagged = text.range(of: "</\(tag)>", range: index..<text.endIndex) {
+            return tagged
+        }
+        return text.range(of: "</>", range: index..<text.endIndex)
     }
 }

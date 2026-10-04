@@ -214,6 +214,36 @@ final class AgentMarkersTests: XCTestCase {
         let text = "a <ROUTINE>{\"action\":\"pause\",\"routine_id\":\"r\"}</ROUTINE> b <COMPUTER_USE_REQUEST>leak"
         XCTAssertEqual(AgentMarkers.strippingMarkers(text), "a  b")
     }
+
+    /// Agent text is untrusted: nested or overlapping markers must strip
+    /// safely — merging two per-tag scans used to index backwards into the
+    /// string and trap (Range requires lowerBound <= upperBound).
+    func testStrippingNestedAndOverlappingMarkersNeverTraps() {
+        // The `</>` inside the JSON string is payload, not a close — the
+        // tagged close wins and the routine still decodes.
+        let nested = "<ROUTINE>{\"task\":\"<COMPUTER_USE_REQUEST>x</>\"}</ROUTINE>"
+        XCTAssertEqual(AgentMarkers.strippingMarkers("ok \(nested) done"), "ok  done")
+        XCTAssertEqual(AgentMarkers.routines(in: nested),
+                       [AgentMarkers.RoutineMarker(action: "create",
+                                                   task: "<COMPUTER_USE_REQUEST>x</>")])
+        // Cross-tag nesting — the inner marker is consumed as content.
+        XCTAssertEqual(AgentMarkers.strippingMarkers(
+            "a <COMPUTER_USE_REQUEST>please <ROUTINE>{\"action\":\"pause\"}</ROUTINE> now</COMPUTER_USE_REQUEST> b"),
+            "a  b")
+        // Same-tag nesting — the inner open is swallowed by the outer span.
+        XCTAssertEqual(AgentMarkers.strippingMarkers(
+            "a <ROUTINE>x<ROUTINE>y</ROUTINE>z</ROUTINE> b"), "a z</ROUTINE> b")
+        // Unclosed outer containing a complete inner — dangling cuts the tail.
+        XCTAssertEqual(AgentMarkers.strippingMarkers(
+            "pre <COMPUTER_USE_REQUEST>…<ROUTINE>{\"action\":\"pause\"}</ROUTINE>"), "pre")
+        // Unclosed inner — the outer's close still binds.
+        XCTAssertEqual(AgentMarkers.strippingMarkers(
+            "a <ROUTINE>x<COMPUTER_USE_REQUEST>y</ROUTINE> b"), "a  b")
+        // Adversarial ordering — stray close, complete marker, dangling tail.
+        XCTAssertEqual(AgentMarkers.strippingMarkers(
+            "</ROUTINE> stray <ROUTINE>ok</ROUTINE> tail <COMPUTER_USE_REQUEST>"),
+            "</ROUTINE> stray  tail")
+    }
 }
 
 final class AgentWorkspaceTests: XCTestCase {
@@ -367,6 +397,46 @@ final class RoutineSchedulerTests: XCTestCase {
         XCTAssertLessThanOrEqual(delta, 6)
         await scheduler.stopAll()
     }
+
+    /// Releasing the scheduler must invalidate attached timers — a ghost
+    /// repeater would keep calling `fire` after the actor is gone.
+    func testDeinitStopsAttachedTimers() async throws {
+        let counter = Counter()
+        var scheduler: RoutineScheduler? = RoutineScheduler { slug, routine in
+            await counter.bump("\(slug):\(routine.id)")
+        }
+        let routine = Routine(id: "r1", everyMinutes: 5, task: "sweep")
+        await scheduler?.schedule(key: "a\u{1F}r1", slug: "a", routine: routine,
+                                  interval: 0.05, fireNow: false)
+        // Let the main-runloop attach land and a couple of fires through.
+        try await Task.sleep(for: .milliseconds(200))
+        scheduler = nil
+        // Let deinit's invalidate bounce onto the main runloop.
+        try await Task.sleep(for: .milliseconds(200))
+        let settled = await counter.fired.count
+        try await Task.sleep(for: .milliseconds(250))
+        let later = await counter.fired.count
+        XCTAssertEqual(later, settled)
+    }
+
+    /// A release racing the main-runloop hop must not leak either: the hop
+    /// skips timer creation entirely when self is already gone.
+    func testReleaseBeforeTimerAttachLeavesNoGhost() async throws {
+        let counter = Counter()
+        do {
+            let scheduler = RoutineScheduler { slug, routine in
+                await counter.bump("\(slug):\(routine.id)")
+            }
+            let routine = Routine(id: "r1", everyMinutes: 5, task: "sweep")
+            await scheduler.schedule(key: "a\u{1F}r1", slug: "a", routine: routine,
+                                     interval: 0.05, fireNow: false)
+        }   // Released here — possibly before the main-queue hop ran.
+        try await Task.sleep(for: .milliseconds(300))
+        let settled = await counter.fired.count
+        try await Task.sleep(for: .milliseconds(250))
+        let later = await counter.fired.count
+        XCTAssertEqual(later, settled)
+    }
 }
 
 final class CodexRuntimeBridgeTests: XCTestCase {
@@ -410,6 +480,24 @@ final class CodexRuntimeBridgeTests: XCTestCase {
         for leaked in ["AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN"] {
             XCTAssertNil(env[leaked], leaked)
         }
+    }
+
+    /// Proxy/custom-CA vars are config, not secrets — the child needs them to
+    /// reach the model API in managed networks (corporate proxy, custom CA).
+    func testChildEnvironmentPassesProxyAndCAConfig() {
+        let env = CodexProtocolClient.filteredEnvironment(
+            parent: ["HTTPS_PROXY": "https://proxy:8443", "HTTP_PROXY": "http://proxy:8080",
+                     "ALL_PROXY": "socks5://proxy:1080", "NO_PROXY": "localhost,127.0.0.1",
+                     "SSL_CERT_FILE": "/etc/ssl/ca.pem", "NODE_EXTRA_CA_CERTS": "/corp/ca.pem",
+                     "AWS_SECRET_ACCESS_KEY": "leak"],
+            injected: [:])
+        XCTAssertEqual(env["HTTPS_PROXY"], "https://proxy:8443")
+        XCTAssertEqual(env["HTTP_PROXY"], "http://proxy:8080")
+        XCTAssertEqual(env["ALL_PROXY"], "socks5://proxy:1080")
+        XCTAssertEqual(env["NO_PROXY"], "localhost,127.0.0.1")
+        XCTAssertEqual(env["SSL_CERT_FILE"], "/etc/ssl/ca.pem")
+        XCTAssertEqual(env["NODE_EXTRA_CA_CERTS"], "/corp/ca.pem")
+        XCTAssertNil(env["AWS_SECRET_ACCESS_KEY"])
     }
 
     /// Executable python fixture standing in for `codex app-server` — one

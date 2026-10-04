@@ -56,6 +56,15 @@ public actor RoutineScheduler {
         for entryKey in Array(entries.keys) { unschedule(entryKey) }
     }
 
+    /// Timers live on the main runloop — bounce invalidation there so a
+    /// released scheduler leaves no repeater firing into the void.
+    deinit {
+        let timers = entries.values.compactMap(\.timer)
+        if !timers.isEmpty {
+            DispatchQueue.main.async { for timer in timers { timer.invalidate() } }
+        }
+    }
+
     /// Interval is a parameter so tests can run sub-second schedules.
     /// Rescheduling the same key invalidates the prior timer before the new
     /// entry is written — no orphaned repeaters survive a re-attach.
@@ -68,10 +77,15 @@ public actor RoutineScheduler {
         entries[entryKey] = Entry(routine: routine, timer: nil, token: token)
         let fire = self.fire
         DispatchQueue.main.async { [weak self] in
+            // Released before the hop landed: creating the timer anyway would
+            // leave an unattached repeater firing forever.
+            guard let self else { return }
             let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
                 Task { await fire(slug, routine) }
             }
-            Task { await self?.attach(entryKey, timer: timer, token: token) }
+            // The Task retains self until attach lands, so a pending attach
+            // can never race deinit.
+            Task { await self.attach(entryKey, timer: timer, token: token) }
         }
         if fireNow ?? firstRunImmediate {
             Task { await fire(slug, routine) }
