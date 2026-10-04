@@ -513,6 +513,15 @@ final class CuaAgentLoop {
             }
             if appName.isEmpty { appName = application }
         }
+        // Pid-only target: still resolve name/bundleID or every
+        // bundle-keyed lane (browser isolation) silently disables.
+        if task.application == nil, pid != nil, bundleID.isEmpty {
+            let apps = (try? await call("list_apps", [:]))?["apps"]?.array ?? []
+            if let match = apps.first(where: { $0["pid"]?.integer == pid }) {
+                appName = match["name"]?.string ?? ""
+                bundleID = match["bundle_id"]?.string ?? ""
+            }
+        }
         guard var resolvedPID = pid else {
             let target = task.application ?? "the target application"
             return finish(.blocked("\(target) is not running and could not be launched. Nothing was dispatched."))
@@ -627,7 +636,8 @@ final class CuaAgentLoop {
                     offer(.setValue(token: token, index: index),
                           "Set the value of \(role) \"\(label)\" to the supplied text", text: Self.elementText(element))
                 } else if Self.menuRoles.contains(role), frontmost,
-                          let path = Self.menuPath(for: index, in: elementByIndex) {
+                          let path = Self.menuPath(for: index, in: elementByIndex),
+                          path.allSatisfy({ !Self.isDenied($0, deny: task.deny) }) {
                     offer(.invokeMenu(path: path, index: index),
                           "Invoke the \"\(path.joined(separator: " → "))\" menu item", text: Self.elementText(element))
                 } else {
@@ -650,14 +660,22 @@ final class CuaAgentLoop {
                       "Pixel-click \"\(label)\" at its observed center", text: Self.elementText(element))
             }
             if !windowInputAmbiguous {
-                for key in Self.keyNames { offer(.pressKey(key), "Press \(key)") }
-                for chord in Self.hotkeyChords { offer(.hotkey(chord), "Press \(chord.joined(separator: "+"))") }
+                // Deny gates key names too — "delete" must not remain
+                // reachable via the keyboard when the button is denied.
+                for key in Self.keyNames where !Self.isDenied(key, deny: task.deny) {
+                    offer(.pressKey(key), "Press \(key)")
+                }
+                for chord in Self.hotkeyChords where !Self.isDenied(chord.joined(separator: "+"), deny: task.deny) {
+                    offer(.hotkey(chord), "Press \(chord.joined(separator: "+"))")
+                }
             }
-            for direction in ["up", "down", "left", "right"] { offer(.scroll(direction), "Scroll \(direction)") }
+            for direction in ["up", "down", "left", "right"] where !Self.isDenied(direction, deny: task.deny) {
+                offer(.scroll(direction), "Scroll \(direction)")
+            }
             if isBrowser {
-                if !windowInputAmbiguous { offer(.newTab, "Open a new browser tab") }
+                if !windowInputAmbiguous, !Self.isDenied("new tab", deny: task.deny) { offer(.newTab, "Open a new browser tab") }
                 let navURL = CuaActionCatalog.explicitBrowserNavigationURL(in: task.goal)
-                if let navURL { offer(.navigate(navURL), "Navigate the tab to \(navURL)") }
+                if let navURL, !Self.isDenied(navURL, deny: task.deny) { offer(.navigate(navURL), "Navigate the tab to \(navURL)") }
                 for ref in pageRefs.prefix(20) {
                     guard let refID = ref["ref"]?.string ?? ref["id"]?.string else { continue }
                     let label = ref["label"]?.string ?? ref["text"]?.string ?? ""
@@ -665,7 +683,7 @@ final class CuaAgentLoop {
                     offer(.browserClick(ref: refID), "Click page element \"\(label)\"", text: label)
                     offer(.browserType(ref: refID), "Type the supplied text into page field \"\(label)\"", text: label)
                 }
-                if browserTarget != nil {
+                if browserTarget != nil, !Self.isDenied("dialog", deny: task.deny) {
                     offer(.browserDialog(accept: true), "Accept the open JavaScript dialog on this page")
                     offer(.browserDialog(accept: false), "Dismiss the open JavaScript dialog on this page")
                 }
@@ -942,7 +960,9 @@ final class CuaAgentLoop {
     }
 
     /// Everything readable in this observation, for the success_contains
-    /// postcondition check on a done claim.
+    /// postcondition check on a done claim. Observed state only — recorded
+    /// postcondition evidence is our own synthesis and must not satisfy
+    /// success_contains (it feeds the model via verified_facts instead).
     private static func observedCorpus(elements: [JSONValue], title: String,
                                        tabs: [JSONValue], facts: [CuaObservedPostcondition]) -> String {
         var parts = [title]
@@ -956,7 +976,6 @@ final class CuaAgentLoop {
                 if let text = tab[key]?.string { parts.append(text) }
             }
         }
-        parts.append(contentsOf: facts.map { $0.evidence })
         return parts.joined(separator: "\n").lowercased()
     }
 

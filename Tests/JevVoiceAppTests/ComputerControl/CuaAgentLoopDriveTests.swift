@@ -50,6 +50,10 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             if name == "get_window_state" {
                 return snapshots.count > 1 ? snapshots.removeFirst() : (snapshots.first ?? .object([:]))
             }
+            // Observation calls are not dispatches — the pid-only target path
+            // consults list_apps to recover bundle identity.
+            if name == "list_apps" { return .object(["apps": .array([])]) }
+            if name == "list_windows" { return .object(["windows": .array([])]) }
             return try dispatch(name, args)
         }
         let judge: CuaTaskAgent.Judge = { _, questions in
