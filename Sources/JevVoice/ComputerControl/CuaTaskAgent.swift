@@ -80,17 +80,29 @@ final class CuaTaskAgent {
     /// exactly one known primitive against an unambiguous installed app, so
     /// the drive loop owns it. `appHint` is the model-supplied `app` argument —
     /// used only when the instruction itself names no app.
-    func resolveFastLane(goal: String, apps: [JSONValue], appHint: String? = nil) -> FastResolution? {
-        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        if let parsed = CuaFastAction.parse(goal),
-           let resolved = CuaFastAction.resolveApp(qualifier: parsed.appQualifier ?? appHint,
-                                                   action: parsed.action,
-                                                   apps: apps, frontmostBundle: frontmost),
-           !parsed.action.needsTabbableApp || CuaFastAction.tabbableBundles.contains(resolved.bundle),
-           parsed.action.selfApproves
-               || !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description) {
-            return FastResolution(action: parsed.action, openVerb: nil,
-                                  name: resolved.name, bundle: resolved.bundle)
+    /// `frontmostBundleOverride` carries the app frontmost before Jarvis's
+    /// own UI took key status — the live NSWorkspace read can name an
+    /// accessory overlay that should never own "frontmost" targeting.
+    func resolveFastLane(goal: String, apps: [JSONValue], appHint: String? = nil,
+                         frontmostBundleOverride: String? = nil) -> FastResolution? {
+        let frontmost = frontmostBundleOverride
+            ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        if let parsed = CuaFastAction.parse(goal) {
+            // A misheard model `app` arg must not sink an otherwise-valid
+            // command — it was never spoken, so resolve without it when the
+            // instruction itself names no app.
+            let qualifiers: [String?] = parsed.appQualifier != nil
+                ? [parsed.appQualifier] : [appHint, nil]
+            for qualifier in qualifiers {
+                guard let resolved = CuaFastAction.resolveApp(qualifier: qualifier,
+                                                            action: parsed.action,
+                                                            apps: apps, frontmostBundle: frontmost),
+                      !parsed.action.needsTabbableApp || CuaFastAction.tabbableBundles.contains(resolved.bundle) else { continue }
+                guard parsed.action.selfApproves
+                        || !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description) else { break }
+                return FastResolution(action: parsed.action, openVerb: nil,
+                                      name: resolved.name, bundle: resolved.bundle)
+            }
         }
         if let parsed = CuaFastAction.parseOpen(goal),
            let resolved = CuaFastAction.resolveOpenApp(query: parsed.query, apps: apps,
@@ -119,6 +131,7 @@ final class CuaTaskAgent {
             throw DriverConnectionError.refused("Multiple instances of this app are running. Specify the target before continuing.")
         }
         var pid = runningMatches.first?["pid"]?.integer ?? 0
+        var launchResult: JSONValue?
         if runningMatches.isEmpty {
             // App-control verbs target a running app — launching one just to
             // hide or quit it would invent work the user did not ask for.
@@ -130,6 +143,7 @@ final class CuaTaskAgent {
             let opened: JSONValue
             do {
                 opened = try await call("launch_app", ["bundle_id": .string(bundle)])
+                launchResult = opened
             } catch DriverConnectionError.timedOut {
                 try Task.checkCancellation()
                 let inspection: String
@@ -167,18 +181,36 @@ final class CuaTaskAgent {
         if resolved.openVerb != nil {
             // A bare "open X" ends deterministically: the process is observed
             // running and its window is verified in front — the same outcome
-            // the loop produces, minus the model calls.
-            if launchedPID != nil, windowID == nil {
+            // the loop produces, minus the model calls. `launch_app` already
+            // polled for the window — its returned `windows[]` spares a full
+            // re-list when the first window registered in time.
+            var launchWindows: [JSONValue] = []
+            if let opened = launchResult, let array = opened["windows"]?.array, !array.isEmpty {
+                launchWindows = array
+            }
+            if launchedPID != nil, windowID == nil, launchWindows.isEmpty {
                 // Bounded patience for a just-launched app's first window; a
                 // menu-bar app may never show one and "opened" stays honest.
                 _ = try? await waitForLaunchWindow(pid: pid)
             }
             // A transport fault is not "no windows" — propagate it rather
             // than skipping the verified-front contract on a dead driver.
-            let rows = try await listedWindowRows(pid: pid)
+            var rows = launchWindows.isEmpty
+                ? try await listedWindowRows(pid: pid)
+                : launchWindows
             if let pinned = windowID,
                !rows.contains(where: { $0["window_id"]?.integer == pinned }) {
                 throw DriverConnectionError.refused("The pinned target window closed. No other window was substituted.")
+            }
+            // A raise verb on a running-but-windowless app (every window
+            // closed, process alive): macOS reopens the default window on
+            // an AppleEvent. One reopen-and-poll before the honest refusal
+            // — otherwise we refuse a request the system could satisfy.
+            if rows.isEmpty, launchedPID == nil,
+               CuaFastAction.openRequiresRaise(goal: goal) {
+                _ = try? await call("launch_app", ["bundle_id": .string(bundle)])
+                _ = try? await waitForLaunchWindow(pid: pid)
+                rows = try await listedWindowRows(pid: pid)
             }
             if let wid = windowID ?? Self.bestWindowID(in: rows) {
                 // Every open verb ends at the same contract: the exact window

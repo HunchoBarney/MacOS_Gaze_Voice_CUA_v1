@@ -93,6 +93,12 @@ final class AgentRuntime: ObservableObject {
     private var activeTurns: [String: String] = [:]
     private var deltas: [String: String] = [:]
     private var eventTask: Task<Void, Never>?
+    /// One shared connect per transport lease — concurrent sends must not
+    /// race two driver spawns into the same connection.
+    private var connectTask: Task<Void, Error>?
+    /// Pending asks already announced — the diff that turns a gate-minted
+    /// ask into a spoken/pushed one exactly once.
+    private var knownPendingIDs: Set<String> = []
     /// Hook installation the first send must await — without it a fast
     /// caller could spawn codex before mcpServersFor exists and bake an
     /// empty tool surface into the agent's config.toml.
@@ -169,16 +175,18 @@ final class AgentRuntime: ObservableObject {
 
     // MARK: Turns
 
-    func send(_ text: String, to agent: CompanionAgent) async throws {
+    @discardableResult
+    func send(_ text: String, to agent: CompanionAgent) async throws -> String {
         await hooksTask?.value
         try await ensureEndpoints(for: agent)
-        try await bridge.send(to: agent, message: text)
+        let turnID = try await bridge.send(to: agent, message: text)
         // Persist the bound thread so a respawn RESUMES the agent's chat
         // instead of starting a fresh one — the agent's memory is its thread.
         if let threadID = try? await bridge.threadID(for: agent) {
             try? await store.recordThread(slug: agent.slug, threadID: threadID)
         }
         refreshPending()
+        return turnID
     }
 
     /// The agent's workspace + codex home exist before first spawn —
@@ -191,7 +199,22 @@ final class AgentRuntime: ObservableObject {
         // A dead transport also loses its session lease, so a reconnect must
         // mint a fresh label rather than reuse the tombstoned one.
         let reconnected = await !connection.connected
-        if reconnected { try await connection.connect() }
+        if reconnected {
+            // Concurrent sends (routine fire + delegation) must share one
+            // connect — two winners would spawn twin driver processes and
+            // corrupt the shared pending/frame state.
+            if let inFlight = connectTask { try await inFlight.value }
+            else {
+                let task = Task { try await connection.connect() }
+                connectTask = task
+                defer { connectTask = nil }
+                try await task.value
+            }
+            // Every label minted under the dead transport is tombstoned —
+            // not just this agent's. Flush them all so each agent re-mints
+            // (and re-runs start_session) on its next send.
+            sessionLabels.removeAll()
+        }
         if reconnected || sessionLabels[agent.slug] == nil {
             // The label must be unique per transport: when a proxy lease dies
             // the daemon tombstones its sessions permanently — a later
@@ -260,8 +283,14 @@ final class AgentRuntime: ObservableObject {
                                             summary: armed.summary, reason: armed.reason,
                                             state: .approved))
             }
-        case .turnCompleted:
+        case .turnCompleted(_, let turn):
             activeTurns[slug] = nil
+            // A turn can fail with the error ONLY in turn/completed — no
+            // preceding .error notification. Without this the user hears
+            // "on it" and then silence forever.
+            if turn.status == "failed" {
+                onAgentReply?(slug, "Error: " + (turn.errorMessage ?? "the agent's turn failed"))
+            }
             // A mid-turn consent refusal dies with its turn (setActiveTurn
             // evicts it) — but the user still needs the ask AFTER the agent
             // stops. Preserve it as a roster-level ask: resolving it arms
@@ -372,12 +401,21 @@ final class AgentRuntime: ObservableObject {
         let gateIDs = Set(merged.map(\.id))
         merged += markerAsks.filter { !gateIDs.contains($0.id) }
         pendingAsks = merged
+        // A gate-minted ask (mid-turn tool refusal) never raised onConsentAsk
+        // — it used to sit silent until the agent bothered to emit its
+        // marker, stalling the whole turn with no user signal. Any newly
+        // pending id announces once, whichever source minted it.
+        for ask in merged where !knownPendingIDs.contains(ask.id) {
+            onConsentAsk?(ask)
+        }
+        knownPendingIDs = Set(merged.map(\.id))
     }
 
-    /// Pending ask for the companion's bare-yes path — exactly one live ask
-    /// resolves; more than one needs an explicit card choice.
+    /// Pending ask for the companion's bare-yes path — the NEWEST live ask
+    /// resolves (a mid-turn gate ask plus its marker echo is one logical
+    /// ask; answering the newest resolves what the user was just asked).
     var solePendingAsk: ConsentRequest? {
-        pendingAsks.count == 1 ? pendingAsks[0] : nil
+        pendingAsks.last
     }
 
     // MARK: Cursor identity
@@ -389,10 +427,18 @@ final class AgentRuntime: ObservableObject {
 
     // MARK: Shutdown
 
-    func stopAll() {
+    /// Actually awaited on quit — fire-and-forget teardown used to reply
+    /// `terminate` while `codex app-server` children were still spawning,
+    /// leaving orphaned processes holding CODEX_HOME and loopback ports.
+    func stopAll() async {
         eventTask?.cancel()
-        Task { await bridge.stopAll() }
-        Task { await scheduler.stopAll() }
+        await bridge.stopAll()
+        await scheduler.stopAll()
+        for endpoint in endpoints.values {
+            await endpoint.cu.stop()
+            await endpoint.jev.stop()
+        }
+        endpoints.removeAll()
         registry.clear()
     }
 }

@@ -14,18 +14,28 @@ enum CuaDaemonControl {
     /// `browser_prepare` authorization refusal clears it so the next app run
     /// reconciles again (a daemon that dies mid-session relaunches grantless).
     private static let configuredKey = "cuaDaemonExistingProfileGrantConfigured"
-    private static var reconciled = false
+    /// Success is what latches — a reconcile that fails must retry on the
+    /// next call, not stay poisoned for the process lifetime. The Task also
+    /// single-flights concurrent callers (the check-then-set race would
+    /// double `stop` and double `open -a` the daemon).
+    private static var reconcileTask: Task<Bool, Never>?
 
     /// Reconciles once per process. Skips a restart only when the daemon is
     /// already listening AND this install previously verified it carries the
     /// grant — the driver exposes no grant query, so an unknown running daemon
     /// is restarted rather than guessed about.
     static func ensureExistingProfileGrant() async {
-        if reconciled { return }
-        reconciled = true
+        if let task = reconcileTask { _ = await task.value; return }
+        let task = Task { await reconcile() }
+        reconcileTask = task
+        let ok = await task.value
+        if !ok { reconcileTask = nil }
+    }
+
+    private static func reconcile() async -> Bool {
         let executable = CuaDependency.executable
         let listening = (try? await run(executable, ["status"], timeout: 3)) == true
-        if listening && UserDefaults.standard.bool(forKey: configuredKey) { return }
+        if listening && UserDefaults.standard.bool(forKey: configuredKey) { return true }
         if listening {
             // Unknown grant state; `serve` grants are immutable after launch.
             _ = try? await run(executable, ["stop"], timeout: 10)
@@ -38,14 +48,15 @@ enum CuaDaemonControl {
             .deletingLastPathComponent()  // .app
         guard (try? await run(URL(fileURLWithPath: "/usr/bin/open"),
                 ["-n", "-g", bundle.path, "--args", "serve", "--grant", "existing-profile"],
-                timeout: 10)) == true else { return }
+                timeout: 10)) == true else { return false }
         for _ in 0..<100 {
             if (try? await run(executable, ["status"], timeout: 2)) == true {
                 UserDefaults.standard.set(true, forKey: configuredKey)
-                return
+                return true
             }
             try? await Task.sleep(for: .milliseconds(100))
         }
+        return false
     }
 
     /// Called when `browser_prepare` reports the daemon was never granted.

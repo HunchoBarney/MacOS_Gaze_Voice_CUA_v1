@@ -267,14 +267,22 @@ struct CuaFastAction: Equatable {
     private static func parseAppControl(_ normalized: String) -> (action: CuaFastAction, appQualifier: String?)? {
         let verbs: [(String, AppVerb)] = [("hide", .hide), ("unhide", .unhide),
                                           ("minimize", .minimize), ("minimise", .minimize),
+                                          ("close", .quit), ("exit", .quit),
                                           ("quit", .quit)]
         for (verb, kind) in verbs {
             guard normalized.hasPrefix(verb + " ") else { continue }
             var rest = String(normalized.dropFirst(verb.count + 1))
             if rest.hasPrefix("the ") { rest = String(rest.dropFirst(4)) }
+            var hadWindowSuffix = false
             for suffix in ["'s windows", "'s window", " windows", " window", " app"] {
-                if rest.hasSuffix(suffix) { rest = String(rest.dropLast(suffix.count)); break }
+                if rest.hasSuffix(suffix) {
+                    hadWindowSuffix = suffix.contains("window")
+                    rest = String(rest.dropLast(suffix.count)); break
+                }
             }
+            // "close Spotify's window" means ⌘W, not ⌘Q — a window-suffixed
+            // close must not lane as an app quit.
+            if hadWindowSuffix, verb == "close" { continue }
             rest = rest.trimmingCharacters(in: .whitespaces)
             // "minimize window", "hide the app" and vague referents keep their
             // frontmost table meaning; only a resolvable app name may lane.
@@ -380,7 +388,9 @@ struct CuaFastAction: Equatable {
     }
 
     private static func isNegated(_ words: String) -> Bool {
-        words.range(of: #"\b(?:do not|don't|dont|never|without|stop|avoid|no new)\b"#, options: .regularExpression) != nil
+        // `normalize` maps apostrophes to spaces — "don't" arrives as
+        // "don t", so the un-apostrophed pairs must be listed too.
+        words.range(of: #"\b(?:do not|don't|dont|don t|won't|wont|won t|never|without|stop|avoid|no new)\b"#, options: .regularExpression) != nil
     }
 
     /// Peel a trailing "in/on/with/using <app>" qualifier. Only peels when the

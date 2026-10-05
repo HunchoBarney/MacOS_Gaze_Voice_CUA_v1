@@ -123,7 +123,18 @@ final class RealtimePlayer: @unchecked Sendable {
     private var scheduledMs = 0.0
     private var playedMs = 0.0
     private var currentItemID: String?
+    /// Scheduled total when the current item started — playedMs is
+    /// cumulative across items, so per-item progress is the delta from this.
+    private var itemStartScheduledMs = 0.0
+    /// Completion handlers of discarded buffers fire AFTER interrupt()
+    /// resets the counters — this epoch makes them inert instead of
+    /// re-inflating playedMs into an instant-false "drained" state.
+    private var generation: UInt64 = 0
+    /// Deltas still arriving for a cancelled response share the interrupted
+    /// item's id — dropping them stops dead speech reviving over a barge-in.
+    private var interruptedItemID: String?
     private var running = false
+    private var configObserver: NSObjectProtocol?
     /// Raised whenever the queue fully drains — used to settle a turn.
     var onPlaybackIdle: (@Sendable () -> Void)?
     /// True when nothing is scheduled or everything scheduled already played —
@@ -140,6 +151,14 @@ final class RealtimePlayer: @unchecked Sendable {
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: format)
         engine.prepare()
+        // An output device that vanishes (DAC pulled, AirPods dropped) kills
+        // the render — without this, running stays true, every later enqueue
+        // lands on a dead node, and the drain counter never moves.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            self?.queue.async { self?.running = false }
+        }
     }
 
     func ensureRunning() {
@@ -156,22 +175,36 @@ final class RealtimePlayer: @unchecked Sendable {
     }
 
     func enqueue(_ pcm: Data, itemID: String) {
+        // An odd-length delta would copy one byte past the int16 buffer —
+        // untrusted wire input gets a hard bound, not a heap write.
+        guard pcm.count.isMultiple(of: 2), !pcm.isEmpty else { return }
         queue.async { [weak self] in
             guard let self else { return }
+            self.lock.lock()
+            if self.interruptedItemID == itemID { self.lock.unlock(); return }
+            if self.currentItemID != itemID {
+                self.interruptedItemID = nil
+                self.currentItemID = itemID
+                self.itemStartScheduledMs = self.scheduledMs
+            }
+            let gen = self.generation
+            self.lock.unlock()
             self.ensureRunningLocked()
-            if self.currentItemID != itemID { self.currentItemID = itemID }
             let frames = AVAudioFrameCount(pcm.count / MemoryLayout<Int16>.size)
             guard let buffer = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: frames),
                   let dst = buffer.int16ChannelData?[0] else { return }
             buffer.frameLength = frames
-            dst.withMemoryRebound(to: UInt8.self, capacity: pcm.count) {
-                pcm.copyBytes(to: $0, count: pcm.count)
+            dst.withMemoryRebound(to: UInt8.self, capacity: Int(frames) * MemoryLayout<Int16>.size) {
+                pcm.copyBytes(to: $0, count: Int(frames) * MemoryLayout<Int16>.size)
             }
             let ms = Double(frames) / 24.0
             self.lock.lock(); self.scheduledMs += ms; self.lock.unlock()
             self.player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                 guard let self else { return }
                 self.lock.lock()
+                // A buffer discarded by interrupt() still fires this handler
+                // after the counters reset — the epoch keeps it inert.
+                guard self.generation == gen else { self.lock.unlock(); return }
                 self.playedMs += ms
                 let drained = self.playedMs >= self.scheduledMs - 0.5
                 self.lock.unlock()
@@ -181,7 +214,9 @@ final class RealtimePlayer: @unchecked Sendable {
     }
 
     private func ensureRunningLocked() {
-        guard !running else { return }
+        // `running` is our cache — the engine's own state is the truth, so a
+        // config change or a device loss still gets a real restart attempt.
+        guard !running || !engine.isRunning else { return }
         do {
             try engine.start()
             player.play()
@@ -192,9 +227,11 @@ final class RealtimePlayer: @unchecked Sendable {
     }
 
     /// How much of the current item actually played — the truncation point.
+    /// playedMs is cumulative, so per-item progress is the delta since the
+    /// item started.
     func playedMilliseconds() -> Int {
         lock.lock(); defer { lock.unlock() }
-        return max(0, Int(playedMs.rounded(.down)))
+        return max(0, Int((playedMs - itemStartScheduledMs).rounded(.down)))
     }
 
     /// Stop playback and drop everything queued — the local half of barge-in.
@@ -203,8 +240,11 @@ final class RealtimePlayer: @unchecked Sendable {
     func interrupt() -> (itemID: String?, playedMs: Int) {
         lock.lock()
         let item = currentItemID
-        let played = max(0, Int(playedMs.rounded(.down)))
-        scheduledMs = 0; playedMs = 0; currentItemID = nil
+        let played = max(0, Int((playedMs - itemStartScheduledMs).rounded(.down)))
+        scheduledMs = 0; playedMs = 0; itemStartScheduledMs = 0
+        currentItemID = nil
+        if let item { interruptedItemID = item }
+        generation += 1
         lock.unlock()
         queue.async { [weak self] in
             guard let self else { return }

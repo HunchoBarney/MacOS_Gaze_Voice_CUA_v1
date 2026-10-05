@@ -704,7 +704,7 @@ final class AgentRuntimeLiveTests: XCTestCase {
         let agent = try await runtime.foundAgent(name: "Live Check", role: "verifier",
                                                  description: "one-shot live turn proof")
         defer {
-            runtime.stopAll()
+            Task { await runtime.stopAll() }
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: agent.workspacePath))
             try? FileManager.default.removeItem(at: root)
         }
@@ -788,7 +788,7 @@ final class AgentRuntimeLiveTests: XCTestCase {
         let agent = try await runtime.foundAgent(name: "Gate Check", role: "verifier",
                                                  description: "live MCP + consent proof")
         defer {
-            runtime.stopAll()
+            Task { await runtime.stopAll() }
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: agent.workspacePath))
             try? FileManager.default.removeItem(at: root)
         }

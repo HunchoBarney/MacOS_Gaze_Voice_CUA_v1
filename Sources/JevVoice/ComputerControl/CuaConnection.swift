@@ -42,6 +42,14 @@ actor CuaConnection {
     private var nextID = 0
     private var generation = UUID()
     private var initialized = false
+    /// Check/set must happen before connect() first suspends — without it a
+    /// second connect spawns a second daemon, overwrites `process`, and the
+    /// first caller's teardown kills the live transport.
+    private var connectInFlight = false
+    /// A wedged daemon can hold the socket open and never answer — two
+    /// consecutive request timeouts mark the transport dead rather than
+    /// letting every later call burn a full timeout forever.
+    private var consecutiveTimeouts = 0
     private(set) var serverVersion: String?
     /// A connection that completed `initialize` and whose proxy process is
     /// still alive. Lets the runtime reuse one transport across tasks.
@@ -50,6 +58,10 @@ actor CuaConnection {
     init(executable: URL = CuaDependency.executable,
          arguments: [String] = ["mcp"],
          onToolCall: (@Sendable (String, Int?) -> Void)? = nil) {
+        // A write to a just-dead proxy raises SIGPIPE, whose default
+        // disposition kills the process — ignore it once so EPIPE surfaces
+        // as a thrown error instead of an app crash.
+        signal(SIGPIPE, SIG_IGN)
         self.executable = executable
         self.arguments = arguments
         self.onToolCall = onToolCall
@@ -64,7 +76,14 @@ actor CuaConnection {
     }
 
     func connect() async throws {
-        guard process == nil else { throw DriverConnectionError.remote("Cua connection already started.") }
+        // Set before the first suspension — the daemon-spawn and grant
+        // awaits below are seconds long, and a second connect entering that
+        // window would spawn a duplicate and clobber this one's transport.
+        guard process == nil, !connectInFlight else {
+            throw DriverConnectionError.remote("Cua connection already started.")
+        }
+        connectInFlight = true
+        defer { connectInFlight = false }
         var launchArguments = arguments
         if let bundled = CuaDependency.bundledExecutable, executable == bundled {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
@@ -113,7 +132,7 @@ actor CuaConnection {
                   ["2024-11-05", "2025-03-26", "2025-06-18"].contains(version),
                   result["capabilities"]?["tools"]?.object != nil else { throw DriverConnectionError.malformed }
             serverVersion = result["serverInfo"]?["version"]?.string
-            try write(.object(["jsonrpc": .string("2.0"), "method": .string("notifications/initialized")]))
+            try await write(.object(["jsonrpc": .string("2.0"), "method": .string("notifications/initialized")]))
             initialized = true
         } catch {
             disconnect(error)
@@ -175,13 +194,26 @@ actor CuaConnection {
         while true {
             attempts -= 1
             do {
-                return try await callResultOnce(name, arguments: arguments, timeout: timeout)
-            } catch let error as DriverConnectionError where attempts > 0 && Self.transientReadFault(error) {
+                let result = try await callResultOnce(name, arguments: arguments, timeout: timeout)
+                consecutiveTimeouts = 0
+                return result
+            } catch let error as DriverConnectionError {
+                if case .timedOut = error { noteTimeout() }
+                guard attempts > 0, Self.transientReadFault(error) else { throw error }
                 // A daemon waking alongside the machine stalls in steps —
                 // bounded backoff covers seconds of it, never a mutation.
                 try? await Task.sleep(for: backoff)
                 backoff = min(backoff * 2, .seconds(2))
             }
+        }
+    }
+
+    /// Two consecutive timeouts is a dead transport, not a slow one — tear it
+    /// down so callers get `.closed` and the runtime replaces it wholesale.
+    private func noteTimeout() {
+        consecutiveTimeouts += 1
+        if consecutiveTimeouts >= 2 {
+            disconnect(DriverConnectionError.closed)
         }
     }
 
@@ -294,25 +326,36 @@ actor CuaConnection {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 pending[id] = continuation
-                do {
-                    try write(.object(["jsonrpc": .string("2.0"), "id": .number(Double(id)),
-                                       "method": .string(method), "params": params]))
-                    deadlines[id] = Task { [weak self] in
-                        do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
-                        await self?.cancel(id, error: DriverConnectionError.timedOut)
-                    }
-                } catch { complete(id, result: .failure(error)) }
+                // The deadline arms BEFORE the write — a write that never
+                // returns (full pipe, wedged daemon) must still let the
+                // timeout fire the request's owner.
+                deadlines[id] = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
+                    await self?.cancel(id, error: DriverConnectionError.timedOut)
+                }
+                Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.write(.object(["jsonrpc": .string("2.0"), "id": .number(Double(id)),
+                                           "method": .string(method), "params": params]))
+                    } catch { await self.complete(id, result: .failure(error)) }
+                }
             }
         } onCancel: {
             Task { await self.cancel(id, error: CancellationError()) }
         }
     }
 
-    private func write(_ message: JSONValue) throws {
+    /// FileHandle.write is a blocking syscall — on the actor executor a full
+    /// pipe would wedge every request, deadline, and disconnect behind it.
+    /// Writes are already serialized by the actor (each request writes before
+    /// its continuation suspends), so moving the block off-actor preserves
+    /// order while the timeout machinery stays reachable.
+    private func write(_ message: JSONValue) async throws {
         guard let input else { throw DriverConnectionError.closed }
         var data = try JSONEncoder().encode(message)
         data.append(10)
-        try input.write(contentsOf: data)
+        try await Task.detached { try input.write(contentsOf: data) }.value
     }
 
     private func receive(_ bytes: Data, token: UUID) {
@@ -322,8 +365,10 @@ actor CuaConnection {
                 // This client advertises no server-request capabilities.
                 if message["method"] != nil {
                     if let id = message["id"] {
-                        try write(.object(["jsonrpc": .string("2.0"), "id": id,
-                            "error": .object(["code": .number(-32601), "message": .string("Method not supported")])]))
+                        Task { [weak self] in
+                            try? await self?.write(.object(["jsonrpc": .string("2.0"), "id": id,
+                                "error": .object(["code": .number(-32601), "message": .string("Method not supported")])]))
+                        }
                     }
                     continue
                 }
@@ -339,8 +384,12 @@ actor CuaConnection {
 
     private func cancel(_ id: Int, error: Error) {
         guard pending[id] != nil else { return }
-        try? write(.object(["jsonrpc": .string("2.0"), "method": .string("notifications/cancelled"),
-                           "params": .object(["requestId": .number(Double(id)), "reason": .string("Cancelled")])]))
+        // The stdio proxy drops notifications — this documents intent only;
+        // the daemon still runs the dispatched action to completion.
+        Task { [weak self] in
+            try? await self?.write(.object(["jsonrpc": .string("2.0"), "method": .string("notifications/cancelled"),
+                                "params": .object(["requestId": .number(Double(id)), "reason": .string("Cancelled")])]))
+        }
         complete(id, result: .failure(error))
         // Cancellation is not evidence that an already-dispatched GUI effect stopped.
         // Task owner must end its Driver session and reobserve any uncertain action.

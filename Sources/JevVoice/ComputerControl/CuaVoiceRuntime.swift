@@ -50,6 +50,10 @@ final class CuaVoiceRuntime {
         var elapsedMs: Double = 0
         var timings: [String: Double] = [:]
         var active = true
+        /// The attempt parked on a dialogue question — its [question] push is
+        /// the live ask, so settle must not contradict it with a "blocked"
+        /// outcome or show the task as failed.
+        var questionParked = false
         var approval: String?
         var approvalContinuation: CheckedContinuation<Bool, Never>?
         var phase: Phase = .queued
@@ -111,7 +115,10 @@ final class CuaVoiceRuntime {
     var agentBridge: (any AgentBridging)?
     /// Test seam: scripted scenarios stub deterministic fast-lane resolution.
     /// Production leaves this nil and uses CuaTaskAgent.resolveFastLane.
-    private let fastLaneResolver: (@MainActor (String, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)?
+    /// (goal, appHint, frontmostBundleOverride, apps) — the override is the
+    /// app frontmost before Jarvis's own UI took key status; an accessory app
+    /// frontmost mid-turn must not steal "frontmost" targeting.
+    private let fastLaneResolver: (@MainActor (String, String?, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)?
     /// Front-app check handed to each drive loop — real NSWorkspace in
     /// production; simulated drivers pretend their fixture app is frontmost.
     private let isFrontmostApp: ((Int) -> Bool)?
@@ -155,7 +162,7 @@ final class CuaVoiceRuntime {
     init(config: Config, makeConnection: @escaping () -> CuaConnection = { CuaConnection() },
          judge: CuaTaskAgent.Judge? = nil, dialogue: CuaDialogueState = CuaDialogueState(),
          agentBridge: (any AgentBridging)? = nil,
-         fastLaneResolver: (@MainActor (String, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = nil,
+         fastLaneResolver: (@MainActor (String, String?, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = nil,
          screenLocked: @escaping () -> Bool = { CuaVoiceRuntime.consoleScreenLocked },
          isFrontmostApp: ((Int) -> Bool)? = nil) {
         self.config = config
@@ -183,7 +190,11 @@ final class CuaVoiceRuntime {
     static func wantsForeground(_ utterance: String) -> Bool {
         let text = utterance.lowercased()
         guard !text.contains("background") else { return false }
-        return ["open", "launch", "show", "bring", "switch to", "start"].contains(where: text.contains)
+        // Whole-word match — "reopen the doc" or "startup disk" must not be
+        // read as an open/start foreground request.
+        return text.range(
+            of: #"\b(?:open|launch|show|bring|switch to|start)\b"#,
+            options: .regularExpression) != nil
     }
 
     var active: Bool { tasks.contains(where: \.active) }
@@ -212,9 +223,22 @@ final class CuaVoiceRuntime {
     /// later as a pushed `[task outcome]` message. No waiters, no timers.
     func beginVoiceTask(_ instruction: String, app: String?,
                         frontmostHint: String? = nil, literalText: String? = nil,
+                        transcriptHint: String? = nil,
                         captureID: UUID = UUID()) async -> String {
-        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "No instruction was provided." }
+        // The realtime model sometimes emits the same call twice — an
+        // identical instruction still live (running or parked on an ask)
+        // must not run a second time.
+        let key = trimmed.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }.joined(separator: " ").lowercased()
+        if let dupe = tasks.last(where: {
+            $0.request.components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }.joined(separator: " ").lowercased() == key
+                && ($0.active || $0.questionParked || $0.approvalContinuation != nil)
+        }) {
+            return "That request is already running — \"\(dupe.request)\". A [task outcome] message arrives when it finishes."
+        }
         feed.add(.heard, trimmed)
         let invocation = Invocation(receivedAt: ProcessInfo.processInfo.systemUptime)
         nextLabel += 1
@@ -223,9 +247,33 @@ final class CuaVoiceRuntime {
         var resolution: CuaTaskAgent.FastResolution?
         do {
             apps = try await appList(invocation: invocation)
-            resolution = (fastLaneResolver ?? { goal, hint, list in
-                CuaTaskAgent(call: { _, _ in .object([:]) }).resolveFastLane(goal: goal, apps: list, appHint: hint)
-            })(trimmed, app, apps)
+            // The tool args can diverge from the model's own transcript of
+            // the user's words — when both parse as "open X" naming DIFFERENT
+            // installed apps, what the user said is ground truth.
+            if let heard = transcriptHint?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !heard.isEmpty, heard.lowercased() != trimmed.lowercased(),
+               let heardOpen = CuaFastAction.parseOpen(heard),
+               let calledOpen = CuaFastAction.parseOpen(trimmed),
+               heardOpen.query.lowercased() != calledOpen.query.lowercased(),
+               let heardApp = CuaFastAction.resolveOpenApp(query: heardOpen.query,
+                                                         apps: apps, frontmostBundle: nil),
+               let calledApp = CuaFastAction.resolveOpenApp(query: calledOpen.query,
+                                                          apps: apps, frontmostBundle: nil),
+               heardApp.bundle != calledApp.bundle {
+                Self.log.notice("voice_transcript_divergence heard=\"\(heard, privacy: .public)\" called=\"\(trimmed, privacy: .public)\"")
+                trimmed = heard
+            }
+            // The controller captured who was frontmost before our own UI —
+            // resolve that name to a bundle so an accessory app being
+            // frontmost can't steal generic-command targeting.
+            let frontmostBundle = frontmostHint.flatMap { hint in
+                (apps.first { $0["name"]?.string?.localizedCaseInsensitiveCompare(hint) == .orderedSame })?["bundle_id"]?.string
+            }
+            resolution = (fastLaneResolver ?? { goal, hint, frontmost, list in
+                CuaTaskAgent(call: { _, _ in .object([:]) })
+                    .resolveFastLane(goal: goal, apps: list, appHint: hint,
+                                     frontmostBundleOverride: frontmost)
+            })(trimmed, app, frontmostBundle, apps)
         } catch {
             Self.log.notice("fast_lane_app_list_failed error=\(error.localizedDescription, privacy: .public)")
             feed.add(.error, "The computer-use driver isn't reachable — the task will retry it directly.")
@@ -291,8 +339,10 @@ final class CuaVoiceRuntime {
                                    target: intentTarget(for: kind, source: source, apps: apps)))
         } catch {
             work.active = false
-            work.outcome = .failed(reason: "The request could not be accepted.")
-            work.message = "The request could not be accepted."
+            // The real refusal (e.g. unresolved-capacity) reaches the model —
+            // "could not be accepted" tells it nothing to correct.
+            work.outcome = .failed(reason: error.localizedDescription)
+            work.message = error.localizedDescription
             intentSpecs.removeValue(forKey: intentID)
             selectedID = previousSelection
             noteChange()
@@ -321,8 +371,32 @@ final class CuaVoiceRuntime {
             return verdict ? "Approved — the action is running." : "Denied — the action was not run."
         }
         guard let pending = dialogue.pendingClarification else { return nil }
+        // A denial word is a cancel, not an answer — "never mind"/"stop it"
+        // must withdraw the ask, not resume the task with "never mind"
+        // merged into its spec.
+        if let denied = Self.questionDenied(trimmed), denied {
+            if let work = tasks.last(where: { $0.intentID == pending.entry.intent.id }) {
+                cancel(work.id)
+            } else {
+                try? dialogue.cancel(intentID: pending.entry.intent.id, reason: "Cancelled by the user.")
+            }
+            return "Cancelled — nothing further runs."
+        }
         return await resumeAnsweredQuestion(owner: pending.entry, question: pending.question,
                                             answer: trimmed, captureID: captureID)
+    }
+
+    /// Cancel-shaped utterances that should withdraw a parked question
+    /// rather than resume it. "no" alone is deliberately absent — a yes/no
+    /// clarification needs it as a legitimate answer.
+    static func questionDenied(_ text: String) -> Bool? {
+        let normalized = text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        let cancels = ["never mind", "cancel", "cancel that", "stop", "stop it",
+                       "forget it", "forget that", "abort", "don't", "do not",
+                       "leave it", "skip it", "no thanks", "nah"]
+        return cancels.contains(normalized) || normalized.hasPrefix("don't ")
     }
 
     /// A spoken answer resumes the question's owner intent in place — same
@@ -379,9 +453,16 @@ final class CuaVoiceRuntime {
     }
 
     /// `cancel_task` — a hint matches by request text, label or app; bare
-    /// "cancel that" stops the newest running work.
+    /// "cancel that" stops the newest running work. A question-parked work
+    /// reads as inactive but is still cancellable — without it "cancel that"
+    /// says "nothing is running" while an ask sits live.
     func cancelVoiceTask(_ hint: String?) -> String {
-        let live = tasks.filter(\.active)
+        let live = tasks.filter {
+            $0.active || (dialogue.entry(for: $0.intentID).map {
+                if case .awaitingAnswer = $0.status { return true }
+                return false
+            } ?? false)
+        }
         guard !live.isEmpty else { return "Nothing is running." }
         let trimmed = (hint ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if trimmed.isEmpty || trimmed == "all" || trimmed == "everything" {
@@ -605,9 +686,11 @@ final class CuaVoiceRuntime {
         if let spec = intentSpecs[target.intent.id] {
             kind = .execute(spec)
         } else if let apps = try? await appList(invocation: invocation),
-                  let resolved = (fastLaneResolver ?? { goal, hint, list in
-                      CuaTaskAgent(call: { _, _ in .object([:]) }).resolveFastLane(goal: goal, apps: list, appHint: hint)
-                  })(target.intent.instruction, nil, apps) {
+                  let resolved = (fastLaneResolver ?? { goal, hint, frontmost, list in
+                      CuaTaskAgent(call: { _, _ in .object([:]) })
+                          .resolveFastLane(goal: goal, apps: list, appHint: hint,
+                                           frontmostBundleOverride: frontmost)
+                  })(target.intent.instruction, nil, nil, apps) {
             kind = .fastLane(resolved, goal: target.intent.instruction)
         } else {
             kind = .execute(TaskSpec(goal: target.intent.instruction,
@@ -631,11 +714,30 @@ final class CuaVoiceRuntime {
 
     private var appListCache: (fetched: TimeInterval, apps: [JSONValue])?
     private func appList(invocation: Invocation) async throws -> [JSONValue] {
-        if let cached = appListCache,
-           ProcessInfo.processInfo.systemUptime - cached.fetched < 15 {
-            return cached.apps
+        let now = ProcessInfo.processInfo.systemUptime
+        if let cached = appListCache {
+            let age = now - cached.fetched
+            if age < 15 { return cached.apps }
+            if age < 45 {
+                // Stale-while-revalidate: routing needs only names — the fresh
+                // read lands for the next turn rather than stalling this one
+                // on a ~2s list_apps roundtrip. Dispatch authority always
+                // comes from the loop's own fresh reads.
+                Task { [weak self] in
+                    guard let self,
+                          let result = try? await self.makeToolCall(
+                              invocation: Invocation(receivedAt: now),
+                              useInstalledAppCache: false)("list_apps", [:]),
+                          let apps = result["apps"]?.array else { return }
+                    self.appListCache = (ProcessInfo.processInfo.systemUptime, apps)
+                }
+                return cached.apps
+            }
         }
-        let result = try await makeToolCall(invocation: invocation)("list_apps", [:])
+        // Bypass the 60s inventory cache — the running/pid hints drive
+        // fast-lane candidacy and must reflect this read's own freshness.
+        let result = try await makeToolCall(invocation: invocation,
+                                            useInstalledAppCache: false)("list_apps", [:])
         let apps = result["apps"]?.array ?? []
         appListCache = (ProcessInfo.processInfo.systemUptime, apps)
         return apps
@@ -749,11 +851,11 @@ final class CuaVoiceRuntime {
     /// serialized bootstrap so neither can orphan a transport or run calls on
     /// a session that was never started.
     private func sessionTransport() async throws -> CuaConnection {
-        if let inFlight = sessionStartTask {
-            _ = try await inFlight.value
-            if let connection = sessionConnection, await connection.connected { return connection }
-        }
-        if let connection = sessionConnection, await connection.connected { return connection }
+        // Check-and-set is atomic here: every state check (including the
+        // connected re-check) happens INSIDE the task, so two callers racing
+        // a reconnect-after-death both join one bootstrap instead of
+        // duplicating daemons or tombstoning each other's sessions.
+        if let inFlight = sessionStartTask { return try await inFlight.value }
         let task = Task { () throws -> CuaConnection in
             if let connection = self.sessionConnection, await connection.connected { return connection }
             let connection = self.makeConnection()
@@ -997,24 +1099,42 @@ final class CuaVoiceRuntime {
     /// honest dialogue outcomes. `.needsText` re-opens the intent with a
     /// question the next utterance answers through the normal decision path.
     /// Recover the verbatim query from a "search for X" / "look up X" /
-    /// "find X" goal. A trailing " in <app>" naming the spec's application is
-    /// stripped; any other tail is left alone — an over-long query still
-    /// lands the right search, a truncated one never would.
+    /// "find X" / "play X" goal. Matches run on the ORIGINAL string with word
+    /// boundaries — "display" never trips "play", and indices stay valid for
+    /// any casing. The LAST marker wins ("use the search bar and play X"
+    /// captures X), falling back to earlier markers when the last yields a
+    /// stopword ("play X and search for it" still lands X). Meta-tails cut
+    /// at " then " / " and <verb>" / " please" — a plain " and " survives so
+    /// "Simon and Garfunkel" keeps its name. A trailing " in <app>" naming
+    /// the spec's application is stripped.
     static func impliedQuery(in goal: String, app: String?) -> String? {
-        let lower = goal.lowercased()
-        for marker in ["search for ", "searching for ", "search ",
-                       "look up ", "looking up ", "lookup ", "google ", "find ",
-                       "play ", "queue ", "listen to ", "watch ", "put on "] {
-            guard let range = lower.range(of: marker) else { continue }
+        let pattern = #"\b(search for|searching for|search|look up|looking up|lookup|google|find|play|queue|listen to|watch|put on)\s+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let matches = regex.matches(in: goal, range: NSRange(goal.startIndex..., in: goal))
+        // Last-to-first: the most recent marker owns the payload; a marker
+        // whose tail is pure meta-language defers to the one before it.
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: goal) else { continue }
+            let marker = String(goal[range]).lowercased()
             var query = String(goal[range.upperBound...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if marker == "search ", query.lowercased().hasPrefix("for ") {
+            // Cut meta-command tails — "play X then close the app" queries
+            // only X; " and " cuts only when a meta-verb follows so titles
+            // like "Simon and Garfunkel" stay whole.
+            let tailPattern = #"( then\b| and then\b| and (search|find|play|queue|listen|watch|google|look up|open|close|press|click|type|hit|enter|go|send|select|choose|pick)\b| and after\b| afterwards\b| after that\b| next\b|, then\b|,\s| please\b|\.\s)"#
+            if let tailRegex = try? NSRegularExpression(pattern: tailPattern, options: [.caseInsensitive]),
+               let cut = tailRegex.firstMatch(in: query, range: NSRange(query.startIndex..., in: query)),
+               let cutRange = Range(cut.range, in: query) {
+                query = String(query[..<cutRange.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if marker.hasPrefix("search"), query.lowercased().hasPrefix("for ") {
                 query = String(query.dropFirst(4))
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
             if let app, !app.isEmpty {
                 let tail = " " + app.lowercased()
-                for preposition in [" in", " on", " within", " inside"] {
+                for preposition in [" in", " on", " within", " inside", " using"] {
                     let suffix = preposition + tail
                     if query.lowercased().hasSuffix(suffix) {
                         query = String(query.dropLast(suffix.count))
@@ -1023,10 +1143,12 @@ final class CuaVoiceRuntime {
                     }
                 }
             }
+            let lowered = query.lowercased()
             guard !query.isEmpty,
                   !["for", "in", "on", "at", "the", "it", "that", "this", "them",
-                    "pause", "resume", "stop", "music", "the video"].contains(query.lowercased())
-            else { return nil }
+                    "pause", "resume", "stop", "music", "the video", "the track",
+                    "the result", "the song", "that song", "the one"].contains(lowered)
+            else { continue }
             return query
         }
         return nil
@@ -1134,6 +1256,7 @@ final class CuaVoiceRuntime {
             } catch {
                 work.message = "The task was revised while a question was open."
             }
+            work.questionParked = true
             work.active = false
             noteChange()
             return .blocked(reason: work.message)
@@ -1247,6 +1370,14 @@ final class CuaVoiceRuntime {
     /// Finish the dialogue attempt, or resolve a never-begun intent so blocked
     /// and cancelled utterances cannot accumulate against unresolved capacity.
     private func settle(work: Work, outcome: CuaDialogueState.Outcome) {
+        if work.questionParked {
+            // The [question] push already told the model the task waits —
+            // a "blocked" outcome now would contradict a live ask and read
+            // as failure while the question still expects an answer.
+            work.outcome = outcome
+            noteChange()
+            return
+        }
         if work.attemptBegan {
             do {
                 try dialogue.finish(attemptID: work.attemptID, intentID: work.intentID, outcome: outcome)

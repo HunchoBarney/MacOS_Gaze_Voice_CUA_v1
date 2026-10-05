@@ -92,7 +92,7 @@ for line in sys.stdin:
     private func makeRuntime(script: URL,
                              judge: @escaping CuaTaskAgent.Judge,
                              calls: CallLog? = nil,
-                             fastLaneResolver: (@MainActor (String, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = { _, _, _ in nil }) -> CuaVoiceRuntime {
+                             fastLaneResolver: (@MainActor (String, String?, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = { _, _, _, _ in nil }) -> CuaVoiceRuntime {
         let config = Config(defaults: UserDefaults(suiteName: "test.cua.spawn.\(UUID())")!,
                             keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: [:])
         return CuaVoiceRuntime(config: config,

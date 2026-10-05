@@ -9,15 +9,23 @@ protocol AgentRosterProviding: Sendable {
 
 extension AgentStore: AgentRosterProviding {}
 
-/// Runtime seam — `CodexRuntimeBridge` satisfies it as-is. Events arrive on
-/// `events` tagged per agent; send/interrupt forward a user action.
+/// Runtime seam — `AgentRuntime` satisfies it. `events` is deliberately NOT
+/// here: the bridge stream is single-consumer, owned by `AgentRuntime.start`,
+/// and fanned out to this model through `onAgentEvent` — a second iterator
+/// would steal half the events (replies, consent asks, turn states).
 protocol AgentRuntimeHandling: Sendable {
-    var events: AsyncStream<AgentCodexEvent> { get }
     @discardableResult func send(to agent: CompanionAgent, message: String) async throws -> String
     func interrupt(slug: String) async throws
 }
 
-extension CodexRuntimeBridge: AgentRuntimeHandling {}
+extension AgentRuntime: AgentRuntimeHandling {
+    @discardableResult func send(to agent: CompanionAgent, message: String) async throws -> String {
+        try await send(message, to: agent)
+    }
+    func interrupt(slug: String) async throws {
+        try await bridge.interrupt(slug: slug)
+    }
+}
 
 /// Consent seam — a subset of `ConsentGating` (`ComputerUseGate` conforms
 /// with no extra members). The coordinator binds the real gate; until then
@@ -171,7 +179,6 @@ final class AgentsViewModel: ObservableObject {
     private var roster: any AgentRosterProviding
     private var runtime: (any AgentRuntimeHandling)?
     private var consent: (any ConsentCoordinating)?
-    private var eventTask: Task<Void, Never>?
     private static let resolvedConsentLimit = 12
 
     /// Defaults to the persisted roster so the UI shows real agents before
@@ -183,12 +190,11 @@ final class AgentsViewModel: ObservableObject {
         self.roster = roster ?? AgentStore(directory: AgentWorkspace.root())
         self.runtime = runtime
         self.consent = consent
-        if let runtime { consume(runtime) }
     }
 
     /// Coordinator entry point — rebinds the live store/gate after the
-    /// shared instances exist; the runtime can only be bound once (its event
-    /// stream is single-consumer).
+    /// shared instances exist. Events reach `handle` through the runtime's
+    /// `onAgentEvent` fan-out, never a second stream consumer.
     func bind(roster: (any AgentRosterProviding)? = nil,
               runtime: (any AgentRuntimeHandling)? = nil,
               consent: (any ConsentCoordinating)? = nil) {
@@ -196,16 +202,6 @@ final class AgentsViewModel: ObservableObject {
         if let consent { self.consent = consent }
         if let runtime, self.runtime == nil {
             self.runtime = runtime
-            consume(runtime)
-        }
-    }
-
-    private func consume(_ runtime: any AgentRuntimeHandling) {
-        eventTask?.cancel()
-        eventTask = Task { [weak self] in
-            for await event in runtime.events {
-                self?.handle(event)
-            }
         }
     }
 

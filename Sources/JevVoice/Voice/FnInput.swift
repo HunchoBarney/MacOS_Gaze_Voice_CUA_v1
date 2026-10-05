@@ -29,6 +29,9 @@ struct FnInputState {
 
     mutating func reconcilePressedKeys(_ keys: Set<UInt16>) { pressedKeys = keys }
 
+    /// `held` deliberately survives: an interruption while the key is still
+    /// down must not let the same physical hold re-arm a capture. The health
+    /// check synthesizes the release when the tap misses it.
     mutating func interrupt() { armed = false; dictating = false; latched = false }
 
     mutating func handle(_ kind: Kind, key: UInt16, fn: Bool, otherModifiers: Bool = false,

@@ -325,7 +325,8 @@ final class VoiceController: ObservableObject {
         }
     }
     var operationActive: Bool {
-        if cua.active { return true }
+        // Gates the Escape consume — a background task must not eat the key
+        // in other apps; only a presented interaction owns it.
         switch status { case .idle, .done, .error: return false; default: return true }
     }
     var captureActive: Bool { status == .starting || status == .listening || status == .finishing || status == .awaitingRelease || status == .testingMicrophone }
@@ -366,7 +367,8 @@ final class VoiceController: ObservableObject {
                 return await self.cua.beginVoiceTask(
                     instruction, app: app,
                     frontmostHint: self.commandFrontmostApp ?? self.lastExternalApp,
-                    literalText: literalText, captureID: captureID)
+                    literalText: literalText,
+                    transcriptHint: self.transcript, captureID: captureID)
             }
             lane.taskResponseHandler = { [weak self] answer, captureID in
                 guard let self else { return "Nothing is waiting for an answer." }
@@ -452,6 +454,14 @@ final class VoiceController: ObservableObject {
         microphoneEnabled = false
         microphoneReady = false; microphoneReadiness = reason
         if captureActive { interruptCapture(reason) }
+        else {
+            // A live turn dies with the socket — teardown emits no events,
+            // so without failing here the card spins "Working…" forever.
+            switch status {
+            case .thinking, .executing, .awaitingAnswer: fail(reason)
+            default: break
+            }
+        }
         speech.cancel()
         let prior = microphoneTask
         prior?.cancel()
@@ -633,14 +643,14 @@ final class VoiceController: ObservableObject {
         startup?.cancel()
         startupTask = nil
         if startup == nil { status = terminalStatus; return }
-        status = .stopping
-        detail = "Finishing cleanup…"
+        // The cancelled startup's own checkpoints make it inert — the card
+        // returns to its terminal state immediately instead of waiting out
+        // an in-flight socket connect, and Fn stays responsive.
         cleanupTask = Task { [weak self] in
             await startup?.value
-            guard let self else { return }
-            self.cleanupTask = nil
-            self.status = terminalStatus
+            self?.cleanupTask = nil
         }
+        status = terminalStatus
     }
 
     func shutdown() async {
@@ -719,9 +729,29 @@ final class VoiceController: ObservableObject {
             let reply = replyDraft.isEmpty ? detail : replyDraft
             replyDraft = ""
             guard status != .idle, status != .done else { return }
+            // A parked question or approval still needs the card — the
+            // STARTED fast-path ends turns while work is live, and an ask
+            // that lands after dismissal would be unreachable.
+            if interactionQuestion != nil || pendingTaskApproval != nil { return }
             // The reply already played through the lane's speaker — complete
             // without re-speaking it via the TTS seam.
             complete(reply.isEmpty ? "Done." : reply, session: id, voiced: false)
+            return
+        case .heardFinal(let text):
+            // The model already heard the audio — this transcript is display
+            // only; the function call carries the instruction into the
+            // runtime. The completion can arrive AFTER the reply starts
+            // streaming (status already .executing) — record it regardless,
+            // or the user's own words never show on the card.
+            transcript = text
+            trace("capture_final")
+            deadlineTask?.cancel(); durationTask?.cancel()
+            switch status {
+            case .starting, .listening, .finishing, .testingMicrophone:
+                status = .executing
+                if replyDraft.isEmpty { detail = "Working…" }
+            default: break
+            }
             return
         case .failure(let message):
             // Lane failures can arrive mid-turn (.executing) — only an already
@@ -746,18 +776,8 @@ final class VoiceController: ObservableObject {
         let accepting = status == .starting || status == .listening || status == .finishing || status == .testingMicrophone
         guard accepting else { return }
         switch event {
-        case .failure, .assistantDelta, .assistant, .turnEnded:
+        case .failure, .assistantDelta, .assistant, .turnEnded, .heardFinal:
             break // handled above — these outlive the capture window
-        case .heardFinal(let text):
-            // The model already heard the audio — this transcript is display
-            // only; the function call carries the instruction into the
-            // runtime. Dictation never reaches here — its commit was
-            // transcript-only and arrives as `.final`, which delivers.
-            transcript = text
-            trace("capture_final")
-            deadlineTask?.cancel(); durationTask?.cancel()
-            status = .executing
-            detail = "Working…"
         case .timing(let name, let milliseconds):
             guard milliseconds.isFinite, milliseconds >= 0 else { return }
             measurements[name] = milliseconds
@@ -897,9 +917,13 @@ final class VoiceController: ObservableObject {
         // unrelated task state must not complete it early.
         guard !dictating else { return }
         // Only the interaction-driven presentation states are re-projected here.
-        // Capture-owned and rest states keep whatever they already present.
+        // Capture-owned and rest states keep whatever they already present —
+        // EXCEPT a parked question or approval, which resurfaces a done/idle
+        // card that the STARTED fast-path already dismissed.
         switch status {
         case .thinking, .executing, .awaitingAnswer: break
+        case .idle, .done:
+            guard interactionQuestion != nil || pendingTaskApproval != nil else { return }
         default: return
         }
         // Only this session's dialogue decides the interaction's presentation.
@@ -927,7 +951,8 @@ final class VoiceController: ObservableObject {
         }
         // The lane's reply stream owns the display once a turn is committed —
         // work settling between turns updates the task list, not this card.
-        if !interactionWorks.isEmpty, status == .executing {
+        // Task progress must not stomp a reply that's mid-stream.
+        if !interactionWorks.isEmpty, status == .executing, replyDraft.isEmpty {
             detail = interactionMessage
         }
     }

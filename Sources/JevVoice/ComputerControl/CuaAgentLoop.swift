@@ -152,6 +152,30 @@ final class CuaAgentLoop {
             }
         }
 
+        /// Lanes whose effect can plausibly mint a window — a key press,
+        /// scroll or type never produces one, so polling list_windows after
+        /// them is ~0.8s + 3 RTTs of pure per-step latency.
+        var mayProduceWindow: Bool {
+            switch self {
+            case .clickElement, .invokeMenu, .newTab, .navigate,
+                 .pixelClick, .browserClick, .launchApp:
+                return true
+            case .hotkey(let keys):
+                let set = Set(keys.map { $0.lowercased() })
+                return set.contains("cmd") && !set.isDisjoint(with: ["n", "t", "o"])
+            default:
+                return false
+            }
+        }
+
+        /// A submit keypress — replayed verbatim it can skip past results.
+        var isSubmitKey: Bool {
+            if case .pressKey(let key) = self {
+                return ["return", "enter"].contains(key.lowercased())
+            }
+            return false
+        }
+
         /// Lanes that put caller-supplied text into a field.
         var needsFillText: Bool {
             switch self {
@@ -220,6 +244,58 @@ final class CuaAgentLoop {
         } catch {
             return nil
         }
+    }
+
+    /// The target window (or app) is gone — `window_id_not_found` and kin.
+    /// This is the success signature of a close/quit goal, not a fault.
+    func vanishedWindowOutcome(pid: Int, goal: String, appName: String,
+                               ledger: inout [String],
+                               windowID: inout Int?) async throws -> DriveResult? {
+        let closeGoal = goal.range(of: #"\b(close|quit|exit|shut)\b"#,
+                                   options: [.regularExpression, .caseInsensitive]) != nil
+        let apps: [JSONValue]
+        do {
+            apps = (try await call("list_apps", [:]))["apps"]?.array ?? []
+        } catch {
+            // A failed liveness read is not evidence of a quit — only a
+            // successful observation may prove the app is gone. Transport
+            // faults propagate; other failures report honestly.
+            return finish(.blocked("Could not verify whether \(appName) is still running. Inspect the app before assuming the close landed."))
+        }
+        let alive = apps.contains {
+            $0["pid"]?.integer == pid && $0["running"] != .bool(false)
+        }
+        if !alive {
+            if closeGoal {
+                ledger.append("\(appName) is no longer running — the close request is satisfied.")
+                recordPostcondition(.resultObserved, "Observed \(appName) no longer running.",
+                                    appName: appName, bundleID: bundleID, processID: pid)
+                return finish(.done)
+            }
+            return finish(.blocked("\(appName) quit while the task was in progress. The remaining steps did not run."))
+        }
+        let windowsValue = try await listWindows(pid: pid)
+        guard let rows = windowsValue?["windows"]?.array else {
+            // The window list itself was unreadable — not proof of no windows.
+            return finish(.blocked("Could not verify \(appName)'s remaining windows. Inspect the app before assuming the close landed."))
+        }
+        if rows.isEmpty {
+            if closeGoal {
+                ledger.append("\(appName) has no windows left — the close request is satisfied.")
+                recordPostcondition(.resultObserved, "Observed \(appName) with no remaining windows.",
+                                    appName: appName, bundleID: bundleID, processID: pid)
+                return finish(.done)
+            }
+            return finish(.blocked("The \(appName) window the task was driving closed before the request finished."))
+        }
+        // The driven window is gone but the app lives — re-pin to a remaining
+        // window and keep driving (close-tab flows land here legitimately).
+        if let newID = Self.preferredWindow(in: rows) {
+            ledger.append("target window closed — continuing in \(appName)'s remaining window")
+            windowID = newID
+            return nil
+        }
+        return finish(.blocked("The \(appName) window the task was driving closed before the request finished."))
     }
 
         // ── Target: a caller pid, a running app matched by name/bundle, or a
@@ -408,6 +484,15 @@ final class CuaAgentLoop {
 
         var newTabRequested = false
         var dispatchFailures = 0
+        /// Driver-reported partial/uncertain outcomes — each arms one
+        /// re-observe pass; a second consecutive one blocks honestly.
+        var uncertainOutcomes = 0
+        /// Identical fill/submit repeats are effects replayed, never intent —
+        /// tracked so a second run of the same payload can't double-type.
+        var lastDispatchKey: String?
+        /// Transient empty AX reads right after a mutation — one bounded
+        /// re-read before the noInteractiveElements handback.
+        var emptyReads = 0
         /// Lanes that failed at dispatch — the fallback rung (an AX value
         /// overwrite after faithful typing failed) is only offered for
         /// these; two equivalent fill lanes split judge confidence below
@@ -444,9 +529,24 @@ final class CuaAgentLoop {
             // ── Observe: window elements (+ browser page when bound). The
             // screenshot rides along only while pixel lanes need the image
             // coordinate space it defines.
-            let snapshot = try await call("get_window_state", [
-                "pid": .number(Double(resolvedPID)), "window_id": .number(Double(wid)),
-                "include_screenshot": .bool(!pixelArmed.isEmpty), "max_elements": .number(200)])
+            let snapshot: JSONValue
+            do {
+                snapshot = try await call("get_window_state", [
+                    "pid": .number(Double(resolvedPID)), "window_id": .number(Double(wid)),
+                    "include_screenshot": .bool(!pixelArmed.isEmpty), "max_elements": .number(200)])
+            } catch let error as DriverConnectionError {
+                // A vanished window is not a transport failure. For a
+                // close/quit goal it IS the done evidence; for anything
+                // else it's a honest blocked, or a re-pin when other
+                // windows of the app remain.
+                guard Self.windowVanished(error) else { throw error }
+                if let outcome = try await vanishedWindowOutcome(
+                    pid: resolvedPID, goal: task.goal, appName: appName,
+                    ledger: &ledger, windowID: &windowID) {
+                    return outcome
+                }
+                continue
+            }
             let elements = snapshot["elements"]?.array ?? []
             let windowTitle = snapshot["window"]?["title"]?.string
                 ?? snapshot["title"]?.string ?? snapshot["window_title"]?.string ?? ""
@@ -645,8 +745,18 @@ final class CuaAgentLoop {
             // payload the judge still sees done/stuck/keyboard lanes, so an
             // empty window can honestly satisfy or honestly block the goal.
             if interactive == 0 && pageRefs.isEmpty && !task.values.isEmpty {
+                // A mutation (typed text, pressed Return) can blank the AX
+                // tree for a beat while the app re-renders — Spotify after
+                // a search submit is exactly this. One bounded re-read
+                // before honestly handing back.
+                if !modelHistory.isEmpty, emptyReads == 0 {
+                    emptyReads = 1
+                    try? await Task.sleep(for: .milliseconds(400))
+                    continue
+                }
                 return finish(.handedBack(.noInteractiveElements))
             }
+            if interactive > 0 { emptyReads = 0 }
 
             // ── Single-action bypass: exactly one offered action lane (the
             // done/stuck sentinels don't count) makes the model pick
@@ -735,7 +845,15 @@ final class CuaAgentLoop {
                 answers = synthesizedPick
                 nextID = actionLanes.keys.first!
             } else {
-                answers = try await judge(.object(mergedState), questions)
+                do {
+                    answers = try await judge(.object(mergedState), questions)
+                } catch {
+                    // One bounded retry — the judge call is the most
+                    // failure-prone hop in the loop; a blip must not kill
+                    // an otherwise healthy run.
+                    try? await Task.sleep(for: .milliseconds(300))
+                    answers = try await judge(.object(mergedState), questions)
+                }
                 do {
                     nextID = try JevSelection.read(answers["next"], allowed: Set(criteria.keys))
                 } catch {
@@ -875,6 +993,17 @@ final class CuaAgentLoop {
                     continue
                 }
             }
+            // A fill or submit replayed verbatim is never intent — typing
+            // the same text twice appends it, Return pressed twice can skip
+            // past the result. Re-observe instead of re-dispatching.
+            let dispatchKey = lane.id + "|" + (dispatchText ?? "")
+            if lastDispatchKey == dispatchKey,
+               lane.needsFillText || lane.isSubmitKey {
+                modelHistory.append(.object(["action": .string(description),
+                    "observation": .string("The identical action already ran — its effect is in this observation. Do not repeat it.")]))
+                ledger.append("\(description) — skipped: identical to the previous step")
+                continue
+            }
             let result: JSONValue
             do {
                 Self.log.notice("agent_step \"\(task.goal, privacy: .public)\" -> \(description, privacy: .public)")
@@ -923,7 +1052,18 @@ final class CuaAgentLoop {
                 }
                 continue
             } catch let outcome as CuaUncertainOutcome {
-                return finish(.blocked("\(outcome.localizedDescription) Inspect \(appName) before retrying."))
+                // "Partial" is an observation, not a verdict — the typed
+                // text may have landed. Re-observe once (with the insert
+                // proof armed) before honestly blocking; never replay.
+                if lane.needsFillText { pendingInsertProof = (lane.elementIndex, dispatchText ?? "") }
+                uncertainOutcomes += 1
+                modelHistory.append(.object(["action": .string(description),
+                    "observation": .string("The driver reported an uncertain outcome — the effect may have landed. Verify against the fresh observation before repeating it.")]))
+                ledger.append("\(description) — uncertain outcome; verifying before retry")
+                guard uncertainOutcomes < 2 else {
+                    return finish(.blocked("\(outcome.localizedDescription) Inspect \(appName) before retrying."))
+                }
+                continue
             }
             // An acknowledged cancellation stops the drive here — reads
             // after this point would only decorate a dead run, and any
@@ -937,6 +1077,8 @@ final class CuaAgentLoop {
             }
             if case .typeIntoWindow = lane { pendingInsertProof = (nil, dispatchText ?? "") }
             if case .browserType = lane { pendingInsertProof = (nil, dispatchText ?? "") }
+            lastDispatchKey = dispatchKey
+            uncertainOutcomes = 0
             let outcome = Self.effectSummary(result)
             modelHistory.append(.object(["action": .string(description),
                                          "observation": .string(outcome)]))
@@ -949,7 +1091,7 @@ final class CuaAgentLoop {
             // dispatch — the window server needs a beat to publish the new
             // document — so settle and re-list once when the first snapshot
             // shows nothing new.
-            if laneMutates(lane), !lane.needsFillText, baselineWindowIDs.contains(wid),
+            if lane.mayProduceWindow, !lane.needsFillText, baselineWindowIDs.contains(wid),
                let newID = await producedWindowID(pid: resolvedPID, excluding: baselineWindowIDs) {
                 windowID = newID
                 currentWindowID = newID
@@ -991,6 +1133,29 @@ final class CuaAgentLoop {
     }
 
     // MARK: - Drive-until helpers
+
+    /// Driver codes that mean the window/app we were driving no longer
+    /// exists — checked by code first (typed refusals), then the remote
+    /// string for transports that only carry text.
+    nonisolated static func windowVanished(_ error: DriverConnectionError) -> Bool {
+        // The driver names the family (`window_id_not_found`,
+        // `window_target_not_found`, `bring_to_front_pid_not_found`,
+        // `app_not_running`, `px_window_not_found`…) — match the family,
+        // not an exact-name list that ages out with every new tool.
+        func vanished(_ text: String) -> Bool {
+            let lowered = text.lowercased()
+            return lowered.contains("not_found") || lowered.contains("not_running")
+                || lowered.contains("invalid_window")
+        }
+        switch error {
+        case .toolRefused(_, let code, _):
+            return vanished(code)
+        case .remote(let text), .refused(let text):
+            return vanished(text)
+        default:
+            return false
+        }
+    }
 
     /// deny[] match — case-insensitive substring on the candidate's text.
     nonisolated static func isDenied(_ text: String, deny: [String]) -> Bool {
@@ -1381,9 +1546,19 @@ final class CuaAgentLoop {
         }
         if browserState == nil, !bindingUpgradeTried {
             bindingUpgradeTried = true
-            _ = try? await call("browser_prepare", [
-                "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-                "strategy": .object(["kind": .string("existing_profile")])])
+            do {
+                _ = try await call("browser_prepare", [
+                    "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                    "strategy": .object(["kind": .string("existing_profile")])])
+            } catch let error as DriverConnectionError {
+                // A grant refusal means the daemon wasn't launched with
+                // --grant existing-profile — clear the verified flag so the
+                // next connect re-reconciles instead of trusting stale state.
+                if case .toolRefused(_, let code, _) = error,
+                   code.contains("grant") || code.contains("permission") {
+                    CuaDaemonControl.markGrantUnconfirmed()
+                }
+            } catch {}
             browserState = try? await observeBrowser(pid: pid, wid: wid, target: nil, tab: nil)
         }
         guard let browserState else { return ([], [], .null) }

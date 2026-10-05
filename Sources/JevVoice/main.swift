@@ -84,8 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // pay the process spawn + MCP handshake inside the turn.
         controller.cua.warm()
         if let runtime = agentRuntime {
-            windows.agents.bind(roster: runtime.store, runtime: runtime.bridge,
+            // The AgentRuntime is the seam — sends run its endpoint setup —
+            // and it owns the single event-stream consumer, fanning events
+            // out to the UI here.
+            windows.agents.bind(roster: runtime.store, runtime: runtime,
                                 consent: runtime.gate)
+            runtime.onAgentEvent = { [weak self] event in
+                self?.windows.agents.handle(event)
+            }
         }
         controller.pendingConsent = { [weak self] in self?.agentRuntime?.solePendingAsk }
         controller.onConsentResolution = { [weak self] request, approved in
@@ -188,7 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        input.stop(); microphones.stop(); agentRuntime?.stopAll()
+        input.stop(); microphones.stop()
+        Task { await agentRuntime?.stopAll() }
     }
 
     /// Agents need a codex binary (vendored in the bundle, dev fallback

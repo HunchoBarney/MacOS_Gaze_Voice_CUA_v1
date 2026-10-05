@@ -23,6 +23,7 @@ final class RealtimeVoiceClient {
         case inputCommitted(itemID: String)
         case transcriptDelta(String)
         case transcriptDone(String, languages: [String])
+        case transcriptFailed(String)
         case speechStarted
         case speechStopped
         case outputAudio(Data, itemID: String)
@@ -151,19 +152,20 @@ final class RealtimeVoiceClient {
         what is visible right now. Answer questions about the screen directly \
         from it — no tool needed.
 
-        To act on the Mac, call computer_command with the user's instruction \
-        verbatim — make the call your first output, before any speech; the \
-        acknowledgement comes after it returns. Fill app when one is named \
+        To act on the Mac, speak one short beat — five words or fewer \
+        ("On it —", "Opening it", "Doing that") — and call computer_command \
+        in the same breath, with the user's instruction verbatim. That beat \
+        IS the acknowledgement: the tool returns STARTED, and you say \
+        nothing more — the verified result arrives later as a "[task \
+        outcome]" message; when it does, tell the user plainly what \
+        happened — done, blocked, or what stopped it. Never claim a task \
+        finished before its outcome arrives. Fill app when one is named \
         or obvious from the screenshot (for media pick the likely one — \
         Spotify, Music, the browser — don't spend a voice turn asking), and \
         literal_text with the content to type or search for — 'play Marvin's \
         Room by Drake' → literal_text "Marvin's Room Drake", not the whole \
         sentence. Repeat names, places, and titles exactly as the user said \
-        them — never paraphrase (Yuba City stays Yuba City). \
-        The tool returns STARTED the moment work begins — acknowledge in a few \
-        words ("On it") and never claim it finished. The verified result \
-        arrives later as a "[task outcome]" message; when it does, tell the \
-        user plainly what happened — done, blocked, or what stopped it.
+        them — never paraphrase (Yuba City stays Yuba City).
 
         When you see "[needs confirmation]" or "[question]" a task is waiting \
         on the user — ask it out loud in your own words, and when they answer, \
@@ -216,10 +218,36 @@ final class RealtimeVoiceClient {
             "tools": Self.toolDefinitions,
             "tool_choice": "auto"
         ]
-        try await send(["type": "session.update", "session": session])
+        // Readiness means the server CONFIRMED the session — a rejected
+        // session.update used to leave phase=.ready while tools/turn-detection
+        // silently ran server defaults. Resumed on .sessionUpdated; an error
+        // or socket close while pending fails the connect instead.
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            sessionReady = c
+            Task { [weak self] in
+                do { try await self?.send(["type": "session.update", "session": session]) }
+                catch { self?.failSessionReady(error) }
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(10))
+                self?.failSessionReady(VoiceError("The realtime session was not confirmed."))
+            }
+        }
         connectedAt = Date()
         phase = .ready
         Self.log.notice("realtime_connected model=\(model, privacy: .public)")
+    }
+
+    private var sessionReady: CheckedContinuation<Void, Error>?
+
+    private func confirmSessionReady() {
+        let c = sessionReady; sessionReady = nil
+        c?.resume()
+    }
+
+    private func failSessionReady(_ error: Error) {
+        let c = sessionReady; sessionReady = nil
+        c?.resume(throwing: error)
     }
 
     var isReady: Bool {
@@ -295,7 +323,11 @@ final class RealtimeVoiceClient {
                     let message = try await socket.receive()
                     guard let self, !Task.isCancelled else { return }
                     if case .string(let payload) = message {
-                        for event in Self.decode(payload) { self.onEvent?(event) }
+                        for event in Self.decode(payload) {
+                            if case .sessionUpdated = event { self.confirmSessionReady() }
+                            if case .closed = event { self.failSessionReady(VoiceError("The realtime session closed.")) }
+                            self.onEvent?(event)
+                        }
                     }
                 } catch {
                     guard let self, !Task.isCancelled else { return }
@@ -304,6 +336,7 @@ final class RealtimeVoiceClient {
                     let status = (socket?.response as? HTTPURLResponse)?.statusCode
                     let close = socket?.closeCode.rawValue
                     Self.log.notice("realtime_socket_ended error=\(error.localizedDescription, privacy: .public) http=\(status ?? 0, privacy: .public) close=\(close ?? -1, privacy: .public)")
+                    self.failSessionReady(error)
                     self.phase = .closed
                     if let status, status != 101 {
                         self.onEvent?(.failure("Realtime connection refused (HTTP \(status))."))
@@ -338,6 +371,12 @@ final class RealtimeVoiceClient {
         case "conversation.item.input_audio_transcription.completed":
             let languages = (frame["languages"] as? [[String: Any]])?.compactMap { $0["code"] as? String } ?? []
             return [.transcriptDone(frame["transcript"] as? String ?? "", languages: languages)]
+        case "conversation.item.input_audio_transcription.failed":
+            // The transcript died but the model still heard the audio — the
+            // turn can succeed display-less. A distinct event, not .failure:
+            // killing the capture over a lost caption is wrong.
+            let detail = (frame["error"] as? [String: Any])?["message"] as? String ?? "Transcription failed."
+            return [.transcriptFailed(detail)]
         case "response.output_audio.delta":
             guard let delta = frame["delta"] as? String,
                   let pcm = Data(base64Encoded: delta) else { return [] }
@@ -348,7 +387,9 @@ final class RealtimeVoiceClient {
             return [.assistantDelta(frame["delta"] as? String ?? "")]
         case "response.output_audio_transcript.done":
             return [.assistantDone(frame["transcript"] as? String ?? "")]
-        case "conversation.item.created":
+        case "conversation.item.created", "conversation.item.added":
+            // GA canonical lifecycle is .added→.done; .created is the
+            // backward-compat alias — decode both, the lane dedupes by id.
             let item = frame["item"] as? [String: Any]
             let hasImage = (item?["content"] as? [[String: Any]])?.contains {
                 $0["type"] as? String == "input_image"
@@ -370,12 +411,23 @@ final class RealtimeVoiceClient {
                                             name: item["name"] as? String ?? "",
                                             arguments: item["arguments"] as? String ?? ""))
             }
+            // A failed/incomplete response carries the real reason in
+            // status_details — swallowing it reads as a clean (silent) turn
+            // end. `cancelled` stays silent: that's our own barge-in.
+            if let status = (frame["response"] as? [String: Any])?["status"] as? String,
+               status == "failed" || status == "incomplete" {
+                let details = (frame["response"] as? [String: Any])?["status_details"] as? [String: Any]
+                let reason = (details?["error"] as? [String: Any])?["message"] as? String
+                    ?? details?["reason"] as? String ?? "response \(status)"
+                events.append(.failure("The voice reply \(status == "failed" ? "failed" : "was cut short"): \(reason)."))
+            }
             events.append(.responseDone)
             return events
         case "error", "invalid_request_error":
             let detail = (frame["error"] as? [String: Any])?["message"] as? String
-                ?? frame["message"] as? String ?? "Realtime session error."
-            return [.failure(detail)]
+                ?? frame["message"] as? String ?? ""
+            let detail_ = detail.isEmpty ? "Realtime session error." : detail
+            return [.failure(detail_)]
         default:
             return []
         }
@@ -383,6 +435,9 @@ final class RealtimeVoiceClient {
 
     func teardown() {
         phase = .closed
+        // A connect() suspended on session confirmation would otherwise wait
+        // out its 10s timeout — teardown is the definitive answer it needs.
+        failSessionReady(VoiceError("The realtime session closed."))
         receiver?.cancel(); receiver = nil
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil

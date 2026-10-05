@@ -86,12 +86,23 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// Keep-latest-1 screenshot hygiene — each new screenshot item deletes
     /// the previous one from the conversation so images don't accumulate.
     private var screenshotItemID: String?
+    /// The turn's screenshot is captured at Fn-DOWN — it's the screen the
+    /// user actually looked at while speaking, and the encode+upload leaves
+    /// the release→response.create serial path entirely.
+    private var screenshotTask: Task<Data?, Never>?
+    /// An outcome push that hit a dead socket — re-sent when the next
+    /// session confirms, or the verified result is silently lost.
+    private var retryOutcomePush: String?
+    /// Serializes cancel()'s server sends against the next hold's stream —
+    /// a clearAudio landing late would wipe freshly streamed audio.
+    private var teardownTask: Task<Void, Never>?
     /// turnEnded belongs to the user's turn only — a pushed outcome's
     /// response.done must not close the interaction.
     private var awaitingTurnEnd = false
     /// response.done lands before the speaker drains — the card would close
     /// mid-sentence. When set, the next player idle emits the held turnEnded.
     private var pendingTurnEndOnIdle = false
+    private var drainDeadline: Task<Void, Never>?
     /// The identity turn events and tool calls bind to — the active capture's
     /// id while holding, or the controller's session id for a typed command.
     private var turnID: UUID?
@@ -119,6 +130,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             Task { @MainActor in
                 guard let self, self.pendingTurnEndOnIdle else { return }
                 self.pendingTurnEndOnIdle = false
+                self.drainDeadline?.cancel()
                 if let id = self.turnID { self.onEvent?(id, .turnEnded) }
             }
         }
@@ -151,6 +163,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         return d.contains("no active response") || d.contains("cancellation failed")
             || d.contains("response not in progress") || d.contains("already has a response")
             || d.contains("empty buffer") || d.contains("buffer too small")
+            || d.contains("does not exist") || d.contains("not found")
     }
 
     /// Errors that retrying can never fix — billing, auth, a model the
@@ -222,6 +235,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
         let started = ProcessInfo.processInfo.systemUptime
         var session: Session!
         if transcribe {
+            // The previous hold's teardown sends must land before this one
+            // streams — a late clearAudio wipes freshly streamed audio.
+            await teardownTask?.value
+            teardownTask = nil
             _ = try await prepare(inputUID: inputUID)
             try Task.checkCancellation()
             guard let next = prepared else { throw VoiceError("Speech input is not ready yet.") }
@@ -231,18 +248,41 @@ final class RealtimeVoiceLane: SpeechCapturing {
             pendingTurnEndOnIdle = false
             toolCallsThisTurn = 0
             holding = true
+            // Screenshot rides the hold, not the release — by commit time
+            // only the send remains between the user's last word and the
+            // model's first token.
+            screenshotTask?.cancel()
+            screenshotTask = Task { await self.screenShotProvider?() }
+            // The mic gate opens BEFORE the barge-in sends — every awaited
+            // socket write ahead of it would silently drop what the user is
+            // already saying (the head of every barge-in hold was clipped).
+            active = (id, session)
+            turnID = id
+            beginStreaming(session: session, id: id)
+            onEvent?(id, .timing("Input admission", milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000))
             // Barge-in: a new hold interrupts the model mid-sentence — stop
             // playback locally and truncate what never reached the user. A
             // response mid-generation has no audio yet — cancel it too, or it
             // would start talking over this hold.
             let interrupted = player.interrupt()
             if interrupted.itemID != nil || responseInFlight {
-                try? await client.cancelResponse()
+                do { try await client.cancelResponse() }
+                catch {
+                    // A cancel that never lands must not wedge the response
+                    // gate — the response is either done or the socket is
+                    // dead and its .closed path handles recovery.
+                    responseInFlight = false
+                }
                 if let itemID = interrupted.itemID {
                     try? await client.truncate(itemID: itemID, audioEndMs: interrupted.playedMs)
                 }
             }
             try? await client.clearAudio()
+            // A cancel() that landed during the sends must not leave the mic
+            // streaming into the socket with the UI idle — tear the
+            // just-opened capture down before propagating.
+            do { try Task.checkCancellation() }
+            catch { cancel(); throw error }
         } else {
             // Metering opens no socket — the input test never sends audio out.
             await suspend()
@@ -255,35 +295,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
                               feed: try ConvertedAudioFeed(input: hardware.format, output: hardware.format),
                               sendsAudio: false)
             holding = true
+            active = (id, session)
+            turnID = id
+            input.gate.open(session.feed)
         }
-        active = (id, session)
-        turnID = id
-        session.sender = Task { [weak self] in
-            var pending = Data()
-            do {
-                for try await buffer in session.feed.stream {
-                    guard !Task.isCancelled else { return }
-                    guard session.sendsAudio else { continue }
-                    guard let samples = buffer.int16ChannelData?[0] else { continue }
-                    pending.append(Data(bytes: samples, count: Int(buffer.frameLength) * MemoryLayout<Int16>.size))
-                    // ~100 ms chunks — small enough for streaming transcription,
-                    // large enough to keep frame overhead low.
-                    if pending.count >= 4800 {
-                        try await self?.sendAudioChunk(pending, session: id)
-                        pending.removeAll(keepingCapacity: true)
-                    }
-                }
-                if !pending.isEmpty, !Task.isCancelled {
-                    try await self?.sendAudioChunk(pending, session: id)
-                }
-            } catch {
-                guard let self, self.active?.id == id, !Task.isCancelled else { return }
-                Self.log.notice("realtime_send_failed session=\(id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
-                self.onEvent?(id, .failure("The voice connection dropped. Release Fn to retry."))
-            }
-        }
-        input.gate.open(session.feed)
-        onEvent?(id, .timing("Input admission", milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000))
         var reportedFirst = false
         meterTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -335,7 +350,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                     // The reply is still playing — hold the interaction open
                     // until the last buffer drains so the UI doesn't vanish
                     // while the model is mid-sentence.
-                    pendingTurnEndOnIdle = true
+                    deferTurnEndOnDrain(turn: id)
                 }
             }
             flushSpeech()
@@ -348,10 +363,26 @@ final class RealtimeVoiceLane: SpeechCapturing {
         case .failure:
             responseInFlight = false
             responseWatchdog?.cancel()
+            awaitingTurnEnd = false
         case .closed:
             responseInFlight = false
             responseWatchdog?.cancel()
             speakQueue = []; wantResponse = false
+            awaitingTurnEnd = false
+            pendingTurnEndOnIdle = false
+            pendingCalls = []
+            // A dead socket invalidates the warm session AND the tracked
+            // screenshot — reprepare must not be blocked by either. The
+            // turn-scoped branch emits the user-visible .failure.
+            screenshotItemID = nil
+            prepared = nil
+        case .sessionUpdated:
+            // A fresh confirmed session — retry the outcome push a dead
+            // socket dropped, or the verified result never reaches the user.
+            if let retry = retryOutcomePush {
+                retryOutcomePush = nil
+                pushTaskEvent(retry, speak: true)
+            }
         case .itemCreated(let itemID, let isImage):
             // Keep-latest-1 screenshot hygiene — the model already used the
             // last image; deleting it stops old screenshots re-billing and
@@ -392,9 +423,20 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // snapshots — accumulate so the overlay shows the whole sentence.
             transcriptInFlight += delta
             onEvent?(id, .partial(transcriptInFlight))
+        case .transcriptFailed(let detail):
+            // The model still heard the audio — the turn can succeed
+            // display-less. Log it; never kill the capture over a caption.
+            Self.log.notice("realtime_transcription_failed \(detail, privacy: .public)")
         case .transcriptDone(let text, _):
             transcriptInFlight = ""
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The heard-vs-called pair: when a command goes to the wrong app
+            // this line is the evidence of whether transcription or the
+            // model's ear is at fault. Command mode only — dictation text
+            // can carry passwords.
+            if respondOnCommit {
+                Self.log.notice("realtime_transcript session=\(id.uuidString, privacy: .public) \"\(trimmed, privacy: .public)\"")
+            }
             if respondOnCommit {
                 // Command mode — display only; the model's function call
                 // carries the instruction into the runtime.
@@ -419,9 +461,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
             flushSpeech()
         case .closed:
             onEvent?(id, .failure("The voice session closed."))
-        case .sessionStarted, .sessionUpdated, .inputCommitted, .speechStarted,
+        case .sessionStarted, .inputCommitted, .speechStarted,
              .speechStopped, .outputAudio, .outputAudioDone, .responseDone,
-             .itemCreated:
+             .itemCreated, .sessionUpdated:
             break
         }
     }
@@ -497,6 +539,19 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 return
             }
             guard self.turnID == id else { return }
+            // A STARTED task was acknowledged by the model's beat before the
+            // call — re-arming a second response would speak 1.5-3s later
+            // over work already running (Clicky's ack-rides-the-call rule).
+            // Emit the turn-end tail the earlier response.done skipped while
+            // this call was pending; if it hasn't landed, it fires there.
+            if name == "computer_command", output.hasPrefix("STARTED") {
+                if self.pendingCalls.isEmpty {
+                    self.awaitingTurnEnd = false
+                    if self.player.playbackIdle { self.onEvent?(id, .turnEnded) }
+                    else { self.deferTurnEndOnDrain(turn: id) }
+                }
+                return
+            }
             self.awaitingTurnEnd = true
             self.requestResponseWhenFree()
         }
@@ -511,7 +566,12 @@ final class RealtimeVoiceLane: SpeechCapturing {
     func pushTaskEvent(_ text: String, speak: Bool) {
         Task { [weak self] in
             do { try await self?.client.sendText(text) }
-            catch { Self.log.notice("realtime_push_failed error=\(error.localizedDescription, privacy: .public)") }
+            catch {
+                Self.log.notice("realtime_push_failed error=\(error.localizedDescription, privacy: .public)")
+                // A verified outcome that hit a dead socket must not vanish —
+                // it's re-sent when the rebuilt session confirms.
+                if speak { self?.retryOutcomePush = text }
+            }
         }
         guard speak, speakQueue.count < 8 else { return }
         speakQueue.append(text)
@@ -524,6 +584,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     func submitTyped(_ text: String, sessionID: UUID) async throws {
         turnID = sessionID
         pendingCalls = []; handledCalls = []; toolCallsThisTurn = 0
+        pendingTurnEndOnIdle = false
         try await client.sendText(text)
         if let jpeg = await screenShotProvider?() {
             try? await client.sendImage(jpegBase64: jpeg.base64EncodedString(),
@@ -531,6 +592,21 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         awaitingTurnEnd = true
         requestResponseWhenFree()
+    }
+
+    /// Arms the drain defer: if the output engine wedges (device pulled,
+    /// failed restart) playbackIdle never fires and the card would spin
+    /// "Working…" forever — an early dismiss beats an unrecoverable stall.
+    private func deferTurnEndOnDrain(turn id: UUID) {
+        pendingTurnEndOnIdle = true
+        drainDeadline?.cancel()
+        drainDeadline = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 25_000_000_000)
+            guard !Task.isCancelled, let self, self.pendingTurnEndOnIdle else { return }
+            self.pendingTurnEndOnIdle = false
+            Self.log.notice("playback_drain_deadline — ending turn without drain")
+            self.onEvent?(id, .turnEnded)
+        }
     }
 
     /// Serialised response.create — the API rejects a second response while
@@ -544,6 +620,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             do { try await self?.client.requestResponse() }
             catch {
                 self?.responseInFlight = false
+                self?.awaitingTurnEnd = false
                 self?.flushSpeech()
             }
         }
@@ -562,9 +639,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
             self.wantResponse = false
             self.onEvent?(self.active?.id ?? self.turnID ?? UUID(),
                           .failure("The voice server stopped responding. Press Fn to reconnect."))
-            // .closed lands next and runs the prepared=nil + prepareNext
-            // recovery — the next hold meets a fresh socket.
+            // teardown() cancels the receiver first — no .closed event
+            // ever arrives, so the reprepare must run here directly or
+            // `prepared` stays stale and every later hold wedges on a
+            // dead socket.
+            self.prepared = nil
             self.client.teardown()
+            self.prepareNext()
         }
     }
 
@@ -572,6 +653,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
         guard wantResponse || !speakQueue.isEmpty else { return }
         wantResponse = false
         speakQueue.removeAll(keepingCapacity: true)
+        // A queued outcome response is its own turn — the tool-call cap
+        // counts per turn, not per session lifetime.
+        toolCallsThisTurn = 0
         requestResponseWhenFree()
     }
 
@@ -595,6 +679,36 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     // MARK: - SpeechCapturing tail
 
+    /// Spawns the session's socket sender and opens the mic gate — the
+    /// caller binds `active`/`turnID` first so chunks never send anonymously.
+    private func beginStreaming(session: Session, id: UUID) {
+        session.sender = Task { [weak self] in
+            var pending = Data()
+            do {
+                for try await buffer in session.feed.stream {
+                    guard !Task.isCancelled else { return }
+                    guard session.sendsAudio else { continue }
+                    guard let samples = buffer.int16ChannelData?[0] else { continue }
+                    pending.append(Data(bytes: samples, count: Int(buffer.frameLength) * MemoryLayout<Int16>.size))
+                    // ~100 ms chunks — small enough for streaming transcription,
+                    // large enough to keep frame overhead low.
+                    if pending.count >= 4800 {
+                        try await self?.sendAudioChunk(pending, session: id)
+                        pending.removeAll(keepingCapacity: true)
+                    }
+                }
+                if !pending.isEmpty, !Task.isCancelled {
+                    try await self?.sendAudioChunk(pending, session: id)
+                }
+            } catch {
+                guard let self, self.active?.id == id, !Task.isCancelled else { return }
+                Self.log.notice("realtime_send_failed session=\(id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                self.onEvent?(id, .failure("The voice connection dropped. Release Fn to retry."))
+            }
+        }
+        input.gate.open(session.feed)
+    }
+
     func finish() {
         guard finishTask == nil, let active else { return }
         let started = ProcessInfo.processInfo.systemUptime
@@ -605,10 +719,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
         onEvent?(active.id, .timing("Captured audio duration", milliseconds: durations.input * 1000))
         finishTask = Task { [weak self] in
             guard let self else { return }
-            // The screenshot rides with the turn — capture it concurrently
-            // with the audio drain + commit so ~150-600ms of capture never
-            // sits between release and response.create.
-            let screenshotTask = Task { await self.screenShotProvider?() }
+            // The screenshot was captured at Fn-down — only the send stands
+            // between release and response.create now.
+            let screenshotTask = self.screenshotTask ?? Task { await self.screenShotProvider?() }
+            self.screenshotTask = nil
             // Drain the converted tail so the release doesn't clip the last word.
             await session.sender?.value
             guard !Task.isCancelled else { return }
@@ -623,8 +737,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
             }
             do {
                 try await self.client.commitAudio()
+                // A zombie finish must not touch the next hold — a cancelled
+                // task still completes its websocket sends, and without this
+                // identity check it would commit whatever the NEW capture
+                // streamed, attach a screenshot, and arm awaitingTurnEnd
+                // on a turn that isn't its own.
+                guard !Task.isCancelled, self.active?.id == active.id else { return }
                 if self.respondOnCommit {
                     if let jpeg = await screenshotTask.value {
+                        guard !Task.isCancelled, self.active?.id == active.id else { return }
                         try? await self.client.sendImage(
                             jpegBase64: jpeg.base64EncodedString(),
                             caption: "[screenshot] The user's screen at the moment they spoke.")
@@ -648,22 +769,30 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     func cancel() {
         let prior = active
+        // Only cancel what's actually cancellable — a finished session
+        // leaves `active` set, and a bare response.cancel earns a
+        // "no active response" error that used to kill the next hold. Read
+        // before the queued-want flag clears below.
+        let needsCancel = responseInFlight || wantResponse
         active = nil
         turnID = nil
         holding = false
         awaitingTurnEnd = false
         pendingTurnEndOnIdle = false
+        drainDeadline?.cancel()
         input.gate.close()?.finish()
         meterTimer?.invalidate(); meterTimer = nil
         finishTask?.cancel(); finishTask = nil
+        screenshotTask?.cancel(); screenshotTask = nil
         pendingCalls = []; handledCalls = []; transcriptInFlight = ""
+        // The dead turn's queued response-create must not fire on release —
+        // a cancelled typed turn would still answer after the user bailed.
+        wantResponse = false
         prior?.session.sender?.cancel()
         if prior != nil {
-            // Only cancel what's actually cancellable — a finished session
-            // leaves `active` set, and a bare response.cancel earns a
-            // "no active response" error that used to kill the next hold.
-            let needsCancel = responseInFlight || wantResponse
-            Task { [weak self] in
+            // Captured so the next start() can await it — a clearAudio
+            // landing after the new hold streams would wipe it.
+            teardownTask = Task { [weak self] in
                 try? await self?.client.clearAudio()
                 if needsCancel { try? await self?.client.cancelResponse() }
             }

@@ -99,7 +99,7 @@ for line in sys.stdin:
     private func makeRuntime(config: Config, script: URL,
                              judge: @escaping CuaTaskAgent.Judge,
                              calls: CallLog? = nil,
-                             fastLaneResolver: (@MainActor (String, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = { _, _, _ in nil }) -> CuaVoiceRuntime {
+                             fastLaneResolver: (@MainActor (String, String?, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = { _, _, _, _ in nil }) -> CuaVoiceRuntime {
         CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"),
                                             arguments: ["-u", script.path],
@@ -172,7 +172,7 @@ for line in sys.stdin:
         let runtime = makeRuntime(config: config, script: script,
             judge: { _, _ in judged.bump(); return [:] },
             calls: calls,
-            fastLaneResolver: { goal, _, _ in
+            fastLaneResolver: { goal, _, _, _ in
                 guard goal.lowercased().contains("fixture") else { return nil }
                 return CuaTaskAgent.FastResolution(action: nil, openVerb: "open",
                                                    name: "Fixture", bundle: "test.fixture")
@@ -294,7 +294,9 @@ for line in sys.stdin:
         let judgeCalls = Counter()
         let runtime = makeRuntime(config: config, script: script, judge: { _, _ in
             judgeCalls.bump()
-            if judgeCalls.value == 1 { throw DriverConnectionError.refused("judgment unavailable") }
+            // The drive retries a thrown judge call once — both calls must
+            // fail for the work itself to fail.
+            if judgeCalls.value <= 2 { throw DriverConnectionError.refused("judgment unavailable") }
             return self.answers(next: "done")
         })
         let controller = VoiceController(config: config, speech: Capture(),
