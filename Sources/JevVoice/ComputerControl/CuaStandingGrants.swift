@@ -9,6 +9,17 @@ import Foundation
 enum CuaStandingGrants {
     private static let pageAccessKey = "cuaStandingGrant.browserPageAccess"
     private static let menuFocusPrefix = "cuaStandingGrant.menuFocus."
+    private static let computerUseInputKey = "cuaStandingGrant.computerUseInput"
+
+    /// Clicky's always-allow: input consent is granted standing rather than
+    /// per turn. Voice confirmations (`requestApproval`) and the agent gate
+    /// both honor it — a user who asked for no prompts is never re-asked.
+    /// Driver-side policy (deny lists, delivery mode, scope) is unaffected;
+    /// this only bypasses the *asking*, not the action rules.
+    static var computerUseInput: Bool {
+        get { UserDefaults.standard.bool(forKey: computerUseInputKey) }
+        set { UserDefaults.standard.set(newValue, forKey: computerUseInputKey) }
+    }
 
     /// `browser_prepare` with `existing_profile` — reading and acting on page
     /// content in the user's real browser profile. The driver's own launch
@@ -32,6 +43,7 @@ enum CuaStandingGrants {
 
     /// Drops every remembered grant; the next task that needs one asks again.
     static func reset() {
+        UserDefaults.standard.removeObject(forKey: computerUseInputKey)
         UserDefaults.standard.removeObject(forKey: pageAccessKey)
         for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix(menuFocusPrefix) {
             UserDefaults.standard.removeObject(forKey: key)

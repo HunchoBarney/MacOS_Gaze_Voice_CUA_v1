@@ -5,7 +5,7 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var windows: VoiceWindows!
-    private let speechOutput = ElevenLabsSpeechOutput()
+    private let speechOutput = SpeechOutput()
     private lazy var controller = VoiceController(speaker: speechOutput)
     private var agentRuntime: AgentRuntime?
     private let microphones = MicrophoneCatalog()
@@ -57,7 +57,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         input.dictationChordEnabled = controller.config.dictationHotkey
         input.latchMode = controller.config.latchMode
         speechOutput.enabled = controller.config.ttsEnabled
-        speechOutput.apiKey = controller.config.elevenLabsAPIKey
         input.onDictationBegin = { [weak self] in self?.controller.beginDictation() }
         input.onDictationConvert = { [weak self] in self?.controller.dictate() }
         input.onLatch = { [weak self] in self?.controller.latchHold() }
@@ -66,8 +65,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.config.$latchMode.sink { [weak self] in self?.input.latchMode = $0 }
             .store(in: &subscriptions)
         controller.config.$ttsEnabled.sink { [weak self] in self?.speechOutput.enabled = $0 }
-            .store(in: &subscriptions)
-        controller.config.$elevenLabsAPIKey.sink { [weak self] in self?.speechOutput.apiKey = $0 }
             .store(in: &subscriptions)
 
         agentRuntime = Self.makeAgentRuntime()
@@ -83,6 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.speechOutput.speak(lead)
         }
         agentRuntime?.start()
+        // Cold-connect the Cua driver now so the first voice command doesn't
+        // pay the process spawn + MCP handshake inside the turn.
+        controller.cua.warm()
         if let runtime = agentRuntime {
             windows.agents.bind(roster: runtime.store, runtime: runtime.bridge,
                                 consent: runtime.gate)
@@ -154,7 +154,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         controller.refreshPermissions()
-        Task { await SpeechAssets.shared.refresh() }
         if ProcessInfo.processInfo.arguments.contains("--settings") {
             windows.show(.voice)
         } else if !controller.missingPermissions.isEmpty || !input.ready {
@@ -204,20 +203,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else {
             return nil
         }
-        let settings = TextProviderSettings.shared
-        guard settings.configured else { return nil }
-        let envKey = "JEV_CODEX_API_KEY"
-        let provider = CodexModelProvider(name: "jev", baseURL: settings.endpoint,
-                                        wireAPI: "chat", envKey: envKey,
-                                        model: settings.model)
+        // Prefer the user's own codex login (real OpenAI models on their
+        // subscription — the Clicky shape). Fall back to the configured
+        // text provider only when no codex auth exists.
+        let codexHome = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex")
+        let auth = codexHome.appendingPathComponent("auth.json")
+        let provider: CodexModelProvider
+        var environment: [String: String] = [:]
+        if FileManager.default.fileExists(atPath: auth.path) {
+            provider = .chatGPT(model: Self.codexConfigModel(codexHome: codexHome) ?? "")
+        } else {
+            let settings = TextProviderSettings.shared
+            guard settings.configured else { return nil }
+            let envKey = "JEV_CODEX_API_KEY"
+            provider = CodexModelProvider(name: "jev", baseURL: settings.endpoint,
+                                          envKey: envKey, model: settings.model)
+            environment[envKey] = (try? settings.providerKey()) ?? ""
+        }
         let bridge = CodexRuntimeBridge(configuration: .init(
-            codexBinary: codex, provider: provider,
-            environment: [envKey: (try? settings.providerKey()) ?? ""]))
+            codexBinary: codex, provider: provider, environment: environment))
         let jevKey = Config.shared.apiKey
         let store = AgentStore(directory: AgentWorkspace.root())
         let runtime = AgentRuntime(store: store, bridge: bridge,
                                    connection: CuaConnection(), apiKey: { jevKey })
         return runtime
+    }
+
+    /// `model = "…"` from the user's own ~/.codex/config.toml — agents inherit
+    /// whichever model their account is already tuned to. Nil → codex default.
+    private static func codexConfigModel(codexHome: URL) -> String? {
+        guard let text = try? String(contentsOf: codexHome.appendingPathComponent("config.toml"),
+                                     encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix("model"), t.contains("=") else { continue }
+            let v = t.split(separator: "=", maxSplits: 1).last?
+                .trimmingCharacters(in: .whitespaces) ?? ""
+            let unquoted = v.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !unquoted.isEmpty { return unquoted }
+        }
+        return nil
     }
     /// Relaunching a running accessory app (Spotlight, Finder, `open`) sends
     /// reopen — without this the user gets no window and the status item may

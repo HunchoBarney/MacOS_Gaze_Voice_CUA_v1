@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import OSLog
 import JevVoiceCore
 
 /// Thin observe→choose→act executor: the Hermes shape. Each step reads the
@@ -22,7 +23,12 @@ final class CuaAgentLoop {
     private let judge: Judge
     private let approve: ((String) async throws -> Bool)?
     private let progress: (String) -> Void
+    /// Whether a pid currently owns the frontmost app — a seam so tests can
+    /// simulate foreground state. Foreground delivery and menu lanes are
+    /// only honest while this is true.
+    private let isFrontmostApp: (Int) -> Bool
 
+    private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice", category: "agent-loop")
     private static let maximumSteps = 24
     private static let maximumUnprovenDone = 2
     private static let maximumDispatchFailures = 3
@@ -36,9 +42,13 @@ final class CuaAgentLoop {
 
     init(call: @escaping Call, judge: @escaping Judge,
          approve: ((String) async throws -> Bool)? = nil,
-         progress: @escaping (String) -> Void = { _ in }) {
+         progress: @escaping (String) -> Void = { _ in },
+         isFrontmostApp: ((Int) -> Bool)? = nil) {
         self.call = call; self.judge = judge
         self.approve = approve; self.progress = progress
+        self.isFrontmostApp = isFrontmostApp ?? { pid in
+            NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(pid)
+        }
     }
 
     private func recordPostcondition(_ kind: CuaObservedPostcondition.Kind, _ evidence: String,
@@ -155,10 +165,17 @@ final class CuaAgentLoop {
 
     private static let keyNames = ["return", "escape", "tab", "delete", "space",
                                    "left", "right", "up", "down", "home", "end", "pageup", "pagedown"]
+    /// Clicky's hotkey policy, mirrored: ⌘L is never offered — delivered to a
+    /// backgrounded pid the omnibox-focus semantic still pulls the app
+    /// forward, and on a browser the correct navigation path is the agent's
+    /// own window, not the user's address bar. ⌘F is out too: "find" is an
+    /// app-level feature, not a universal chord — in Spotify it opens the
+    /// shortcuts overlay, elsewhere it may do nothing or something worse.
+    /// The element lanes reach the app's own find/search affordance instead.
     private static let hotkeyChords: [[String]] = [
-        ["cmd", "t"], ["cmd", "l"], ["cmd", "n"], ["cmd", "w"], ["cmd", "a"],
+        ["cmd", "t"], ["cmd", "n"], ["cmd", "w"], ["cmd", "a"],
         ["cmd", "c"], ["cmd", "v"], ["cmd", "x"], ["cmd", "z"], ["cmd", "s"],
-        ["cmd", "q"], ["cmd", "f"], ["cmd", "shift", "z"]]
+        ["cmd", "q"], ["cmd", "shift", "z"]]
 
     // MARK: - Main loop
 
@@ -180,11 +197,13 @@ final class CuaAgentLoop {
     func drive(_ task: DriveTask) async throws -> DriveResult {
         var pid = task.pid
         var windowID = task.windowID
+        var taskLaunchedApp = false
         var appName = ""
         var bundleID = ""
         var ledger: [String] = []
         func finish(_ status: DriveStatus) -> DriveResult {
-            DriveResult(status: status, history: ledger, pid: pid, windowID: windowID)
+            DriveResult(status: status, history: ledger, pid: pid, windowID: windowID,
+                        bundleID: bundleID.isEmpty ? nil : bundleID)
         }
 
     /// Best-effort window listing: ordinary failures degrade to nil, but a
@@ -226,6 +245,7 @@ final class CuaAgentLoop {
                 } catch {
                     return finish(.blocked("\(application) could not be launched. Nothing was dispatched."))
                 }
+                taskLaunchedApp = true
                 pid = launched["pid"]?.integer
                 appName = launched["name"]?.string ?? appName
                 bundleID = launched["bundle_id"]?.string ?? bundleID
@@ -295,11 +315,30 @@ final class CuaAgentLoop {
                     ($0["title"]?.string ?? "").localizedCaseInsensitiveContains(wanted)
                 }
             }
-            if baselineWindowIDs.isEmpty {
+            // Apps expose phantom untitled offscreen windows — they can never
+            // be the request's target, so the pick and binds only see real
+            // (onscreen, titled) windows. An all-phantom listing falls back
+            // unfiltered so "no usable window" stays honest downstream.
+            let real = matches.filter {
+                $0["is_on_screen"] != .bool(false) && !($0["title"]?.string ?? "").isEmpty
+            }
+            if !real.isEmpty { matches = real }
+            // A listing taken after this task's own launch sees task-produced
+            // windows — those must never enter the baseline or a create-scope
+            // done could be vetoed by a window the task itself caused.
+            if baselineWindowIDs.isEmpty, !taskLaunchedApp {
                 baselineWindowIDs = Set((listing["windows"]?.array ?? [])
                     .compactMap { $0["window_id"]?.integer })
             }
-            if matches.count > 1 {
+            // A "which window" ask is only meaningful when the window's
+            // identity carries the goal — a named window matching several
+            // titles, or a payload that could land in the wrong window.
+            // Carrier goals (any window produces the outcome), create scope
+            // and browsers bind the most plausible window silently — create
+            // re-pins to the produced window later.
+            let windowIdentityMatters = task.windowName != nil || !task.values.isEmpty
+            if matches.count > 1, task.scope != .create, windowIdentityMatters,
+               !CuaTaskAgent.supportsIsolatedBrowser(bundleID) {
                 var criteria: [String: String?] = [
                     "none": "None of these — the user must choose which window."]
                 for match in matches {
@@ -330,25 +369,36 @@ final class CuaAgentLoop {
                         matches.compactMap { $0["title"]?.string ?? $0["window_id"]?.integer.map(String.init) }))
                 }
             } else {
-                windowID = matches.first?["window_id"]?.integer
+                windowID = Self.preferredWindow(in: matches)
             }
         }
 
         if windowID == nil, let listing = try await listWindows(pid: resolvedPID) {
+            if baselineWindowIDs.isEmpty, !taskLaunchedApp {
+                baselineWindowIDs = Set((listing["windows"]?.array ?? [])
+                    .compactMap { $0["window_id"]?.integer })
+            }
             windowID = Self.preferredWindow(in: listing["windows"]?.array ?? [])
+        }
+        // A caller-pinned window skipped both listings — its pid's window set
+        // still predates every task effect, so capture it as the baseline. A
+        // failed listing degrades to the pin alone, which provably pre-exists.
+        if !taskLaunchedApp, baselineWindowIDs.isEmpty {
+            baselineWindowIDs = Set(((try await listWindows(pid: resolvedPID))?["windows"]?.array ?? [])
+                .compactMap { $0["window_id"]?.integer })
+            if let wid = windowID { baselineWindowIDs.insert(wid) }
         }
         currentWindowID = windowID
 
-        // Interaction happens in the target's front window — raise it so
-        // keyboard, click, and menu lanes land where the user asked. The
-        // driver's verified raise doubles as frontmost evidence for the
-        // menu lane; a failed raise only narrows the offer set.
-        var activated = false
-        if let wid = windowID {
-            let activation = try? await call("bring_to_front",
+        // An explicit "open/show X" request raises the bound window once —
+        // the user asked for the app in front. Everything else stays
+        // background-honest: element clicks, types and value writes never
+        // need the target raised, and window-level input raises on demand
+        // only after the driver proves it cannot be pinned. A background
+        // task preserves the user's foreground app.
+        if task.foreground, let wid = windowID {
+            _ = try? await call("bring_to_front",
                 ["pid": .number(Double(resolvedPID)), "window_id": .number(Double(wid))])
-            activated = activation?["activated"] == .bool(true)
-            if activated { ledger.append("brought \(appName)'s window to the front") }
         }
 
         let isBrowser = CuaTaskAgent.supportsIsolatedBrowser(bundleID)
@@ -358,6 +408,11 @@ final class CuaAgentLoop {
 
         var newTabRequested = false
         var dispatchFailures = 0
+        /// Lanes that failed at dispatch — the fallback rung (an AX value
+        /// overwrite after faithful typing failed) is only offered for
+        /// these; two equivalent fill lanes split judge confidence below
+        /// the act threshold.
+        var failedLaneIDs: Set<String> = []
         var windowInputAmbiguous = false
         var unprovenDone = 0
         var bindingUpgradeTried = false
@@ -368,10 +423,17 @@ final class CuaAgentLoop {
         /// escalation — the next reads offer a pixel-click lane, resolved
         /// against that read's own frame and screenshot space.
         var pixelArmed: [Int: String] = [:]
+        /// OCR'd text from one bounded `parse_visual_regions` read — armed
+        /// the first time a done claim is rejected for missing evidence.
+        /// Windows whose content lives only in pixels (Calculator's
+        /// display, a terminal's scrollback) expose nothing readable to AX;
+        /// this is their observed evidence, not a replayed claim.
+        var visualTexts: [String] = []
+        var visualParseTried = false
         var modelHistory: [JSONValue] = []
 
         for _ in 0..<max(task.maxSteps, 1) {
-            do { try Task.checkCancellation() } catch { return finish(.cancelled) }
+            try Task.checkCancellation()
             guard var wid = windowID else {
                 if task.values["literal_text"] != nil {
                     return finish(.blocked("No app was launched to receive the text — \(appName) produced no usable window. Nothing was dispatched."))
@@ -388,6 +450,14 @@ final class CuaAgentLoop {
             let elements = snapshot["elements"]?.array ?? []
             let windowTitle = snapshot["window"]?["title"]?.string
                 ?? snapshot["title"]?.string ?? snapshot["window_title"]?.string ?? ""
+            // tree_markdown carries static text the driver filters out of
+            // `elements` — a calculator's display, a terminal's scrollback.
+            // That is real observed evidence, not a replayed claim, and it
+            // needs no screenshot. Menu chrome is filtered out so a stale
+            // menu label can never pose as window content.
+            let windowText = Self.windowStaticTexts(
+                markdown: snapshot["tree_markdown"]?.string ?? "").joined(separator: "\n")
+            let windowTextDigest = String(windowText.prefix(3000))
 
             if let proof = pendingInsertProof, !proof.text.isEmpty {
                 func reads(_ element: JSONValue) -> Bool {
@@ -405,6 +475,32 @@ final class CuaAgentLoop {
                     modelHistory.append(.object(["observation": .string(
                         "Verified: the inserted text now reads back from \(label).")]))
                     pendingInsertProof = nil
+                } else if windowText.localizedCaseInsensitiveContains(proof.text) {
+                    recordPostcondition(.resultObserved, "The inserted text is visible in \(appName)'s window content.",
+                                        appName: appName, bundleID: bundleID,
+                                        processID: resolvedPID, windowID: wid)
+                    modelHistory.append(.object(["observation": .string(
+                        "Verified: the inserted text is visible in the window's text content.")]))
+                    pendingInsertProof = nil
+                } else if !visualParseTried {
+                    // Pixel-only surfaces (a terminal's scrollback, a
+                    // calculator display) hold no AX text — one bounded
+                    // visual read proves the landing before the model may
+                    // retype the payload into the same place.
+                    visualParseTried = true
+                    let texts = await readVisualTexts(pid: resolvedPID, wid: wid)
+                    if !texts.isEmpty { visualTexts = texts }
+                    let needle = String(proof.text.prefix(24))
+                    if texts.contains(where: {
+                        $0.localizedCaseInsensitiveContains(proof.text)
+                            || $0.localizedCaseInsensitiveContains(needle) }) {
+                        recordPostcondition(.resultObserved, "The inserted text is visible on screen.",
+                                            appName: appName, bundleID: bundleID,
+                                            processID: resolvedPID, windowID: wid)
+                        modelHistory.append(.object(["observation": .string(
+                            "Verified: the inserted text is visible on screen.")]))
+                        pendingInsertProof = nil
+                    }
                 }
             }
 
@@ -433,10 +529,10 @@ final class CuaAgentLoop {
             for element in elements {
                 if let index = element["element_index"]?.integer { elementByIndex[index] = element }
             }
-            let frontmost = activated
-                || NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(resolvedPID)
+            let frontmost = isFrontmostApp(resolvedPID)
             var interactive = 0
             var elementCandidates = 0
+            var textLaneOffered = false
             for element in elements {
                 guard elementCandidates < Self.maximumElementCandidates else { break }
                 let index = element["element_index"]?.integer ?? -1
@@ -451,15 +547,30 @@ final class CuaAgentLoop {
                 if Self.isDenied(label, deny: task.deny) { continue }
                 elementCandidates += 1
                 if Self.textRoles.contains(role) {
+                    textLaneOffered = true
                     offer(.typeIntoElement(token: token, index: index),
                           "Type the supplied text into \(role) \"\(label)\"", text: Self.elementText(element))
-                    offer(.setValue(token: token, index: index),
-                          "Set the value of \(role) \"\(label)\" to the supplied text", text: Self.elementText(element))
-                } else if Self.menuRoles.contains(role), frontmost,
-                          let path = Self.menuPath(for: index, in: elementByIndex),
-                          path.allSatisfy({ !Self.isDenied($0, deny: task.deny) }) {
-                    offer(.invokeMenu(path: path, index: index),
-                          "Invoke the \"\(path.joined(separator: " → "))\" menu item", text: Self.elementText(element))
+                    // Two equivalent fill lanes split the judge's confidence
+                    // below the act threshold — an AX overwrite only earns an
+                    // offer once faithful typing has already failed.
+                    // Failure memory keys on lane id + the element's own
+                    // text, not bare index — element_index is positional
+                    // per read, so a reshuffled tree must not offer AX
+                    // overwrite on whichever element now sits at that slot.
+                    if failedLaneIDs.contains("typeinto_\(index)|\(Self.elementText(element))") {
+                        offer(.setValue(token: token, index: index),
+                              "Set the value of \(role) \"\(label)\" to the supplied text", text: Self.elementText(element))
+                    }
+                } else if Self.menuRoles.contains(role) {
+                    // A menu item lives outside every window — an element
+                    // click on it can only fail with element_outside_target_
+                    // window. Menu invocation is the only honest lane, and
+                    // only while the app is frontmost with a resolved path.
+                    if frontmost, let path = Self.menuPath(for: index, in: elementByIndex),
+                       path.allSatisfy({ !Self.isDenied($0, deny: task.deny) }) {
+                        offer(.invokeMenu(path: path, index: index),
+                              "Invoke the \"\(path.joined(separator: " → "))\" menu item", text: Self.elementText(element))
+                    }
                 } else {
                     offer(.clickElement(token: token, index: index),
                           "Click \(role) \"\(label)\"", text: Self.elementText(element))
@@ -479,9 +590,27 @@ final class CuaAgentLoop {
                                   index: index, x: point.x, y: point.y),
                       "Pixel-click \"\(label)\" at its observed center", text: Self.elementText(element))
             }
-            if !windowInputAmbiguous {
-                // Deny gates key names too — "delete" must not remain
-                // reachable via the keyboard when the button is denied.
+            // Deny gates key names too — "delete" must not remain
+            // reachable via the keyboard when the button is denied. Once the
+            // driver reports window ambiguity, dispatch re-raises the bound
+            // window and re-verifies frontmost before foreground delivery —
+            // so a keystroke is never aimed at a window the driver could not
+            // pin. A raise is honest for a foreground task, or while the app
+            // is already frontmost; a background task whose app sits behind
+            // gets no window-input lanes at all rather than stealing the
+            // user's foreground.
+            // A text payload with no writable element still lands in one
+            // dispatch: the window-level lane types at the target's focus —
+            // Calculator's button field, a terminal prompt — rather than
+            // approximating the text with per-key or per-button presses.
+            let windowInputAllowed = !windowInputAmbiguous || task.foreground || frontmost
+            if !task.values.isEmpty, !textLaneOffered, windowInputAllowed {
+                let preview = task.values.values.sorted()
+                    .map { String($0.prefix(40)) }.joined(separator: ", ")
+                offer(.typeIntoWindow,
+                      "Type the supplied text \"\(preview)\" at the window's keyboard focus in one action")
+            }
+            if windowInputAllowed {
                 for key in Self.keyNames where !Self.isDenied(key, deny: task.deny) {
                     offer(.pressKey(key), "Press \(key)")
                 }
@@ -493,7 +622,7 @@ final class CuaAgentLoop {
                 offer(.scroll(direction), "Scroll \(direction)")
             }
             if isBrowser {
-                if !windowInputAmbiguous, !Self.isDenied("new tab", deny: task.deny) { offer(.newTab, "Open a new browser tab") }
+                if windowInputAllowed, !Self.isDenied("new tab", deny: task.deny) { offer(.newTab, "Open a new browser tab") }
                 let navURL = CuaActionCatalog.explicitBrowserNavigationURL(in: task.goal)
                 if let navURL, !Self.isDenied(navURL, deny: task.deny) { offer(.navigate(navURL), "Navigate the tab to \(navURL)") }
                 for ref in pageRefs.prefix(20) {
@@ -519,6 +648,39 @@ final class CuaAgentLoop {
                 return finish(.handedBack(.noInteractiveElements))
             }
 
+            // ── Single-action bypass: exactly one offered action lane (the
+            // done/stuck sentinels don't count) makes the model pick
+            // deterministic — synthesize the pick and fall through the same
+            // dispatch path. Done is still checked deterministically first: a
+            // success_contains claim matched in the observed corpus finishes
+            // the run without spending a model round-trip on it. A fill pick
+            // is only deterministic with exactly one supplied value — an
+            // ambiguous field→value binding still goes through the judge.
+            let actionLanes = lanes.filter { $0.key != "done" && $0.key != "stuck" }
+            var synthesizedPick: [String: Answer]?
+            if actionLanes.count == 1, let onlyID = actionLanes.keys.first,
+               let only = lanes[onlyID], !only.needsFillText || task.values.count == 1 {
+                let corpus = Self.observedCorpus(elements: elements, title: windowTitle,
+                                                 tabs: tabs, facts: observedPostconditions,
+                                                 visualTexts: visualTexts,
+                                                 staticText: windowText)
+                let claimMatched = task.successContains.contains {
+                    corpus.contains($0.lowercased())
+                }
+                if !task.successContains.isEmpty && claimMatched {
+                    recordPostcondition(.resultObserved, "Observed the requested outcome in \(appName).",
+                                        appName: appName, bundleID: bundleID,
+                                        processID: resolvedPID, windowID: windowID)
+                    ledger.append("done — the requested outcome is visible in \(appName)")
+                    return finish(.done)
+                }
+                synthesizedPick = ["next": .choice(choice: onlyID, confidence: 1, probabilities: [:])]
+                if only.needsFillText, let key = task.values.keys.first {
+                    synthesizedPick?["fill"] = .choice(choice: key, confidence: 1, probabilities: [:])
+                }
+                ledger.append("single lane — dispatched without a judge call")
+            }
+
             var fillChoices: [String: String?] = [
                 "unavailable": "The chosen field needs text the caller did not supply in values."]
             for key in task.values.keys.sorted() {
@@ -533,7 +695,7 @@ final class CuaAgentLoop {
 
             // ── One model call: action + fill + done-evidence + blocked
             // reason ride along, mapped onto a StepJudgment.
-            let mergedState: [String: JSONValue] = [
+            var mergedState: [String: JSONValue] = [
                 "request": .string(task.goal),
                 "previous_context": .string(task.previousContext ?? ""),
                 "scope": .string(task.scope.rawValue),
@@ -547,26 +709,38 @@ final class CuaAgentLoop {
                 "tabs": .array(tabs.map(CuaBrowserTarget.compactTab)),
                 "browser_page": browserPage,
                 "history": .array(modelHistory.suffix(10))]
+            if !visualTexts.isEmpty {
+                mergedState["visual_texts"] = .array(visualTexts.map { .string($0) })
+            }
+            if !windowTextDigest.isEmpty {
+                mergedState["window_text"] = .string(windowTextDigest)
+            }
             let questions: [String: Question] = [
                 "next": .choice(
-                    instructions: "Choose the single next action for this step. Pick done only when the observed state alone proves the exact request is satisfied. Pick stuck only when no action can progress. Action ids refer to the offered list; never invent one.",
+                    instructions: "Choose the single next action for this step. When the request supplies text and an action delivers it in one step, prefer that over sequences of small element actions — clicking each key or button one at a time is slower and error-prone. For a feature the request names (a search field, a button, a menu item), act on that element directly — a chorded shortcut means different things in different apps, so use one only when no element offers the feature. Pick done only when the observed state alone proves the exact request is satisfied. Pick stuck only when no action can progress. Action ids refer to the offered list; never invent one.",
                     criteria: criteria),
                 "fill": .choice(
                     instructions: "Answered only when `next` types or sets a field: which supplied value belongs in that field? Pick the matching value key, or unavailable when the field needs text the caller did not supply.",
                     criteria: fillChoices),
                 "doneEvidence": .choice(
-                    instructions: "Answered only when `next` is done: does the observed state (element values, tab urls/titles, window state, verified_facts, success_contains) prove the exact requested outcome? History proves steps ran, never that the request succeeded.",
+                    instructions: "Answered only when `next` is done: does the observed state (element values, tab urls/titles, window_text, verified_facts, visual_texts, success_contains) prove the exact requested outcome? A success_contains string appearing in the observed text IS proof — for a compute request, the expected result string is listed there. History proves steps ran, never that the request succeeded.",
                     criteria: ["proven": "Readable evidence shows the exact requested outcome.",
                                "unproven": "Nothing readable proves it, or the state contradicts it."]),
                 "blockedReason": .choice(
                     instructions: "Answered only when `next` is stuck: what stops progress?",
                     criteria: blockedChoices)]
-            let answers = try await judge(.object(mergedState), questions)
+            let answers: [String: Answer]
             let nextID: String
-            do {
-                nextID = try JevSelection.read(answers["next"], allowed: Set(criteria.keys))
-            } catch {
-                return finish(.handedBack(.untrustedAnswer))
+            if let synthesizedPick {
+                answers = synthesizedPick
+                nextID = actionLanes.keys.first!
+            } else {
+                answers = try await judge(.object(mergedState), questions)
+                do {
+                    nextID = try JevSelection.read(answers["next"], allowed: Set(criteria.keys))
+                } catch {
+                    return finish(.handedBack(.untrustedAnswer))
+                }
             }
             guard let lane = lanes[nextID] else {
                 return finish(.handedBack(.untrustedAnswer))
@@ -597,9 +771,20 @@ final class CuaAgentLoop {
             if judgment.done {
                 let evidence = (try? JevSelection.read(answers["doneEvidence"], allowed: ["proven", "unproven"])) == "proven"
                 let corpus = Self.observedCorpus(elements: elements, title: windowTitle,
-                                                 tabs: tabs, facts: observedPostconditions)
+                                                 tabs: tabs, facts: observedPostconditions,
+                                                 visualTexts: visualTexts,
+                                                 staticText: windowText)
+                // A produced pin already proves the structural half of a
+                // create goal — "new document" is verified by the window
+                // existing, never by window text that could contain the
+                // words. Only user-named content (a title, a body) still
+                // gates on the observed corpus.
+                let producedPin = task.scope == .create && !baselineWindowIDs.contains(wid)
                 let postUnmet = !task.successContains.isEmpty
-                    && !task.successContains.contains { corpus.contains($0.lowercased()) }
+                    && !task.successContains.contains { claim in
+                        let lowered = claim.lowercased()
+                        return corpus.contains(lowered)
+                            || (producedPin && Self.isProducedArtifactClaim(lowered)) }
                 let createVetoed = task.scope == .create && baselineWindowIDs.contains(wid)
                 if !evidence || postUnmet || createVetoed {
                     unprovenDone += 1
@@ -608,8 +793,21 @@ final class CuaAgentLoop {
                             ? "A new document window was requested, but the task could not be completed: \(appName)'s observed state never produced one. Nothing is claimed as success."
                             : "The request's outcome could not be proven from \(appName)'s observed state. Completed steps are not claimed as success; inspect the app before retrying."))
                     }
+                    // One bounded visual read arms the next round: pixel-only
+                    // surfaces (Calculator's display, terminal scrollback)
+                    // have no AX text for the corpus, so the same claim can
+                    // only ever be unproven without this evidence.
+                    if !visualParseTried {
+                        visualParseTried = true
+                        let texts = await self.readVisualTexts(pid: resolvedPID, wid: wid)
+                        if !texts.isEmpty {
+                            visualTexts = texts
+                            modelHistory.append(.object(["observation": .string(
+                                "A visual read of the window shows: \(texts.prefix(8).joined(separator: "; ")).")]))
+                        }
+                    }
                     modelHistory.append(.object(["observation": .string(
-                        "The completion claim was rejected: its evidence is not observable yet. Continuing.")]))
+                        "The completion claim was rejected: its evidence is not observable yet. Continuing — actions already dispatched took effect; do not repeat them unless fresh evidence shows they did not land.")]))
                     ledger.append("done claim rejected — evidence not observable")
                     continue
                 }
@@ -655,28 +853,67 @@ final class CuaAgentLoop {
                     throw DriverConnectionError.refused("The operation or its authorization is unclear: \(description). Nothing was dispatched.")
                 }
             }
+            // Foreground input lands wherever focus is — honest only while
+            // the bound window is frontmost, so the pinned window is raised
+            // and frontmost re-verified before each delivery. Element lanes
+            // never reach this: a raise happens only when the chosen action
+            // genuinely needs window-level input the driver refused to pin.
+            // A raise that cannot verify frontmost is a dispatch failure,
+            // never a blind keystroke into the wrong app.
+            let foregroundInput = windowInputAmbiguous && lane.usesWindowInput
+            if foregroundInput {
+                let raised = try? await call("bring_to_front",
+                    ["pid": .number(Double(resolvedPID)), "window_id": .number(Double(wid))])
+                guard raised?["activated"] == .bool(true), isFrontmostApp(resolvedPID) else {
+                    dispatchFailures += 1
+                    modelHistory.append(.object(["action": .string(description),
+                        "observation": .string("The bound window could not be brought to the front; the input was not sent.")]))
+                    ledger.append("\(description) — not dispatched: window is not frontmost")
+                    guard dispatchFailures < Self.maximumDispatchFailures else {
+                        return finish(.blocked("The bound window could not be brought to the front for keyboard input. Nothing further was dispatched."))
+                    }
+                    continue
+                }
+            }
             let result: JSONValue
             do {
+                Self.log.notice("agent_step \"\(task.goal, privacy: .public)\" -> \(description, privacy: .public)")
                 result = try await dispatch(lane, pid: resolvedPID, wid: wid, goal: task.goal,
                                             text: dispatchText,
                                             browserTarget: browserTarget, shownTab: browserShownTab,
                                             tabs: tabs, tabsBaseline: &tabsBaseline,
-                                            newTabRequested: &newTabRequested)
+                                            newTabRequested: &newTabRequested,
+                                            foregroundInput: foregroundInput)
                 dispatchFailures = 0
             } catch let error as DriverConnectionError {
-                if case .toolRefused(_, let code) = error, code.contains("consent") {
+                if case .toolRefused(_, let code, _) = error, code.contains("consent") {
                     return finish(.blockedByConsent(code))
                 }
                 if case .refused(let message) = error {
                     return finish(.blocked(message))
                 }
-                if case .toolRefused(_, let code) = error,
+                if case .timedOut = error, laneMutates(lane) {
+                    // The mutation's response was lost — the effect may
+                    // have landed. Read the pinned target once so the
+                    // uncertainty report carries fresh evidence, then
+                    // stop: a lost response is never re-dispatched blindly
+                    // and never claimed as success.
+                    _ = try? await call("get_window_state", [
+                        "pid": .number(Double(resolvedPID)), "window_id": .number(Double(wid)),
+                        "include_screenshot": .bool(false), "max_elements": .number(200)])
+                    throw CuaUncertainOutcome(tool: lane.id, result: .object([:]))
+                }
+                if case .toolRefused(_, let code, _) = error,
                    code == "same_pid_keyboard_ambiguity", lane.usesWindowInput {
                     windowInputAmbiguous = true
+                    let explanation = task.foreground || isFrontmostApp(resolvedPID)
+                        ? "App-level input could not be pinned to the window in the background; the next window-input action raises the bound window to the front and delivers it there instead."
+                        : "App-level input could not be pinned to the window and this task must stay in the background; window-level key and focus-typing actions are no longer available — use element actions or report honestly."
                     modelHistory.append(.object(["action": .string(description),
-                        "observation": .string("App-level input cannot target this window; only element-scoped actions remain available.")]))
+                        "observation": .string(explanation)]))
                     continue
                 }
+                failedLaneIDs.insert(lane.id + "|" + (laneText[nextID] ?? ""))
                 dispatchFailures += 1
                 modelHistory.append(.object(["action": .string(description),
                     "observation": .string("Dispatch failed: \(error.localizedDescription). The effect may not have happened — re-check before acting.")]))
@@ -688,6 +925,10 @@ final class CuaAgentLoop {
             } catch let outcome as CuaUncertainOutcome {
                 return finish(.blocked("\(outcome.localizedDescription) Inspect \(appName) before retrying."))
             }
+            // An acknowledged cancellation stops the drive here — reads
+            // after this point would only decorate a dead run, and any
+            // later mutation is forbidden outright.
+            try Task.checkCancellation()
             if case .typeIntoElement(_, let index) = lane {
                 pendingInsertProof = (index, dispatchText ?? "")
             }
@@ -701,19 +942,36 @@ final class CuaAgentLoop {
                                          "observation": .string(outcome)]))
             ledger.append("\(description) → \(outcome)")
             progress("\(description) → \(outcome)")
-            // A produced window outranks a baseline pin for create-scope
-            // work: exactly one new onscreen window after a mutation becomes
-            // the pin; two or more stays ambiguous rather than guessed.
-            if laneMutates(lane), task.scope == .create, baselineWindowIDs.contains(wid),
-               let listing = try? await call("list_windows", ["pid": .number(Double(resolvedPID))]) {
-                let produced = (listing["windows"]?.array ?? []).filter {
-                    $0["is_on_screen"] != .bool(false)
-                        && !baselineWindowIDs.contains($0["window_id"]?.integer ?? -1) }
-                if produced.count == 1, let newID = produced[0]["window_id"]?.integer {
-                    windowID = newID
-                    currentWindowID = newID
-                    wid = newID
+            // A produced window outranks the baseline pin: exactly one new
+            // onscreen window after a mutation becomes the pin — the new
+            // document, dialog or sheet the action caused; two or more
+            // stays ambiguous rather than guessed. Registration lags
+            // dispatch — the window server needs a beat to publish the new
+            // document — so settle and re-list once when the first snapshot
+            // shows nothing new.
+            if laneMutates(lane), !lane.needsFillText, baselineWindowIDs.contains(wid),
+               let newID = await producedWindowID(pid: resolvedPID, excluding: baselineWindowIDs) {
+                windowID = newID
+                currentWindowID = newID
+                wid = newID
+                // The window id publishes before its content does — a
+                // re-pinned read that arrives too early shows the judge an
+                // empty shell and invites repeating the producing action.
+                // Settle on a populated (or honestly empty) tree before
+                // the next observation.
+                for _ in 0..<3 {
+                    let probe = try? await call("get_window_state", [
+                        "pid": .number(Double(resolvedPID)), "window_id": .number(Double(newID)),
+                        "include_screenshot": .bool(false), "max_elements": .number(50)])
+                    if !(probe?["elements"]?.array ?? []).isEmpty { break }
+                    try? await Task.sleep(for: .milliseconds(400))
                 }
+                // The produce is evidence, not a claim — record it so the
+                // done-evidence question sees it in verified_facts.
+                recordPostcondition(.resultObserved,
+                                    "Task produced a new \(appName) window (id \(newID)).",
+                                    appName: appName, bundleID: bundleID,
+                                    processID: resolvedPID, windowID: newID)
             }
             // Driver honesty fields: a confirmed effect (or an explicit
             // verified readback) is proof; a suspected noop or a pixel
@@ -812,9 +1070,15 @@ final class CuaAgentLoop {
     /// postcondition evidence is our own synthesis and must not satisfy
     /// success_contains (it feeds the model via verified_facts instead).
     private static func observedCorpus(elements: [JSONValue], title: String,
-                                       tabs: [JSONValue], facts: [CuaObservedPostcondition]) -> String {
+                                       tabs: [JSONValue], facts: [CuaObservedPostcondition],
+                                       visualTexts: [String] = [],
+                                       staticText: String = "") -> String {
         var parts = [title]
         for element in elements {
+            // Menu chrome is not window content — a "recent items" menu can
+            // list a stale result and must not satisfy success_contains.
+            if let role = element["role"]?.string, menuRoles.contains(role)
+                || role == "AXMenu" || role == "AXMenuBar" || role == "AXMenuBarItem" { continue }
             for key in ["label", "title", "value", "description"] {
                 if let text = element[key]?.string { parts.append(text) }
             }
@@ -824,7 +1088,42 @@ final class CuaAgentLoop {
                 if let text = tab[key]?.string { parts.append(text) }
             }
         }
+        parts += visualTexts
+        parts.append(staticText)
         return parts.joined(separator: "\n").lowercased()
+    }
+
+    /// Display content pulled out of `tree_markdown`: static text and value
+    /// lines only. Menu chrome is excluded — a Calculator "recent items"
+    /// menu can literally list a prior result like "14" and must never
+    /// count as the current window's evidence.
+    static func windowStaticTexts(markdown: String) -> [String] {
+        markdown.split(separator: "\n").compactMap { line in
+            guard line.contains("AXStaticText") || line.contains("AXValue")
+                    || line.contains("AXTextArea") || line.contains("AXTextField")
+                    || line.contains("AXHeading") else { return nil }
+            guard let quoted = line.split(separator: "\"").dropFirst().first else {
+                let tail = line.split(separator: "=", maxSplits: 1).last?
+                    .trimmingCharacters(in: .whitespaces) ?? ""
+                return tail.isEmpty ? nil : String(tail)
+            }
+            return String(quoted)
+        }
+    }
+
+    /// One bounded visual read: a fresh window capture feeds the driver's
+    /// `parse_visual_regions`; the region text is observed evidence for
+    /// surfaces whose content exists only as pixels. Read-only — it never
+    /// counts as a dispatch and never repeats.
+    private func readVisualTexts(pid: Int, wid: Int) async -> [String] {
+        guard let capture = try? await call("get_window_state",
+            ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+             "include_screenshot": .bool(true)]),
+              let captureID = capture["capture_id"]?.string,
+              let parsed = try? await call("parse_visual_regions",
+                  ["capture_id": .string(captureID)]) else { return [] }
+        return (parsed["regions"]?.array ?? [])
+            .compactMap { $0["text"]?.string ?? $0["label"]?.string }
     }
 
     /// Driver ActionResult honesty: `effect: confirmed` or an explicit
@@ -882,7 +1181,9 @@ final class CuaAgentLoop {
     private func dispatch(_ lane: Lane, pid: Int, wid: Int, goal: String,
                           text: String?, browserTarget: JSONValue?, shownTab: String?,
                           tabs: [JSONValue],
-                          tabsBaseline: inout [String]?, newTabRequested: inout Bool) async throws -> JSONValue {
+                          tabsBaseline: inout [String]?, newTabRequested: inout Bool,
+                          foregroundInput: Bool = false) async throws -> JSONValue {
+        let inputMode = JSONValue.string(foregroundInput ? "foreground" : "background")
         switch lane {
         case .clickElement(let token, _):
             return try await call("click", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
@@ -897,7 +1198,7 @@ final class CuaAgentLoop {
             guard let text, !text.isEmpty else { throw DriverConnectionError.refused("There is no text to insert.") }
             return try await call("type_text", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                                 "text": .string(text),
-                                                "delivery_mode": .string("background")])
+                                                "delivery_mode": inputMode])
         case .setValue(let token, _):
             guard let text, !text.isEmpty else { throw DriverConnectionError.refused("There is no value to set.") }
             return try await call("set_value", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
@@ -931,11 +1232,11 @@ final class CuaAgentLoop {
         case .pressKey(let key):
             return try await call("press_key", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                                 "key": .string(key),
-                                                "delivery_mode": .string("background")])
+                                                "delivery_mode": inputMode])
         case .hotkey(let keys):
             return try await call("hotkey", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                              "keys": .array(keys.map { .string($0) }),
-                                             "delivery_mode": .string("background")])
+                                             "delivery_mode": inputMode])
         case .scroll(let direction):
             return try await call("scroll", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                              "direction": .string(direction), "by": .string("page"), "amount": .number(1),
@@ -949,7 +1250,7 @@ final class CuaAgentLoop {
             newTabRequested = true
             return try await call("hotkey", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                              "keys": .array([.string("cmd"), .string("t")]),
-                                             "delivery_mode": .string("background")])
+                                             "delivery_mode": inputMode])
         case .navigate(let url):
             guard let target = browserTarget else {
                 throw DriverConnectionError.refused("This window is not bound to the browser route; DOM navigation is unavailable.")
@@ -998,6 +1299,24 @@ final class CuaAgentLoop {
         }
     }
 
+    /// Exactly one new onscreen window outside the baseline, or nil when none
+    /// or several appeared. Listing errors and ambiguity both collapse to nil
+    /// — the step loop re-observes anyway; only a confident unique produce
+    /// may steal the pin.
+    private func producedWindowID(pid: Int, excluding baseline: Set<Int>) async -> Int? {
+        for attempt in 0...2 {
+            if let listing = try? await call("list_windows", ["pid": .number(Double(pid))]) {
+                let produced = (listing["windows"]?.array ?? []).filter {
+                    $0["is_on_screen"] != .bool(false)
+                        && !baseline.contains($0["window_id"]?.integer ?? -1) }
+                if produced.count == 1 { return produced[0]["window_id"]?.integer }
+                if produced.count > 1 { return nil }
+            }
+            if attempt < 2 { try? await Task.sleep(for: .milliseconds(400)) }
+        }
+        return nil
+    }
+
     // MARK: - Observation shaping
 
     private static func compactElement(_ element: JSONValue) -> JSONValue {
@@ -1007,6 +1326,24 @@ final class CuaAgentLoop {
             "label": element["label"] ?? element["title"] ?? .null,
             "value": (element["value"]?.string).map { .string(String($0.prefix(80))) } ?? .null])
     }
+
+    /// A success_contains entry that only describes the artifact a create
+    /// task produces — "new document", "a new note" — can never appear in
+    /// observed window text; the produced window itself is its only proof.
+    /// Any user-named content in the claim (a title, a body phrase) keeps it
+    /// gated on the corpus instead.
+    private static func isProducedArtifactClaim(_ claim: String) -> Bool {
+        let words = claim.split { !$0.isLetter }
+        return !words.isEmpty && words.allSatisfy { producedArtifactVocabulary.contains($0.lowercased()) }
+    }
+
+    private static let producedArtifactVocabulary: Set<String> = [
+        "a", "an", "the", "new", "fresh", "blank", "empty", "untitled",
+        "document", "doc", "window", "note", "file", "draft", "message",
+        "email", "mail", "task", "todo", "reminder", "event", "appointment",
+        "meeting", "tab", "page", "item", "entry", "record", "card", "post",
+        "text", "sheet", "canvas", "project", "list", "board", "created",
+        "create", "opened", "open", "made", "make"]
 
     /// Roles a click makes sense on; everything else is skipped as a candidate
     /// (the model sees all elements in state, only these become actions).

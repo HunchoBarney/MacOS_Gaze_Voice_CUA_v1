@@ -37,7 +37,7 @@ public enum JSONValue: Codable, Equatable, Sendable {
 
 public enum DriverConnectionError: Error, LocalizedError, Equatable {
     case unavailable, closed, malformed, timedOut, remote(String), refused(String)
-    case toolRefused(tool: String, code: String)
+    case toolRefused(tool: String, code: String, detail: String)
     public var errorDescription: String? {
         switch self {
         case .unavailable: return "Install Cua Driver in Applications before connecting."
@@ -45,7 +45,13 @@ public enum DriverConnectionError: Error, LocalizedError, Equatable {
         case .malformed: return "Cua returned an invalid response. No action will be replayed."
         case .timedOut: return "Cua timed out. A dispatched action may have completed; inspect before retrying."
         case .remote(let text), .refused(let text): return text
-        case .toolRefused(let tool, let code): return "Cua could not complete \(tool) (\(code)). Inspect the target before retrying."
+        // The driver-side refusal text stays OUT of localizedDescription —
+        // refusal messages can carry private observed content and this
+        // description reaches user-facing surfaces. The typed code is the
+        // safe signal; `detail` rides along only for MCP envelopes where the
+        // agent needs the actionable reason.
+        case .toolRefused(let tool, let code, _):
+            return "Cua could not complete \(tool) (\(code)). Inspect the target before retrying."
         }
     }
 }

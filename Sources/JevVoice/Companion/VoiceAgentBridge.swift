@@ -1,6 +1,19 @@
 import Foundation
 import JevVoiceCore
 
+/// The voice path's delegation seam into the persistent-agent runtime.
+protocol AgentBridging: Sendable {
+    /// Slugs/names/roles the tool surface may route to.
+    func roster() async -> [CompanionAgent]
+    /// `delegate_to_agent` tool: found or reuse a persistent agent. Returns
+    /// the user-facing line the runtime reports.
+    func delegate(_ request: DelegationRequest) async throws -> String
+    /// A follow-up into an existing agent's thread.
+    func sendToAgent(slug: String, message: String) async throws -> String
+    /// Read findings without waking the agent.
+    func agentMemory(slug: String) async throws -> String
+}
+
 /// Production `AgentBridging` over `AgentRuntime` — the voice path's
 /// delegation seam. A nil runtime means agents are unavailable in this
 /// build; decisions refuse honestly rather than guessing.

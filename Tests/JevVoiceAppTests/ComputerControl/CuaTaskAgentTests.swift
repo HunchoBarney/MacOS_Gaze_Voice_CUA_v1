@@ -3,9 +3,8 @@ import JevVoiceCore
 @testable import JevVoice
 
 /// Coverage for the post-split CuaTaskAgent: the deterministic fast lane plus
-/// the pure helpers the drive loop's escalation seams call back into. Planning
-/// coverage lives in CompanionBrain tests; per-step selection lives in
-/// CuaAgentLoopDriveTests.
+/// the pure helpers the drive loop's escalation seams call back into.
+/// Per-step selection lives in CuaAgentLoopDriveTests.
 @MainActor
 final class CuaTaskAgentTests: XCTestCase {
 
@@ -50,6 +49,61 @@ final class CuaTaskAgentTests: XCTestCase {
         let sut = CuaTaskAgent(call: { _, _ in .object([:]) })
         let apps = [app("Fixture", bundle: "test.fixture")]
         XCTAssertNil(sut.resolveFastLane(goal: "open nonexistent", apps: apps))
+    }
+
+    /// "scroll down in X" resolves as a deterministic window scroll — the
+    /// highest frequency pointer replacement a voice user asks for — with
+    /// zero planner or judge calls. (The unqualified form resolves against
+    /// the frontmost app, which a test host cannot pose as.)
+    func testScrollResolvesAndDispatchesWindowScroll() async throws {
+        var dispatched: [String: JSONValue]?
+        let sut = CuaTaskAgent(call: { tool, args in
+            switch tool {
+            case "scroll": dispatched = args
+            case "get_accessibility_tree":
+                return .object(["apps": .array([self.app("Fixture", bundle: "test.fixture",
+                                                         running: true, pid: 42)])])
+            case "list_windows":
+                return .object(["windows": .array([.object([
+                    "window_id": .number(7), "is_on_screen": .bool(true)])])])
+            default: break
+            }
+            return .object([:])
+        })
+        let resolved = try XCTUnwrap(sut.resolveFastLane(
+            goal: "scroll down in fixture", apps: [app("Fixture", bundle: "test.fixture",
+                                                       running: true, pid: 42)]))
+        let evidence = try await sut.runFastLane(resolved, goal: "scroll down in fixture") { _ in }
+        XCTAssertNotNil(evidence)
+        XCTAssertEqual(dispatched?["direction"], .string("down"))
+        XCTAssertEqual(dispatched?["window_id"], .number(7))
+        XCTAssertEqual(dispatched?["delivery_mode"], .string("background"))
+    }
+
+    /// A scroll aimed at a window never rewrites into a keystroke: "scroll
+    /// down" must not dispatch ⌘-style chords even when the page is key-heavy.
+    func testScrollLaneNeverSendsHotkeys() async throws {
+        var hotkeyCalls = 0
+        let sut = CuaTaskAgent(call: { tool, _ in
+            if tool == "hotkey" { hotkeyCalls += 1 }
+            if tool == "get_accessibility_tree" {
+                return .object(["apps": .array([self.app("Fixture", bundle: "test.fixture",
+                                                         running: true, pid: 42)])])
+            }
+            if tool == "list_windows" {
+                return .object(["windows": .array([.object([
+                    "window_id": .number(7), "is_on_screen": .bool(true)])])])
+            }
+            return .object([:])
+        })
+        for phrase in ["scroll up in fixture", "scroll down in fixture",
+                       "scroll left in fixture", "scroll right in fixture"] {
+            let resolved = try XCTUnwrap(sut.resolveFastLane(
+                goal: phrase, apps: [app("Fixture", bundle: "test.fixture",
+                                         running: true, pid: 42)]), phrase)
+            _ = try await sut.runFastLane(resolved, goal: phrase) { _ in }
+        }
+        XCTAssertEqual(hotkeyCalls, 0)
     }
 
     // MARK: - runFastLane
@@ -162,6 +216,24 @@ final class CuaTaskAgentTests: XCTestCase {
                                                          actionDescription: "Press ⌘C"))
         XCTAssertFalse(CuaTaskAgent.requiresRiskJudgment(goal: "save the document",
                                                          actionDescription: "hotkey_cmd+s"))
+    }
+
+    // MARK: - Search-query backfill
+
+    /// "search for X" goals carry a verbatim query — when the planner omits
+    /// `values`, the runtime recovers it deterministically so the loop can
+    /// type instead of hunting for a chorded shortcut.
+    func testImpliedQueryRecoversSearchText() {
+        XCTAssertEqual(CuaVoiceRuntime.impliedQuery(in: "Search for Marvins Room in Spotify",
+                                                  app: "Spotify"), "Marvins Room")
+        XCTAssertEqual(CuaVoiceRuntime.impliedQuery(in: "look up the weather in yuba city",
+                                                  app: nil), "the weather in yuba city")
+        XCTAssertEqual(CuaVoiceRuntime.impliedQuery(in: "google how to make pasta",
+                                                  app: nil), "how to make pasta")
+        // No search verb → nothing recovered.
+        XCTAssertNil(CuaVoiceRuntime.impliedQuery(in: "open the notes app", app: "Notes"))
+        // An empty tail is no query.
+        XCTAssertNil(CuaVoiceRuntime.impliedQuery(in: "search for", app: nil))
     }
 
     // MARK: - Postcondition ledger

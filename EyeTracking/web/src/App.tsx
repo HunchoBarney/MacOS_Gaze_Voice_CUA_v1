@@ -31,10 +31,18 @@ type ClickEffectState = {
 
 const calibrationPoints: [number, number][] = [
   [0.5, 0.5],
-  [0.12, 0.12],
-  [0.88, 0.12],
-  [0.88, 0.88],
-  [0.12, 0.88]
+  [0.08, 0.08],
+  [0.92, 0.08],
+  [0.92, 0.92],
+  [0.08, 0.92],
+  [0.5, 0.08],
+  [0.92, 0.5],
+  [0.5, 0.92],
+  [0.08, 0.5],
+  [0.31, 0.31],
+  [0.69, 0.31],
+  [0.69, 0.69],
+  [0.31, 0.69]
 ];
 const validationPoints: [number, number][] = [[0.3, 0.7], [0.7, 0.3]];
 const trialPoints = [...calibrationPoints, ...validationPoints];
@@ -163,6 +171,10 @@ function App() {
         setCalibrationNotice(payload.message ?? "Calibration did not validate; trying again");
         setCalibrationIndex(0);
         setCalibrationAttempt((value) => value + 1);
+      } else if (payload.status === "validation_retry") {
+        setCalibrationNotice(payload.message ?? "Validation was off; re-checking the two points");
+        setCalibrationIndex(calibrationPoints.length);
+        setCalibrationAttempt((value) => value + 1);
       } else if (shouldRetryCalibrationCapture(payload.status)) {
         setCalibrationNotice(payload.message ?? (payload.status === "save_failed" ? "Could not save calibration" : "Hold still and retry"));
         setCalibrationAttempt((value) => value + 1);
@@ -289,14 +301,52 @@ function App() {
     });
   }, [gaze]);
 
+  const gazeTargetRef = useRef<[number, number] | null>(null);
+  const gazeDisplayRef = useRef<[number, number] | null>(null);
+
+  useEffect(() => {
+    gazeTargetRef.current = gaze ? [gaze.x_norm, gaze.y_norm] : null;
+  }, [gaze]);
+
+  useEffect(() => {
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const el = gazeDotRef.current;
+      const target = gazeTargetRef.current;
+      if (!el || !target) {
+        gazeDisplayRef.current = null;
+        return;
+      }
+      let pos = gazeDisplayRef.current;
+      if (!pos) {
+        pos = [target[0], target[1]];
+        gazeDisplayRef.current = pos;
+      } else {
+        const k = 1 - Math.exp(-dt / 0.06);
+        pos[0] += (target[0] - pos[0]) * k;
+        pos[1] += (target[1] - pos[1]) * k;
+      }
+      el.style.transform = `translate(${pos[0] * window.innerWidth}px, ${pos[1] * window.innerHeight}px)`;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   const dotStyle = useMemo(() => {
     if (!gaze || Date.now() - gaze.receivedAt > GAZE_STALE_MS) {
       return { opacity: 0 };
     }
-    return {
-      transform: `translate(${gaze.x_norm * window.innerWidth}px, ${gaze.y_norm * window.innerHeight}px)`,
-      opacity: Math.max(0.35, Math.min(1, gaze.confidence))
-    };
+    if (gaze.blink || gaze.head_turned) {
+      return { opacity: 0.15 };
+    }
+    if (gaze.held_reason) {
+      return { opacity: 0.25 };
+    }
+    return { opacity: Math.max(0.35, Math.min(1, gaze.confidence)) };
   }, [gaze]);
 
   useEffect(() => {
@@ -448,9 +498,11 @@ function App() {
           <div>{status}</div>
           {gaze && (
             <div>
-              d {gaze.distance_m.toFixed(2)}m / yaw {gaze.yaw_deg.toFixed(1)} / pitch {gaze.pitch_deg.toFixed(1)}
+              d {gaze.distance_m.toFixed(2)}m{gaze.distance_source ? ` (${gaze.distance_source})` : ""} / yaw {gaze.yaw_deg.toFixed(1)} / pitch {gaze.pitch_deg.toFixed(1)}
             </div>
           )}
+          {gaze?.blink && <div>Eyes closed</div>}
+          {gaze?.head_turned && <div>Head turned</div>}
           {gaze?.head_face_width_ratio && (
             <div>
               Head/Face {gaze.head_face_width_ratio.toFixed(3)}x

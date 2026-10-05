@@ -35,9 +35,13 @@ final class CuaAgentLoopDriveTests: XCTestCase {
     }
 
     /// A loop whose driver + judge are canned. `states` are served in order
-    /// (the last repeats); `steps` answer the judge per step.
+    /// (the last repeats); `steps` answer the judge per step. `listWindows`,
+    /// when given, answers each list_windows call by index (0-based).
     private func harness(states: [JSONValue],
                          steps: @escaping (Int) -> [String: Answer],
+                         listWindows: ((Int) -> JSONValue)? = nil,
+                         frontmost: Bool = true,
+                         raiseMakesFrontmost: Bool = true,
                          dispatch: @escaping (String, [String: JSONValue]) throws -> JSONValue = { _, _ in
                              .object(["effect": .string("confirmed")])
                          })
@@ -45,6 +49,8 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         let calls = Box<[(String, [String: JSONValue])]>([])
         let asked = Box<[[String: Question]]>([])
         var snapshots = states
+        var listCount = 0
+        let frontmostState = Box(frontmost)
         let call: CuaTaskAgent.Call = { name, args in
             calls.value.append((name, args))
             if name == "get_window_state" {
@@ -53,10 +59,14 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             // Observation calls are not dispatches — the pid-only target path
             // consults list_apps to recover bundle identity.
             if name == "list_apps" { return .object(["apps": .array([])]) }
-            if name == "list_windows" { return .object(["windows": .array([])]) }
+            if name == "list_windows" {
+                defer { listCount += 1 }
+                return listWindows?(listCount) ?? .object(["windows": .array([])])
+            }
             if name == "bring_to_front" {
-                return .object(["activated": .bool(true),
-                                "exact_window_effect": .object(["verified": .bool(true)])])
+                if raiseMakesFrontmost { frontmostState.value = true }
+                return .object(["activated": .bool(raiseMakesFrontmost),
+                                "exact_window_effect": .object(["verified": .bool(raiseMakesFrontmost)])])
             }
             return try dispatch(name, args)
         }
@@ -64,7 +74,8 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             asked.value.append(questions)
             return steps(asked.value.count - 1)
         }
-        return (CuaAgentLoop(call: call, judge: judge), calls, asked)
+        return (CuaAgentLoop(call: call, judge: judge,
+                             isFrontmostApp: { _ in frontmostState.value }), calls, asked)
     }
 
     final class Box<T> { var value: T; init(_ v: T) { value = v } }
@@ -182,7 +193,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         let (loop, _, _) = harness(
             states: [window([element(0, role: "AXButton", label: "Go")])],
             steps: { _ in self.answers(next: "click_0") },
-            dispatch: { _, _ in throw DriverConnectionError.toolRefused(tool: "click", code: "blocked_by_consent") })
+            dispatch: { _, _ in throw DriverConnectionError.toolRefused(tool: "click", code: "blocked_by_consent", detail: "") })
         let result = try await loop.drive(DriveTask(goal: "go", pid: 7, windowID: 42))
         XCTAssertEqual(result.status, .blockedByConsent("blocked_by_consent"))
     }
@@ -195,7 +206,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         guard case .maxSteps(let history) = result.status else {
             return XCTFail("expected maxSteps, got \(result.status)")
         }
-        XCTAssertEqual(history.count, 3)
+        XCTAssertEqual(history.count, 2)
     }
 
     func testInvalidAnswerHandsBackUntrusted() async throws {
@@ -269,5 +280,179 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         XCTAssertEqual(result.windowID, 9)
         XCTAssertTrue(calls.value.contains { $0.0 == "launch_app" })
         XCTAssertEqual(calls.value.first { $0.0 == "get_window_state" }?.1["window_id"], .number(9))
+    }
+
+    /// Window registration lags the dispatch that caused it: a create-scope
+    /// mutation whose first post-dispatch listing shows only the baseline must
+    /// settle and re-list once — the produced window then steals the pin and
+    /// the done gate can pass on it.
+    func testCreateScopeSettlesAndFindsProducedWindow() async throws {
+        let oldDoc = JSONValue.object(["window_id": .number(42), "title": .string("Old Doc"),
+                                       "is_on_screen": .bool(true)])
+        let newDoc = JSONValue.object(["window_id": .number(99), "title": .string("Untitled"),
+                                       "is_on_screen": .bool(true)])
+        let (loop, calls, _) = harness(
+            states: [window([element(0, role: "AXButton", label: "Body")]),
+                     window([element(0, role: "AXButton", label: "Body")])],
+            steps: { step in step == 0
+                ? self.answers(next: "hotkey_cmd+n")
+                : self.answers(next: "done") },
+            listWindows: { index in
+                index < 2
+                    ? .object(["windows": .array([oldDoc])])
+                    : .object(["windows": .array([oldDoc, newDoc])])
+            })
+        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, scope: .create))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(result.windowID, 99)
+        let reads = calls.value.filter { $0.0 == "get_window_state" }
+        XCTAssertEqual(reads.last?.1["window_id"], .number(99))
+    }
+
+    /// A create-scope done claim pinned to a baseline window is vetoed even
+    /// when the judge insists the outcome is proven — the bound window
+    /// pre-existed, so nothing the task produced can be claimed.
+    func testCreateScopeBaselinePinVetoesDone() async throws {
+        let oldDoc = JSONValue.object(["window_id": .number(42), "title": .string("Old Doc"),
+                                       "is_on_screen": .bool(true)])
+        let (loop, _, _) = harness(
+            states: [window([element(0, role: "AXButton", label: "Body")])],
+            steps: { _ in self.answers(next: "done") },
+            listWindows: { _ in .object(["windows": .array([oldDoc])]) })
+        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, scope: .create,
+                                                    maxSteps: 4))
+        guard case .blocked(let reason) = result.status else {
+            return XCTFail("expected blocked, got \(result.status)")
+        }
+        XCTAssertTrue(reason.contains("never produced"))
+    }
+
+    /// A window the task's own launch produced is not baseline: fresh-launch
+    /// create scope can prove done on it (an empty baseline is the correct
+    /// pre-task set for an app that was not running).
+    func testCreateScopeLaunchWindowIsNotBaseline() async throws {
+        let (loop, _, _) = harness(
+            states: [window([element(0, role: "AXButton", label: "Body")])],
+            steps: { _ in self.answers(next: "done") },
+            dispatch: { name, _ in
+                name == "launch_app"
+                    ? .object(["pid": .number(55), "name": .string("TestApp"),
+                               "bundle_id": .string("com.test.app"),
+                               "windows": .array([.object(["window_id": .number(9),
+                                                           "title": .string("Untitled"),
+                                                           "is_on_screen": .bool(true)])])])
+                    : .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "new document", application: "com.test.app",
+                                                    scope: .create))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(result.windowID, 9)
+    }
+
+    /// A `same_pid_keyboard_ambiguity` refusal doesn't kill keyboard lanes:
+    /// the bound window is re-raised and the next dispatch rides
+    /// `delivery_mode: foreground` — the only posture the driver can prove
+    /// for app-level input in a multi-window app.
+    func testWindowInputAmbiguityEscalatesToForegroundDelivery() async throws {
+        var hotkeyCalls = 0
+        let (loop, calls, _) = harness(
+            states: [window([element(0, role: "AXButton", label: "Body")])],
+            steps: { step in step < 2
+                ? self.answers(next: "hotkey_cmd+n")
+                : self.answers(next: "done") },
+            dispatch: { name, _ in
+                if name == "hotkey" {
+                    hotkeyCalls += 1
+                    if hotkeyCalls == 1 {
+                        throw DriverConnectionError.toolRefused(tool: "hotkey", code: "same_pid_keyboard_ambiguity", detail: "")
+                    }
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42))
+        XCTAssertEqual(result.status, .done)
+        let hotkeys = calls.value.filter { $0.0 == "hotkey" }
+        XCTAssertEqual(hotkeys.count, 2)
+        XCTAssertEqual(hotkeys[0].1["delivery_mode"], .string("background"))
+        XCTAssertEqual(hotkeys[1].1["delivery_mode"], .string("foreground"))
+    }
+
+    /// The same ambiguity while the app is *not* frontmost: dispatch raises
+    /// the bound window, verifies the app came to the front, then delivers
+    /// the keystroke foreground — a user-requested task may bring its target
+    /// forward; it may never fire a blind keystroke.
+    func testWindowInputAmbiguityRaisesThenDeliversForeground() async throws {
+        var hotkeyCalls = 0
+        let (loop, calls, _) = harness(
+            states: [window([element(0, role: "AXTextArea", label: "Body")])],
+            steps: { step in step < 2
+                ? self.answers(next: "hotkey_cmd+n")
+                : self.answers(next: "done") },
+            frontmost: false,
+            dispatch: { name, _ in
+                if name == "hotkey" {
+                    hotkeyCalls += 1
+                    if hotkeyCalls == 1 {
+                        throw DriverConnectionError.toolRefused(tool: "hotkey", code: "same_pid_keyboard_ambiguity", detail: "")
+                    }
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42,
+                                                  foreground: true))
+        XCTAssertEqual(result.status, .done)
+        let hotkeys = calls.value.filter { $0.0 == "hotkey" }
+        XCTAssertEqual(hotkeys.count, 2)
+        XCTAssertEqual(hotkeys[0].1["delivery_mode"], .string("background"))
+        XCTAssertEqual(hotkeys[1].1["delivery_mode"], .string("foreground"))
+        XCTAssertEqual(calls.value.filter { $0.0 == "bring_to_front" }.count, 2,
+                       "Once at drive start (foreground task), once at the ambiguity escalation")
+    }
+
+    /// A background-posture task on a non-frontmost app may not steal the
+    /// user's foreground: once the driver reports window ambiguity its
+    /// window-input lanes leave the offer set rather than raise.
+    func testBackgroundTaskNeverRaisesForAmbiguousWindowInput() async throws {
+        let (loop, calls, _) = harness(
+            states: [window([element(0, role: "AXTextArea", label: "Body")])],
+            steps: { step in step == 0
+                ? self.answers(next: "hotkey_cmd+n")
+                : self.answers(next: "done") },
+            frontmost: false,
+            dispatch: { name, _ in
+                if name == "hotkey" {
+                    throw DriverConnectionError.toolRefused(tool: "hotkey", code: "same_pid_keyboard_ambiguity", detail: "")
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.value.filter { $0.0 == "bring_to_front" }.count, 0,
+                       "A background task must never raise its target window")
+        XCTAssertEqual(calls.value.filter { $0.0 == "hotkey" }.count, 1,
+                       "The only hotkey call is the refused one — withheld lanes cannot be picked again")
+    }
+
+    /// A raise that cannot verify the app came to the front is a bounded
+    /// dispatch failure — the keystroke is never sent blind into a window
+    /// the driver could not pin.
+    func testWindowInputAmbiguityNeverFiresABlindKeystroke() async throws {
+        let (loop, calls, _) = harness(
+            states: [window([element(0, role: "AXTextArea", label: "Body")])],
+            steps: { step in step == 0
+                ? self.answers(next: "hotkey_cmd+n")
+                : self.answers(next: "done") },
+            frontmost: false, raiseMakesFrontmost: false,
+            dispatch: { name, _ in
+                if name == "hotkey" {
+                    throw DriverConnectionError.toolRefused(tool: "hotkey", code: "same_pid_keyboard_ambiguity", detail: "")
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42,
+                                                  foreground: true))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.value.filter { $0.0 == "hotkey" }.count, 1,
+                       "The only hotkey call is the refused one — no blind retry")
     }
 }

@@ -9,12 +9,7 @@ final class CuaVoiceLiveTests: XCTestCase {
     private final class Capture: SpeechCapturing {
         var onEvent: ((UUID, SpeechEvent) -> Void)?
         var id: UUID?
-        var snapshot = RangedTranscript()
-        func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String { id = session; snapshot = RangedTranscript(); return "Simulated transcript; real Jev/Cua" }
-        func emitRevision(_ revision: SpeechRevision) throws {
-            try snapshot.apply(revision)
-            emit(.transcript(snapshot))
-        }
+        func start(session: UUID, inputUID: String?, transcribe: Bool) async throws -> String { id = session; return "Simulated transcript; real Jev/Cua" }
         func finish() {}
         func cancel() {}
         func emit(_ event: SpeechEvent) { if let id { onEvent?(id, event) } }
@@ -53,7 +48,7 @@ final class CuaVoiceLiveTests: XCTestCase {
         let suite = "JarvisVoiceLive-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let config = Config(defaults: defaults, keyStore: Keys(key: key), environment: [:])
+        let config = Config(defaults: defaults, keyStore: Keys(key: key), openAIKeyStore: Keys(key: ""), environment: [:])
         let observer = CuaConnection()
         var activeController: VoiceController?
         do {
@@ -66,14 +61,18 @@ final class CuaVoiceLiveTests: XCTestCase {
                 previousWindows = Set((windows["windows"]?.array ?? []).compactMap { $0["window_id"]?.integer })
             }
             let capture = Capture()
-            let runtime = warmedRuntime ?? CuaVoiceRuntime(config: config, judge: { state, questions in
+            let runtime = warmedRuntime ?? CuaVoiceRuntime(config: config,
+                judge: { state, questions in
                 let result = try await JevClient(apiKey: key).systemOne(state: state, questions: questions).response.answers
                 for (id, answer) in result {
                     if case let .choice(value, _, _) = answer {
                         print("Fixture decision:", id, value)
                         if id == "next", case let .choice(_, options) = questions[id] {
                             print("Fixture action:", (options[value] ?? nil) ?? "")
-                            print("Window identities:", state["initial_window_ids"] ?? .null, state["windows"]?.array?.compactMap { $0["window_id"]?.integer } ?? [])
+                            print("State: scope=\(state["scope"] ?? .null)",
+                                  "produced=\(state["window_produced_by_task"] ?? .null)",
+                                  "wid=\(state["selected_window_id"] ?? .null)",
+                                  "title=\(state["window_title"] ?? .null)")
                         }
                     }
                 }
@@ -87,10 +86,17 @@ final class CuaVoiceLiveTests: XCTestCase {
             for _ in 0..<100 where controller.status != .listening { try await Task.sleep(for: .milliseconds(10)) }
             XCTAssertEqual(controller.status, .listening)
             let start = ContinuousClock.now
-            try capture.emitRevision(.init(start: 0, end: 1, text: request, isFinal: true))
+            // The realtime model's tool call lands here — the same entry the
+            // lane's computer_command uses; the ack returns at acceptance and
+            // the verified outcome settles asynchronously.
+            let ack = await controller.cua.beginVoiceTask(request, app: nil)
+            print("Voice route ack:", ack)
             for _ in 0..<600 {
                 if controller.cuaTasks.count > priorTaskCount, controller.cuaTasks.last?.active == false { break }
                 try await Task.sleep(for: .milliseconds(50))
+            }
+            if controller.cuaTasks.last == nil {
+                print("No task materialized — ack:", ack)
             }
             let task = try XCTUnwrap(controller.cuaTasks.last)
             print("Voice route outcome:", task.status, task.message, "transcript-to-result:", start.duration(to: .now))

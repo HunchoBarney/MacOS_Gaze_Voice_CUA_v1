@@ -7,16 +7,16 @@ import OSLog
 /// so the session can safely drain its converter without stopping the device.
 final class MicrophoneAudioGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var feed: AnalyzerAudioFeed?
+    private var feed: ConvertedAudioFeed?
     private var openedAt: UInt64 = 0
 
-    func open(_ feed: AnalyzerAudioFeed, at hostTime: UInt64 = mach_absolute_time()) {
+    func open(_ feed: ConvertedAudioFeed, at hostTime: UInt64 = mach_absolute_time()) {
         lock.lock(); defer { lock.unlock() }
         self.feed = feed
         openedAt = hostTime
     }
     @discardableResult
-    func close() -> AnalyzerAudioFeed? {
+    func close() -> ConvertedAudioFeed? {
         lock.lock(); defer { lock.unlock() }
         let previous = feed
         feed = nil
@@ -97,8 +97,14 @@ final class MicrophoneInput: @unchecked Sendable {
                                                                   sameFormat: sameFormat) {
                                 case .restoreTap:
                                     Self.log.notice("configuration stable; restoring input tap")
+                                    // Tap surgery on a running engine races the IO
+                                    // thread — it can call through a render proc the
+                                    // remove just nulled (SIGSEGV in IOWorkLoop).
+                                    // Stop first so the swap happens on a dead AU.
+                                    engine.stop()
                                     input.removeTap(onBus: 0)
                                     self.installTap(on: input, format: currentFormat)
+                                    do { try engine.start() } catch { self.interrupted?() }
                                 case .interrupt:
                                     self.interrupted?()
                                 }

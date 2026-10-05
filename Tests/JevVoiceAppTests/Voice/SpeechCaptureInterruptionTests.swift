@@ -4,12 +4,12 @@ import XCTest
 @MainActor
 final class SpeechCaptureInterruptionTests: XCTestCase {
     func testDelayedMicrophoneTestInterruptionCannotSuspendReplacementLifecycle() async {
-        let capture = SpeechAnalyzerCapture()
-        let oldInterruption = capture.microphoneTestInterruptionHandler(session: UUID())
+        let capture = RealtimeVoiceLane(apiKey: { "" })
+        let oldInterruption = capture.interruptionHandler(session: UUID())
         // End the old input lifecycle, as replacement by a new input does.
-        // No hardware or speech assets are started by this test.
+        // No hardware or socket is started by this test.
         await capture.suspend()
-        let replacementInterruption = capture.microphoneTestInterruptionHandler(session: UUID())
+        let replacementInterruption = capture.interruptionHandler(session: UUID())
 
         let staleTeardown = expectation(description: "Stale interruption must not publish a paused input")
         staleTeardown.isInverted = true

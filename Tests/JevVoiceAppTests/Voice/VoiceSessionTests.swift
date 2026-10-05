@@ -37,74 +37,24 @@ private final class FakeSpeech: SpeechCapturing {
     func emit(_ event: SpeechEvent, session: UUID? = nil) { onEvent?(session ?? sessions.last!, event) }
 }
 
-/// Capture and the Cua transport are injected; the executor judge returns ignore
-/// outcomes so these lifecycle tests cannot dispatch a desktop action.
+/// Capture lifecycle only: the speech pipeline is simulated and no realtime
+/// lane exists, so a routed command ends in the honest lane-unavailable error
+/// and no work ever materializes.
 @MainActor
 final class VoiceSessionTests: XCTestCase {
+    /// The terminal state a routed command reaches with a simulated capture.
+    private let noLane: VoiceController.Status = .error("The realtime voice lane is not available.")
+
     private func controller(_ speech: FakeSpeech, manual: Bool = false,
-                            timings: VoiceTimings = VoiceTimings(),
-                            judged: @escaping (String) -> Void = { _ in }) -> VoiceController {
+                            timings: VoiceTimings = VoiceTimings()) -> VoiceController {
         let config = Config(defaults: UserDefaults(suiteName: "test.voice.\(UUID())")!,
-                            keyStore: MemoryKeyStore(), environment: [:])
+                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: [:])
         config.autoExecute = !manual
-        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("voice-session-\(UUID()).py")
-        try! #"""
-import json,sys
-for line in sys.stdin:
- r=json.loads(line)
- if 'id' not in r: continue
- if r['method']=='initialize': out={'protocolVersion':'2025-03-26','capabilities':{'tools':{}}}
- else:
-  name=r['params']['name']
-  if name=='list_apps': value={'apps':[]}
-  elif name in ('start_session','end_session'): value={'active':name=='start_session'}
-  elif name=='set_agent_cursor_enabled': value={'enabled':r['params']['arguments'].get('enabled',False)}
-  else: raise RuntimeError('Unexpected fixture tool '+name)
-  out={'structuredContent':value}
- print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':out}),flush=True)
-"""#.write(to: fixture, atomically: true, encoding: .utf8)
-        addTeardownBlock { try? FileManager.default.removeItem(at: fixture) }
-        let runtime = CuaVoiceRuntime(config: config,
-            makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: ["-u", fixture.path]) },
-            judge: { state, questions in
-                if questions["operation"] != nil { judged(state["transcript"]?.string ?? "") }
-                return questions.reduce(into: [:]) { result, item in
-                    let value: String
-                    switch item.key {
-                    case "operation": value = "ignore"
-                    case "span": value = String(state["pending_word_range"]?["end"]?.integer ?? 0)
-                    case "task": value = "independent"
-                    case "relationship": value = "independent"
-                    case "pendingQuestion": value = "none"
-                    case "app": value = "none"
-                    case "scope": value = "work"
-                    case "visibility": value = "background"
-                    case "contentMode": value = "control"
-                    case "literalStart", "literalEnd": value = "none"
-                    case "correctionMode": value = "retract"
-                    case "replacementStart", "replacementEnd": value = "none"
-                    case "clarification": value = "none"
-                    default: fatalError("Unexpected executor question: \(item.key)")
-                    }
-                    result[item.key] = .choice(choice: value, confidence: 1, probabilities: [value: 1])
-                }
-            }, planner: RecordingRefusingPlanner(decide: { utterance, _ in
-                judged(utterance)
-                return .refuse(reason: "ignored")
-            }))
         return VoiceController(config: config, speech: speech, authorize: { true },
-                               timings: timings, frontmost: { "Fixture" }, cuaRuntime: runtime)
+                               timings: timings, frontmost: { "Fixture" },
+                               cuaRuntime: CuaVoiceRuntime(config: config, screenLocked: { false }))
     }
     private func settle() async { for _ in 0..<50 { await Task.yield() } }
-
-    /// A planner that hands each submitted utterance to a closure and returns
-    /// its decision — the lifecycle tests only need to observe submission.
-    private struct RecordingRefusingPlanner: CompanionPlanning {
-        let decide: @Sendable (String, PlannerContext) -> PlannerDecision
-        func decide(utterance: String, context: PlannerContext) async throws -> PlannerDecision {
-            decide(utterance, context)
-        }
-    }
 
     func testSuspensionDoesNotWaitForPreparationToFinish() async {
         let speech = FakeSpeech(); speech.delayPreparation = true
@@ -137,14 +87,14 @@ for line in sys.stdin:
         await shutdown.value
     }
     func testSuspensionInterruptsFinalizationAndRejectsLateFinal() async {
-        let speech = FakeSpeech(); var calls = 0
-        let c = controller(speech, manual: true, judged: { _ in calls += 1 })
+        let speech = FakeSpeech()
+        let c = controller(speech, manual: true)
         c.begin(); await settle(); speech.emit(.partial("captured phrase")); c.finish()
         XCTAssertEqual(c.status, .finishing)
         c.suspendMicrophone("Sleep"); await settle()
         speech.emit(.final("late final")); await settle()
         XCTAssertEqual(c.status, .error("Sleep"))
-        XCTAssertEqual(calls, 0); XCTAssertFalse(c.canBegin)
+        XCTAssertFalse(c.canBegin)
         await c.shutdown()
     }
     func testSpeechStageTimingRejectsStaleAndInvalidEvents() async {
@@ -159,11 +109,11 @@ for line in sys.stdin:
     }
     func testReleaseBeforeCaptureStartsCancelsWithoutLateListening() async {
         let speech = FakeSpeech(); speech.delayStart = true
-        var calls = 0
-        let c = controller(speech, judged: { _ in calls += 1 })
+        let c = controller(speech)
         c.begin(); await settle(); XCTAssertEqual(c.status, .starting)
         c.finish(); speech.startGate?.resume(); await settle()
-        XCTAssertEqual(c.status, .idle); XCTAssertEqual(calls, 0)
+        XCTAssertEqual(c.status, .idle)
+        XCTAssertTrue(c.cuaTasks.isEmpty)
         await c.shutdown()
     }
     func testInterruptionDuringStartupKeepsErrorAfterCleanup() async {
@@ -175,36 +125,44 @@ for line in sys.stdin:
         XCTAssertEqual(c.status, .error("Keyboard interrupted")); XCTAssertTrue(c.canBegin)
         await c.shutdown()
     }
-    func testFinalAfterReleaseSubmitsOnceAndIgnoresLateCallbacks() async {
-        let speech = FakeSpeech(); var received: [String] = []
-        let c = controller(speech, judged: { received.append($0) })
+    /// The first final transcript submits once; late duplicate callbacks on the
+    /// same session cannot double-submit or resurrect the capture.
+    func testFinalAfterReleaseRoutesOnceAndIgnoresLateCallbacks() async {
+        let speech = FakeSpeech()
+        let c = controller(speech)
         c.begin(); await settle(); c.finish()
         XCTAssertEqual(speech.finishes, 1)
         speech.emit(.final("a conversation")); speech.emit(.final("duplicate"))
-        await c.cua.speech.waitForPending()
-        XCTAssertEqual(received, ["a conversation"]); XCTAssertEqual(c.status, .done)
+        await settle()
+        XCTAssertEqual(c.status, noLane)
+        XCTAssertEqual(c.transcript, "a conversation")
+        XCTAssertTrue(c.cuaTasks.isEmpty)
         await c.shutdown()
     }
     func testEarlyFinalRequiresReleaseAndExplicitTranscriptReview() async {
-        let speech = FakeSpeech(); var received: [String] = []
-        let c = controller(speech, judged: { received.append($0) })
+        let speech = FakeSpeech()
+        let c = controller(speech)
         c.begin(); await settle(); speech.emit(.final("a conversation"))
         XCTAssertEqual(c.status, .awaitingRelease)
-        c.finish(); XCTAssertEqual(c.status, .reviewTranscript); XCTAssertTrue(received.isEmpty)
+        c.finish(); XCTAssertEqual(c.status, .reviewTranscript)
+        XCTAssertTrue(c.cuaTasks.isEmpty)
         c.acceptTranscript(); c.acceptTranscript()
-        await c.cua.speech.waitForPending()
-        XCTAssertEqual(received, ["a conversation"]); XCTAssertEqual(c.status, .done)
+        await settle()
+        XCTAssertEqual(c.status, noLane)
+        XCTAssertTrue(c.cuaTasks.isEmpty)
         await c.shutdown()
     }
     func testManualReviewConfirmsOnlyOnceAndDoesNotInterpretPartials() async {
-        let speech = FakeSpeech(); var received: [String] = []
-        let c = controller(speech, manual: true, judged: { received.append($0) })
+        let speech = FakeSpeech()
+        let c = controller(speech, manual: true)
         c.begin(); await settle(); speech.emit(.partial("a conversation")); await settle()
         c.finish(); speech.emit(.final("a conversation")); await settle()
-        XCTAssertTrue(received.isEmpty); XCTAssertEqual(c.status, .awaitingConfirm)
+        XCTAssertEqual(c.status, .awaitingConfirm)
+        XCTAssertTrue(c.cuaTasks.isEmpty)
         c.confirm(); c.confirm()
-        await c.cua.speech.waitForPending()
-        XCTAssertEqual(received, ["a conversation"])
+        await settle()
+        XCTAssertEqual(c.status, noLane)
+        XCTAssertTrue(c.cuaTasks.isEmpty)
         await c.shutdown()
     }
     func testTimeoutReviewsPartialAndRejectsLateFinal() async throws {
@@ -217,13 +175,14 @@ for line in sys.stdin:
         await c.shutdown()
     }
     func testSilenceDismissesWithoutInterpretation() async {
-        let speech = FakeSpeech(); var calls = 0
-        let c = controller(speech, judged: { _ in calls += 1 })
+        let speech = FakeSpeech()
+        let c = controller(speech)
         c.begin(); await settle(); c.finish(); speech.emit(.final("  ")); await settle()
         XCTAssertEqual(c.status, .idle)
         speech.emit(.final("late words")); await settle()
         XCTAssertEqual(c.status, .idle)
-        XCTAssertEqual(calls, 0); XCTAssertTrue(c.canBegin)
+        XCTAssertTrue(c.canBegin)
+        XCTAssertTrue(c.cuaTasks.isEmpty)
         await c.shutdown()
     }
     func testRecognitionFailureWithoutSpeechStillReportsError() async {
@@ -255,12 +214,14 @@ for line in sys.stdin:
         c.finish(); XCTAssertEqual(c.status, .reviewTranscript)
         await c.shutdown()
     }
-    func testOldCompletionTimerCannotHideNewCapture() async throws {
+    /// An errored submission must not leave a dismissal timer that hides the
+    /// next capture — a fresh hold reaches `.listening` and stays there.
+    func testOldSessionOutcomeCannotHideNewCapture() async throws {
         let speech = FakeSpeech()
         let current = controller(speech, timings: VoiceTimings(dismissal: 0.03))
         current.begin(); await settle(); current.finish(); speech.emit(.final("conversation"))
-        await current.cua.speech.waitForPending()
-        XCTAssertEqual(current.status, .done)
+        await settle()
+        XCTAssertEqual(current.status, noLane)
         current.begin(); await settle(); try await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(current.status, .listening)
         await current.shutdown()

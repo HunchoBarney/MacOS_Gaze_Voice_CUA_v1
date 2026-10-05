@@ -456,10 +456,29 @@ final class CodexRuntimeBridgeTests: XCTestCase {
         XCTAssertTrue(toml.contains("wire_api = \"responses\""))
         XCTAssertTrue(toml.contains("[mcp_servers.\"computer-use\"]"))
         XCTAssertTrue(toml.contains("url = \"http://127.0.0.1:7701/mcp\""))
+        // Our gate is the consent layer — codex's own approval gate must not
+        // refuse the call before it reaches us.
+        XCTAssertTrue(toml.contains("default_tools_approval_mode = \"approve\""))
         XCTAssertTrue(toml.contains("bearer_token_env_var = \"JEV_CU_TOKEN\""))
         XCTAssertTrue(toml.contains("[mcp_servers.\"jev-use\"]"))
         // Secrets travel via process env only — never into the TOML.
         XCTAssertFalse(toml.contains("sk-"))
+    }
+
+    func testSystemAuthConfigOmitsProviderOverride() {
+        let toml = CodexRuntimeBridge.configTOML(
+            provider: .chatGPT(model: "gpt-6.1-sol"),
+            mcpServers: [CodexMCPServer(name: "jev-use", url: "http://127.0.0.1:7702/mcp")])
+        // The agent rides the seeded auth.json + codex's builtin provider —
+        // a custom provider table would fight the ChatGPT login.
+        XCTAssertTrue(toml.contains("model = \"gpt-6.1-sol\""))
+        XCTAssertFalse(toml.contains("model_provider"))
+        XCTAssertFalse(toml.contains("[model_providers."))
+        XCTAssertFalse(toml.contains("env_key"))
+        XCTAssertTrue(toml.contains("[mcp_servers.\"jev-use\"]"))
+        // Empty model → no model line at all; codex uses the account default.
+        let bare = CodexRuntimeBridge.configTOML(provider: .chatGPT(), mcpServers: [])
+        XCTAssertFalse(bare.contains("model"))
     }
 
     func testChildEnvironmentIsAllowlisted() {
@@ -598,5 +617,242 @@ for line in sys.stdin:
         let client = await bridge.client(slug: "desk")
         XCTAssertNil(client)
         await bridge.stopAll()
+    }
+}
+
+/// Opt-in live proof of the product's agent path — the real vendored codex
+/// app-server, the configured text provider (endpoint+model+key exactly as
+/// `makeAgentRuntime` wires them), a founded agent's own workspace and
+/// isolated CODEX_HOME, a streamed turn, and the runtime's clean reply.
+/// Nothing here is simulated; skipped unless JARVIS_LIVE_AGENT_TURN=1.
+@MainActor
+final class AgentRuntimeLiveTests: XCTestCase {
+    private final class ReplyBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: String?
+        func set(_ text: String) { lock.lock(); value = text; lock.unlock() }
+        func get() -> String? { lock.lock(); defer { lock.unlock() }; return value }
+    }
+
+    /// Multi-turn probe state: every agent reply, every completed
+    /// mcpToolCall item, and a turn counter the waits poll on.
+    private final class ProbeBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var replies: [String] = []
+        private var toolItems: [JSONValue] = []
+        private var turns = 0
+        func addReply(_ text: String) { lock.lock(); replies.append(text); lock.unlock() }
+        func addItem(_ item: JSONValue) { lock.lock(); toolItems.append(item); lock.unlock() }
+        func addTurn() { lock.lock(); turns += 1; lock.unlock() }
+        func snapshot() -> (replies: [String], toolItems: [JSONValue], turns: Int) {
+            lock.lock(); defer { lock.unlock() }
+            return (replies, toolItems, turns)
+        }
+    }
+
+    func testLiveAgentTurnThroughConfiguredProvider() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["JARVIS_LIVE_AGENT_TURN"] == "1" else {
+            throw XCTSkip("Opt-in live AgentRuntime turn")
+        }
+        let binary = env["JEV_CODEX_BINARY"]
+            ?? FileManager.default.currentDirectoryPath
+                + "/build/vendor/cache/codex/package/vendor/aarch64-apple-darwin/bin/codex"
+        guard FileManager.default.fileExists(atPath: binary) else {
+            throw XCTSkip("Vendored codex missing at \(binary) — run the Makefile fetch first")
+        }
+        // Same auth order as the app: the user's own codex login when
+        // present (agents inherit their subscription model), else the
+        // configured text provider via JEV_CODEX_API_KEY.
+        let provider: CodexModelProvider
+        var environment: [String: String] = [:]
+        if FileManager.default.fileExists(
+            atPath: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex/auth.json").path) {
+            provider = .chatGPT(model: "")
+        } else {
+            let settings = TextProviderSettings.shared
+            guard let key = try? settings.providerKey(), !key.isEmpty else {
+                throw XCTSkip("No codex login and no text-provider key for \(settings.endpoint)")
+            }
+            let envKey = "JEV_CODEX_API_KEY"
+            // JEV_PROVIDER_ENDPOINT redirects the provider URL — used to point
+            // codex at a local capture server when diagnosing provider 400s.
+            provider = CodexModelProvider(name: "jev",
+                                          baseURL: env["JEV_PROVIDER_ENDPOINT"] ?? settings.endpoint,
+                                          envKey: envKey, model: settings.model)
+            environment[envKey] = key
+        }
+        environment["RUST_LOG"] = "info,codex_core=debug,codex_app_server=debug"
+        let bridge = CodexRuntimeBridge(configuration: .init(
+            codexBinary: URL(fileURLWithPath: binary), provider: provider,
+            environment: environment,
+            onStderrLine: { print("[codex]", $0) }))
+        // The roster JSON lives in a throwaway dir; the workspace itself is
+        // the REAL Agents root (found() always prepares there — the same
+        // path production takes), so the defer cleans the workspace too.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jev-agent-live-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = AgentStore(directory: root)
+        let runtime = AgentRuntime(store: store, bridge: bridge, connection: CuaConnection(),
+                                   apiKey: { (try? CuaLiveCredential.jev()) ?? "" })
+        runtime.start()
+
+        let box = ReplyBox()
+        runtime.onAgentReply = { _, text in box.set(text) }
+        let agent = try await runtime.foundAgent(name: "Live Check", role: "verifier",
+                                                 description: "one-shot live turn proof")
+        defer {
+            runtime.stopAll()
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: agent.workspacePath))
+            try? FileManager.default.removeItem(at: root)
+        }
+        try await runtime.send("Reply with exactly the word: ok", to: agent)
+        let deadline = Date().addingTimeInterval(180)
+        while Date() < deadline, box.get() == nil {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        let reply = try XCTUnwrap(box.get(), "no agent reply within 180s — turn never completed")
+        print("LIVE agent reply:", reply)
+        XCTAssertTrue(reply.localizedCaseInsensitiveContains("ok"),
+                      "agent reply did not contain the requested word")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: agent.workspacePath + "/AGENTS.md"), "workspace has no AGENTS.md")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: agent.codexHomePath + "/config.toml"), "CODEX_HOME has no config.toml")
+        let persisted = await store.agent(slug: agent.slug)
+        XCTAssertFalse(persisted?.threadIDs.isEmpty ?? true,
+                       "thread id never recorded — respawn would lose the agent's chat")
+    }
+
+    /// The full Clicky-parity chain on a real codex turn:
+    ///   turn 1 — agent calls computer-use `list_apps` (observation passes
+    ///            the gate, real driver answers)
+    ///   turn 2 — agent calls `type_text` → gate refuses `blocked_by_consent`
+    ///            → agent emits <COMPUTER_USE_REQUEST> → pending ask
+    ///   turn 3 — approval arms the NEXT turn → same call clears the gate
+    ///            (driver may still reject the bogus window — the refusal
+    ///            code must not be consent).
+    func testLiveAgentMCPConsentAndRetry() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["JARVIS_LIVE_AGENT_TURN"] == "1" else {
+            throw XCTSkip("Opt-in live AgentRuntime turn")
+        }
+        let binary = env["JEV_CODEX_BINARY"]
+            ?? FileManager.default.currentDirectoryPath
+                + "/build/vendor/cache/codex/package/vendor/aarch64-apple-darwin/bin/codex"
+        guard FileManager.default.fileExists(atPath: binary) else {
+            throw XCTSkip("Vendored codex missing at \(binary) — run the Makefile fetch first")
+        }
+        let provider: CodexModelProvider
+        var environment: [String: String] = [:]
+        if FileManager.default.fileExists(
+            atPath: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex/auth.json").path) {
+            provider = .chatGPT(model: "")
+        } else {
+            let settings = TextProviderSettings.shared
+            guard let key = try? settings.providerKey(), !key.isEmpty else {
+                throw XCTSkip("No codex login and no text-provider key for \(settings.endpoint)")
+            }
+            let envKey = "JEV_CODEX_API_KEY"
+            provider = CodexModelProvider(name: "jev",
+                                          baseURL: env["JEV_PROVIDER_ENDPOINT"] ?? settings.endpoint,
+                                          envKey: envKey, model: settings.model)
+            environment[envKey] = key
+        }
+        environment["RUST_LOG"] = "info,codex_core=debug,codex_app_server=debug"
+        let bridge = CodexRuntimeBridge(configuration: .init(
+            codexBinary: URL(fileURLWithPath: binary), provider: provider,
+            environment: environment,
+            onStderrLine: { print("[codex]", $0) }))
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jev-agent-live-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = AgentStore(directory: root)
+        let runtime = AgentRuntime(store: store, bridge: bridge, connection: CuaConnection(),
+                                   apiKey: { (try? CuaLiveCredential.jev()) ?? "" })
+        runtime.start()
+
+        let probe = ProbeBox()
+        runtime.onAgentReply = { _, text in print("REPLY:", text); probe.addReply(text) }
+        runtime.onAgentEvent = { event in
+            switch event.event {
+            case .turnCompleted: probe.addTurn()
+            case .itemCompleted(_, _, let item):
+                if item["type"]?.string == "mcpToolCall" { probe.addItem(item) }
+            default: break
+            }
+        }
+        let agent = try await runtime.foundAgent(name: "Gate Check", role: "verifier",
+                                                 description: "live MCP + consent proof")
+        defer {
+            runtime.stopAll()
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: agent.workspacePath))
+            try? FileManager.default.removeItem(at: root)
+        }
+        try await runtime.send("Reply with exactly the word: ok", to: agent)
+        let tomlPath = agent.codexHomePath + "/config.toml"
+        print("CONFIG TOML:\n" + ((try? String(contentsOfFile: tomlPath, encoding: .utf8)) ?? "<missing>"))
+        try await waitForTurns(1)
+
+        func waitForTurns(_ n: Int, timeout: TimeInterval = 240) async throws {
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline, probe.snapshot().turns < n {
+                try await Task.sleep(for: .milliseconds(250))
+            }
+            XCTAssertGreaterThanOrEqual(probe.snapshot().turns, n,
+                "turn \(n) never completed — replies so far: \(probe.snapshot().replies)")
+        }
+        func rendered(_ item: JSONValue) -> String {
+            (try? JSONEncoder().encode(item)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        }
+
+        // 1 — observation passes the consent gate AND returns real data.
+        try await runtime.send("""
+            Call the computer-use MCP tool `list_apps` once, then reply with \
+            the name of one running app you saw. Do not skip the tool call.
+            """, to: agent)
+        try await waitForTurns(2)
+        let s1 = probe.snapshot()
+        for item in s1.toolItems { print("TOOL ITEM:", rendered(item)) }
+        XCTAssertTrue(s1.toolItems.contains {
+            let text = rendered($0)
+            return text.contains("list_apps") && text.contains("\"status\":\"completed\"")
+        }, "list_apps did not complete through the gate — items: \(s1.toolItems.map { rendered($0) })")
+        XCTAssertFalse(s1.replies.isEmpty, "agent never replied after the observation call")
+
+        // 2 — mutating call refused; marker ask lands on the roster.
+        try await runtime.send("""
+            Call the computer-use MCP tool `type_text` exactly once with \
+            arguments {"window_id": "0", "text": "consent-probe"} — this is a \
+            connectivity check and window 0 intentionally does not exist. If \
+            the tool reports a consent refusal, emit one \
+            <COMPUTER_USE_REQUEST> line describing the call and stop.
+            """, to: agent)
+        try await waitForTurns(3)
+        let s2 = probe.snapshot()
+        for item in s2.toolItems.dropFirst(s1.toolItems.count) { print("TOOL ITEM:", rendered(item)) }
+        let refused = s2.toolItems.filter { rendered($0).contains("type_text") }
+        XCTAssertTrue(refused.contains { rendered($0).contains("blocked_by_consent") },
+            "type_text did not hit the consent refusal — items: \(refused.map { rendered($0) })")
+        let asks = await runtime.pending()
+        XCTAssertFalse(asks.isEmpty,
+            "no pending consent ask after the refusal — the agent never emitted COMPUTER_USE_REQUEST")
+
+        // 3 — approve: the NEXT turn is armed; the retry must clear the gate.
+        if let ask = asks.first(where: { $0.agentSlug == agent.slug }) ?? asks.first {
+            await runtime.resolveConsent(ask, approved: true)
+        }
+        let toolCountBeforeRetry = s2.toolItems.count
+        try await runtime.send("Consent granted. Retry the same type_text call once.", to: agent)
+        try await waitForTurns(4)
+        let s3 = probe.snapshot()
+        let retried = s3.toolItems.dropFirst(toolCountBeforeRetry)
+            .filter { rendered($0).contains("type_text") }
+        XCTAssertFalse(retried.isEmpty, "agent never retried type_text after approval")
+        XCTAssertTrue(retried.contains { !rendered($0).contains("blocked_by_consent") },
+            "retried type_text still refused by the gate — approval did not arm the turn")
     }
 }

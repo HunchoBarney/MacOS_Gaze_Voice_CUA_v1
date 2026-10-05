@@ -240,10 +240,15 @@ pnpm dev -- \
 - `--camera-resolution`: Camera capture resolution preset or `WIDTHxHEIGHT`. Default: `VGA` (`640x480`). Accepted presets are `QQVGA`, `QVGA`, `VGA`, `SVGA`, `XGA`, `HD`/`720p`, `SXGA`, `UXGA`, `Full HD`/`1080p`, `3MP`, `QHD`/`WQHD`/`1440p`, `5MP`, `6MP`, `4K UHD`, `DCI 4K`, `12MP`, `5K`, `6K`, `8K UHD`, and `12K`. `2MP`, `4MP`, and `8MP` aliases are rejected; use `1920x1080`, `2560x1440`, or `3840x2160` instead.
 - `--camera-fov`: Horizontal camera FOV in degrees. Must be greater than `0` and less than `180`. Default: `90`.
 - `--score-threshold`: Detection score threshold. For YOLO, this applies to Head and Mouth; Eye uses a fixed `0.20` threshold.
-- `--calibration-file`: Path for the 5-point calibration result. Default: `.gaze_calibration.json`.
-- `--calibrate`: Runs 5-point calibration.
-- `--smoothing-alpha`: Horizontal gaze marker smoothing. Larger values are steadier but slower. Default: `0.65`.
-- `--smoothing-alpha-y`: Vertical gaze marker smoothing. Larger values are steadier but slower. Default: `0.45`.
+- `--calibration-file`: Path for the 9-point calibration result. Default: `.gaze_calibration.json`.
+- `--calibrate`: Runs 9-point calibration with geometry retuning and held-out validation.
+- `--gaze-filter oneeuro|ema`: Gaze marker filter. `oneeuro` (default) is speed-adaptive: steady when the gaze is still, responsive during fast glances. `ema` keeps the legacy fixed-alpha smoothing.
+- `--filter-mincutoff`: One Euro filter minimum cutoff frequency in Hz. Larger values track faster but jitter more. Default: `1.0`.
+- `--filter-beta`: One Euro filter speed coefficient. Larger values respond faster to quick glances. Default: `0.7`.
+- `--filter-dcutoff`: One Euro filter derivative cutoff frequency in Hz. Default: `1.0`.
+- `--no-iris-distance`: Disables iris-diameter distance estimation and always uses the head-width distance estimate.
+- `--smoothing-alpha`: Horizontal gaze marker smoothing when `--gaze-filter ema` is used. Larger values are steadier but slower. Default: `0.65`.
+- `--smoothing-alpha-y`: Vertical gaze marker smoothing when `--gaze-filter ema` is used. Larger values are steadier but slower. Default: `0.45`.
 - `--preview-fps`: PiP camera preview update FPS. Default: `8`.
 - `--enable-inference-time`: Shows total inference time in the top-left corner as `xx.xx ms`.
 - `--web-inference-worker off|ort-proxy|dedicated`: Experimental web runtime worker mode. Default: `off`. `ort-proxy` only applies to onnxruntime-web wasm inference; `dedicated` moves onnxruntime-web or LiteRT inference processing into a dedicated Worker. `dedicated` may not reduce the model-only `inference_ms`, but it can reduce renderer main-thread blocking and improve effective FPS, dropped frames, and p95 frame interval stability when capture, preprocessing, inference, and preview generation compete with overlay rendering.
@@ -261,7 +266,7 @@ pnpm dev -- \
 - `--gaze-projection-mode legacy|binocular-screen|binocular-convergence`: Screen projection mode. Default: `legacy`.
 - `--enable-lip-motion`: With `--detector yolo`, estimates Mouth class id `19` with `vsdlm_l`; opening the mouth sends a left click at the current gaze point, and a quick open-close-open sequence sends the second click for a normal OS double-click. With RetinaFace this option is ignored with a warning.
 
-If vertical tracking feels too slow while horizontal tracking is acceptable, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`.
+If vertical tracking feels too slow while horizontal tracking is acceptable with `--gaze-filter ema`, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`. With the default `oneeuro` filter, raise `--filter-beta` for faster glances or lower `--filter-mincutoff` for a steadier marker.
 
 The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green, Eye detections are drawn in yellow, and Mouth is drawn with the same margin-adjusted bbox used for lip motion input. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
 
@@ -627,6 +632,11 @@ type GazeState = {
   y_px?: number;
   confidence?: number;
   distance_m?: number;
+  iris_distance_m?: number;
+  distance_source?: "iris" | "head";
+  eye_open?: number;
+  blink?: boolean;
+  gaze_filter?: "oneeuro" | "ema" | string;
   head_face_width_ratio?: number;
   eye_position_weight_x?: number;
   eye_position_weight_y?: number;
@@ -648,9 +658,18 @@ type CalibrationState = {
   count?: number;
   saved_path?: string;
   message?: string;
-  raw_projection?: "unclipped-v1";
+  raw_projection?: "unclipped-v1" | "unclipped-v2";
   legacy_calibration?: boolean;
   affine?: number[][];
+  rbf?: {
+    sigma: number;
+    centers: [number, number][];
+    weights: [number, number][];
+  } | null;
+  geometry?: {
+    eye_position_weight_x: number;
+    eye_position_weight_y: number;
+  } | null;
   source_bounds?: {
     min?: [number, number];
     max?: [number, number];
@@ -743,7 +762,7 @@ In the normal transparent overlay, mouse events pass through to the application 
 
 Startup logs include display entries such as `Display 0` and `Display 1`. If the overlay appears on the wrong monitor, specify `--display-index`. When `--display-index` is omitted, the primary display is used.
 
-## 5-Point Calibration
+## 9-Point Calibration
 
 The app can run without calibration. To calibrate, start it with `--calibrate`.
 
@@ -751,13 +770,15 @@ The app can run without calibration. To calibrate, start it with `--calibrate`.
 pnpm dev -- --backend cuda --calibrate
 ```
 
-After a centered `3`, `2`, `1` countdown, five calibration targets and then two separate validation targets appear. For the center target, two red arrows bracket the target as `-> O <-`. For outer targets, a red arrow at the screen center points toward the target direction. Look at each target and hold still. The app uses the median of at least three fresh gaze frames near the end of each target display. A moving or missing sample is retried. A 2D affine correction is fitted to the five calibration targets, then checked against the two validation targets before it is saved to `.gaze_calibration.json`. If raw targets collapse together or the fit fails validation, the sequence restarts without replacing a previous saved calibration. The 0.06 stability and 0.18 normalized error limits are starting heuristics, not measured accuracy claims.
+After a centered `3`, `2`, `1` countdown, nine calibration targets (center, four corners, and four edge midpoints) and then two separate validation targets appear. For the center target, two red arrows bracket the target as `-> O <-`. For outer targets, a red arrow at the screen center points toward the target direction. Look at each target and hold still with your eyes open. The app takes the median of at least three fresh gaze feature samples near the end of each target display; each sample carries the projected point, per-eye angles, eye centers, head width, iris diameter, and eye openness. Moving, stale, or closed-eye samples are rejected and retried.
+
+When all nine samples are collected, the fit runs two stages. First, a geometry stage re-projects every stored feature across a grid of eye-position weight candidates and keeps the weight pair whose affine fit has the lowest error — this personalizes the head-translation correction to the actual camera mounting instead of the default `1.0/0.25` weights. Second, a 2D affine plus Gaussian RBF residual correction is fitted to the nine re-projected targets to absorb nonlinear projection error that affine alone cannot model. The combined correction is then checked against the two held-out validation targets before it is saved to `.gaze_calibration.json`. If raw targets collapse together, the fit error exceeds `0.18`, or validation fails, the sequence restarts without replacing a previous saved calibration. The fitted eye-position weights are stored in the calibration file (`unclipped-v2` format) and applied to the live projector on load. The 0.06 stability and 0.18 normalized error limits are starting heuristics, not measured accuracy claims.
 
 When `--calibrate` is used, the PiP camera preview and normal red gaze marker are hidden during calibration and validation. They return after calibration completes.
 
-Calibration files created with clipped raw projection are preserved but ignored; run `--calibrate` to replace one with a validated unclipped calibration. New calibration files store raw input bounds and suppress strong extrapolation outside the calibrated range. The validation errors are saved in the calibration file in normalized display coordinates. They indicate whether the fit met this app's gate; they do not establish pixel accuracy or performance under head movement.
+Calibration files created with clipped raw projection are preserved but ignored; run `--calibrate` to replace one with a validated unclipped calibration. Older `unclipped-v1` files (5-point affine) still load, but they carry no fitted geometry or RBF correction, so recalibrating is recommended. New calibration files store raw input bounds and suppress strong extrapolation outside the calibrated range. The validation errors are saved in the calibration file in normalized display coordinates. They indicate whether the fit met this app's gate; they do not establish pixel accuracy or performance under head movement.
 
-The live marker also discards a single raw jump larger than 0.35 normalized screen units unless a nearby second frame confirms the new position. This can delay a large intentional glance by one frame. The existing smoothing settings are unchanged. The calibration and validation flow follows [Tobii's calibration guidance](https://www.developer.tobiipro.com/commonconcepts/calibration.html); the jump thresholds are local heuristics and still need a live comparison of jitter and response delay.
+The live marker also discards a single raw jump larger than 0.35 normalized screen units unless a nearby second frame confirms the new position. This can delay a large intentional glance by one frame. Frames where the model's eye-openness measure indicates a blink are gated out before the jump gate, so blinks no longer inject outlier points; the marker freezes at its last position and dims while eyes are closed. Output smoothing defaults to a One Euro filter (speed-adaptive cutoff), which reduces both idle jitter and fast-glance lag compared with fixed-alpha EMA; `--gaze-filter ema` restores the previous behavior. The calibration and validation flow follows [Tobii's calibration guidance](https://www.developer.tobiipro.com/commonconcepts/calibration.html); the jump thresholds are local heuristics and still need a live comparison of jitter and response delay.
 
 ## Estimation Assumptions
 
@@ -765,7 +786,9 @@ The live marker also discards a single raw jump larger than 0.35 normalized scre
 - The camera is assumed to be mounted at the top center of the target display.
 - For the vertical direction, the app estimates eye height relative to the camera center from the face/eye bbox Y position and projects it to screen coordinates assuming the camera is at the top center of the display. If the face moves upward in the camera frame, the marker moves upward; if the face moves downward, the marker moves downward.
 - Adult average Head width is assumed to be `16cm`. The eye-to-display distance is estimated from the detected face/head bbox width.
+- When the gaze model resolves a plausible iris diameter, distance is instead estimated from a nominal `11.7mm` iris diameter (the MediaPipe iris technique), which removes most of the head-width assumption error; the head-width estimate remains the fallback. Distance is EMA-smoothed across frames (`alpha 0.35`). `--no-iris-distance` disables this.
 - With RetinaFace, Face width is converted to Head-equivalent width using the static Head/Face ratio `1.545`.
+- Eye openness is estimated per frame from the eyeball mesh eyelid contours; frames below the open threshold are treated as blinks and excluded from the marker update and calibration samples.
 - By default, RetinaFace left/right eye landmarks are used to compute the gaze-model crop center.
 - `--gaze-projection-mode binocular-screen` and `binocular-convergence` use left/right gaze angles separately; they are experimental approximations and should be calibrated separately from `legacy`.
 - With `--detector yolo`, WholeBody28 class id `7` is Head, class id `17` is Eye, and class id `19` is Mouth. Head and Mouth use `--score-threshold`; Eye uses a fixed score threshold of `0.20`.
@@ -774,7 +797,7 @@ The live marker also discards a single raw jump larger than 0.35 normalized scre
 ## Known Limitations
 
 - Absolute position accuracy degrades without calibration if the camera is far from the top center of the display.
-- Distance estimation drifts when the user's actual Head width differs from the `16cm` assumption.
+- Iris-diameter distance estimation assumes a `11.7mm` iris and a plausible camera FOV; implausible estimates (closer than `0.15m` or farther than `3m`) fall back to the head-width estimate, which still drifts when the user's actual Head width differs from the `16cm` assumption.
 - Glasses, strong backlight, dark scenes, or large face rotation can destabilize Eye/Head detection or gaze estimation.
 - When multiple people are visible, the highest-score Head is selected.
 

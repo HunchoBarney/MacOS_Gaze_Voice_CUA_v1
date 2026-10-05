@@ -23,7 +23,7 @@ final class ConfigTests: XCTestCase {
         let store = FakeAPIKeyStore()
         store.beforeSave = { XCTAssertEqual(self.defaults.string(forKey: "typesafeAPIKey"), "synthetic-legacy") }
 
-        let config = Config(defaults: defaults, keyStore: store, environment: [:])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: [:])
 
         XCTAssertEqual(config.apiKey, "synthetic-legacy")
         XCTAssertEqual(try store.read(), "synthetic-legacy")
@@ -34,7 +34,7 @@ final class ConfigTests: XCTestCase {
     func testExistingKeychainKeyWinsAndRemovesStalePlaintext() {
         defaults.set("synthetic-stale", forKey: "typesafeAPIKey")
         let store = FakeAPIKeyStore(value: "synthetic-stored")
-        let config = Config(defaults: defaults, keyStore: store, environment: ["TYPESAFE_API_KEY": "synthetic-env"])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: ["TYPESAFE_API_KEY": "synthetic-env"])
 
         XCTAssertEqual(config.apiKey, "synthetic-stored")
         XCTAssertNil(defaults.object(forKey: "typesafeAPIKey"))
@@ -45,7 +45,7 @@ final class ConfigTests: XCTestCase {
         defaults.set("synthetic-legacy", forKey: "typesafeAPIKey")
         let store = FakeAPIKeyStore()
         store.failSave = true
-        let config = Config(defaults: defaults, keyStore: store, environment: [:])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: [:])
 
         XCTAssertEqual(config.apiKey, "synthetic-legacy")
         XCTAssertEqual(defaults.string(forKey: "typesafeAPIKey"), "synthetic-legacy")
@@ -62,7 +62,7 @@ final class ConfigTests: XCTestCase {
         defaults.set("synthetic-legacy", forKey: "typesafeAPIKey")
         let store = FakeAPIKeyStore(value: "synthetic-inaccessible")
         store.failRead = true
-        let config = Config(defaults: defaults, keyStore: store, environment: ["TYPESAFE_API_KEY": "synthetic-env"])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: ["TYPESAFE_API_KEY": "synthetic-env"])
 
         XCTAssertEqual(config.apiKey, "synthetic-env")
         XCTAssertNotNil(config.apiKeyError)
@@ -73,7 +73,7 @@ final class ConfigTests: XCTestCase {
 
     func testEnvironmentFallbackIsNotPersisted() {
         let store = FakeAPIKeyStore()
-        let config = Config(defaults: defaults, keyStore: store, environment: ["TYPESAFE_API_KEY": "synthetic-env"])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: ["TYPESAFE_API_KEY": "synthetic-env"])
 
         XCTAssertEqual(config.apiKey, "synthetic-env")
         XCTAssertNil(store.value)
@@ -83,7 +83,7 @@ final class ConfigTests: XCTestCase {
 
     func testExplicitSavePersistsAndClearsLegacyValue() {
         let store = FakeAPIKeyStore()
-        let config = Config(defaults: defaults, keyStore: store, environment: [:])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: [:])
         defaults.set("synthetic-stale", forKey: "typesafeAPIKey")
 
         XCTAssertTrue(config.saveAPIKey("synthetic-new"))
@@ -95,7 +95,7 @@ final class ConfigTests: XCTestCase {
 
     func testFailedSaveKeepsLastUsableKeyWithoutPlaintextFallback() {
         let store = FakeAPIKeyStore(value: "synthetic-original")
-        let config = Config(defaults: defaults, keyStore: store, environment: [:])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: [:])
         store.failSave = true
 
         XCTAssertFalse(config.saveAPIKey("synthetic-replacement"))
@@ -107,7 +107,7 @@ final class ConfigTests: XCTestCase {
 
     func testClearingKeyDeletesStoredAndLegacyCredentials() {
         let store = FakeAPIKeyStore(value: "synthetic-original")
-        let config = Config(defaults: defaults, keyStore: store, environment: [:])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: [:])
         defaults.set("synthetic-stale", forKey: "typesafeAPIKey")
 
         XCTAssertTrue(config.saveAPIKey(""))
@@ -118,7 +118,7 @@ final class ConfigTests: XCTestCase {
 
     func testFailedDeleteRetainsCurrentKeyAndReportsFailure() {
         let store = FakeAPIKeyStore(value: "synthetic-original")
-        let config = Config(defaults: defaults, keyStore: store, environment: [:])
+        let config = Config(defaults: defaults, keyStore: store, openAIKeyStore: FakeAPIKeyStore(), environment: [:])
         store.failDelete = true
 
         XCTAssertFalse(config.saveAPIKey(""))
@@ -128,11 +128,11 @@ final class ConfigTests: XCTestCase {
     }
 
     func testNonSecretPreferencesStillPersistInDefaults() {
-        let config = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), environment: [:])
+        let config = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), openAIKeyStore: FakeAPIKeyStore(), environment: [:])
         XCTAssertTrue(config.autoExecute)
         config.autoExecute = false
 
-        let reloaded = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), environment: [:])
+        let reloaded = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), openAIKeyStore: FakeAPIKeyStore(), environment: [:])
         XCTAssertFalse(reloaded.autoExecute)
     }
 }

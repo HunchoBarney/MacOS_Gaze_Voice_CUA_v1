@@ -33,6 +33,20 @@ export interface RuntimeModels {
   dispose(): void;
 }
 
+export async function warmupRuntimeModels(models: RuntimeModels): Promise<void> {
+  const frame = new ImageData(160, 160);
+  const head: Detection = { classId: 7, score: 1, x1: 20, y1: 10, x2: 140, y2: 150 };
+  const eyes: Detection[] = [
+    { classId: 17, score: 1, x1: 50, y1: 70, x2: 60, y2: 80 },
+    { classId: 17, score: 1, x1: 100, y1: 70, x2: 110, y2: 80 }
+  ];
+  try {
+    await models.estimate(frame, head, eyes);
+  } catch {
+    // Warmup output is discarded; the inference itself compiles provider pipelines.
+  }
+}
+
 let onnxSessionCreateQueue = Promise.resolve();
 let liteRtLoadPromise: Promise<unknown> | null = null;
 
@@ -50,7 +64,9 @@ export async function createRuntimeModels(config: WebInferenceConfig, accelerato
 
 async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: WebAccelerator): Promise<RuntimeModels> {
   const ort = await import("onnxruntime-web/webgpu");
-  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.numThreads = globalThis.crossOriginIsolated
+    ? Math.min(4, Math.max(1, (globalThis.navigator?.hardwareConcurrency ?? 4) - 2))
+    : 1;
   ort.env.wasm.proxy = config.webInferenceWorker === "ort-proxy" && accelerator === "wasm";
   ort.env.wasm.wasmPaths = absoluteAssetUrl(config.onnxWasmBaseUrl);
   ort.env.logLevel = "error";

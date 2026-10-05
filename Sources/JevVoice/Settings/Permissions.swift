@@ -6,7 +6,7 @@ enum Permission: String, CaseIterable, Identifiable {
     case microphone = "Microphone"
     case accessibility = "Accessibility"
 
-    // SpeechAnalyzer is on-device and does not require the legacy recognizer grant.
+    // Audio streams to the realtime API — no on-device recognizer grant needed.
     static let allCases: [Permission] = [.microphone, .accessibility]
 
     var id: String { rawValue }

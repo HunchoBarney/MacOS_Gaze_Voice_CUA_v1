@@ -29,18 +29,13 @@ struct CuaObservedPostcondition: Equatable, Sendable {
     }
 }
 
-/// Namespace retained so `CuaAgentLoop.run` keeps compiling: it types one
-/// parameter as `CuaExecutorDecision.ContentMode`. The utterance planner
-/// battery that produced full executor decisions is deleted — the companion
-/// planner emits `PlannerDecision`/`TaskSpec` and `CuaAgentLoop.drive` is the
-/// per-step selector.
-enum CuaExecutorDecision {
-    enum ContentMode: String, Equatable, Sendable { case control, literal, dictate }
-}
+/// How a work item's payload is executed: UI control steps, literal text
+/// insertion, or dictation into the frontmost field.
+enum CuaContentMode: String, Equatable, Sendable { case control, literal, dictate }
 
 /// Per-task executor state for the voice path: the deterministic fast lane
 /// plus the helpers the drive loop's escalation seams call back into.
-/// Planning lives in CompanionBrain; per-step choice lives in CuaAgentLoop.
+/// Per-step choice lives in CuaAgentLoop.
 @MainActor
 final class CuaTaskAgent {
     typealias Call = (String, [String: JSONValue]) async throws -> JSONValue
@@ -83,11 +78,13 @@ final class CuaTaskAgent {
 
     /// Parse + resolve only — no dispatch. Nil when the utterance is not
     /// exactly one known primitive against an unambiguous installed app, so
-    /// the planner owns it.
-    func resolveFastLane(goal: String, apps: [JSONValue]) -> FastResolution? {
+    /// the drive loop owns it. `appHint` is the model-supplied `app` argument —
+    /// used only when the instruction itself names no app.
+    func resolveFastLane(goal: String, apps: [JSONValue], appHint: String? = nil) -> FastResolution? {
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         if let parsed = CuaFastAction.parse(goal),
-           let resolved = CuaFastAction.resolveApp(qualifier: parsed.appQualifier, action: parsed.action,
+           let resolved = CuaFastAction.resolveApp(qualifier: parsed.appQualifier ?? appHint,
+                                                   action: parsed.action,
                                                    apps: apps, frontmostBundle: frontmost),
            !parsed.action.needsTabbableApp || CuaFastAction.tabbableBundles.contains(resolved.bundle),
            parsed.action.selfApproves
@@ -341,6 +338,10 @@ final class CuaTaskAgent {
                 "keys": .array(keys.map { .string($0) }),
                 "target": .object(["kind": .string("window"), "pid": .number(Double(pid)), "window_id": .number(Double(wid))])
             ])
+        case .scroll(let direction):
+            _ = try await call("scroll", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                          "direction": .string(direction), "by": .string("page"),
+                                          "amount": .number(1), "delivery_mode": .string("background")])
         }
         let shortcut = fast.shortcut ?? ""
 
@@ -431,9 +432,13 @@ final class CuaTaskAgent {
         case .processGone, .appOnScreen:
             throw DriverConnectionError.malformed // app verbs complete inside runAppControl
         case .delivered:
-            recordPostcondition(.resultObserved, "Cua confirmed \(shortcut) keystroke delivery to \(name).",
+            // Only hotkey lanes carry a chord label — scroll's receipt is a
+            // window-scroll delivery, not a keystroke.
+            let receipt = shortcut.isEmpty ? "window scroll" : "\(shortcut) keystroke"
+            recordPostcondition(.resultObserved, "Cua confirmed \(receipt) delivery to \(name).",
                                 appName: name, bundleID: bundle, processID: pid, windowID: wid)
-            return "\(fast.result) in \(name) — \(shortcut) delivered to the window." + focusNote
+            let suffix = shortcut.isEmpty ? "delivered" : "\(shortcut) delivered to the window"
+            return "\(fast.result) in \(name) — \(suffix)." + focusNote
         }
     }
 

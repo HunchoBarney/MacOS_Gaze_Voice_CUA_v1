@@ -9,19 +9,22 @@ import JevVoiceCore
 final class AgentDriveExecutor: DriveExecuting {
     private let connection: CuaConnection
     private let apiKey: @Sendable () -> String
-    private let sessionLabel: String?
+    /// Resolved per drive, not captured at init — the runtime mints a fresh
+    /// label whenever the transport reconnects (the daemon tombstones dead
+    /// leases' sessions, so a stale label is worse than none).
+    private let sessionLabel: @MainActor () -> String?
     private let progress: @Sendable (String) -> Void
 
     init(connection: CuaConnection, apiKey: @escaping @Sendable () -> String,
-         sessionLabel: String? = nil,
+         sessionLabel: (@MainActor () -> String?)? = nil,
          progress: @escaping @Sendable (String) -> Void = { _ in }) {
         self.connection = connection; self.apiKey = apiKey
-        self.sessionLabel = sessionLabel; self.progress = progress
+        self.sessionLabel = { sessionLabel?() }; self.progress = progress
     }
 
     func drive(_ task: DriveTask) async throws -> DriveResult {
         let connection = self.connection, apiKey = self.apiKey
-        let sessionLabel = self.sessionLabel
+        let sessionLabel = self.sessionLabel()
         let loop = CuaAgentLoop(
             call: { name, args in
                 var merged = args
@@ -80,6 +83,9 @@ final class AgentRuntime: ObservableObject {
     private let apiKey: @Sendable () -> String
     private let registry = EndpointRegistry()
     private var endpoints: [String: Endpoints] = [:]
+    /// Driver session labels minted per transport lease — see
+    /// `ensureEndpoints` for why reuse across connections is refused.
+    private var sessionLabels: [String: String] = [:]
     private var markerAsks: [ConsentRequest] = []
     /// Marker asks the user approved post-turn — armed onto the agent's next
     /// turnStarted instead of the evicted turn they were asked under.
@@ -87,6 +93,10 @@ final class AgentRuntime: ObservableObject {
     private var activeTurns: [String: String] = [:]
     private var deltas: [String: String] = [:]
     private var eventTask: Task<Void, Never>?
+    /// Hook installation the first send must await — without it a fast
+    /// caller could spawn codex before mcpServersFor exists and bake an
+    /// empty tool surface into the agent's config.toml.
+    private var hooksTask: Task<Void, Never>?
 
     @Published private(set) var roster: [CompanionAgent] = []
     /// Gate refusal asks + agent marker asks — the single pending one is what
@@ -124,7 +134,7 @@ final class AgentRuntime: ObservableObject {
     /// materialize lazily in the registry.
     func start() {
         let registry = self.registry
-        Task {
+        hooksTask = Task {
             await bridge.installHooks(mcpServersFor: { agent in registry.mcp(agent.slug) },
                                       environmentFor: { agent in registry.env(agent.slug) })
         }
@@ -160,8 +170,14 @@ final class AgentRuntime: ObservableObject {
     // MARK: Turns
 
     func send(_ text: String, to agent: CompanionAgent) async throws {
+        await hooksTask?.value
         try await ensureEndpoints(for: agent)
         try await bridge.send(to: agent, message: text)
+        // Persist the bound thread so a respawn RESUMES the agent's chat
+        // instead of starting a fresh one — the agent's memory is its thread.
+        if let threadID = try? await bridge.threadID(for: agent) {
+            try? await store.recordThread(slug: agent.slug, threadID: threadID)
+        }
         refreshPending()
     }
 
@@ -169,17 +185,42 @@ final class AgentRuntime: ObservableObject {
     /// `AgentWorkspace.prepare` is idempotent so re-founding a deleted
     /// workspace repairs it.
     private func ensureEndpoints(for agent: CompanionAgent) async throws {
+        // Nothing lazily connects CuaConnection — the gate's tools/list
+        // provider throws .closed until the transport is up, which codex
+        // reads as "MCP server broken" and drops the tool surface entirely.
+        // A dead transport also loses its session lease, so a reconnect must
+        // mint a fresh label rather than reuse the tombstoned one.
+        let reconnected = await !connection.connected
+        if reconnected { try await connection.connect() }
+        if reconnected || sessionLabels[agent.slug] == nil {
+            // The label must be unique per transport: when a proxy lease dies
+            // the daemon tombstones its sessions permanently — a later
+            // connection reusing the same label gets session_unavailable on
+            // start_session and tool_invocation_failed on every call carrying
+            // it. A stable label buys nothing anyway: process-ownership and
+            // the agent cursor die with the transport either way.
+            let label = "agent-" + agent.slug + "-"
+                + UUID().uuidString.prefix(8).lowercased()
+            sessionLabels[agent.slug] = label
+            // The gate must inject the same label — a call carrying a label
+            // this transport never registered (or a dead transport's
+            // tombstone) is refused by the daemon.
+            gate.setSessionLabel(label, agentSlug: agent.slug)
+            // The driver's session owns the visible per-agent cursor: session
+            // color + name badge follow every action this agent dispatches.
+            // start_session must succeed — a swallowed failure is exactly how
+            // the tombstoned-label bug stayed hidden: every subsequent call
+            // would carry a label the daemon refuses. The cursor flag is
+            // cosmetic, so it stays best-effort.
+            _ = try await connection.call("start_session",
+                                          arguments: ["session": .string(label)])
+            _ = try? await connection.call("set_agent_cursor_enabled",
+                                           arguments: ["session": .string(label),
+                                                       "enabled": .bool(true)])
+        }
         guard endpoints[agent.slug] == nil else { return }
-        let sessionLabel = "agent-" + agent.slug
-        // The driver's session owns the visible per-agent cursor: session
-        // color + name badge follow every action this agent dispatches.
-        _ = try? await connection.call("start_session",
-                                       arguments: ["session": .string(sessionLabel)])
-        _ = try? await connection.call("set_agent_cursor_enabled",
-                                       arguments: ["session": .string(sessionLabel),
-                                                   "enabled": .bool(true)])
         let executor = AgentDriveExecutor(connection: connection, apiKey: apiKey,
-                                          sessionLabel: sessionLabel)
+                                          sessionLabel: { [weak self] in self?.sessionLabels[agent.slug] })
         let jev = JevUseMCPServer(executor: executor, consent: gate, agentSlug: agent.slug)
         let jevServer = jev.server()
         let cuServer = gate.server(agentSlug: agent.slug)
@@ -221,6 +262,21 @@ final class AgentRuntime: ObservableObject {
             }
         case .turnCompleted:
             activeTurns[slug] = nil
+            // A mid-turn consent refusal dies with its turn (setActiveTurn
+            // evicts it) — but the user still needs the ask AFTER the agent
+            // stops. Preserve it as a roster-level ask: resolving it arms
+            // the agent's NEXT turn, the same path an emitted
+            // <COMPUTER_USE_REQUEST> marker takes. Model compliance with the
+            // marker is a nicety, not the load-bearing mechanism.
+            for ask in gate.pending() where ask.agentSlug == slug {
+                let preserved = ConsentRequest(id: ask.id, agentSlug: slug,
+                                               turnID: nil, summary: ask.summary,
+                                               reason: ask.reason, state: .pending)
+                if !markerAsks.contains(where: { $0.id == preserved.id }) {
+                    markerAsks.append(preserved)
+                    onConsentAsk?(preserved)
+                }
+            }
             gate.setActiveTurn(nil, agentSlug: slug)
         case .agentMessageDelta(_, _, let itemID, let delta):
             deltas[slug + "\u{1F}" + itemID, default: ""] += delta

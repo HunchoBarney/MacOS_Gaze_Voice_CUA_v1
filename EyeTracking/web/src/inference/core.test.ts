@@ -3,8 +3,12 @@ import {
   Calibration,
   DisplayGeometry,
   GazeJumpGate,
+  OneEuroFilter,
   ScreenProjector,
-  stableRawSample,
+  featureDistanceM,
+  isHeadTurned,
+  stableFeatureSample,
+  updateBlinkState,
   createLipMotionInput,
   createLipMotionInputNhwc,
   estimateGazeFromModelOutput,
@@ -14,7 +18,29 @@ import {
   parseRetinaFaceRawOutput,
   parseYoloOutput
 } from "./core";
-import type { GazeEstimate } from "./core";
+import type { GazeEstimate, GazeFeature } from "./core";
+
+function pointDistance(a: [number, number], b: [number, number]): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+function makeFeature(point: [number, number], overrides: Partial<GazeFeature> = {}): GazeFeature {
+  return {
+    point,
+    eyeCenterPx: [320, 240],
+    leftEyePx: [300, 240],
+    rightEyePx: [340, 240],
+    leftYawDeg: 0,
+    leftPitchDeg: 0,
+    rightYawDeg: 0,
+    rightPitchDeg: 0,
+    headWidthPx: 160,
+    irisDiameterPx: 30,
+    eyeOpen: 0.9,
+    distanceM: 0.6,
+    ...overrides
+  };
+}
 
 describe("ScreenProjector", () => {
   const display = new DisplayGeometry(1920, 1080, 31.5);
@@ -52,7 +78,10 @@ describe("ScreenProjector", () => {
       leftYawDeg: 5,
       leftPitchDeg: 2,
       rightYawDeg: 5,
-      rightPitchDeg: 2
+      rightPitchDeg: 2,
+      irisDiameterPx: 30,
+      eyeOpen: 0.9,
+      agreement: 1
     };
     const legacy = projector.project([320, 240], estimate.yawDeg, estimate.pitchDeg, distanceM);
     const result = projector.projectEstimate("binocular-screen", eyes, estimate, distanceM);
@@ -68,7 +97,10 @@ describe("ScreenProjector", () => {
       leftYawDeg: 0,
       leftPitchDeg: 0,
       rightYawDeg: 0,
-      rightPitchDeg: 0
+      rightPitchDeg: 0,
+      irisDiameterPx: 30,
+      eyeOpen: 0.9,
+      agreement: 1
     };
     const result = projector.projectEstimate("binocular-convergence", eyes, estimate, distanceM);
     expect(result.fallbackReason).toBeTruthy();
@@ -353,7 +385,55 @@ describe("Calibration", () => {
     expect(calibration.apply([0.25, 0.75])).toEqual([0.25, 0.75]);
   });
 
-  it("writes affine-compatible calibration payload", async () => {
+  it("writes v2 calibration payload after nine captures and two validations", async () => {
+    const writeCalibration = vi.fn().mockResolvedValue({ ok: true, path: ".gaze_calibration.json" });
+    vi.stubGlobal("window", {
+      gazeBridge: {
+        readCalibration: vi.fn().mockResolvedValue({ ok: true, text: null }),
+        writeCalibration
+      }
+    });
+    const emit = vi.fn();
+    const calibration = new Calibration(".gaze_calibration.json", emit, undefined, undefined, 9);
+    const targets: [number, number][] = [
+      [0.5, 0.5],
+      [0.12, 0.12],
+      [0.88, 0.12],
+      [0.88, 0.88],
+      [0.12, 0.88],
+      [0.5, 0.12],
+      [0.88, 0.5],
+      [0.5, 0.88],
+      [0.12, 0.5]
+    ];
+    const raws: [number, number][] = [
+      [0.5, 0.5],
+      [0.1, 0.1],
+      [0.9, 0.1],
+      [0.9, 0.9],
+      [0.1, 0.9],
+      [0.5, 0.1],
+      [0.9, 0.5],
+      [0.5, 0.9],
+      [0.1, 0.5]
+    ];
+    for (let index = 0; index < targets.length; index += 1) {
+      await calibration.capture(makeFeature(raws[index]), targets[index]);
+    }
+    expect(writeCalibration).not.toHaveBeenCalled();
+    await calibration.validate(makeFeature([0.3, 0.7]), [0.31, 0.69]);
+    await calibration.validate(makeFeature([0.7, 0.3]), [0.69, 0.31]);
+    expect(writeCalibration).toHaveBeenCalledOnce();
+    const payload = writeCalibration.mock.calls[0][1];
+    expect(payload.affine).toHaveLength(3);
+    expect(payload.raw_projection).toBe("unclipped-v2");
+    expect(payload.source_bounds.min).toEqual([0.1, 0.1]);
+    expect(payload.source_bounds.max).toEqual([0.9, 0.9]);
+    expect(payload.validation).toHaveLength(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("selects the feature map when the projected cone is nonlinearly distorted", async () => {
     const writeCalibration = vi.fn().mockResolvedValue({ ok: true, path: ".gaze_calibration.json" });
     vi.stubGlobal("window", {
       gazeBridge: {
@@ -363,21 +443,45 @@ describe("Calibration", () => {
     });
     const emit = vi.fn();
     const calibration = new Calibration(".gaze_calibration.json", emit);
-    await calibration.capture([0.5, 0.5], [0.5, 0.5]);
-    await calibration.capture([0.1, 0.1], [0.12, 0.12]);
-    await calibration.capture([0.9, 0.1], [0.88, 0.12]);
-    await calibration.capture([0.9, 0.9], [0.88, 0.88]);
-    await calibration.capture([0.1, 0.9], [0.12, 0.88]);
-    expect(writeCalibration).not.toHaveBeenCalled();
-    await calibration.validate([0.3, 0.7], [0.31, 0.69]);
-    await calibration.validate([0.7, 0.3], [0.69, 0.31]);
+    const targets: [number, number][] = [
+      [0.5, 0.5],
+      [0.08, 0.08], [0.92, 0.08], [0.92, 0.92], [0.08, 0.92],
+      [0.5, 0.08], [0.92, 0.5], [0.5, 0.92], [0.08, 0.5],
+      [0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]
+    ];
+    const featureAt = ([tx, ty]: [number, number]): GazeFeature => {
+      const yaw = (tx - 0.5) * 30;
+      const pitch = (ty - 0.5) * 30;
+      const warp = 0.4 * (tx - 0.5) * (ty - 0.5);
+      return makeFeature([tx + warp, ty - warp], {
+        leftYawDeg: yaw,
+        rightYawDeg: yaw,
+        leftPitchDeg: pitch,
+        rightPitchDeg: pitch
+      });
+    };
+    for (const target of targets) {
+      await calibration.capture(featureAt(target), target);
+    }
+    await calibration.validate(featureAt([0.2, 0.6]), [0.2, 0.6]);
+    await calibration.validate(featureAt([0.8, 0.4]), [0.8, 0.4]);
     expect(writeCalibration).toHaveBeenCalledOnce();
     const payload = writeCalibration.mock.calls[0][1];
-    expect(payload.affine).toHaveLength(3);
-    expect(payload.raw_projection).toBe("unclipped-v1");
-    expect(payload.source_bounds.min).toEqual([0.1, 0.1]);
-    expect(payload.source_bounds.max).toEqual([0.9, 0.9]);
-    expect(payload.validation).toHaveLength(2);
+    expect(payload.raw_projection).toBe("featuremap-v3");
+    expect(payload.feature_map).not.toBeNull();
+    expect(payload.feature_map.coeffs).toHaveLength(16);
+    expect(calibration.featureMap).not.toBeNull();
+    const estimate = calibration.applyFeature(featureAt([0.35, 0.75]));
+    expect(pointDistance(estimate, [0.35, 0.75])).toBeLessThan(0.05);
+
+    const reloaded = new Calibration(".gaze_calibration.json", vi.fn(), {
+      read: vi.fn().mockResolvedValue({ ok: true, text: JSON.stringify(payload) }),
+      write: vi.fn().mockResolvedValue({ ok: true, path: ".gaze_calibration.json" })
+    });
+    await reloaded.load();
+    expect(reloaded.featureMap).not.toBeNull();
+    const reloadedEstimate = reloaded.applyFeature(featureAt([0.6, 0.25]));
+    expect(pointDistance(reloadedEstimate, [0.6, 0.25])).toBeLessThan(0.05);
     vi.unstubAllGlobals();
   });
 
@@ -386,9 +490,9 @@ describe("Calibration", () => {
     const emit = vi.fn();
     const calibration = new Calibration("calibration.json", emit, {
       read: vi.fn().mockResolvedValue({ ok: true, text: null }), write
-    });
+    }, undefined, 5);
     for (const target of [[0.5, 0.5], [0.12, 0.12], [0.88, 0.12], [0.88, 0.88], [0.12, 0.88]] as [number, number][]) {
-      await calibration.capture([0.5, 0.5], target);
+      await calibration.capture(makeFeature([0.5, 0.5]), target);
     }
     expect(write).not.toHaveBeenCalled();
     expect(calibration.samples).toHaveLength(0);
@@ -406,32 +510,122 @@ describe("Calibration", () => {
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({ level: "warning" }));
   });
 
-  it("rejects a bad held-out point before saving", async () => {
+  it("retries a bad held-out point, then rejects the fit after retries run out", async () => {
     const write = vi.fn();
-    const calibration = new Calibration("calibration.json", vi.fn(), {
+    const emit = vi.fn();
+    const calibration = new Calibration("calibration.json", emit, {
       read: vi.fn().mockResolvedValue({ ok: true, text: null }), write
-    });
+    }, undefined, 5);
     for (const [raw, target] of [
       [[0.5, 0.5], [0.5, 0.5]], [[0.1, 0.1], [0.12, 0.12]],
       [[0.9, 0.1], [0.88, 0.12]], [[0.9, 0.9], [0.88, 0.88]],
       [[0.1, 0.9], [0.12, 0.88]]
-    ] as Array<[[number, number], [number, number]]>) await calibration.capture(raw, target);
-    await calibration.validate([0.1, 0.1], [0.7, 0.3]);
+    ] as Array<[[number, number], [number, number]]>) await calibration.capture(makeFeature(raw), target);
+    await calibration.validate(makeFeature([0.1, 0.1]), [0.7, 0.3]);
+    expect(write).not.toHaveBeenCalled();
+    // A single bad validation point keeps the fit alive for a retry.
+    expect(calibration.pendingMatrix).not.toBeNull();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await calibration.validate(makeFeature([0.1, 0.1]), [0.7, 0.3]);
+    }
     expect(write).not.toHaveBeenCalled();
     expect(calibration.pendingMatrix).toBeNull();
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ status: "rejected_fit" }));
   });
 });
 
 describe("calibration frame window", () => {
   it("uses recent stable frames and rejects stale or moving frames", () => {
-    expect(stableRawSample([
-      { point: [0.2, 0.3], at: 1000 }, { point: [0.21, 0.3], at: 1020 },
-      { point: [0.2, 0.31], at: 1040 }, { point: [0.9, 0.9], at: 100 }
-    ], 1050).point).toEqual([0.2, 0.3]);
-    expect(stableRawSample([{ point: [0.2, 0.3], at: 100 }], 1050).point).toBeNull();
-    expect(stableRawSample([
-      { point: [0, 0], at: 1000 }, { point: [0.5, 0.5], at: 1020 }, { point: [1, 1], at: 1040 }
-    ], 1050).point).toBeNull();
+    expect(stableFeatureSample([
+      { feature: makeFeature([0.2, 0.3]), at: 1000 },
+      { feature: makeFeature([0.21, 0.3]), at: 1020 },
+      { feature: makeFeature([0.2, 0.31]), at: 1040 },
+      { feature: makeFeature([0.9, 0.9]), at: 100 }
+    ], 1050).feature?.point).toEqual([0.2, 0.3]);
+    expect(stableFeatureSample([{ feature: makeFeature([0.2, 0.3]), at: 100 }], 1050).feature).toBeNull();
+    expect(stableFeatureSample([
+      { feature: makeFeature([0, 0]), at: 1000 },
+      { feature: makeFeature([0.5, 0.5]), at: 1020 },
+      { feature: makeFeature([1, 1]), at: 1040 }
+    ], 1050).feature).toBeNull();
+  });
+
+  it("rejects calibration frames captured while eyes are closed", () => {
+    const sample = stableFeatureSample([
+      { feature: makeFeature([0.2, 0.3], { eyeOpen: 0.1 }), at: 1000 },
+      { feature: makeFeature([0.2, 0.3], { eyeOpen: 0.1 }), at: 1020 },
+      { feature: makeFeature([0.2, 0.3], { eyeOpen: 0.1 }), at: 1040 }
+    ], 1050);
+    expect(sample.feature).toBeNull();
+    expect(sample.reason).toMatch(/closed/i);
+  });
+});
+
+describe("feature distance", () => {
+  const focalPx = 640 / (2 * Math.tan((90 * Math.PI) / 360));
+
+  it("prefers iris diameter when it is plausible", () => {
+    const distance = featureDistanceM(makeFeature([0.5, 0.5], { irisDiameterPx: 20 }), focalPx);
+    expect(distance).toBeCloseTo((0.0117 * focalPx) / 20, 6);
+  });
+
+  it("rejects implausible iris distances and falls back to head width", () => {
+    const distance = featureDistanceM(makeFeature([0.5, 0.5], { irisDiameterPx: 30 }), focalPx);
+    expect(distance).toBeCloseTo((0.16 * focalPx) / 160, 6);
+  });
+
+  it("falls back to head width when the iris is missing or implausible", () => {
+    const headDistance = featureDistanceM(makeFeature([0.5, 0.5], { irisDiameterPx: 0 }), focalPx);
+    expect(headDistance).toBeCloseTo((0.16 * focalPx) / 160, 6);
+    const noIris = featureDistanceM(makeFeature([0.5, 0.5]), focalPx, false);
+    expect(noIris).toBeCloseTo(headDistance, 6);
+  });
+});
+
+describe("one euro filter", () => {
+  it("passes the first sample through and smooths stationary noise", () => {
+    const filter = new OneEuroFilter(1.0, 0.5, 1.0);
+    expect(filter.filter(0.5, 0)).toBe(0.5);
+    let value = 0;
+    for (let index = 1; index <= 60; index += 1) {
+      value = filter.filter(0.5 + (index % 2 === 0 ? 0.02 : -0.02), index / 60);
+    }
+    expect(Math.abs(value - 0.5)).toBeLessThan(0.02);
+  });
+
+  it("tracks a fast step faster than a slow drift", () => {
+    const filter = new OneEuroFilter(1.0, 1.0, 1.0);
+    filter.filter(0, 0);
+    for (let index = 1; index <= 30; index += 1) {
+      filter.filter(0, index / 60);
+    }
+    let settled = 0;
+    for (let index = 31; index <= 45; index += 1) {
+      settled = filter.filter(1, index / 60);
+    }
+    expect(settled).toBeGreaterThan(0.5);
+  });
+});
+
+describe("blink hysteresis", () => {
+  it("holds the closed state through the deadband and releases above it", () => {
+    expect(updateBlinkState(false, 0.2)).toBe(true);
+    expect(updateBlinkState(true, 0.36)).toBe(true);
+    expect(updateBlinkState(false, 0.36)).toBe(false);
+    expect(updateBlinkState(true, 0.6)).toBe(false);
+  });
+
+  it("treats NaN openness as still closed and ignores it when open", () => {
+    expect(updateBlinkState(true, Number.NaN)).toBe(true);
+    expect(updateBlinkState(false, Number.NaN)).toBe(false);
+  });
+});
+
+describe("head turn gate", () => {
+  it("treats a collapsed eye span as a turned head", () => {
+    expect(isHeadTurned(60, 160)).toBe(false);
+    expect(isHeadTurned(25, 160)).toBe(true);
+    expect(isHeadTurned(Number.NaN, 160)).toBe(false);
   });
 });
 

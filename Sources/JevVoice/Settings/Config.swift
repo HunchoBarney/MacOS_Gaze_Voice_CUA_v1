@@ -6,14 +6,14 @@ final class Config: ObservableObject {
 
     private let defaults: UserDefaults
     private let keyStore: APIKeyStore
-    private let elevenLabsKeyStore: APIKeyStore
+    private let openAIKeyStore: APIKeyStore
     @Published private(set) var apiKeyError: String?
 
     @Published private(set) var apiKey: String
-    /// ElevenLabs TTS credential — env `ELEVENLABS_API_KEY` first, Keychain
-    /// `elevenLabsAPIKey` second. Empty routes spoken replies to the system
-    /// voice instead of the cloud voice.
-    @Published private(set) var elevenLabsAPIKey: String
+    /// OpenAI credential for the realtime duplex lane — env `OPENAI_API_KEY`
+    /// first, Keychain `openAIAPIKey` second. ChatGPT sign-in cannot mint
+    /// realtime sessions; this lane requires an API key.
+    @Published private(set) var openAIAPIKey: String
 
     @Published var microphoneUID: String {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
@@ -21,6 +21,13 @@ final class Config: ObservableObject {
 
     @Published var autoExecute: Bool {
         didSet { defaults.set(autoExecute, forKey: "autoExecute") }
+    }
+
+    /// Standing computer-use consent — when on, voice confirmations and the
+    /// agent gate approve input without asking. Persisted as the same
+    /// standing-grant key the runtime and gate read.
+    @Published var alwaysAllowComputerUse: Bool {
+        didSet { defaults.set(alwaysAllowComputerUse, forKey: "cuaStandingGrant.computerUseInput") }
     }
 
     /// Whether the driver draws its animated agent cursor while acting.
@@ -49,16 +56,17 @@ final class Config: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         keyStore: APIKeyStore = KeychainAPIKeyStore(),
-        elevenLabsKeyStore: APIKeyStore = KeychainAPIKeyStore(account: "elevenLabsAPIKey"),
+        openAIKeyStore: APIKeyStore = KeychainAPIKeyStore(account: "openAIAPIKey"),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.defaults = defaults
         self.keyStore = keyStore
-        self.elevenLabsKeyStore = elevenLabsKeyStore
+        self.openAIKeyStore = openAIKeyStore
         self.apiKey = environment["TYPESAFE_API_KEY"] ?? ""
-        self.elevenLabsAPIKey = environment["ELEVENLABS_API_KEY"] ?? ""
+        self.openAIAPIKey = environment["OPENAI_API_KEY"] ?? ""
         self.microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
+        self.alwaysAllowComputerUse = defaults.object(forKey: "cuaStandingGrant.computerUseInput") as? Bool ?? false
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
         self.latchMode = defaults.object(forKey: "latchMode") as? Bool ?? false
@@ -80,20 +88,20 @@ final class Config: ObservableObject {
             apiKeyError = "Could not load or migrate the API key in Keychain: \(error.localizedDescription)"
         }
 
-        if elevenLabsAPIKey.isEmpty {
-            elevenLabsAPIKey = (try? elevenLabsKeyStore.read()) ?? ""
+        if openAIAPIKey.isEmpty {
+            openAIAPIKey = (try? openAIKeyStore.read()) ?? ""
         }
     }
 
     @discardableResult
-    func saveElevenLabsAPIKey(_ value: String) -> Bool {
+    func saveOpenAIAPIKey(_ value: String) -> Bool {
         do {
             if value.isEmpty {
-                try elevenLabsKeyStore.delete()
+                try openAIKeyStore.delete()
             } else {
-                try elevenLabsKeyStore.save(value)
+                try openAIKeyStore.save(value)
             }
-            elevenLabsAPIKey = value
+            openAIAPIKey = value
             return true
         } catch {
             return false

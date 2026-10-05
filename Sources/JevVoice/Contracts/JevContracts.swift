@@ -84,17 +84,23 @@ public struct DriveTask: Sendable {
     public var deny: [String]
     /// Postcondition strings the verifier looks for after effects.
     public var successContains: [String]
+    /// The caller asked the app to come forward — the bound window is
+    /// raised once at drive start. Element-scoped and explicitly
+    /// background work leaves this false so the user's front app survives.
+    public var foreground: Bool
     public var maxSteps: Int
     public init(goal: String, application: String? = nil, pid: Int? = nil,
                 windowID: Int? = nil, windowName: String? = nil,
                 previousContext: String? = nil,
                 scope: TaskSpec.Scope = .work, values: [String: String] = [:],
-                deny: [String] = [], successContains: [String] = [], maxSteps: Int = 24) {
+                deny: [String] = [], successContains: [String] = [],
+                foreground: Bool = false, maxSteps: Int = 24) {
         self.goal = goal; self.application = application
         self.pid = pid; self.windowID = windowID; self.windowName = windowName
         self.previousContext = previousContext
         self.scope = scope; self.values = values
         self.deny = deny; self.successContains = successContains
+        self.foreground = foreground
         self.maxSteps = maxSteps
     }
 }
@@ -106,41 +112,20 @@ public struct DriveResult: Sendable {
     public var history: [String]
     public var pid: Int?
     public var windowID: Int?
-    public init(status: DriveStatus, history: [String] = [], pid: Int? = nil, windowID: Int? = nil) {
-        self.status = status; self.history = history; self.pid = pid; self.windowID = windowID
+    /// The bundle id the loop actually resolved — observed identity, never
+    /// the caller's application spelling.
+    public var bundleID: String?
+    public init(status: DriveStatus, history: [String] = [], pid: Int? = nil, windowID: Int? = nil,
+                bundleID: String? = nil) {
+        self.status = status; self.history = history; self.pid = pid
+        self.windowID = windowID; self.bundleID = bundleID
     }
 }
 
-// MARK: Planner contract (CompanionBrain output)
+// MARK: Voice task contract
 
-/// One structured decision per utterance — the replacement for the
-/// 19-question `decide()` battery. CompanionBrain returns exactly one.
-public enum PlannerDecision: Sendable {
-    /// A task spec ready for the drive loop.
-    case execute(TaskSpec)
-    /// Ask the user a single question (spoken + card).
-    case clarify(ClarifyRequest)
-    /// Answer aloud/in the card — no computer action.
-    case answer(text: String, consumedThrough: Int? = nil)
-    /// The next step needs input consent this turn.
-    case consentNeeded(ConsentRequest, consumedThrough: Int? = nil)
-    case refuse(reason: String, consumedThrough: Int? = nil)
-    /// Delegate work to a persistent agent (Wave 2+).
-    case delegate(DelegationRequest)
-    /// Follow-up message into an existing agent's thread.
-    case sendToAgent(slug: String, message: String, consumedThrough: Int? = nil)
-    /// Read an agent's findings without waking it.
-    case agentMemory(slug: String, consumedThrough: Int? = nil)
-    /// Stop work the user named — a specific intent, or everything.
-    case cancel(CancelRequest)
-    /// A correction of an earlier intent: retract it or record the revision.
-    case correct(CorrectionRequest)
-    /// Re-run a referenced intent in place — same intent, fresh attempt,
-    /// fresh observation. Never a blind replay of a settled action.
-    case retry(RetryRequest)
-}
-
-/// App-level task description produced by the planner (pre-resolution).
+/// App-level task description built from the realtime `computer_command`
+/// tool call. `CuaVoiceRuntime` resolves app/window to `DriveTask` for the loop.
 /// `CuaVoiceRuntime` resolves app/window to `DriveTask` for the loop.
 public struct TaskSpec: Sendable {
     public enum Scope: String, Sendable { case open, create, work }
@@ -151,104 +136,22 @@ public struct TaskSpec: Sendable {
     public var window: String?
     public var deny: [String]
     public var values: [String: String]
-    /// Literal text the user dictated for insertion (planner-parsed).
+    /// Literal text the user dictated for insertion (`literal_text` tool arg).
     public var literalText: String?
     public var successContains: [String]
-    /// True only when the planner folded an answer to a pending question into
-    /// this spec — the runtime resumes that question's owner intent in place.
-    /// A plain execute while a question is pending is a NEW request and is
-    /// capacity-checked like any other.
-    public var resolvesPendingQuestion: Bool
-    /// When the utterance answers a specific pending question, its id —
-    /// nil folds the newest one. Lets "the second one" bind the question it
-    /// names instead of stealing the latest ask.
-    public var answersQuestionID: UUID?
-    /// How the new intent relates to a referenced earlier intent.
-    public var relationship: TaskRelationship
-    /// An explicit execution-blocking edge: this intent may only run once
-    /// the referenced intent has produced a verified fact of the required
-    /// kind. Waiting happens inside the attempt, never silently.
-    public var requiresIntentID: UUID?
-    /// Words of the presented utterance this decision consumed from the
-    /// front — for "open Notes then send it" the planner marks the prefix it
-    /// used and the remainder re-presents as its own decision. Nil = the
-    /// decision covers every remaining word.
-    public var consumedThrough: Int?
+    /// True when the request asks the app to come forward — "open X",
+    /// "show X", an explicit "in the foreground". Dictate-into-window and
+    /// background phrasing leave it false so the user's foreground app is
+    /// preserved.
+    public var foreground: Bool
     public init(goal: String, application: String? = nil, scope: Scope = .work,
                 window: String? = nil, deny: [String] = [], values: [String: String] = [:],
                 literalText: String? = nil, successContains: [String] = [],
-                resolvesPendingQuestion: Bool = false, answersQuestionID: UUID? = nil,
-                relationship: TaskRelationship = .independent, requiresIntentID: UUID? = nil,
-                consumedThrough: Int? = nil) {
+                foreground: Bool = false) {
         self.goal = goal; self.application = application; self.scope = scope
         self.window = window; self.deny = deny; self.values = values
         self.literalText = literalText; self.successContains = successContains
-        self.resolvesPendingQuestion = resolvesPendingQuestion
-        self.answersQuestionID = answersQuestionID
-        self.relationship = relationship; self.requiresIntentID = requiresIntentID
-        self.consumedThrough = consumedThrough
-    }
-}
-
-/// How a new intent relates to a referenced earlier one — the planner-facing
-/// mirror of the dialogue ledger's relationship edge.
-public enum TaskRelationship: Sendable, Equatable {
-    case independent
-    case continuation(of: UUID)
-    case correction(of: UUID)
-}
-
-/// Stop work the user named: a specific intent, the single live intent
-/// when the target is nil, or everything when `stopAll` is explicit.
-public struct CancelRequest: Sendable {
-    public var targetIntentID: UUID?
-    public var consumedThrough: Int?
-    /// True only for an explicit "stop everything" — a nil target without
-    /// this flag binds the single live intent or asks, never all.
-    public var stopAll: Bool
-    public init(targetIntentID: UUID? = nil, consumedThrough: Int? = nil,
-                stopAll: Bool = false) {
-        self.targetIntentID = targetIntentID; self.consumedThrough = consumedThrough
-        self.stopAll = stopAll
-    }
-}
-
-/// A correction of an earlier intent. `retract` withdraws/cancels the target
-/// (and unwinds effects the target verifiably owns); `revise` records the
-/// correction link and runs a replacement spec when the planner supplies one.
-public struct CorrectionRequest: Sendable {
-    public enum Mode: String, Sendable { case retract, revise }
-    public var targetIntentID: UUID?
-    public var mode: Mode
-    public var replacement: TaskSpec?
-    public var consumedThrough: Int?
-    public init(targetIntentID: UUID? = nil, mode: Mode = .retract,
-                replacement: TaskSpec? = nil, consumedThrough: Int? = nil) {
-        self.targetIntentID = targetIntentID; self.mode = mode
-        self.replacement = replacement; self.consumedThrough = consumedThrough
-    }
-}
-
-/// Re-run a referenced intent in place: same intent id, fresh attempt,
-/// re-observed state — never a replay of the earlier dispatch.
-public struct RetryRequest: Sendable {
-    /// The intent to re-attempt; nil targets the most recent retryable one.
-    public var targetIntentID: UUID?
-    public var consumedThrough: Int?
-    public init(targetIntentID: UUID? = nil, consumedThrough: Int? = nil) {
-        self.targetIntentID = targetIntentID; self.consumedThrough = consumedThrough
-    }
-}
-
-public struct ClarifyRequest: Sendable {
-    public var question: String
-    public var options: [String]
-    /// Words of the presented utterance this decision consumed from the
-    /// front — nil covers every remaining word.
-    public var consumedThrough: Int?
-    public init(question: String, options: [String] = [], consumedThrough: Int? = nil) {
-        self.question = question; self.options = options
-        self.consumedThrough = consumedThrough
+        self.foreground = foreground
     }
 }
 
@@ -262,80 +165,13 @@ public struct DelegationRequest: Sendable {
     public var newAgentDescription: String?
     /// The task/message handed to the agent.
     public var message: String
-    /// Words of the presented utterance this decision consumed from the
-    /// front — nil covers every remaining word.
-    public var consumedThrough: Int?
     public init(agentSlug: String? = nil, newAgentName: String? = nil,
                 newAgentRole: String? = nil, newAgentDescription: String? = nil,
-                message: String, consumedThrough: Int? = nil) {
+                message: String) {
         self.agentSlug = agentSlug; self.newAgentName = newAgentName
         self.newAgentRole = newAgentRole; self.newAgentDescription = newAgentDescription
-        self.message = message; self.consumedThrough = consumedThrough
+        self.message = message
     }
-}
-
-/// One published intent the planner may reference — for stops, corrections,
-/// continuations and retries. The id is the stable dialogue intent id.
-public struct PlannerTaskRef: Sendable {
-    public var intentID: UUID
-    public var request: String
-    /// Semantic status: pending, executing, awaitingAnswer, uncertain,
-    /// partial, blocked, cancelled, succeeded, failed.
-    public var status: String
-    public var application: String?
-    public init(intentID: UUID, request: String, status: String, application: String? = nil) {
-        self.intentID = intentID; self.request = request
-        self.status = status; self.application = application
-    }
-}
-
-/// A live pending question the planner may bind an answer to.
-public struct PendingQuestionRef: Sendable {
-    public var questionID: UUID
-    public var intentID: UUID
-    public var prompt: String
-    public var options: [String]
-    public init(questionID: UUID, intentID: UUID, prompt: String, options: [String] = []) {
-        self.questionID = questionID; self.intentID = intentID
-        self.prompt = prompt; self.options = options
-    }
-}
-
-/// Context the planner sees — deliberately small (Clicky keeps planner
-/// context lean; the loop handles step-level detail).
-public struct PlannerContext: Sendable {
-    /// Recent user intents/tasks for follow-up routing ("it", "again").
-    public var recentIntents: [String]
-    /// Referenceable intents — the ids cancel/correct/retry/continuation
-    /// decisions bind to.
-    public var tasks: [PlannerTaskRef]
-    /// Pending clarification an utterance might answer — the newest ask.
-    public var pendingClarify: ClarifyRequest?
-    /// Every live pending question; an answer may name any of them.
-    public var questions: [PendingQuestionRef]
-    /// Pending agent/consent ask a bare "yes"/"no" resolves.
-    public var pendingConsent: ConsentRequest?
-    /// Agent roster summary for delegation routing.
-    public var agents: [CompanionAgent]
-    /// Short foreground-app hint ("TextEdit — Untitled 3").
-    public var foregroundHint: String?
-    /// True only on the release-final handoff — literal insertions hold
-    /// for this so dictated text stays revisable mid-hold.
-    public var utteranceFinal: Bool
-    public init(recentIntents: [String] = [], tasks: [PlannerTaskRef] = [],
-                pendingClarify: ClarifyRequest? = nil, questions: [PendingQuestionRef] = [],
-                pendingConsent: ConsentRequest? = nil, agents: [CompanionAgent] = [],
-                foregroundHint: String? = nil, utteranceFinal: Bool = true) {
-        self.recentIntents = recentIntents; self.tasks = tasks
-        self.pendingClarify = pendingClarify; self.questions = questions
-        self.pendingConsent = pendingConsent; self.agents = agents
-        self.foregroundHint = foregroundHint; self.utteranceFinal = utteranceFinal
-    }
-}
-
-/// The seam every planner implementation satisfies.
-public protocol CompanionPlanning: Sendable {
-    func decide(utterance: String, context: PlannerContext) async throws -> PlannerDecision
 }
 
 // MARK: Agent contract (persistent named agents — Clicky's "Clickys")

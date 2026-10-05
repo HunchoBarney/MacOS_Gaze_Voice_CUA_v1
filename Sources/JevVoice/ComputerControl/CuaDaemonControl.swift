@@ -61,10 +61,15 @@ enum CuaDaemonControl {
             process.arguments = arguments
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
+            // Timeout and termination fire on different queues; the lock makes
+            // check-and-set atomic so the continuation resumes exactly once.
+            let resumeLock = NSLock()
             var resumed = false
             let finish: (Bool) -> Void = { ok in
-                guard !resumed else { return }
+                resumeLock.lock()
+                guard !resumed else { resumeLock.unlock(); return }
                 resumed = true
+                resumeLock.unlock()
                 continuation.resume(returning: ok)
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {

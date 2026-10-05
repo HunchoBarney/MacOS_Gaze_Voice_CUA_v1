@@ -4,6 +4,9 @@ import JevVoiceCore
 /// Custom OpenAI-compatible provider written into the agent's config.toml.
 /// `envKey` names the environment variable codex reads the API key from —
 /// the key itself is only ever placed in the child process environment.
+/// `usesSystemAuth` means codex's builtin provider authenticates through the
+/// user's own `~/.codex/auth.json` (ChatGPT login) seeded into the agent's
+/// CODEX_HOME — no custom provider table is emitted at all.
 public struct CodexModelProvider: Sendable, Equatable {
     public var name: String
     public var baseURL: String
@@ -11,15 +14,32 @@ public struct CodexModelProvider: Sendable, Equatable {
     public var wireAPI: String
     public var envKey: String
     public var model: String
+    /// True → use the machine's existing codex auth (auth.json); the config
+    /// writes only model/approval/sandbox, no provider override.
+    public var usesSystemAuth: Bool
     public init(name: String, baseURL: String, wireAPI: String = "responses",
                 envKey: String, model: String) {
         self.name = name; self.baseURL = baseURL; self.wireAPI = wireAPI
         self.envKey = envKey; self.model = model
+        self.usesSystemAuth = false
+    }
+    /// The user's own codex login — auth.json is copied into the agent's
+    /// CODEX_HOME at spawn. `model` may be empty → codex's account default.
+    public static func chatGPT(model: String = "") -> CodexModelProvider {
+        CodexModelProvider(name: "openai", baseURL: "https://api.openai.com/v1",
+                           envKey: "", model: model).withSystemAuth()
+    }
+    private func withSystemAuth() -> CodexModelProvider {
+        var copy = self; copy.usesSystemAuth = true; return copy
     }
 }
 
 /// A streamable-HTTP MCP server entry for config.toml (`[mcp_servers.<name>]`).
 /// Loopback URLs are injected, never hardcoded — L5 owns the actual servers.
+/// `default_tools_approval_mode = "approve"` is emitted for every server:
+/// these are our own loopback surfaces and ComputerUseGate IS the consent
+/// layer — codex's per-call gate would auto-refuse everything under
+/// `approval_policy = "never"` (openai/codex#24135).
 public struct CodexMCPServer: Sendable, Equatable {
     public var name: String
     public var url: String
@@ -185,7 +205,11 @@ public actor CodexRuntimeBridge {
     /// mid-spawn closes the session instead of publishing it.
     private func spawnAndRegister(_ agent: CompanionAgent) async throws -> Session {
         try writeConfig(for: agent)
-        var environment = configuration.environmentFor?(agent) ?? configuration.environment
+        // Per-agent vars (MCP tokens) layer OVER the base env — a non-nil
+        // environmentFor must never discard configuration.environment,
+        // which carries the provider's API key.
+        var environment = configuration.environment
+        environment.merge(configuration.environmentFor?(agent) ?? [:]) { _, new in new }
         environment["CODEX_HOME"] = agent.codexHomePath
         let client = CodexProtocolClient(executable: configuration.codexBinary,
                                        environment: environment,
@@ -203,18 +227,19 @@ public actor CodexRuntimeBridge {
         }
         do {
             try await client.start()
+            let model = configuration.provider.model.isEmpty ? nil : configuration.provider.model
             var threadID: String
             if let last = agent.threadIDs.last {
                 do {
                     threadID = try await client.resumeThread(last, cwd: agent.workspacePath,
-                                                           model: configuration.provider.model)
+                                                           model: model)
                 } catch {
                     threadID = try await client.startThread(cwd: agent.workspacePath,
-                                                          model: configuration.provider.model)
+                                                          model: model)
                 }
             } else {
                 threadID = try await client.startThread(cwd: agent.workspacePath,
-                                                        model: configuration.provider.model)
+                                                        model: model)
             }
             let session = Session(client: client, threadID: threadID,
                                   activeTurnID: nil, forwarder: forwarder)
@@ -253,30 +278,46 @@ public actor CodexRuntimeBridge {
                                    mcpServers: configuration.mcpServersFor?(agent) ?? configuration.mcpServers)
         try toml.write(to: home.appendingPathComponent("config.toml"),
                        atomically: true, encoding: .utf8)
+        // System-auth providers ride the user's own codex login — seed a
+        // fresh copy of auth.json each spawn so a token refresh in one
+        // agent's home can't strand the others on a rotated credential.
+        if configuration.provider.usesSystemAuth {
+            let source = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex/auth.json")
+            let dest = home.appendingPathComponent("auth.json")
+            try? FileManager.default.removeItem(at: dest)
+            try? FileManager.default.copyItem(at: source, to: dest)
+        }
     }
 
     static func configTOML(provider: CodexModelProvider, mcpServers: [CodexMCPServer]) -> String {
         var toml = """
-        model = \(tomlString(provider.model))
-        model_provider = \(tomlString(provider.name))
+        \(provider.model.isEmpty ? "" : "model = \(tomlString(provider.model))\n")\
+        \(provider.usesSystemAuth ? "" : "model_provider = \(tomlString(provider.name))\n")\
         approval_policy = "never"
         sandbox_mode = "workspace-write"
 
         [sandbox_workspace_write]
         network_access = true
 
-        [model_providers.\(tomlString(provider.name))]
-        name = \(tomlString(provider.name))
-        base_url = \(tomlString(provider.baseURL))
-        wire_api = \(tomlString(provider.wireAPI))
-        env_key = \(tomlString(provider.envKey))
-
         """
+        if !provider.usesSystemAuth {
+            toml += """
+
+            [model_providers.\(tomlString(provider.name))]
+            name = \(tomlString(provider.name))
+            base_url = \(tomlString(provider.baseURL))
+            wire_api = \(tomlString(provider.wireAPI))
+            env_key = \(tomlString(provider.envKey))
+
+            """
+        }
         for server in mcpServers {
             toml += """
 
             [mcp_servers.\(tomlString(server.name))]
             url = \(tomlString(server.url))
+            default_tools_approval_mode = "approve"
 
             """
             if let envVar = server.bearerTokenEnvVar {

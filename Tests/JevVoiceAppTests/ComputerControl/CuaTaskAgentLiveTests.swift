@@ -2,34 +2,12 @@ import XCTest
 import JevVoiceCore
 @testable import JevVoice
 
-/// Opt-in live checks against the real Cua driver + real models. Under the
-/// split architecture these exercise the two production seams directly:
-/// `CompanionBrain` (one decision per utterance) and `CuaAgentLoop.drive`
-/// (Jev-picked steps). The fixture invariants are unchanged: disposable
-/// window, observed readbacks, no mutation after cancellation.
+/// Opt-in live checks against the real Cua driver + real models. These
+/// exercise `CuaAgentLoop.drive` (Jev-picked steps) directly. The fixture
+/// invariants are unchanged: disposable window, observed readbacks, no
+/// mutation after cancellation.
 @MainActor
 final class CuaTaskAgentLiveTests: XCTestCase {
-
-    /// An unspecified target must surface a clarify decision — never a guessed
-    /// app. Live provider, zero driver calls.
-    func testUnspecifiedTargetDoesNotBorrowPriorAppOptIn() async throws {
-        guard ProcessInfo.processInfo.environment["JARVIS_CUA_AGENT_TEST"] == "1" else {
-            throw XCTSkip("Opt-in live planner clarify check; no OS mutation")
-        }
-        let brain = CompanionBrain(settings: .shared)
-        for request in ["Open something.", "Can you open an app?", "Open the thing."] {
-            let decision: PlannerDecision
-            do {
-                decision = try await brain.decide(utterance: request, context: PlannerContext())
-            } catch {
-                throw XCTSkip("Text provider unavailable for live clarify check: \(error.localizedDescription)")
-            }
-            guard case .clarify = decision else {
-                XCTFail("Unspecified target must ask for clarification, got \(decision)")
-                continue
-            }
-        }
-    }
 
     func testNativeFixtureOptIn() async throws { try await fixture(createDocument: false) }
     func testNewDocumentFixtureOptIn() async throws { try await fixture(createDocument: true) }
@@ -178,7 +156,8 @@ final class CuaTaskAgentLiveTests: XCTestCase {
             let operation = Task {
                 try await loop.drive(DriveTask(goal: goal, application: "com.apple.TextEdit",
                                                pid: pid, windowID: window,
-                                               values: ["literal_text": "copper lantern beside the window"]))
+                                               values: ["literal_text": "copper lantern beside the window"],
+                                               foreground: true))
             }
             var result: DriveResult?
             var statusLine = ""

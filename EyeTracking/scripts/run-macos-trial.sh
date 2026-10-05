@@ -5,7 +5,9 @@ trial_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 trial_app="${TRIAL_APP_PATH:-$trial_root/../build/Screen Eye Tracking Trial.app}"
 run_args=(
   --runtime onnxweb
-  --display-size-inch 13.3
+  --display-size-inch 14.2
+  --camera-resolution HD \
+  --camera-fov 62
   --web-inference-worker dedicated
   --gaze-projection-mode binocular-screen
   --calibration-file "$trial_root/.gaze_calibration.binocular-screen.json"

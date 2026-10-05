@@ -14,6 +14,13 @@ enum CuaDependency {
     static var bundledExecutable: URL? { Bundle.main.url(forResource: "cua-driver", withExtension: nil) }
     static var executable: URL { bundledExecutable ?? installedExecutable }
     static let executableSHA256 = "656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66"
+    /// Signing is part of `make app`, so the embedded copy can never match the
+    /// upstream byte hash. The build records the post-signing digest here and
+    /// the outer app signature seals it; unpackaged bundles have no embedded
+    /// driver and never reach this key.
+    static var bundledSHA256: String? {
+        Bundle.main.object(forInfoDictionaryKey: "JevCuaDriverSHA256") as? String
+    }
 
     static func verify(_ file: URL, expectedSHA256: String) throws {
         guard FileManager.default.isExecutableFile(atPath: file.path) else {

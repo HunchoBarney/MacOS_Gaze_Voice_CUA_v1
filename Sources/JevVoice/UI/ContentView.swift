@@ -175,6 +175,30 @@ struct ActivityView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Decision feed", systemImage: "list.bullet.rectangle").font(.headline)
+                    if controller.cua.feed.entries.isEmpty {
+                        Text("Nothing yet — hold Fn and speak; each routing decision, dispatch, and verification lands here as it happens.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(controller.cua.feed.entries.suffix(30).reversed()) { entry in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Image(systemName: entry.kind.symbol)
+                                    .font(.system(size: 10)).frame(width: 14)
+                                    .foregroundStyle(entry.kind == .error ? Color.orange
+                                        : entry.kind == .consent ? Color.yellow
+                                        : entry.kind == .verify ? Color.mint
+                                        : Color.secondary)
+                                Text(entry.text).font(.caption).lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(entry.at, style: .time).font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+            }
             CuaTasksView(controller: controller)
             VoiceCard {
                 VStack(alignment: .leading, spacing: 10) {

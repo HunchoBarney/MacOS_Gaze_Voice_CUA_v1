@@ -58,16 +58,20 @@ function readCalibrationPayload(path, readCalibrationFile) {
       return {};
     }
     const payload = JSON.parse(text);
-    if (payload.raw_projection !== "unclipped-v1") {
+    if (payload.raw_projection !== "unclipped-v1" && payload.raw_projection !== "unclipped-v2") {
       return { legacy_calibration: true };
     }
     const affine = Array.isArray(payload.affine) ? payload.affine : undefined;
+    const rbf = payload.rbf && typeof payload.rbf === "object" ? payload.rbf : undefined;
+    const geometry = payload.geometry && typeof payload.geometry === "object" ? payload.geometry : undefined;
     const sourceBounds = payload.source_bounds && typeof payload.source_bounds === "object" ? payload.source_bounds : undefined;
     const samples = Array.isArray(payload.samples) ? payload.samples : undefined;
     const validation = Array.isArray(payload.validation) ? payload.validation : undefined;
     return compactObject({
       raw_projection: stringValue(payload.raw_projection),
       affine,
+      rbf,
+      geometry,
       source_bounds: sourceBounds,
       samples,
       validation
@@ -195,6 +199,20 @@ class GazeStateStore {
         ...pixels,
         confidence: finiteNumber(payload.confidence),
         distance_m: finiteNumber(payload.distance_m),
+        iris_distance_m: finiteNumber(payload.iris_distance_m),
+        distance_source: stringValue(payload.distance_source),
+        eye_open: finiteNumber(payload.eye_open),
+        blink: payload.blink === true ? true : undefined,
+        head_turned: payload.head_turned === true ? true : undefined,
+        gaze_filter: stringValue(payload.gaze_filter),
+        tracking_source: stringValue(payload.tracking_source),
+        held_reason: stringValue(payload.held_reason),
+        filter_velocity_deg_s: finiteNumber(payload.filter_velocity_deg_s),
+        gaze_state: stringValue(payload.gaze_state),
+        capture_ms: finiteNumber(payload.capture_ms),
+        preview_ms: finiteNumber(payload.preview_ms),
+        processed_fps: finiteNumber(payload.processed_fps),
+        frame_interval_ms: finiteNumber(payload.frame_interval_ms),
         head_face_width_ratio: finiteNumber(payload.head_face_width_ratio),
         eye_position_weight_x: finiteNumber(payload.eye_position_weight_x),
         eye_position_weight_y: finiteNumber(payload.eye_position_weight_y),

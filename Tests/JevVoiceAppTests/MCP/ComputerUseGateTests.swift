@@ -12,6 +12,28 @@ final class ComputerUseGateTests: XCTestCase {
         result["structuredContent"]?["refusal"]?["code"]?.string
     }
 
+    func testStandingGrantPreApprovesInput() async throws {
+        CuaStandingGrants.computerUseInput = true
+        defer { CuaStandingGrants.computerUseInput = false }
+        let (gate, driver) = fixture()
+        gate.setActiveTurn("turn-1", agentSlug: "inbox")
+        let result = await gate.callTool("click", arguments: .object(["pid": .number(7)]), agentSlug: "inbox")
+        XCTAssertNil(result["isError"])
+        let calls = await driver.calls
+        XCTAssertEqual(calls.map(\.name), ["click"])
+        // The grant bypasses the ask entirely — nothing ever pends.
+        XCTAssertTrue(gate.pending().isEmpty)
+        // Policy still applies: deny lists and desktop scope are not consent.
+        gate.setDenyList(["delete"], agentSlug: "inbox")
+        let denied = await gate.callTool("press_element",
+            arguments: .object(["label": .string("Delete everything")]), agentSlug: "inbox")
+        XCTAssertEqual(refusalCode(denied), "denied_label")
+        let scoped = await gate.callTool("click",
+            arguments: .object(["scope": .string("desktop"), "x": .number(1), "y": .number(2)]),
+            agentSlug: "inbox")
+        XCTAssertEqual(refusalCode(scoped), "scope_refused")
+    }
+
     func testObservationPassesWithoutConsent() async throws {
         let (gate, driver) = fixture()
         let result = await gate.callTool("list_windows", arguments: .object([:]), agentSlug: "inbox")
@@ -235,7 +257,7 @@ final class ComputerUseGateTests: XCTestCase {
     func testDriverRefusalPropagatesAsToolError() async throws {
         let (gate, driver) = fixture()
         gate.approve(ConsentRequest(agentSlug: "a", turnID: nil, summary: "allow", reason: "test"))
-        await driver.failWith(DriverConnectionError.toolRefused(tool: "click", code: "menu_path_unavailable"))
+        await driver.failWith(DriverConnectionError.toolRefused(tool: "click", code: "menu_path_unavailable", detail: ""))
         let result = await gate.callTool("click", arguments: .object([:]), agentSlug: "a")
         XCTAssertEqual(result["isError"], .bool(true))
         XCTAssertEqual(result["structuredContent"]?["refusal"]?["code"], .string("menu_path_unavailable"))

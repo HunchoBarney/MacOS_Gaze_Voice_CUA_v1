@@ -53,6 +53,7 @@ export type WebInferenceWorkerMode = "off" | "ort-proxy" | "dedicated";
 export interface WebInferenceConfig {
   runtime: Exclude<RuntimeName, "python">;
   webInferenceWorker: WebInferenceWorkerMode;
+  webAccelerator: "auto" | "webgpu" | "wasm";
   detector: "retinaface" | "yolo";
   backend: string;
   camera: string;
@@ -79,7 +80,14 @@ export interface WebInferenceConfig {
   assetBaseUrl?: string;
   smoothingAlpha: number;
   smoothingAlphaY: number;
+  calibrate: boolean;
+  gazeFilter: "saccade" | "oneeuro" | "ema";
+  filterMincutoff: number;
+  filterBeta: number;
+  filterDcutoff: number;
+  disableIrisDistance: boolean;
   previewFps: number;
+  gazeMaxFps: number;
   hidePreview: boolean;
   flipX: boolean;
   flipY: boolean;
@@ -101,6 +109,16 @@ export type BackendMessage =
       raw_y_norm?: number;
       confidence: number;
       distance_m: number;
+      iris_distance_m?: number;
+      distance_source?: "iris" | "head";
+      eye_open?: number;
+      blink?: boolean;
+      head_turned?: boolean;
+      gaze_filter?: string;
+      tracking_source?: "detector" | "iris";
+      held_reason?: string;
+      filter_velocity_deg_s?: number;
+      gaze_state?: "fixation" | "saccade";
       head_face_width_ratio?: number;
       eye_position_weight_x?: number;
       eye_position_weight_y?: number;
@@ -165,4 +183,8 @@ export type BackendMessage =
       count?: number;
       path?: string;
       message?: string;
+      geometry?: {
+        eye_position_weight_x: number;
+        eye_position_weight_y: number;
+      } | null;
     };

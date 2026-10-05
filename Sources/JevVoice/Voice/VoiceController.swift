@@ -126,17 +126,12 @@ final class VoiceController: ObservableObject {
         })?.question
     }
 
-    /// The interaction's own conversational text: its pending question, a
-    /// speech outcome worth surfacing, or its latest attempt's progress —
-    /// never the diagnostically selected task's message.
+    /// The interaction's own conversational text: its pending question or its
+    /// latest attempt's progress — never the diagnostically selected task's
+    /// message.
     private var interactionMessage: String {
         if let question = interactionQuestion { return question.prompt }
-        if !cua.speech.message.isEmpty,
-           ["incomplete", "clarification", "dictationWaitingForFinal"].contains(cua.speech.outcome) {
-            return cua.speech.message
-        }
-        if let work = interactionWorks.last, !work.message.isEmpty { return work.message }
-        return cua.speech.message
+        return interactionWorks.last?.message ?? ""
     }
 
     /// Only this session's own latest attempt can surface a failure on the
@@ -185,17 +180,36 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// An explicit retry goes through the normal utterance/decision path — the
-    /// same route a spoken "try that again" takes — naming the task's request
-    /// so Jev binds the retry relationship and the dialogue resumes the intent
-    /// in place. It never replays a tool call or re-runs a worker directly.
-    /// Requires an idle pipeline: it must not rewrite a live capture's ledger.
+    /// An explicit retry resumes the intent in place through the runtime's
+    /// direct path — same intent id, fresh attempt, re-observed state. It
+    /// never replays a tool call or re-runs a worker directly. Requires an
+    /// idle pipeline: it must not interleave with a live capture's events.
     func retryTask(_ id: UUID) {
-        guard canRetryTask(id), !captureActive, !cua.speech.busy,
-              cua.speech.remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let work = cuaTasks.first(where: { $0.id == id }) else { return }
-        cua.begin(app: commandFrontmostApp ?? lastExternalApp, captureID: sessionID ?? UUID())
-        cua.update("Try the earlier task again: \(work.request)", final: true)
+        guard canRetryTask(id), !captureActive else { return }
+        let lane = speech as? RealtimeVoiceLane
+        Task { [weak self] in
+            let reply = await self?.cua.retryWork(id) ?? "That task is gone."
+            lane?.pushTaskEvent("[task outcome] retry: \(reply)", speak: true)
+        }
+    }
+
+    /// Typed and reviewed commands take the same model turn the voice does —
+    /// one decision surface (the realtime model), one screen, one tool set.
+    /// Typed and reviewed commands take the same model turn the voice does —
+    /// one decision surface (the realtime model), one screen, one tool set.
+    private func routeCommand(_ text: String) {
+        guard let lane = speech as? RealtimeVoiceLane else {
+            fail("The realtime voice lane is not available.")
+            return
+        }
+        // A typed retry can arrive with no live session — make one so the
+        // turn's events have an identity to bind to.
+        if sessionID == nil { _ = newSession() }
+        let sid = sessionID ?? UUID()
+        Task { [weak self] in
+            do { try await lane.submitTyped(text, sessionID: sid) }
+            catch { self?.fail("The voice model is unavailable: \(error.localizedDescription)") }
+        }
     }
 
     /// Short stable identity for surfaces that show intent/attempt ids.
@@ -252,7 +266,7 @@ final class VoiceController: ObservableObject {
     private func relatedLabel(_ intentID: UUID) -> String {
         cua.tasks.last { $0.intentID == intentID }?.label ?? "intent \(shortID(intentID))"
     }
-    private let speech: SpeechCapturing
+    private var speech: SpeechCapturing
     private let dictation: DictationDelivering
     /// Spoken replies seam — nil or Config.ttsEnabled=false stays silent.
     var speaker: SpeechSynthesizing?
@@ -264,6 +278,7 @@ final class VoiceController: ObservableObject {
     private let timings: VoiceTimings
     private let frontmost: () -> String?
     private var appObserver: AnyCancellable?
+    private var subscriptions: Set<AnyCancellable> = []
     private var lastExternalApp: String?
     private var commandFrontmostApp: String?
     private var sessionID: UUID?
@@ -285,10 +300,12 @@ final class VoiceController: ObservableObject {
     private var hideTask: Task<Void, Never>?
     private var beganAt: TimeInterval = 0
     private var releasedAt: TimeInterval = 0
+    /// Accumulates the realtime lane's streaming reply text for the detail line.
+    private var replyDraft = ""
     var isListening: Bool { status == .listening }
     var canBegin: Bool {
         guard microphoneEnabled else { return false }
-        if !held, !cua.speech.busy, cleanupTask == nil, startupTask == nil,
+        if !held, cleanupTask == nil, startupTask == nil,
            [.executing, .thinking].contains(status) { return true }
         if isMicrophoneTest && status != .stopping { return true }
         switch status {
@@ -299,7 +316,7 @@ final class VoiceController: ObservableObject {
     /// Same gates as `canBegin` minus microphone availability — a typed
     /// command never touches the mic.
     var canSubmitCommand: Bool {
-        if !held, !cua.speech.busy, cleanupTask == nil, startupTask == nil,
+        if !held, cleanupTask == nil, startupTask == nil,
            [.executing, .thinking].contains(status) { return true }
         if isMicrophoneTest && status != .stopping { return true }
         switch status {
@@ -321,15 +338,14 @@ final class VoiceController: ObservableObject {
          speaker: SpeechSynthesizing? = nil) {
         let config = config ?? Config.shared
         self.config = config
-        self.speech = speech ?? SpeechAnalyzerCapture()
         self.dictation = dictation
         self.speaker = speaker
-        self.authorize = authorize ?? { await SpeechAnalyzerCapture.requestAuthorization() }
-        // Production wires the real planner: CompanionBrain re-reads the text
-        // provider per decision, so a missing key degrades to the fast lane +
-        // an honest unavailable message and self-heals once a key is saved.
-        self.cua = cuaRuntime ?? CuaVoiceRuntime(config: config,
-                                               planner: CompanionBrain(settings: .shared))
+        self.authorize = authorize ?? { await RealtimeVoiceLane.requestAuthorization() }
+        // `speech` must exist before self can appear in closures below.
+        self.speech = speech ?? RealtimeVoiceLane(apiKey: { [weak config] in config?.openAIAPIKey ?? "" })
+        // No second planner — the realtime model's tool choice is the
+        // decision; the runtime routes it (fast lane → drive loop).
+        self.cua = cuaRuntime ?? CuaVoiceRuntime(config: config)
         self.timings = timings
         self.frontmost = frontmost ?? { NSWorkspace.shared.frontmostApplication?.localizedName }
         lastExternalApp = self.frontmost()
@@ -339,7 +355,57 @@ final class VoiceController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] in self?.lastExternalApp = $0.localizedName }
         self.cua.onChange = { [weak self] in self?.cuaChanged() }
-        self.speech.onReadiness = { [weak self] readiness in
+        // The realtime lane's tools reach the runtime spine — the model picks
+        // the tool; fast lane / drive loop / consent decide how. computer_
+        // command returns at spawn and the verified outcome pushes back
+        // through taskEventSink as a spoken `[task outcome]`.
+        if let lane = self.speech as? RealtimeVoiceLane {
+            lane.audioRepliesEnabled = config.ttsEnabled
+            lane.commandHandler = { [weak self] instruction, app, literalText, captureID in
+                guard let self else { return "Jev is not available." }
+                return await self.cua.beginVoiceTask(
+                    instruction, app: app,
+                    frontmostHint: self.commandFrontmostApp ?? self.lastExternalApp,
+                    literalText: literalText, captureID: captureID)
+            }
+            lane.taskResponseHandler = { [weak self] answer, captureID in
+                guard let self else { return "Nothing is waiting for an answer." }
+                // A parked voice ask (task consent or question) wins; then
+                // the agent-gate consent; then an honest "nothing pending".
+                if let reply = await self.cua.respondToTask(answer, captureID: captureID) {
+                    return reply
+                }
+                if let pending = self.pendingConsent(),
+                   let approved = Self.consentAnswer(answer) {
+                    self.onConsentResolution(pending, approved)
+                    return approved ? "Confirmed — go ahead." : "Cancelled."
+                }
+                return "Nothing is waiting for an answer."
+            }
+            lane.delegationHandler = { [weak self] task, agent, name, role, description in
+                guard let self else { return "Jev is not available." }
+                return await self.cua.delegateToAgent(task: task, agent: agent,
+                                                      name: name, role: role,
+                                                      description: description)
+            }
+            lane.cancelHandler = { [weak self] hint in
+                guard let self else { return "Nothing is running." }
+                return self.cua.cancelVoiceTask(hint)
+            }
+            lane.screenShotProvider = {
+                try? await ScreenCapture.jpeg()
+            }
+            self.cua.taskEventSink = { [weak lane] _, text, speak in
+                lane?.pushTaskEvent(text, speak: speak)
+            }
+            config.$ttsEnabled.sink { [weak lane] in lane?.audioRepliesEnabled = $0 }
+                .store(in: &subscriptions)
+        }
+        wire(self.speech)
+    }
+
+    private func wire(_ capture: SpeechCapturing) {
+        capture.onReadiness = { [weak self] readiness in
             guard let self else { return }
             switch readiness {
             case .preparing: self.microphoneReady = false; self.microphoneReadiness = "Preparing microphone…"
@@ -350,7 +416,7 @@ final class VoiceController: ObservableObject {
                 if self.microphoneEnabled { self.prepareMicrophone() }
             }
         }
-        self.speech.onEvent = { [weak self] id, event in self?.receive(event, session: id) }
+        capture.onEvent = { [weak self] id, event in self?.receive(event, session: id) }
     }
 
     func refreshPermissions() {
@@ -413,7 +479,7 @@ final class VoiceController: ObservableObject {
         guard config.dictationHotkey, !dictating else { return }
         guard status == .starting || status == .listening else { return }
         dictating = true
-        cua.cancelCapture()
+        (speech as? RealtimeVoiceLane)?.respondOnCommit = false
         // Partials already handed to the planner may have dispatched work —
         // conversion withdraws this interaction's intents and attempts along
         // with the pending decision.
@@ -440,6 +506,8 @@ final class VoiceController: ObservableObject {
         speech.cancel()
         isMicrophoneTest = false
         self.dictating = dictating
+        // Dictation commits audio for transcript only — no spoken reply.
+        (speech as? RealtimeVoiceLane)?.respondOnCommit = !dictating
         held = true
         let id = newSession()
         if let inputHandlingMs { measurements["Fn handler"] = inputHandlingMs }
@@ -447,7 +515,6 @@ final class VoiceController: ObservableObject {
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
             commandFrontmostApp = frontmost() ?? lastExternalApp
         }
-        cua.begin(app: commandFrontmostApp, captureID: id)
         status = .starting
         trace("fn_down")
         let selectedUID = config.microphoneUID
@@ -495,12 +562,21 @@ final class VoiceController: ObservableObject {
             guard let id = sessionID, status == .finishing else { return }
             deadlineTask = Task { [weak self] in
                 guard let self else { return }
-                do { try await Task.sleep(nanoseconds: UInt64(self.timings.finalization * 1e9)) } catch { return }
+                // The realtime turn can run longer — tool calls, then speech.
+                let timeout = self.speech is RealtimeVoiceLane
+                    ? max(self.timings.finalization, 45) : self.timings.finalization
+                do { try await Task.sleep(nanoseconds: UInt64(timeout * 1e9)) } catch { return }
                 guard self.sessionID == id, self.status == .finishing else { return }
                 self.trace("capture_finalization_timeout")
                 self.speech.cancel()
-                self.detail = "Speech didn't finish in time. Review the captured text before continuing."
-                self.showTranscriptReview()
+                if self.speech is RealtimeVoiceLane {
+                    // The model already heard the audio — there is no local
+                    // transcript artifact to review.
+                    self.fail("No response arrived. Hold Fn and try again.")
+                } else {
+                    self.detail = "Speech didn't finish in time. Review the captured text before continuing."
+                    self.showTranscriptReview()
+                }
             }
         default: break
         }
@@ -527,7 +603,6 @@ final class VoiceController: ObservableObject {
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
             commandFrontmostApp = frontmost() ?? lastExternalApp
         }
-        cua.begin(app: commandFrontmostApp, captureID: id)
         trace("typed_command")
         submit(trimmed, session: id)
     }
@@ -535,7 +610,7 @@ final class VoiceController: ObservableObject {
     func confirm() {
         guard status == .awaitingConfirm else { return }
         status = .executing
-        cua.update(transcript, final: true)
+        routeCommand(transcript)
     }
 
     func cancel() { cancel(endingWith: .idle) }
@@ -543,7 +618,6 @@ final class VoiceController: ObservableObject {
     func cancelCaptureAttempt() { cancel(endingWith: .idle, cancelTask: false) }
 
     private func cancel(endingWith terminalStatus: Status, cancelTask: Bool = true) {
-        cua.cancelCapture()
         if cancelTask { cancelInteractionWork() }
         guard status != .stopping else { return }
         held = false; dictating = false; latched = false
@@ -621,7 +695,7 @@ final class VoiceController: ObservableObject {
         speaker?.stop()
         let id = UUID(); sessionID = id
         automatic = config.autoExecute
-        transcript = ""; detail = ""; resultMessage = ""; audioLevel = 0
+        transcript = ""; detail = ""; resultMessage = ""; audioLevel = 0; replyDraft = ""
         measurements = [:]
         beganAt = ProcessInfo.processInfo.systemUptime
         return id
@@ -629,40 +703,79 @@ final class VoiceController: ObservableObject {
 
     private func receive(_ event: SpeechEvent, session id: UUID) {
         guard sessionID == id else { return }
+        // Assistant-side events outlive the capture: the turn keeps streaming
+        // after Fn released and the status moved on to .executing.
+        switch event {
+        case .assistantDelta(let delta):
+            replyDraft += delta
+            detail = replyDraft
+            if status == .finishing { status = .executing }
+            return
+        case .assistant(let text):
+            replyDraft = ""
+            detail = text
+            return
+        case .turnEnded:
+            let reply = replyDraft.isEmpty ? detail : replyDraft
+            replyDraft = ""
+            guard status != .idle, status != .done else { return }
+            // The reply already played through the lane's speaker — complete
+            // without re-speaking it via the TTS seam.
+            complete(reply.isEmpty ? "Done." : reply, session: id, voiced: false)
+            return
+        case .failure(let message):
+            // Lane failures can arrive mid-turn (.executing) — only an already
+            // finished or dead session ignores them.
+            switch status {
+            case .idle, .done, .error: return
+            default: break
+            }
+            trace("capture_failed \(message)")
+            speech.cancel(); audioLevel = 0
+            deadlineTask?.cancel(); durationTask?.cancel()
+                detail = "Speech stopped: \(message)"
+            if speech is RealtimeVoiceLane || transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // The realtime lane holds no reviewable transcript artifact —
+                // the model already heard the audio.
+                fail(detail)
+            } else if held { status = .awaitingRelease }
+            else { showTranscriptReview() }
+            return
+        default: break
+        }
         let accepting = status == .starting || status == .listening || status == .finishing || status == .testingMicrophone
         guard accepting else { return }
         switch event {
+        case .failure, .assistantDelta, .assistant, .turnEnded:
+            break // handled above — these outlive the capture window
+        case .heardFinal(let text):
+            // The model already heard the audio — this transcript is display
+            // only; the function call carries the instruction into the
+            // runtime. Dictation never reaches here — its commit was
+            // transcript-only and arrives as `.final`, which delivers.
+            transcript = text
+            trace("capture_final")
+            deadlineTask?.cancel(); durationTask?.cancel()
+            status = .executing
+            detail = "Working…"
         case .timing(let name, let milliseconds):
             guard milliseconds.isFinite, milliseconds >= 0 else { return }
             measurements[name] = milliseconds
             Self.voiceLog.notice("capture=\(id.uuidString, privacy: .public) timing=\(name, privacy: .public) milliseconds=\(milliseconds)")
         case .level(let level): audioLevel = level
-        case .transcript(let snapshot):
-            // Dictation feeds the delivery path only — the planner never sees it.
-            if !dictating { cua.speech.record(snapshot) }
-            let text = snapshot.text
-            // Finality can change without changing any characters.
-            transcript = text
-            trace(snapshot.segments.last?.isFinal == true ? "recognition_final_segment" : "recognition_volatile_segment")
-            if measurements["First partial"] == nil { measurements["First partial"] = (ProcessInfo.processInfo.systemUptime - beganAt) * 1000 }
-            if automatic, !dictating {
-                cua.update(text, final: false)
-            }
         case .partial(let text):
+            // Realtime transcription deltas are display-only — the tool call
+            // carries the real instruction; fragments never reach the runtime.
             guard text != transcript else { return }
             transcript = text
             if measurements["First partial"] == nil { measurements["First partial"] = (ProcessInfo.processInfo.systemUptime - beganAt) * 1000 }
-            if automatic, !dictating {
-                cua.update(text, final: false)
-            }
         case .final(let text):
             transcript = text
             trace("capture_final")
             speech.cancel(); audioLevel = 0
             deadlineTask?.cancel(); durationTask?.cancel()
             if held {
-                cua.cancelCapture()
-                detail = dictating
+                        detail = dictating
                     ? "Recognition ended before you released Fn. Release to insert what was captured."
                     : "Recognition ended before you released Fn. Release the key, then review the text."
                 status = .awaitingRelease
@@ -670,15 +783,6 @@ final class VoiceController: ObservableObject {
                 measurements["Transcript finalized"] = (ProcessInfo.processInfo.systemUptime - releasedAt) * 1000
                 submit(text, session: id)
             }
-        case .failure(let message):
-            trace("capture_failed")
-            speech.cancel(); audioLevel = 0
-            deadlineTask?.cancel(); durationTask?.cancel()
-            cua.cancelCapture()
-            detail = "Speech recognition stopped: \(message)"
-            if transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fail(detail) }
-            else if held { status = .awaitingRelease }
-            else { showTranscriptReview() }
         }
     }
 
@@ -693,12 +797,6 @@ final class VoiceController: ObservableObject {
             }
             return
         }
-        cua.cancelCapture()
-        if automatic {
-            do { transcript = try cua.speech.reviewRemainder(transcript) }
-            catch { fail(error.localizedDescription); return }
-        }
-        cua.begin(app: commandFrontmostApp, captureID: sessionID ?? UUID())
         if transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             fail("No usable speech remains. Hold Fn and try again.")
         } else { status = .reviewTranscript }
@@ -722,7 +820,7 @@ final class VoiceController: ObservableObject {
             complete(approved ? "Approved." : "Denied.", session: id)
             return
         }
-        if automatic { status = .executing; cua.update(text, final: true) }
+        if automatic { status = .executing; routeCommand(text) }
         else { status = .awaitingConfirm; detail = "Run this request through Cua?" }
     }
 
@@ -745,7 +843,7 @@ final class VoiceController: ObservableObject {
     }
 
     /// A bare yes/no — normalized against punctuation — that resolves the
-    /// single pending consent ask. Anything richer routes through the planner.
+    /// single pending consent ask.
     static func consentAnswer(_ text: String) -> Bool? {
         let normalized = text.lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -765,9 +863,11 @@ final class VoiceController: ObservableObject {
         speaker?.speak(text)
     }
 
-    private func complete(_ message: String, session id: UUID) {
+    /// `voiced: false` — the realtime lane already played the reply's audio;
+    /// re-speaking it through TTS would double the voice.
+    private func complete(_ message: String, session id: UUID, voiced: Bool = true) {
         resultMessage = message
-        if !dictating { speak(message) }
+        if voiced, !dictating { speak(message) }
         dictating = false
         status = .done
         hideTask = Task { [weak self] in
@@ -780,20 +880,11 @@ final class VoiceController: ObservableObject {
     private func cuaChanged() {
         objectWillChange.send()
         guard !isMicrophoneTest else { return }
-        trace("voice_state_" + cua.speech.outcome)
-        if let error = cua.speech.error {
-            detail = error
-            speech.cancel(); audioLevel = 0
-            status = held ? .awaitingRelease : .error(error)
-            return
-        }
         if held {
             // Capture owns the status while held; the detail line keeps this
             // interaction's progress — or an independent task's — visible
             // without letting any of it own the interaction's state.
-            if !cua.speech.message.isEmpty {
-                detail = cua.speech.message
-            } else if let work = interactionWorks.last(where: \.active) ?? interactionWorks.last {
+            if let work = interactionWorks.last(where: \.active) ?? interactionWorks.last {
                 detail = work.message
             } else if let question = interactionQuestion {
                 detail = question.prompt
@@ -819,15 +910,7 @@ final class VoiceController: ObservableObject {
             status = .awaitingAnswer(question.prompt)
             return
         }
-        if cua.speech.outcome == "clarification", !cua.speech.message.isEmpty {
-            // A clarification that could not be recorded as an intent still
-            // presents as a question, never through the error path.
-            detail = cua.speech.message
-            speak(cua.speech.message)
-            status = .awaitingAnswer(cua.speech.message)
-            return
-        }
-        if interactionWorks.contains(where: \.active) || cua.speech.busy {
+        if interactionWorks.contains(where: \.active) {
             detail = interactionMessage
             status = .executing
             return
@@ -842,14 +925,15 @@ final class VoiceController: ObservableObject {
             status = .idle
             return
         }
-        if let id = sessionID {
-            complete(interactionMessage.isEmpty ? "No action taken" : interactionMessage, session: id)
+        // The lane's reply stream owns the display once a turn is committed —
+        // work settling between turns updates the task list, not this card.
+        if !interactionWorks.isEmpty, status == .executing {
+            detail = interactionMessage
         }
     }
 
     private func fail(_ message: String) {
-        trace("capture_failed")
-        cua.cancelCapture()
+        trace("capture_failed \(message)")
         speech.cancel()
         audioLevel = 0; held = false; dictating = false; latched = false; isMicrophoneTest = false
         deadlineTask?.cancel(); durationTask?.cancel()
@@ -866,7 +950,6 @@ final class VoiceController: ObservableObject {
                 try await Task.sleep(nanoseconds: UInt64(max(0, self.timings.limit - self.timings.warning) * 1e9))
                 guard self.sessionID == id, self.status == .listening else { return }
                 self.trace("capture_limit")
-                self.cua.cancelCapture()
                 self.speech.cancel(); self.audioLevel = 0
                 self.detail = "Recording reached its limit. Release Fn, then review the captured text."
                 self.status = .awaitingRelease

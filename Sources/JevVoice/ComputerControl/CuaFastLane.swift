@@ -52,6 +52,9 @@ struct CuaFastAction: Equatable {
         case hotkey(keys: [String], shortcut: String)
         /// Exact text into the window's single unambiguous editable element.
         case type(String)
+        /// One page of window-scoped scroll — direction is the driver's
+        /// vocabulary ("up"/"down"/"left"/"right").
+        case scroll(String)
         /// A verb applied to the resolved app itself, independent of which
         /// window is in front (hide Calculator, minimize Notes' window).
         case appControl(AppVerb)
@@ -428,7 +431,9 @@ struct CuaFastAction: Equatable {
         // TextEdit, Notes, Mail and every browser; the window delta is the
         // same observable evidence everywhere.
         add(["new window", "open a new window", "open new window", "make a new window",
-             "create a new window", "open another window", "another window"],
+             "create a new window", "open another window", "another window",
+             "new document", "open a new document", "create a new document",
+             "new file", "open a new file", "create a new file"],
             ["cmd", "n"], "⌘N", "Opening a new window", "Opened a new window", .windowDelta(1),
             generic: true)
         add(["minimize window", "minimize the window", "minimize this window",
@@ -464,6 +469,21 @@ struct CuaFastAction: Equatable {
         addKey(["press end", "press the end key"], "end", "End")
         addKey(["press page up", "press pageup", "hit page up"], "pageup", "Page Up")
         addKey(["press page down", "press pagedown", "hit page down"], "pagedown", "Page Down")
+        /// Window-scoped scroll is the single most common pointer
+        /// replacement a voice user asks for — the driver's delivery receipt
+        /// is the honest effect; scroll position is not reliably AX-readable.
+        func addScroll(_ phrases: [String], _ direction: String, _ label: String) {
+            let action = CuaFastAction(body: .scroll(direction), generic: true,
+                                       description: "Scrolling \(label)",
+                                       result: "Scrolled \(label)", effect: .delivered)
+            for phrase in phrases { t[phrase] = action }
+        }
+        addScroll(["scroll down", "scroll the page down", "scroll down the page",
+                   "scroll down a bit", "scroll down a little"], "down", "down")
+        addScroll(["scroll up", "scroll the page up", "scroll up the page",
+                   "scroll up a bit", "scroll up a little"], "up", "up")
+        addScroll(["scroll left", "scroll to the left"], "left", "left")
+        addScroll(["scroll right", "scroll to the right"], "right", "right")
         add(["next tab", "go to next tab", "go to the next tab", "switch to next tab",
              "switch to the next tab", "move to next tab", "move to the next tab",
              "tab over", "cycle tabs forward"],
@@ -493,10 +513,28 @@ struct CuaFastAction: Equatable {
             ["cmd", "-"], "⌘-", "Zooming out", "Zoomed out", .delivered)
         add(["reset zoom", "reset the zoom", "actual size", "normal zoom", "reset page zoom"],
             ["cmd", "0"], "⌘0", "Resetting zoom", "Reset zoom", .delivered)
-        add(["focus the address bar", "focus address bar", "go to the address bar",
-             "open the address bar", "jump to the address bar", "focus the url bar",
-             "focus url bar", "go to the url bar", "focus the omnibox", "focus omnibox"],
-            ["cmd", "l"], "⌘L", "Focusing the address bar", "Focused the address bar", .delivered)
+        // ⌘` cycles this app's windows — z-order isn't cleanly AX-observable,
+        // so the driver's delivery receipt is the honest effect.
+        add(["next window", "switch to next window", "switch to the next window",
+             "cycle windows", "next app window", "switch between windows"],
+            ["cmd", "`"], "⌘`", "Switching to the next window", "Switched to the next window",
+            .delivered, generic: true)
+        // System chords — the effect is a global UI, not a window delta.
+        add(["open spotlight", "spotlight", "spotlight search", "open spotlight search",
+             "open search", "bring up spotlight"],
+            ["cmd", "space"], "⌘Space", "Opening Spotlight", "Opened Spotlight",
+            .delivered, generic: true)
+        add(["mission control", "show all windows", "see all windows",
+             "show me all windows", "all windows"],
+            ["ctrl", "up"], "⌃↑", "Opening Mission Control", "Opened Mission Control",
+            .delivered, generic: true)
+        add(["app windows", "show app windows", "show this app's windows", "app expose"],
+            ["ctrl", "down"], "⌃↓", "Showing the app's windows", "Showed the app's windows",
+            .delivered, generic: true)
+        // ⌘L is deliberately absent (same policy as the loop's hotkey
+        // chords): delivered to a backgrounded browser the omnibox-focus
+        // semantic still activates the app — the fast lane resolves a
+        // uniquely-running tabbable app that need not be frontmost.
         return t
     }()
 }

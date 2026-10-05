@@ -49,6 +49,8 @@ app: build vendor
 	find "$(APP)/Contents/Resources" -type f | while read -r file; do \
 		case "$$(file -b "$$file")" in Mach-O*) codesign --force --sign "$$SIGN" "$$file" ;; esac; \
 	done; \
+	/usr/libexec/PlistBuddy -c "Delete :JevCuaDriverSHA256" "$(APP)/Contents/Info.plist" 2>/dev/null || true; \
+	/usr/libexec/PlistBuddy -c "Add :JevCuaDriverSHA256 string $$(shasum -a 256 '$(APP)/Contents/Resources/cua-driver' | cut -d' ' -f1)" "$(APP)/Contents/Info.plist"; \
 	codesign --force --deep --sign "$$SIGN" "$(APP)"
 
 run: app

@@ -14,7 +14,11 @@ final class CuaAppInventory {
         guard let apps = observed["apps"]?.array else { throw DriverConnectionError.malformed }
         let names = apps.compactMap { app -> JSONValue? in
             guard let name = app["name"]?.string, let bundle = app["bundle_id"]?.string, !bundle.isEmpty else { return nil }
-            return .object(["name": .string(name), "bundle_id": .string(bundle)])
+            // running/pid ride along as advisory hints for fast-lane target
+            // disambiguation — dispatch authority still comes from fresh reads.
+            return .object(["name": .string(name), "bundle_id": .string(bundle),
+                            "running": app["running"] ?? .bool(false),
+                            "pid": app["pid"] ?? .number(0)])
         }
         let result: JSONValue = .object(["apps": .array(names)])
         value = result; expiresAt = now + 60

@@ -38,7 +38,9 @@ struct JevUseMCPServer: Sendable {
     /// The loopback endpoint the coordinator writes into `mcp_servers`.
     func server(token: String? = nil) -> LoopbackMCPServer {
         LoopbackMCPServer(serverName: "jev-use", token: token,
-            tools: { Self.tools },
+            // suggest_action only advertises when wired — a listed tool that
+            // always answers "unavailable" burns agent turns on a dead door.
+            tools: { Self.tools(includeSuggest: self.suggester != nil) },
             onCall: { name, args in try await self.callTool(name, arguments: args) })
     }
 
@@ -79,8 +81,11 @@ struct JevUseMCPServer: Sendable {
 
     /// Clicky's tool surface, verbatim: drive_until takes the goal plus the
     /// caller's literal values/deny list; suggest_action takes a window.
-    static let tools: [JSONValue] = [
-        .object([
+    /// `includeSuggest` keeps the second tool honest — it is only listed
+    /// when a suggester is actually wired (see `server(token:)`).
+    static func tools(includeSuggest: Bool = true) -> [JSONValue] {
+        var list: [JSONValue] = [
+            .object([
             "name": .string(JevUseTools.driveUntil),
             "description": .string("Drive one window toward a literal end state. Jev selects elements and never writes text — caller-supplied text goes in \"values\" keyed by field label, and \"deny\" labels are never pressed."),
             "inputSchema": .object([
@@ -102,8 +107,10 @@ struct JevUseMCPServer: Sendable {
                 ]),
                 "required": .array([.string("goal")])
             ])
-        ]),
-        .object([
+            ])
+        ]
+        if includeSuggest {
+            list.append(.object([
             "name": .string(JevUseTools.suggestAction),
             "description": .string("One advisory step on a window's accessibility tree: element token, kind, confidence, done/blocked readings. Never acts and never generates text; confidence below 0.5 is guessing."),
             "inputSchema": .object([
@@ -114,8 +121,10 @@ struct JevUseMCPServer: Sendable {
                 ]),
                 "required": .array([.string("pid"), .string("window_id")])
             ])
-        ])
-    ]
+            ]))
+        }
+        return list
+    }
 
     private static func driveResultJSON(_ result: DriveResult) -> JSONValue {
         var status = "", reason: String?

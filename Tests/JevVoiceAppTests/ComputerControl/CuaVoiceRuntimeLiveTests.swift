@@ -64,8 +64,10 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         var fixtures: [ParallelFixture] = []
         var runtime: CuaVoiceRuntime?
         var runtimeConnections: [CuaConnection] = []
+        let toolCalls = ToolCalls()
 
         func restoreAndClean() async {
+            print("Parallel tool calls:", toolCalls.snapshot().tools)
             await runtime?.shutdown()
             for connection in runtimeConnections { await connection.close() }
             for process in processes where process.isRunning { process.terminate() }
@@ -188,11 +190,13 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             }
             let foregroundBeforeTasks = NSWorkspace.shared.frontmostApplication?.processIdentifier
             let model = JevClient(apiKey: key)
-            runtimeConnections = try (0..<descriptions.count).map { _ in try CuaLiveDriver.connection() }
+            runtimeConnections = (0..<descriptions.count).map { _ in
+                CuaConnection(onToolCall: { tool, length in toolCalls.record(tool, textLength: length) })
+            }
             var nextConnection = 0
             var modelCalls = 0
             let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeParallel-\(identifier)")!,
-                                keyStore: FixtureKeyStore(key: key), environment: [:])
+                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
             let taskRuntime = CuaVoiceRuntime(config: config, makeConnection: {
                 let connection = runtimeConnections[nextConnection]
                 nextConnection += 1
@@ -211,27 +215,25 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             let requests = fixtures.map { fixture in
                 "Dictate exactly \"\(fixture.inserted)\" into the text area in \(fixture.name), window \(fixture.title). Preserve all existing text."
             }
-            taskRuntime.begin(app: fixtures[0].name)
-            taskRuntime.update(requests[0], final: true)
+            _ = await taskRuntime.beginVoiceTask(requests[0], app: fixtures[0].name)
 
+            // Submit the second intent as soon as the first materializes —
+            // both run their planner/lease startup concurrently, which is
+            // the parallelism under test. Waiting for the first to reach
+            // Working would let a fast task finish before the second's
+            // planner call even returns.
             let firstDeadline = Date().addingTimeInterval(30)
-            while Date() < firstDeadline {
-                guard let first = taskRuntime.tasks.first else {
-                    try await Task.sleep(for: .milliseconds(100)); continue
-                }
-                if first.status == "Failed" || first.status == "Cancelled" {
-                    throw DriverConnectionError.refused("The first independent task did not start: \(first.message)")
-                }
-                if first.status == "Working", first.bundle == fixtures[0].bundleID { break }
-                try await Task.sleep(for: .milliseconds(100))
+            while Date() < firstDeadline, taskRuntime.tasks.isEmpty {
+                try await Task.sleep(for: .milliseconds(50))
             }
-            guard let first = taskRuntime.tasks.first, first.status == "Working",
-                  first.bundle == fixtures[0].bundleID else {
-                throw DriverConnectionError.refused("The first task did not acquire its exact app lease in time.")
+            guard let first = taskRuntime.tasks.first else {
+                throw DriverConnectionError.refused("The first independent task did not materialize in time.")
+            }
+            if first.status == "Failed" || first.status == "Cancelled" {
+                throw DriverConnectionError.refused("The first independent task did not start: \(first.message)")
             }
 
-            taskRuntime.begin(app: fixtures[1].name)
-            taskRuntime.update(requests[1], final: true)
+            _ = await taskRuntime.beginVoiceTask(requests[1], app: fixtures[1].name)
             let taskDeadline = Date().addingTimeInterval(120)
             var observedParallelProgress = false
             var foregroundStayedPut = true
@@ -500,7 +502,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             }
 
             let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeLiveTests-\(identifier)")!,
-                                keyStore: FixtureKeyStore(key: key), environment: [:])
+                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
             let toolCalls = ToolCalls()
             let taskRuntime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in toolCalls.record(tool, textLength: length) }) }, judge: { state, questions in
                 modelCalls += 1
@@ -514,8 +516,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
                 return response
             })
             runtime = taskRuntime
-            taskRuntime.begin(app: displayName)
-            taskRuntime.update("Dictate exactly \"\(inserted)\" into the existing text area in \(displayName), window \(windowTitle). Preserve all existing text.", final: true)
+            _ = await taskRuntime.beginVoiceTask("Dictate exactly \"\(inserted)\" into the existing text area in \(displayName), window \(windowTitle). Preserve all existing text.", app: displayName)
             for _ in 0..<900 {
                 if taskRuntime.tasks.first?.active == false { break }
                 try await Task.sleep(for: .milliseconds(100))
@@ -600,10 +601,27 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         for _ in 0..<30 where NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
             try await Task.sleep(for: .milliseconds(100))
         }
+        // The app persists its display across launches — a stale "14" would
+        // let the run prove the outcome without dispatching. Reset to a
+        // clean display so the typed expression is what produces it.
+        if let state = try? await connection.call("get_window_state", arguments: [
+            "pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+            "include_screenshot": .bool(false), "session": .string(session)]) {
+            let elements = state["elements"]?.array ?? []
+            let clear = ["All Clear", "Clear", "Delete"].lazy
+                .compactMap { name in elements.first(where: {
+                    $0["label"]?.string == name && $0["role"]?.string == "AXButton" }) }
+                .first
+            if let token = clear?["element_token"]?.string {
+                _ = try? await connection.call("click", arguments: [
+                    "pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+                    "element_token": .string(token), "session": .string(session)])
+            }
+        }
 
         let model = JevClient(apiKey: key)
         let config = Config(defaults: UserDefaults(suiteName: "CuaCalcRepro-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
         let toolCalls = ToolCalls()
         let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in
             print("REPRO driver call:", tool, "textLength", length.map(String.init) ?? "-")
@@ -611,15 +629,19 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         }) }, judge: { state, questions in
             let response = try await model.systemOne(state: state, questions: questions).response.answers
             for (key, answer) in response {
-                guard case let .choice(choice, _, _) = answer,
+                guard case .choice(let choice, _, let probabilities) = answer,
                       case let .choice(_, criteria)? = questions[key] else { continue }
                 let label = criteria[choice].flatMap { $0 } ?? choice
                 print("REPRO Jev \(key):", label)
+                if key == "next" {
+                    let ranked = probabilities.sorted { $0.value > $1.value }.prefix(6)
+                        .map { "\(criteria[$0.key].flatMap { $0 } ?? $0.key)=\(String(format: "%.2f", $0.value))" }
+                    print("REPRO Jev next candidates:", ranked.joined(separator: ", "))
+                }
             }
             return response
         })
-        runtime.begin(app: "Calculator")
-        runtime.update("Add 7+7", final: true)
+        _ = await runtime.beginVoiceTask("Add 7+7", app: "Calculator")
         for _ in 0..<900 {
             if runtime.tasks.first?.active == false { break }
             try await Task.sleep(for: .milliseconds(100))
@@ -644,8 +666,8 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         XCTAssertLessThanOrEqual(snapshot.tools["click"] ?? 0, 2,
             "Blind per-button retyping must not replace the keyboard dispatch")
         if work.status == "Completed" {
-            XCTAssertEqual(snapshot.tools["parse_visual_regions"], 1,
-                "Completion requires observed evidence; Calculator exposes no readable AX value, so visual inspection must have run")
+            XCTAssertLessThanOrEqual(snapshot.tools["parse_visual_regions"] ?? 0, 1,
+                "Visual inspection is a bounded fallback — the display's tree text may prove the outcome natively")
         }
         await runtime.shutdown()
         _ = try await connection.call("end_session", arguments: ["session": .string(session)])
@@ -709,7 +731,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
 
         let model = JevClient(apiKey: key)
         let config = Config(defaults: UserDefaults(suiteName: "CuaChromeTab-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
         let toolCalls = ToolCalls()
         let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in
             print("REPRO driver call:", tool, "textLength", length.map(String.init) ?? "-")
@@ -723,8 +745,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             }
             return response
         })
-        runtime.begin(app: "Google Chrome")
-        runtime.update("open a new tab in google chrome", final: true)
+        _ = await runtime.beginVoiceTask("open a new tab in google chrome", app: "Google Chrome")
         var approvedConsent = false
         for _ in 0..<900 {
             if runtime.tasks.first?.active == false { break }
@@ -753,41 +774,6 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         let newTabs = { (labels: [String]) in labels.filter { $0.hasPrefix("New Tab") }.count }
         XCTAssertTrue(newTabs(tabsAfter) > newTabs(tabsBefore) || tabsAfter.count > tabsBefore.count,
                       "A new tab must actually exist in the Chrome window (before: \(tabsBefore), after: \(tabsAfter))")
-    }
-
-    /// Temporary diagnostic: feed the reported "open a new tab" transcripts
-    /// through the real planner path and print its decisions, then replay
-    /// an answer utterance against a synthetic pending clarification to see
-    /// whether it routes back or loops into a fresh question.
-    func testChromeTabClarificationProbeOptIn() async throws {
-        guard ProcessInfo.processInfo.environment["JARVIS_CUA_DECIDE_PROBE"] == "1" else {
-            throw XCTSkip("Opt-in planner probe against the real text provider")
-        }
-        let brain = CompanionBrain(settings: .shared)
-
-        for text in [
-            "can you open a new tab in google with my google chrome open",
-            "open a new tab in google chrome",
-            "open a new tab",
-            "new tab in chrome",
-        ] {
-            print("PROBE ===> \"\(text)\"")
-            do {
-                let decision = try await brain.decide(utterance: text, context: PlannerContext())
-                print("PROBE decision:", decision)
-            } catch { print("PROBE threw:", error) }
-        }
-
-        // A pending task-clarification question, then a short reply that should route as an answer.
-        let pending = PlannerContext(pendingClarify: ClarifyRequest(
-            question: "Which task do you mean?", options: ["open a new tab in google chrome"]))
-        for reply in ["open a new tab in chrome", "the new tab", "that one", "yes"] {
-            print("PROBE reply ===> \"\(reply)\"")
-            do {
-                let decision = try await brain.decide(utterance: reply, context: pending)
-                print("PROBE reply decision:", decision)
-            } catch { print("PROBE reply threw:", error) }
-        }
     }
 
     /// Opt-in clarification workflow on a disposable two-window fixture: an
@@ -905,17 +891,20 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             fixturePID = process.processIdentifier
 
             var windowIDs: [String: Int] = [:]
-            for _ in 0..<100 where windowIDs.count < 2 {
+            for _ in 0..<100 where windowIDs[titleA] == nil || windowIDs[titleB] == nil {
                 let windows = try await connection.call("list_windows", arguments: [
                     "pid": .number(Double(process.processIdentifier)), "session": .string(session)])
                 for window in windows["windows"]?.array ?? [] {
-                    guard let title = window["title"]?.string, let id = window["window_id"]?.integer else { continue }
+                    // Apps also expose phantom untitled windows — only the two
+                    // named titles matter, everything else is ignored.
+                    guard let title = window["title"]?.string, !title.isEmpty,
+                          let id = window["window_id"]?.integer else { continue }
                     windowIDs[title] = id
                 }
                 if windowIDs[titleA] != nil && windowIDs[titleB] != nil { break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            guard windowIDs.count == 2 else {
+            guard windowIDs[titleA] != nil, windowIDs[titleB] != nil else {
                 throw DriverConnectionError.refused("Cua did not observe both disposable dialogue windows.")
             }
             if let priorPID, let prior = NSRunningApplication(processIdentifier: priorPID) {
@@ -929,7 +918,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             var modelCalls = 0
             let toolCalls = ToolCalls()
             let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeDialogue-\(identifier)")!,
-                                keyStore: FixtureKeyStore(key: key), environment: [:])
+                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
             let taskRuntime = CuaVoiceRuntime(config: config,
                 makeConnection: { CuaConnection(onToolCall: { tool, length in toolCalls.record(tool, textLength: length) }) },
                 judge: { state, questions in
@@ -944,8 +933,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
                 })
             runtime = taskRuntime
 
-            taskRuntime.begin(app: displayName)
-            taskRuntime.update("Dictate exactly \"\(inserted)\" into a text area in \(displayName). Preserve all existing text.", final: true)
+            _ = await taskRuntime.beginVoiceTask("Dictate exactly \"\(inserted)\" into a text area in \(displayName). Preserve all existing text.", app: displayName)
             let firstDeadline = Date().addingTimeInterval(120)
             while Date() < firstDeadline {
                 if let first = taskRuntime.tasks.first, !first.active { break }
@@ -971,7 +959,8 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
                 // The answering utterance resumes the question's owner in place:
                 // same intent id, exactly one follow-up work record, and the
                 // literal may be dispatched at most once in a single window.
-                taskRuntime.update("Use the window titled \"\(titleB)\".", final: true)
+                // respond_to_task is the lane's tool entry for spoken answers.
+                _ = await taskRuntime.respondToTask("Use the window titled \"\(titleB)\".")
                 let resumeDeadline = Date().addingTimeInterval(120)
                 while Date() < resumeDeadline {
                     let works = taskRuntime.tasks
@@ -1052,7 +1041,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         let model = JevClient(apiKey: key)
         let toolCalls = ToolCalls()
         let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeMatrix-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
         let runtime = CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(onToolCall: { tool, length in
                 print("MATRIX driver call:", tool)
@@ -1139,8 +1128,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         var failures: [String] = []
         for row in rows {
             let countBefore = runtime.tasks.count
-            runtime.begin(app: nil)
-            runtime.update(row.command, final: true)
+            _ = await runtime.beginVoiceTask(row.command, app: nil)
             let deadline = Date().addingTimeInterval(90)
             let askedBefore = awaitingCount()
             while Date() < deadline {
@@ -1209,7 +1197,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         let model = JevClient(apiKey: key)
         let toolCalls = ToolCalls()
         let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceWorkflowMatrix-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
         let runtime = CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(onToolCall: { tool, length in
                 print("WORKFLOW driver call:", tool)
@@ -1383,8 +1371,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         var failures: [String] = []
         for row in rows {
             let countBefore = runtime.tasks.count
-            runtime.begin(app: nil)
-            runtime.update(row.command, final: true)
+            _ = await runtime.beginVoiceTask(row.command, app: nil)
             let deadline = Date().addingTimeInterval(120)
             let askedBefore = awaitingCount()
             while Date() < deadline {

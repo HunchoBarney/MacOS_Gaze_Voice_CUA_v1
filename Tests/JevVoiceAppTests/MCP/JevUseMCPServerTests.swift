@@ -4,7 +4,7 @@ import JevVoiceCore
 
 final class JevUseMCPServerTests: XCTestCase {
     func testToolsExposeClickySchemas() {
-        let tools = JevUseMCPServer.tools
+        let tools = JevUseMCPServer.tools()
         XCTAssertEqual(tools.compactMap { $0["name"]?.string }, [JevUseTools.driveUntil, JevUseTools.suggestAction])
         let drive = tools[0]
         XCTAssertEqual(drive["inputSchema"]?["required"]?.array?.first, .string("goal"))
@@ -109,6 +109,17 @@ final class JevUseMCPServerTests: XCTestCase {
         let tasks = await executor.tasks
         XCTAssertEqual(tasks.first?.goal, "send the reply")
         XCTAssertEqual(tasks.first?.maxSteps, 24)
+        await server.stop()
+    }
+
+    /// An unwired server must not advertise suggest_action — a listed tool
+    /// that always answers "unavailable" burns agent turns on a dead door.
+    func testUnwiredSuggesterHidesSuggestTool() async throws {
+        let server = JevUseMCPServer(executor: RecordingDriveExecutor()).server()
+        let endpoint = try await server.start()
+        let (_, response) = try await mcpPost(endpoint, mcpRequest(1, "tools/list"))
+        let names = response?["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }
+        XCTAssertEqual(names, [JevUseTools.driveUntil])
         await server.stop()
     }
 }

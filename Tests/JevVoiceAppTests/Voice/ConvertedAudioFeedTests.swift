@@ -2,11 +2,11 @@ import XCTest
 import AVFoundation
 @testable import JevVoice
 
-final class AnalyzerAudioFeedTests: XCTestCase {
+final class ConvertedAudioFeedTests: XCTestCase {
     func testResamplingDrainsTailAndFinishesExactlyOnce() async throws {
         let input = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
         let output = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1))
-        let feed = try AnalyzerAudioFeed(input: input, output: output)
+        let feed = try ConvertedAudioFeed(input: input, output: output)
         for _ in 0..<48 {
             let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: input, frameCapacity: 1000))
             buffer.frameLength = 1000
@@ -15,7 +15,7 @@ final class AnalyzerAudioFeedTests: XCTestCase {
         }
         feed.finish(); feed.finish()
         var count = 0
-        for try await sample in feed.stream { count += Int(sample.buffer.frameLength) }
+        for try await sample in feed.stream { count += Int(sample.frameLength) }
         XCTAssertEqual(count, 16000, "The final resampler frames must reach the analyzer")
         let durations = feed.audioDurations()
         XCTAssertEqual(durations.input, 1, accuracy: 0.0001)
@@ -24,7 +24,7 @@ final class AnalyzerAudioFeedTests: XCTestCase {
     }
     func testOverflowFailsInsteadOfSilentlyDroppingAudio() async throws {
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1))
-        let feed = try AnalyzerAudioFeed(input: format, output: format)
+        let feed = try ConvertedAudioFeed(input: format, output: format)
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024))
         buffer.frameLength = 1024
         buffer.floatChannelData![0].initialize(repeating: 0, count: 1024)

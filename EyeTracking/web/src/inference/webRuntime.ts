@@ -3,22 +3,37 @@ import { logStatus } from "../logger";
 import {
   Calibration,
   DisplayGeometry,
+  DISTANCE_MAX_M,
+  DISTANCE_MIN_M,
+  DISTANCE_SMOOTHING_ALPHA,
+  GazeAngleSmoother,
   GazeJumpGate,
+  OneEuroFilter,
+  reanchorDetection,
+  SaccadeAwareGazeFilter,
   ScreenProjector,
+  center,
   clamp01,
   createPreviewImage,
+  isHeadTurned,
   LIP_MOTION_OPEN_THRESHOLD,
-  stableRawSample,
-  type TimedRaw,
+  stableFeatureSample,
+  updateBlinkState,
+  type GazeEstimate,
+  type GazeFeature,
+  type TimedFeature,
+  width,
   type Detection
 } from "./core";
 import InferenceWorker from "./inferenceWorker.ts?worker";
-import { createRuntimeModels, type RuntimeModels } from "./runtimes";
+import { createRuntimeModels, warmupRuntimeModels, type RuntimeModels } from "./runtimes";
 
 export interface WebRuntimeController {
   captureCalibration(target: [number, number], validation: boolean): Promise<void>;
   stop(): void;
 }
+
+const DETECT_INTERVAL_MS = 1000;
 
 export async function startWebRuntime(
   config: WebInferenceConfig,
@@ -38,9 +53,19 @@ export async function startWebRuntime(
   }
   let stopped = false;
   let latestRaw: [number, number] | null = null;
-  const recentRaw: TimedRaw[] = [];
+  const recentFeatures: TimedFeature[] = [];
   const jumpGate = new GazeJumpGate();
   let smoothed: [number, number] | null = null;
+  let smoothedDistance: number | null = null;
+  let blinking = false;
+  const filterX = new OneEuroFilter(config.filterMincutoff ?? 1.0, config.filterBeta ?? 0.7, config.filterDcutoff ?? 1.0);
+  const filterY = new OneEuroFilter(config.filterMincutoff ?? 1.0, config.filterBeta ?? 0.7, config.filterDcutoff ?? 1.0);
+  const saccadeFilter = new SaccadeAwareGazeFilter();
+  const angleSmoother = new GazeAngleSmoother();
+  let lastDetection: { head: Detection; eyes: Detection[]; mouth: Detection | null } | null = null;
+  let lastDetectMs = 0;
+  let forceRedetect = false;
+  let appliedGeometryKey: string | null = null;
   let stream: MediaStream | null = null;
   let models: RuntimeModels | null = null;
   let lastStatus = 0;
@@ -48,20 +73,95 @@ export async function startWebRuntime(
   let lastProcessed = 0;
   let lastProjectionWarning = 0;
   let fallbackInProgress = false;
+  let lastEmitCore: { x: number; y: number; distance: number; yaw: number; pitch: number } | null = null;
+  let dropStreakStart = 0;
   const longTasks = createLongTaskCounter();
 
-  const calibration = new Calibration(config.calibrationFile, emit);
+  const emitHold = (reason: string) => {
+    if (lastEmitCore === null) {
+      return;
+    }
+    const now = performance.now();
+    if (dropStreakStart === 0) {
+      dropStreakStart = now;
+    }
+    if (now - dropStreakStart > 8000) {
+      return;
+    }
+    emit({
+      type: "gaze",
+      x_norm: lastEmitCore.x,
+      y_norm: lastEmitCore.y,
+      confidence: 0.2,
+      distance_m: lastEmitCore.distance,
+      yaw_deg: lastEmitCore.yaw,
+      pitch_deg: lastEmitCore.pitch,
+      held_reason: reason
+    });
+  };
+
+  const syncGeometry = () => {
+    if (!calibration.geometry) {
+      return;
+    }
+    const key = `${calibration.geometry.eye_position_weight_x},${calibration.geometry.eye_position_weight_y}`;
+    if (appliedGeometryKey === key) {
+      return;
+    }
+    projector.retune(null, calibration.geometry.eye_position_weight_x, calibration.geometry.eye_position_weight_y);
+    appliedGeometryKey = key;
+    emit({
+      type: "status",
+      level: "info",
+      message: `Applied calibrated camera geometry: eye weights=(${projector.eyePositionWeightX.toFixed(2)},${projector.eyePositionWeightY.toFixed(2)})`,
+      eye_position_weight_x: projector.eyePositionWeightX,
+      eye_position_weight_y: projector.eyePositionWeightY
+    });
+  };
+
+  const emitAndSync = (payload: BackendMessage) => {
+    emit(payload);
+    if (
+      payload.type === "calibration" &&
+      (payload.status === "saved" || (payload.status === "geometry" && !config.calibrate))
+    ) {
+      syncGeometry();
+    }
+  };
+
+  const projector = new ScreenProjector(
+    new DisplayGeometry(config.displayWidth, config.displayHeight, config.displaySizeInch),
+    config.flipX,
+    config.flipY,
+    config.cameraScreenX,
+    config.cameraScreenY,
+    config.eyePositionWeightX,
+    config.eyePositionWeightY,
+    config.cameraFov,
+    config.cameraWidth,
+    config.cameraHeight
+  );
+  const calibration = new Calibration(config.calibrationFile, emitAndSync, undefined, (feature, weightX, weightY) =>
+    projector.projectFeatures(feature, config.gazeProjectionMode, weightX, weightY, !config.disableIrisDistance)
+  );
   await calibration.load();
+  if (config.calibrate) {
+    projector.retune(null, 1, 0.25);
+    appliedGeometryKey = null;
+  } else {
+    syncGeometry();
+  }
 
   const headFaceWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : 1;
   const previewWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : null;
 
   try {
     const useOrtProxy = config.webInferenceWorker === "ort-proxy" && config.runtime === "onnxweb";
+    const forceWasm = useOrtProxy || config.webAccelerator === "wasm";
     try {
-      models = useOrtProxy ? await createRuntimeModels(config, "wasm") : await createRuntimeModels(config, "webgpu");
+      models = forceWasm ? await createRuntimeModels(config, "wasm") : await createRuntimeModels(config, "webgpu");
     } catch (error) {
-      if (useOrtProxy) {
+      if (forceWasm) {
         throw error;
       }
       const payload: BackendMessage = {
@@ -100,6 +200,7 @@ export async function startWebRuntime(
       lip_motion_model: config.enableLipMotion && config.detector === "yolo" ? config.lipMotionModel : undefined,
       lip_motion_providers: models.lipMotionProviders
     });
+    await warmupRuntimeModels(models);
 
     const camera = await openCamera(config.camera, config.cameraWidth, config.cameraHeight);
     stream = camera.stream;
@@ -112,18 +213,6 @@ export async function startWebRuntime(
       throw new Error("2D canvas context is not available");
     }
 
-    const projector = new ScreenProjector(
-      new DisplayGeometry(config.displayWidth, config.displayHeight, config.displaySizeInch),
-      config.flipX,
-      config.flipY,
-      config.cameraScreenX,
-      config.cameraScreenY,
-      config.eyePositionWeightX,
-      config.eyePositionWeightY,
-      config.cameraFov,
-      config.cameraWidth,
-      config.cameraHeight
-    );
     const previewInterval = 1000 / Math.max(0.5, config.previewFps);
 
     const loop = async () => {
@@ -136,28 +225,86 @@ export async function startWebRuntime(
         const frame = ctx.getImageData(0, 0, config.cameraWidth, config.cameraHeight);
         const captureMs = performance.now() - captureStart;
         const detectStart = performance.now();
-        const { head, eyes, mouth } = await models.detect(frame);
-        const detectEnd = performance.now();
-        const detectInferenceMs = detectEnd - detectStart;
-        const now = detectEnd;
+        const detectDue = lastDetection === null || forceRedetect || detectStart - lastDetectMs > DETECT_INTERVAL_MS;
+        let head: Detection | null;
+        let eyes: Detection[];
+        let mouth: Detection | null;
+        let detectInferenceMs = 0;
+        let trackingSource: "detector" | "iris";
+        if (detectDue) {
+          const detected = await models.detect(frame);
+          detectInferenceMs = performance.now() - detectStart;
+          lastDetectMs = detectStart;
+          forceRedetect = false;
+          head = detected.head;
+          eyes = detected.eyes;
+          mouth = detected.mouth;
+          trackingSource = "detector";
+        } else {
+          head = lastDetection!.head;
+          eyes = lastDetection!.eyes;
+          mouth = lastDetection!.mouth;
+          trackingSource = "iris";
+        }
+        const now = performance.now();
         const frameIntervalMs = lastProcessed > 0 ? now - lastProcessed : undefined;
         lastProcessed = now;
         const processedFps = frameIntervalMs && frameIntervalMs > 0 ? 1000 / frameIntervalMs : undefined;
         const shouldEmitPreview = !config.hidePreview && now - lastPreview >= previewInterval;
         let previewMs = 0;
         if (head === null || eyes.length < 2) {
+          lastDetection = null;
+          forceRedetect = true;
           if (shouldEmitPreview) {
             const message = head === null ? "Head not detected" : `Eyes detected: ${eyes.length}`;
-            previewMs = emitPreview(frame, head, eyes, mouth, message, null, previewWidthRatio, emit);
+            previewMs = emitPreview(frame, canvas, head, eyes, mouth, message, null, previewWidthRatio, emit);
             lastPreview = now;
           }
+          emitHold("no_face");
           throw new Error(head === null ? "Head was not detected" : "Two eyes were not detected");
         }
+        lastDetection = { head, eyes, mouth };
 
         const gazeStart = performance.now();
-        const gaze = await models.estimate(frame, head, eyes);
+        let gazeEstimate: GazeEstimate;
+        try {
+          gazeEstimate = await models.estimate(frame, head, eyes);
+        } catch {
+          emitHold("estimate_failed");
+          return;
+        }
+        const gaze = angleSmoother.update(gazeEstimate);
         const gazeEnd = performance.now();
         const gazeInferenceMs = gazeEnd - gazeStart;
+        const reanchored = reanchorDetection(
+          head,
+          eyes,
+          gaze.leftIrisCenterPx,
+          gaze.rightIrisCenterPx,
+          frame.width,
+          frame.height
+        );
+        if (reanchored !== null) {
+          lastDetection = {
+            head: reanchored.head,
+            eyes: reanchored.eyes,
+            mouth:
+              mouth === null
+                ? null
+                : {
+                    ...mouth,
+                    x1: mouth.x1 + reanchored.dx,
+                    y1: mouth.y1 + reanchored.dy,
+                    x2: mouth.x2 + reanchored.dx,
+                    y2: mouth.y2 + reanchored.dy
+                  }
+          };
+          if (Math.hypot(reanchored.dx, reanchored.dy) > 30) {
+            forceRedetect = true;
+          }
+        } else {
+          forceRedetect = true;
+        }
         let lipMotionInferenceMs: number | undefined;
         let mouthOpenProbability: number | null | undefined;
         let mouthOpen: boolean | undefined;
@@ -172,11 +319,61 @@ export async function startWebRuntime(
             mouthOpen = false;
           }
         }
+        const eyeOpen = gaze.eyeOpen;
+        blinking = updateBlinkState(blinking, eyeOpen);
+        const headWidthPx = width(head) * headFaceWidthRatio;
+        const [leftEyeCx, leftEyeCy] = center(eyes[0]);
+        const [rightEyeCx, rightEyeCy] = center(eyes[1]);
+        const eyeSpanPx = Math.hypot(rightEyeCx - leftEyeCx, rightEyeCy - leftEyeCy);
+        const headTurned = isHeadTurned(eyeSpanPx, headWidthPx);
+        const frozen = blinking || headTurned;
         if (shouldEmitPreview) {
-          previewMs = emitPreview(frame, head, eyes, mouth, null, [gaze.yawDeg, gaze.pitchDeg], previewWidthRatio, emit);
+          previewMs = emitPreview(
+            frame,
+            canvas,
+            head,
+            eyes,
+            mouth,
+            blinking ? "Blink" : headTurned ? "Head turned" : null,
+            [gaze.yawDeg, gaze.pitchDeg],
+            previewWidthRatio,
+            emit,
+            [gaze.leftIrisPx ?? [], gaze.rightIrisPx ?? []]
+          );
           lastPreview = now;
         }
-        const distanceM = projector.distanceFromHead(head, headFaceWidthRatio);
+        const headDistanceM = projector.distanceFromHead(head, headFaceWidthRatio);
+        let irisDistanceM: number | undefined;
+        if (!config.disableIrisDistance && Number.isFinite(gaze.irisDiameterPx) && gaze.irisDiameterPx >= 2) {
+          const candidate = projector.distanceFromIris(gaze.irisDiameterPx);
+          if (candidate >= DISTANCE_MIN_M && candidate <= DISTANCE_MAX_M) {
+            irisDistanceM = candidate;
+          }
+        }
+        const rawDistanceM = irisDistanceM ?? headDistanceM;
+        const distanceSource = irisDistanceM !== undefined ? "iris" : "head";
+        smoothedDistance =
+          smoothedDistance === null ? rawDistanceM : smoothedDistance + DISTANCE_SMOOTHING_ALPHA * (rawDistanceM - smoothedDistance);
+        const distanceM = smoothedDistance;
+        if (frozen) {
+          if (smoothed !== null) {
+            emit({
+              type: "gaze",
+              x_norm: clamp01(smoothed[0]),
+              y_norm: clamp01(smoothed[1]),
+              confidence: 0,
+              distance_m: distanceM,
+              iris_distance_m: irisDistanceM,
+              distance_source: distanceSource,
+              eye_open: eyeOpen,
+              blink: blinking,
+              head_turned: headTurned,
+              yaw_deg: gaze.yawDeg,
+              pitch_deg: gaze.pitchDeg
+            });
+          }
+          return;
+        }
         const projection = projector.projectEstimate(config.gazeProjectionMode, eyes, gaze, distanceM);
         if (projection.fallbackReason && now - lastProjectionWarning > 2000) {
           const payload: BackendMessage = {
@@ -192,23 +389,63 @@ export async function startWebRuntime(
           emit(payload);
           lastProjectionWarning = now;
         }
-        const acceptedRaw = jumpGate.accept(projection.point, performance.now());
-        if (acceptedRaw === null) return;
-        latestRaw = acceptedRaw;
-        recentRaw.push({ point: latestRaw, at: performance.now() });
-        while (recentRaw.length > 0 && performance.now() - recentRaw[0].at > 900) recentRaw.shift();
-        const corrected = calibration.apply(latestRaw);
-        if (smoothed === null) {
-          smoothed = corrected;
-        } else {
-          const alphaX = Math.max(0, Math.min(0.95, config.smoothingAlpha));
-          const alphaY = Math.max(0, Math.min(0.95, config.smoothingAlphaY));
-          smoothed = [
-            alphaX * smoothed[0] + (1 - alphaX) * corrected[0],
-            alphaY * smoothed[1] + (1 - alphaY) * corrected[1]
-          ];
+        // A real screen hit can only land near the display — beyond a full
+        // screen away is a broken estimate; never let one teleport the marker.
+        if (
+          !Number.isFinite(projection.point[0]) ||
+          !Number.isFinite(projection.point[1]) ||
+          Math.abs(projection.point[0] - 0.5) > 1 ||
+          Math.abs(projection.point[1] - 0.5) > 1
+        ) {
+          emitHold("implausible_raw");
+          return;
         }
-        const confidence = Math.min(head.score, (eyes[0].score + eyes[1].score) * 0.5);
+        const acceptedRaw = jumpGate.accept(projection.point, performance.now());
+        if (acceptedRaw === null) {
+          emitHold("jump_gate");
+          return;
+        }
+        latestRaw = acceptedRaw;
+        const sampleAt = performance.now();
+        const feature: GazeFeature = {
+          point: latestRaw,
+          eyeCenterPx: [(leftEyeCx + rightEyeCx) * 0.5, (leftEyeCy + rightEyeCy) * 0.5],
+          leftEyePx: [leftEyeCx, leftEyeCy],
+          rightEyePx: [rightEyeCx, rightEyeCy],
+          leftYawDeg: gaze.leftYawDeg,
+          leftPitchDeg: gaze.leftPitchDeg,
+          rightYawDeg: gaze.rightYawDeg,
+          rightPitchDeg: gaze.rightPitchDeg,
+          headWidthPx,
+          irisDiameterPx: gaze.irisDiameterPx,
+          eyeOpen,
+          distanceM
+        };
+        recentFeatures.push({ feature, at: sampleAt });
+        while (recentFeatures.length > 0 && sampleAt - recentFeatures[0].at > 900) recentFeatures.shift();
+        const corrected = calibration.applyFeature(feature);
+        const filterMode = config.gazeFilter ?? "saccade";
+        if (filterMode === "oneeuro") {
+          smoothed = [filterX.filter(corrected[0], sampleAt / 1000), filterY.filter(corrected[1], sampleAt / 1000)];
+        } else if (filterMode === "ema") {
+          if (smoothed === null) {
+            smoothed = corrected;
+          } else {
+            const alphaX = Math.max(0, Math.min(0.95, config.smoothingAlpha));
+            const alphaY = Math.max(0, Math.min(0.95, config.smoothingAlphaY));
+            smoothed = [
+              alphaX * smoothed[0] + (1 - alphaX) * corrected[0],
+              alphaY * smoothed[1] + (1 - alphaY) * corrected[1]
+            ];
+          }
+        } else {
+          smoothed = saccadeFilter.update(corrected[0], corrected[1], sampleAt, gaze.yawDeg, gaze.pitchDeg);
+        }
+        dropStreakStart = 0;
+        lastEmitCore = { x: clamp01(smoothed[0]), y: clamp01(smoothed[1]), distance: distanceM, yaw: gaze.yawDeg, pitch: gaze.pitchDeg };
+        let confidence = Math.min(head.score, (eyes[0].score + eyes[1].score) * 0.5);
+        confidence *= clamp01(eyeOpen);
+        confidence *= Math.max(0.2, gaze.agreement);
         const payload: BackendMessage = {
           type: "gaze",
           x_norm: clamp01(smoothed[0]),
@@ -217,6 +454,14 @@ export async function startWebRuntime(
           raw_y_norm: latestRaw[1],
           confidence,
           distance_m: distanceM,
+          iris_distance_m: irisDistanceM,
+          distance_source: distanceSource,
+          eye_open: eyeOpen,
+          blink: false,
+          gaze_filter: filterMode,
+          tracking_source: trackingSource,
+          filter_velocity_deg_s: filterMode === "saccade" ? saccadeFilter.velocityDegS : undefined,
+          gaze_state: filterMode === "saccade" ? (saccadeFilter.inSaccade ? "saccade" : "fixation") : undefined,
           head_face_width_ratio: headFaceWidthRatio,
           eye_position_weight_x: projector.eyePositionWeightX,
           eye_position_weight_y: projector.eyePositionWeightY,
@@ -256,6 +501,13 @@ export async function startWebRuntime(
           emit(payload);
           try {
             models.dispose();
+          } catch (disposeError) {
+            logStatus(
+              { type: "status", level: "warning", message: "WebGPU session dispose failed", runtime: config.runtime, accelerator: "webgpu" },
+              disposeError
+            );
+          }
+          try {
             models = await createRuntimeModels(config, "wasm");
             emit({
               type: "status",
@@ -333,7 +585,7 @@ export async function startWebRuntime(
   }
 
   return {
-    captureCalibration: (target, validation) => captureCalibration(calibration, recentRaw, target, validation, emit, config),
+    captureCalibration: (target, validation) => captureCalibration(calibration, recentFeatures, target, validation, emit, config),
     stop: () => {
       stopped = true;
       longTasks.stop();
@@ -373,7 +625,8 @@ type MainToWorkerMessage =
   | { type: "init"; config: WebInferenceConfig }
   | {
       type: "frame";
-      data: Uint8ClampedArray<ArrayBuffer>;
+      data?: Uint8ClampedArray<ArrayBuffer>;
+      bitmap?: ImageBitmap;
       width: number;
       height: number;
       captureMs: number;
@@ -451,37 +704,73 @@ async function startDedicatedWorkerRuntime(
       throw new Error("2D canvas context is not available");
     }
 
-    const captureLoop = () => {
+    const captureLoop = async () => {
       if (stopped) {
         return;
       }
       if (inFlight) {
         droppedFrames += 1;
+        captureTimer = window.setTimeout(() => void captureLoop(), 33);
+        return;
+      }
+      const pacingNow = performance.now();
+      const minIntervalMs = config.gazeMaxFps > 0 ? 1000 / config.gazeMaxFps : 0;
+      if (minIntervalMs > 0 && lastCapture > 0 && pacingNow - lastCapture < minIntervalMs) {
+        captureTimer = window.setTimeout(() => void captureLoop(), minIntervalMs - (pacingNow - lastCapture));
+        return;
+      }
+      inFlight = true;
+      const captureStart = performance.now();
+      const now = performance.now();
+      const frameIntervalMs = lastCapture > 0 ? now - lastCapture : undefined;
+      lastCapture = now;
+      const mainThreadLongTasks = longTasks.count();
+      const dropped = droppedFrames;
+      let bitmap: ImageBitmap | null = null;
+      try {
+        bitmap = await createImageBitmap(video);
+      } catch {
+        // createImageBitmap can fail on detached/ended tracks; fall back to
+        // canvas readback below.
+      }
+      if (stopped) {
+        bitmap?.close();
+        return;
+      }
+      if (bitmap !== null) {
+        post(
+          {
+            type: "frame",
+            bitmap,
+            width: config.cameraWidth,
+            height: config.cameraHeight,
+            captureMs: performance.now() - captureStart,
+            frameIntervalMs,
+            droppedFrames: dropped,
+            mainThreadLongTasks
+          },
+          [bitmap]
+        );
       } else {
-        const captureStart = performance.now();
         ctx.drawImage(video, 0, 0, config.cameraWidth, config.cameraHeight);
         const frame = ctx.getImageData(0, 0, config.cameraWidth, config.cameraHeight);
-        const now = performance.now();
-        const frameIntervalMs = lastCapture > 0 ? now - lastCapture : undefined;
-        lastCapture = now;
-        inFlight = true;
         post(
           {
             type: "frame",
             data: frame.data,
             width: frame.width,
             height: frame.height,
-            captureMs: now - captureStart,
+            captureMs: performance.now() - captureStart,
             frameIntervalMs,
-            droppedFrames,
-            mainThreadLongTasks: longTasks.count()
+            droppedFrames: dropped,
+            mainThreadLongTasks
           },
           [frame.data.buffer]
         );
       }
-      captureTimer = window.setTimeout(captureLoop, 33);
+      captureTimer = window.setTimeout(() => void captureLoop(), 33);
     };
-    captureLoop();
+    void captureLoop();
   } catch (error) {
     emit({
       type: "status",
@@ -517,26 +806,27 @@ function isRecoverableInferenceError(error: unknown): boolean {
     message.includes("OrtRun") ||
     message.includes("bad_array_new_length") ||
     message.includes("failed to call") ||
+    message.includes("memory access out of bounds") ||
     message.includes("ERROR_CODE")
   );
 }
 
 async function captureCalibration(
   calibration: Calibration,
-  recentRaw: TimedRaw[],
+  recentFeatures: TimedFeature[],
   target: [number, number],
   validation: boolean,
   emit: (payload: BackendMessage) => void,
   config: WebInferenceConfig
 ): Promise<void> {
-  const sample = stableRawSample(recentRaw, performance.now());
-  if (sample.point === null) {
+  const sample = stableFeatureSample(recentFeatures, performance.now());
+  if (sample.feature === null) {
     emit({ type: "calibration", status: "unstable", message: sample.reason });
     return;
   }
   try {
-    if (validation) await calibration.validate(sample.point, target);
-    else await calibration.capture(sample.point, target);
+    if (validation) await calibration.validate(sample.feature, target);
+    else await calibration.capture(sample.feature, target);
   } catch (error) {
     const payload: BackendMessage = {
       type: "status",
@@ -619,16 +909,18 @@ function waitForVideo(video: HTMLVideoElement): Promise<void> {
 
 function emitPreview(
   frame: ImageData,
+  source: HTMLCanvasElement | null,
   head: Detection | null,
   eyes: Detection[],
   mouth: Detection | null,
   message: string | null,
   gazeAngles: [number, number] | null,
   widthRatio: number | null,
-  emit: (payload: BackendMessage) => void
+  emit: (payload: BackendMessage) => void,
+  irisContours?: [number, number][][]
 ): number {
   const start = performance.now();
-  const image = createPreviewImage(frame, head, eyes, mouth, message, widthRatio, gazeAngles ?? undefined);
+  const image = createPreviewImage(source ?? frame, frame.width, frame.height, head, eyes, mouth, message, widthRatio, gazeAngles ?? undefined, irisContours);
   if (!image) {
     return performance.now() - start;
   }

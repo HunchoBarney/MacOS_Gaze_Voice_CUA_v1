@@ -268,10 +268,6 @@ struct CuaDialogueState {
     let resolvedHistoryLimit: Int
     let unresolvedLimit: Int
     private(set) var entries: [Entry] = []
-    /// Consent asks tracked alongside intents — the runtime records them when a
-    /// planner decision asks for input approval and resolves them from the
-    /// approval surface or a bare voice yes/no.
-    private(set) var consents: [ConsentRequest] = []
     private var knownIntentIDs: Set<UUID> = []
     private var knownQuestionIDs: Set<UUID> = []
     private var knownAttemptIDs: Set<UUID> = []
@@ -306,7 +302,7 @@ struct CuaDialogueState {
     }
 
     /// The intent currently waiting on a user answer — the newest pending
-    /// question when several exist, so the planner sees the live ask.
+    /// question when several exist, so respond_to_task sees the live ask.
     var pendingClarification: (entry: Entry, question: Question)? {
         for entry in entries.reversed() {
             guard let question = entry.question,
@@ -315,32 +311,6 @@ struct CuaDialogueState {
             return (entry, question)
         }
         return nil
-    }
-
-    /// Pending consent asks, in order. `solePendingConsent` is the only shape
-    /// a bare voice "yes"/"no" may resolve — ambiguity never auto-grants.
-    var pendingConsents: [ConsentRequest] { consents.filter { $0.state == .pending } }
-    var solePendingConsent: ConsentRequest? {
-        let pending = pendingConsents
-        return pending.count == 1 ? pending[0] : nil
-    }
-
-    mutating func recordConsent(_ request: ConsentRequest) {
-        if let index = consents.firstIndex(where: { $0.id == request.id }) {
-            consents[index] = request
-        } else {
-            consents.append(request)
-        }
-    }
-
-    /// Approve/deny a pending ask. Returns the resolved request, or nil when
-    /// nothing pending matches — a stale id never rewrites a settled answer.
-    @discardableResult
-    mutating func resolveConsent(id: String, approved: Bool) -> ConsentRequest? {
-        guard let index = consents.firstIndex(where: { $0.id == id && $0.state == .pending })
-        else { return nil }
-        consents[index].state = approved ? .approved : .denied
-        return consents[index]
     }
 
     mutating func add(_ intent: Intent, relationship: Relationship = .independent,

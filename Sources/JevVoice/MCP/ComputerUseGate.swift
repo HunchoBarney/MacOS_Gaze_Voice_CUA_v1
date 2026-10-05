@@ -64,6 +64,16 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
         locked { $0.denyLists[agentSlug] = labels.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty } }
     }
 
+    /// The driver session label this caller's calls should carry. The runtime
+    /// registers the label it actually passed to `start_session` — a session
+    /// label is owned by its transport lease, so when a lease dies the label
+    /// is tombstoned and can never be revived by another transport. Reusing a
+    /// tombstoned label makes the daemon refuse every call, so the runtime
+    /// mints a unique label per connection and must bind it here.
+    func setSessionLabel(_ label: String, agentSlug: String?) {
+        locked { $0.sessionLabels[agentSlug] = label }
+    }
+
     /// tools/call entry — never throws; refusals arrive as `isError` tool
     /// results carrying `structuredContent.refusal.code`, the same envelope
     /// the driver itself uses, so the agent reads the message and keeps
@@ -78,7 +88,12 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
             if let hit = deniedLabel(in: args, agentSlug: agentSlug) {
                 return Self.refusal("denied_label", "refused: \"\(hit)\" is on this caller's deny list.")
             }
-            if let mode = args["delivery_mode"], mode != .null, mode != .string(ConsentContract.requiredDeliveryMode) {
+            // bring_to_front is exempt from the delivery_mode policy: the
+            // driver treats that tool as inherently foreground (tool.rs), so
+            // a caller honestly passing "foreground" would be refused and our
+            // injected "background" is ignored anyway.
+            if name != "bring_to_front",
+               let mode = args["delivery_mode"], mode != .null, mode != .string(ConsentContract.requiredDeliveryMode) {
                 return Self.refusal("delivery_mode_required",
                     "refused: delivery_mode must be \"\(ConsentContract.requiredDeliveryMode)\" — input never steals focus.")
             }
@@ -96,14 +111,17 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
                 return Self.refusal("blocked_by_consent", summary)
             } catch {
                 return Self.refusal("blocked_by_consent",
-                    "computer use input is off until the user allows this turn. Observation tools still work.")
+                    "computer-use consent is required: the user has not approved input for this turn. Emit a <COMPUTER_USE_REQUEST> line to ask, then wait — observation tools still work meanwhile.")
             }
-            args["delivery_mode"] = .string(ConsentContract.requiredDeliveryMode)
+            if name != "bring_to_front" {
+                args["delivery_mode"] = .string(ConsentContract.requiredDeliveryMode)
+            }
         }
         if let agentSlug, args["session"] == nil {
             // Per-agent driver session — the badge + session-colored cursor
             // the driver renders is this agent's visible identity.
-            args["session"] = .string("agent-" + agentSlug)
+            let label = locked { $0.sessionLabels[agentSlug] ?? ("agent-" + agentSlug) }
+            args["session"] = .string(label)
         }
         return await forward(name, args)
     }
@@ -173,8 +191,8 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
             return Self.error("uncertain_outcome",
                 "\(name) reported a partial or uncertain outcome; an effect may have occurred. Inspect the target before retrying.",
                 structured: error.result)
-        } catch DriverConnectionError.toolRefused(_, let code) {
-            return Self.error(code, "The driver refused \(name).",
+        } catch DriverConnectionError.toolRefused(_, let code, let detail) {
+            return Self.error(code, detail.isEmpty ? "The driver refused \(name)." : detail,
                 structured: .object(["status": .string("refused"), "code": .string(code),
                                      "refusal": .object(["code": .string(code)])]))
         } catch {
@@ -226,6 +244,7 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
         var asked: Set<ConsentKey> = []
         var activeTurns: [String?: String] = [:]
         var denyLists: [String?: [String]] = [:]
+        var sessionLabels: [String?: String] = [:]
 
         mutating func setActiveTurn(_ turnID: String?, agentSlug: String?) {
             guard activeTurns[agentSlug] != turnID else { return }
@@ -239,13 +258,17 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
         mutating func assertPermitted(tool: String, key: ConsentKey, now: Date,
                                       nilTurnDenialTTL: TimeInterval) throws {
             guard ConsentContract.requiresConsent(tool) else { return }
+            // Standing grant: the always-allow setting pre-approves every
+            // (agent, turn) — Clicky's always-allow variant. Deny lists,
+            // scope refusals and delivery-mode policy still apply upstream.
+            guard !CuaStandingGrants.computerUseInput else { return }
             if approved.contains(key) { return }
             if let deniedAt = denied[key] {
                 if key.turn == nil, now.timeIntervalSince(deniedAt) >= nilTurnDenialTTL {
                     denied[key] = nil
                 } else {
                     throw GateError.blockedByConsent(summary:
-                        "computer use input was denied for this turn. Observation tools still work.")
+                        "computer-use consent was denied for this turn. Observation tools still work.")
                 }
             }
             if asked.insert(key).inserted {
@@ -256,7 +279,7 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
                 pruneRequests()
             }
             throw GateError.blockedByConsent(summary:
-                "computer use input is off until the user allows this turn. Observation tools still work.")
+                "computer-use consent is required: the user has not approved input for this turn. Emit a <COMPUTER_USE_REQUEST> line to ask, then wait — observation tools still work meanwhile.")
         }
 
         /// Resolved asks leave `requests` entirely so `pending()` only ever

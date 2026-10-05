@@ -67,7 +67,7 @@ actor CuaConnection {
         guard process == nil else { throw DriverConnectionError.remote("Cua connection already started.") }
         var launchArguments = arguments
         if let bundled = CuaDependency.bundledExecutable, executable == bundled {
-            try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
+            try CuaDependency.verify(executable, expectedSHA256: CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
             try await startEmbeddedDaemon()
             launchArguments = ["mcp", "--embedded", "--socket", daemonSocketPath ?? "",
                                "--host-bundle-id", CuaDependency.hostBundleID]
@@ -161,7 +161,7 @@ actor CuaConnection {
     private static func transientReadFault(_ error: Error) -> Bool {
         switch error as? DriverConnectionError {
         case .timedOut, .remote, .malformed: return true
-        case .toolRefused(_, let code): return code == "tool_invocation_failed"
+        case .toolRefused(_, let code, _): return code == "tool_invocation_failed"
         default: return false
         }
     }
@@ -196,15 +196,19 @@ actor CuaConnection {
         // Retain typed refusal codes without reflecting arbitrary tool/page text into error UI.
         let code = value["structuredContent"]?["refusal"]?["code"]?.string
             ?? value["structuredContent"]?["code"]?.string ?? ""
+        // The daemon's own reason lives in refusal.message or the text block —
+        // without it every distinct refusal collapses into the bare code.
+        let detail = value["structuredContent"]?["refusal"]?["message"]?.string
+            ?? value["content"]?.array?.compactMap { $0["text"]?.string }.first ?? ""
         let safeCode = !code.isEmpty && code.count <= 80 && code.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-.")).contains($0) }
         if value["isError"] == .bool(true) {
-            if safeCode { throw DriverConnectionError.toolRefused(tool: name, code: code) }
+            if safeCode { throw DriverConnectionError.toolRefused(tool: name, code: code, detail: detail) }
             throw DriverConnectionError.remote("Cua could not complete \(name)\(safeCode ? " (" + code + ")" : ""). Inspect the target before retrying.")
         }
         guard let body = value["structuredContent"], body.object != nil else { throw DriverConnectionError.malformed }
         guard body["code"] != .string("tool_output_invalid") else { throw DriverConnectionError.malformed }
         if body["status"] == .string("refused") || body["effect"] == .string("refused") || body["refusal"] != nil {
-            if safeCode { throw DriverConnectionError.toolRefused(tool: name, code: code) }
+            if safeCode { throw DriverConnectionError.toolRefused(tool: name, code: code, detail: detail) }
             throw DriverConnectionError.refused(body["refusal"]?["message"]?.string ?? "Cua refused this action.")
         }
         guard value["content"] == nil || value["content"]?.array != nil else { throw DriverConnectionError.malformed }
@@ -241,8 +245,14 @@ actor CuaConnection {
                             "--grant", "existing-profile"]
         daemon.environment = environment
         // Daemon logs may contain observed content; do not persist them.
+        // JARVIS_DRIVER_STDERR redirects stderr for diagnostics only.
         daemon.standardOutput = FileHandle.nullDevice
-        daemon.standardError = FileHandle.nullDevice
+        if let logPath = ProcessInfo.processInfo.environment["JARVIS_DRIVER_STDERR"] {
+            _ = FileManager.default.createFile(atPath: logPath, contents: nil)
+            daemon.standardError = FileHandle(forWritingAtPath: logPath) ?? FileHandle.nullDevice
+        } else {
+            daemon.standardError = FileHandle.nullDevice
+        }
         daemon.standardInput = liveness
         try daemon.run()
         self.daemon = daemon

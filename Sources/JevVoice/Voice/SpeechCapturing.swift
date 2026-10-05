@@ -3,8 +3,15 @@ import JevVoiceCore
 
 enum SpeechEvent {
     case partial(String), final(String), failure(String), level(Float)
-    case transcript(RangedTranscript)
     case timing(String, milliseconds: Double)
+    /// User transcript from the realtime lane — display only; the model
+    /// already heard the audio, so this text must not be re-submitted.
+    case heardFinal(String)
+    /// Streaming / final text of the model's spoken reply.
+    case assistantDelta(String)
+    case assistant(String)
+    /// The model finished responding for this hold (after any tool calls).
+    case turnEnded
 }
 
 enum SpeechReadiness {

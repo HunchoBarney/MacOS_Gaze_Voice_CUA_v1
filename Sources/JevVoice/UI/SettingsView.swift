@@ -18,7 +18,6 @@ final class SettingsNavigation: ObservableObject {
 }
 
 struct SettingsView: View {
-    @ObservedObject private var speechAssets = SpeechAssets.shared
     @ObservedObject var controller: VoiceController
     @ObservedObject var config: Config
     @ObservedObject var microphones: MicrophoneCatalog
@@ -28,8 +27,8 @@ struct SettingsView: View {
     @StateObject private var cuaSetup = CuaSetup()
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = false
-    @State private var elevenLabsKeyDraft = ""
-    @State private var elevenLabsKeySaved = false
+    @State private var openAIKeyDraft = ""
+    @State private var openAIKeySaved = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -91,37 +90,29 @@ struct SettingsView: View {
         .tint(.accentColor)
         .onAppear {
             apiKeyDraft = config.apiKey
-            elevenLabsKeyDraft = config.elevenLabsAPIKey
+            openAIKeyDraft = config.openAIAPIKey
         }
         .onChange(of: apiKeyDraft) { apiKeySaved = false }
-        .onChange(of: elevenLabsKeyDraft) { elevenLabsKeySaved = false }
+        .onChange(of: openAIKeyDraft) { openAIKeySaved = false }
     }
 
     private var voiceSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
             VoiceCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("On-device speech", systemImage: "waveform").font(.headline)
-                    Text(speechAssets.message).font(.callout)
-                    Button("Prepare speech") { Task { await speechAssets.refresh(install: true) } }
-                        .disabled(speechAssets.preparing || speechAssets.ready)
-                }.task { await speechAssets.refresh() }
-            }
-            VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("Spoken replies", systemImage: "speaker.wave.2").font(.headline)
-                    Toggle("Speak replies aloud", isOn: $config.ttsEnabled)
-                    Text("ElevenLabs API key").font(.callout)
+                    Label("Voice", systemImage: "bolt.horizontal.circle").font(.headline)
+                    Text("OpenAI API key").font(.callout)
                     HStack {
-                        SecureField("sk-…", text: $elevenLabsKeyDraft).textFieldStyle(.roundedBorder).onSubmit(saveElevenLabsKey)
-                        Button("Save", action: saveElevenLabsKey).buttonStyle(.borderedProminent)
+                        SecureField("sk-…", text: $openAIKeyDraft).textFieldStyle(.roundedBorder).onSubmit(saveOpenAIKey)
+                        Button("Save", action: saveOpenAIKey).buttonStyle(.borderedProminent)
                     }
-                    Text("Stored in macOS Keychain. Leave empty to use the system voice; a failed request also falls back to it.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if elevenLabsKeySaved {
-                        Text(elevenLabsKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain")
+                    if openAIKeySaved {
+                        Text(openAIKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    Text("Held audio streams to OpenAI's realtime speech model — it hears, decides and speaks back in one live session. Interrupt it by holding Fn again. ChatGPT sign-in can't start realtime sessions; this needs an API key. Stored in macOS Keychain.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Speak replies aloud", isOn: $config.ttsEnabled)
                 }
             }
             VoiceCard {
@@ -239,6 +230,11 @@ struct SettingsView: View {
                     Toggle("Run commands automatically", isOn: $config.autoExecute)
                     Text("Completed commands can run while you hold Fn. Release to finish remaining speech and dictated text. Turn this off to review commands before they run.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Always allow computer use", isOn: $config.alwaysAllowComputerUse)
+                    Text(config.alwaysAllowComputerUse
+                         ? "Input actions run without asking — every task and delegated agent included. Deny lists and focus rules still apply."
+                         : "Actions that change something ask first. Turn this on to approve all computer use up front.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("Model confidence is available in Activity diagnostics. It does not interrupt ordinary commands. Deletion and purchasing are not supported by this app.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Reset remembered permissions") { CuaStandingGrants.reset() }.controlSize(.small)
@@ -250,5 +246,5 @@ struct SettingsView: View {
     }
 
     private func saveAPIKey() { apiKeySaved = config.saveAPIKey(apiKeyDraft) }
-    private func saveElevenLabsKey() { elevenLabsKeySaved = config.saveElevenLabsAPIKey(elevenLabsKeyDraft) }
+    private func saveOpenAIKey() { openAIKeySaved = config.saveOpenAIAPIKey(openAIKeyDraft) }
 }

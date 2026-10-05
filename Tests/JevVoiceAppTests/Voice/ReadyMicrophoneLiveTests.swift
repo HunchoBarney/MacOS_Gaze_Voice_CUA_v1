@@ -13,7 +13,14 @@ final class ReadyMicrophoneLiveTests: XCTestCase {
         guard Permission.microphone.isGranted else {
             return XCTFail("Microphone permission is required for the requested live check")
         }
-        let capture = SpeechAnalyzerCapture()
+        let openAIKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
+        guard !openAIKey.isEmpty else {
+            throw XCTSkip("Realtime lane needs OPENAI_API_KEY for its socket")
+        }
+        let capture = RealtimeVoiceLane(apiKey: { openAIKey })
+        // Transcript-only commits: no response.create, so `.final` is the
+        // terminal event — the same shape the dictation path uses.
+        capture.respondOnCommit = false
         let uid = ProcessInfo.processInfo.environment["JARVIS_TEST_MIC_UID"]
         var current: UUID?, firstAudio: Double?, finalized = false, failure: String?
         capture.onEvent = { id, event in

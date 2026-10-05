@@ -163,6 +163,11 @@ function readWebInferenceWorkerMode(args) {
   return ["off", "ort-proxy", "dedicated"].includes(mode) ? mode : "off";
 }
 
+function readWebAccelerator(args) {
+  const mode = readOption(args, "--web-accelerator", "auto");
+  return ["auto", "webgpu", "wasm"].includes(mode) ? mode : "auto";
+}
+
 function resolveRepoPath(value) {
   const raw = value || "";
   return path.resolve(repoRoot, raw);
@@ -248,7 +253,11 @@ function backendArgs(args, displayBounds) {
     "--eye-position-weight-x",
     "--eye-position-weight-y",
     "--retinaface-head-face-ratio",
-    "--gaze-projection-mode"
+    "--gaze-projection-mode",
+    "--gaze-filter",
+    "--filter-mincutoff",
+    "--filter-beta",
+    "--filter-dcutoff"
   ];
   for (const option of options) {
     const value = readOption(args, option, null);
@@ -267,6 +276,9 @@ function backendArgs(args, displayBounds) {
   }
   if (hasFlag(args, "--no-flip-y")) {
     passthrough.push("--no-flip-y");
+  }
+  if (hasFlag(args, "--no-iris-distance")) {
+    passthrough.push("--no-iris-distance");
   }
   passthrough.push("--display-width", String(displayBounds.width));
   passthrough.push("--display-height", String(displayBounds.height));
@@ -315,6 +327,8 @@ function webInferenceConfig(args, displayBounds, runtime) {
   return {
     runtime,
     webInferenceWorker: readWebInferenceWorkerMode(args),
+    webAccelerator: readWebAccelerator(args),
+    calibrate: hasFlag(args, "--calibrate"),
     detector,
     backend: readOption(args, "--backend", "tensorrt"),
     camera: readOption(args, "--camera", "0"),
@@ -340,7 +354,16 @@ function webInferenceConfig(args, displayBounds, runtime) {
     liteRtWasmBaseUrl: copyLiteRtRuntimeAssetsForRenderer(),
     smoothingAlpha: readNumberOption(args, "--smoothing-alpha", 0.65),
     smoothingAlphaY: readNumberOption(args, "--smoothing-alpha-y", 0.45),
+    gazeFilter: (() => {
+      const mode = readOption(args, "--gaze-filter", "saccade");
+      return ["saccade", "oneeuro", "ema"].includes(mode) ? mode : "saccade";
+    })(),
+    filterMincutoff: readNumberOption(args, "--filter-mincutoff", 1.0),
+    filterBeta: readNumberOption(args, "--filter-beta", 0.7),
+    filterDcutoff: readNumberOption(args, "--filter-dcutoff", 1.0),
+    disableIrisDistance: hasFlag(args, "--no-iris-distance"),
     previewFps: readNumberOption(args, "--preview-fps", 8.0),
+    gazeMaxFps: readPositiveNumberOption(args, "--gaze-max-fps", 20),
     hidePreview: hasFlag(args, "--hide-preview"),
     flipX: !hasFlag(args, "--no-flip-x"),
     flipY: !hasFlag(args, "--no-flip-y"),
