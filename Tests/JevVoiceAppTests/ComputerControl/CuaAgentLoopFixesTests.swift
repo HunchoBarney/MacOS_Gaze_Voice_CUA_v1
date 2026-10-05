@@ -156,7 +156,7 @@ final class CuaAgentLoopFixesTests: XCTestCase {
                                                        "done": 0.1, "stuck": 0.1]) })
         let result = try await loop.drive(DriveTask(goal: "go", pid: 7, windowID: 42))
         XCTAssertEqual(result.status, .handedBack(.needsChoice(options: [
-            "Click AXButton \"Go\"", "Click AXButton \"Other\""])))
+            "Click the AXButton \"Go\"", "Click the AXButton \"Other\""])))
     }
 
     /// Two uncertain outcomes on the SAME dispatch block; the count is
@@ -364,13 +364,16 @@ final class CuaAgentLoopFixesTests: XCTestCase {
         }
         // A second goal-matched button stays offered throughout — the
         // ban removing the search control is a signature match, not a
-        // shortlist trim.
+        // shortlist trim. Filler buttons keep the AX pool adequate so
+        // the fused visual read never fires — the snapshot sequence
+        // stays purely positional.
         let home = element(9, role: "AXButton", label: "Search Results")
+        let fillers = (20..<28).map { element($0, role: "AXButton", label: "filler \($0)") }
         let (loop, calls, asked) = harness(
-            states: [window([searchButton(0, "tA"), home]),
-                     window([searchButton(3, "tB"), home]),
-                     window([searchButton(5, "tC"), home]),
-                     window([searchButton(2, "tD"), home])],
+            states: [window([searchButton(0, "tA"), home] + fillers),
+                     window([searchButton(3, "tB"), home] + fillers),
+                     window([searchButton(5, "tC"), home] + fillers),
+                     window([searchButton(2, "tD"), home] + fillers)],
             steps: { step in
                 self.answers(next: ["click_0", "click_3", "click_5", "done"][min(step, 3)])
             })
@@ -430,5 +433,230 @@ final class CuaAgentLoopFixesTests: XCTestCase {
         XCTAssertTrue(loop.observedPostconditions.contains {
             $0.evidence.contains("visible on screen")
         }, "the visual read proves the insert when AX cannot")
+    }
+
+    /// A stuck verdict on an ADEQUATE AX window (the fused pass never ran,
+    /// so the escalation is unspent) gets one visual escalation: detected
+    /// regions arrive as clickable candidates carrying their capture, and
+    /// picking one dispatches a real pixel click bound to that capture.
+    func testStuckVerdictArmsVisualClickCandidates() async throws {
+        // Ten candidates + a goal-matched lane pass the adequacy gate —
+        // the visual pass stays a stuck escalation, not a fused read.
+        let adequate = window(
+            (0..<9).map { element($0, role: "AXButton", label: "filler \($0)") }
+                + [element(9, role: "AXButton", label: "Biggest")])
+        let (loop, calls, asked) = harness(
+            states: [adequate,
+                     window([], extra: ["capture_id": .string("cap1")]),
+                     adequate],
+            steps: { step in
+                switch step {
+                case 0: return self.answers(next: "stuck")
+                case 1: return self.answers(next: "vclick_r1")
+                default: return self.answers(next: "done")
+                }
+            },
+            dispatch: { name, _ in
+                if name == "parse_visual_regions" {
+                    return .object(["regions": .array([
+                        .object(["id": .string("r1"), "kind": .string("text"),
+                                 "bounds": .object(["x": .number(10), "y": .number(20),
+                                                    "width": .number(40), "height": .number(20)]),
+                                 "text": .string("K"),
+                                 "confidence": .number(0.9),
+                                 "interactive": .bool(true)])])])
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "click the biggest K",
+                                                    pid: 7, windowID: 42))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertTrue(criteria(asked.value[1]).contains("vclick_r1"),
+                      "the visual region must be offered as a clickable candidate")
+        guard let click = calls.value.first(where: { $0.0 == "click" })?.1 else {
+            return XCTFail("the visual lane must dispatch a real click")
+        }
+        XCTAssertEqual(click["capture_id"], .string("cap1"))
+        XCTAssertEqual(click["x"], .number(30))  // bounds center: 10 + 40/2
+        XCTAssertEqual(click["y"], .number(30))  // bounds center: 20 + 20/2
+    }
+
+    /// A visual read that finds nothing — or a judge that stays stuck
+    /// after seeing the regions — blocks honestly instead of inventing an
+    /// action.
+    func testStuckVerdictBlocksWhenVisualPassFindsNothing() async throws {
+        let (loop, calls, _) = harness(
+            states: [window([]), window([], extra: ["capture_id": .string("cap1")])],
+            steps: { _ in self.answers(next: "stuck") },
+            dispatch: { name, _ in
+                if name == "parse_visual_regions" {
+                    return .object(["regions": .array([])])
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let empty = try await loop.drive(DriveTask(goal: "click the biggest K",
+                                                   pid: 7, windowID: 42))
+        guard case .blocked = empty.status else { return XCTFail("expected blocked, got \(empty.status)") }
+        XCTAssertFalse(calls.value.contains { $0.0 == "click" },
+                       "nothing visual means nothing to click")
+    }
+
+    /// The escalation is bounded: after candidates are offered, a second
+    /// consecutive stuck verdict ends the run rather than paying another
+    /// screenshot + parse round-trip.
+    func testStuckVerdictBlocksOnSecondConsecutiveStuck() async throws {
+        // Adequate AX keeps the fused pass off — the escalation is the
+        // only visual read this run pays for.
+        let adequate = window(
+            (0..<9).map { element($0, role: "AXButton", label: "filler \($0)") }
+                + [element(9, role: "AXButton", label: "Biggest")])
+        let (loop, calls, _) = harness(
+            states: [adequate, window([], extra: ["capture_id": .string("cap1")]),
+                     adequate],
+            steps: { _ in self.answers(next: "stuck") },
+            dispatch: { name, _ in
+                if name == "parse_visual_regions" {
+                    return .object(["regions": .array([
+                        .object(["id": .string("r1"), "kind": .string("text"),
+                                 "bounds": .object(["x": .number(0), "y": .number(0),
+                                                    "width": .number(10), "height": .number(10)]),
+                                 "text": .string("K"), "confidence": .number(0.8),
+                                 "interactive": .bool(true)])])])
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "click the biggest K",
+                                                    pid: 7, windowID: 42))
+        guard case .blocked = result.status else { return XCTFail("expected blocked, got \(result.status)") }
+        XCTAssertEqual(calls.value.filter { $0.0 == "parse_visual_regions" }.count, 1,
+                       "one bounded visual read per run")
+        XCTAssertFalse(calls.value.contains { $0.0 == "click" })
+    }
+
+    /// Hybrid perception: a sparse AX tree (0-2 candidates, no goal
+    /// match) fuses the visual pass into the SAME ask — regions arrive
+    /// as clickable candidates before any stuck verdict, and the
+    /// ordinary observe still pays for no screenshot.
+    func testSparseAXFusesVisualCandidatesBeforeStuck() async throws {
+        let (loop, calls, asked) = harness(
+            states: [window([element(0, role: "AXStaticText", label: "drawn pixels")]),
+                     window([], extra: ["capture_id": .string("cap1")])],
+            steps: { step in step == 0
+                ? self.answers(next: "vclick_r1")
+                : self.answers(next: "done") },
+            dispatch: { name, _ in
+                if name == "parse_visual_regions" {
+                    return .object(["regions": .array([
+                        .object(["id": .string("r1"), "kind": .string("text"),
+                                 "bounds": .object(["x": .number(10), "y": .number(20),
+                                                    "width": .number(40), "height": .number(20)]),
+                                 "text": .string("K"), "confidence": .number(0.9),
+                                 "interactive": .bool(true)])])])
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "click the biggest K",
+                                                    pid: 7, windowID: 42))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertTrue(criteria(asked.value[0]).contains("vclick_r1"),
+                      "a thin AX pool fuses visual lanes without waiting for stuck")
+        XCTAssertEqual(calls.value.first { $0.0 == "get_window_state" }?.1["include_screenshot"],
+                       .bool(false), "the ordinary observe never pays for pixels")
+        guard let click = calls.value.first(where: { $0.0 == "click" })?.1 else {
+            return XCTFail("the visual lane must dispatch a real click")
+        }
+        XCTAssertEqual(click["capture_id"], .string("cap1"))
+    }
+
+    /// The converse invariant: an adequate AX pool — at least the element
+    /// floor plus a goal-matched lane — must not grow the judge's option
+    /// space with pixels. No screenshot read, no parse, ever.
+    func testAdequateAXNeverRunsVisualParse() async throws {
+        let elements = (0..<9).map { element($0, role: "AXButton", label: "filler \($0)") }
+            + [element(9, role: "AXButton", label: "Save File")]
+        let (loop, calls, _) = harness(
+            states: [window(elements)],
+            steps: { _ in self.answers(next: "done") })
+        let result = try await loop.drive(DriveTask(goal: "save the file", pid: 7, windowID: 42))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertFalse(calls.value.contains { $0.0 == "parse_visual_regions" },
+                       "an adequate AX pool never pays for the visual pass")
+        XCTAssertFalse(calls.value.contains {
+            $0.0 == "get_window_state" && $0.1["include_screenshot"] == .bool(true) },
+                       "no read buys a screenshot it does not need")
+    }
+
+    /// A scroll on a window AX cannot read reveals new pixels even when
+    /// the tree itself looks identical: the post-scroll observation
+    /// re-arms visual candidates on a FRESH capture — the stale one is
+    /// never reused.
+    func testScrollOnSparseWindowReArmsVisualCandidates() async throws {
+        var parses = 0
+        let (loop, calls, asked) = harness(
+            states: [window([]),
+                     window([], extra: ["capture_id": .string("cap1")]),
+                     window([]),
+                     window([], extra: ["capture_id": .string("cap2")]),
+                     window([])],
+            steps: { step in
+                switch step {
+                case 0: return self.answers(next: "scroll_down")
+                case 1: return self.answers(next: "vclick_r2")
+                default: return self.answers(next: "done")
+                }
+            },
+            dispatch: { name, _ in
+                if name == "parse_visual_regions" {
+                    parses += 1
+                    return .object(["regions": .array([
+                        .object(["id": .string("r\(parses)"), "kind": .string("text"),
+                                 "bounds": .object(["x": .number(0),
+                                                    "y": .number(parses == 1 ? 0 : 50),
+                                                    "width": .number(10), "height": .number(10)]),
+                                 "text": .string(parses == 1 ? "top" : "bottom"),
+                                 "confidence": .number(0.9),
+                                 "interactive": .bool(true)])])])
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "click the bottom entry",
+                                                    pid: 7, windowID: 42))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(parses, 2,
+                       "the post-scroll observation pays for a fresh visual read")
+        XCTAssertTrue(criteria(asked.value[1]).contains("vclick_r2"))
+        XCTAssertEqual(calls.value.filter { $0.0 == "parse_visual_regions" }
+                        .map { $0.1["capture_id"] }, [.string("cap1"), .string("cap2")])
+        guard let click = calls.value.first(where: { $0.0 == "click" })?.1 else {
+            return XCTFail("the refreshed visual lane must dispatch a real click")
+        }
+        XCTAssertEqual(click["capture_id"], .string("cap2"),
+                       "the refreshed regions ride the new capture, never a stale one")
+    }
+
+    /// On an adequate AX window the fused pass never ran, so the stuck
+    /// verdict pays for exactly one visual read — and finding nothing,
+    /// the run blocks honestly instead of inventing an action.
+    func testStuckVerdictBlocksWhenEscalationFindsNothing() async throws {
+        let elements = (0..<9).map { element($0, role: "AXButton", label: "filler \($0)") }
+            + [element(9, role: "AXButton", label: "Biggest")]
+        let (loop, calls, _) = harness(
+            states: [window(elements),
+                     window([], extra: ["capture_id": .string("cap1")])],
+            steps: { _ in self.answers(next: "stuck") },
+            dispatch: { name, _ in
+                if name == "parse_visual_regions" {
+                    return .object(["regions": .array([])])
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "click the biggest K",
+                                                    pid: 7, windowID: 42))
+        guard case .blocked = result.status else {
+            return XCTFail("expected blocked, got \(result.status)")
+        }
+        XCTAssertEqual(calls.value.filter { $0.0 == "parse_visual_regions" }.count, 1,
+                       "the stuck escalation pays for exactly one bounded visual read")
+        XCTAssertFalse(calls.value.contains { $0.0 == "click" })
     }
 }

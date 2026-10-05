@@ -34,6 +34,7 @@ for line in sys.stdin:
         elif name=='win_top': result={'structuredContent':{'action':'ok'},'content':[{'type':'text','text':'{"new_window_ids":[7],"new_windows":[{"window_id":7}]}'}]}
         elif name=='win_nested': result={'structuredContent':{'action':'ok'},'content':[{'type':'text','text':'done {"changes":{"new_window_ids":[8]}} tail'}]}
         elif name=='win_plain': result={'structuredContent':{'action':'ok'},'content':[{'type':'text','text':'no json here'}]}
+        elif name=='list_windows': result={'structuredContent':{'windows':[]},'content':[{'type':'text','text':'{"new_window_ids":[9]}'}]}
         else: result={'structuredContent':{'echo':req['params'].get('arguments',{})}}
     else:
         result={}
@@ -153,33 +154,38 @@ for line in sys.stdin:
         XCTAssertEqual(merged["new_window_ids"], .array([.number(1)]))
     }
 
-    // MARK: - window-observation tail arming
+    /// Read-only results return as-sent: the detector only appends window
+    /// changes to ACTION results, so reads skip the text-block probe — a
+    /// read whose text happens to carry the marker is not rewritten either.
+    func testReadOnlyResultsSkipWindowChangeMerge() async throws {
+        let (connection, path, count) = try fixture()
+        defer { try? FileManager.default.removeItem(at: path); try? FileManager.default.removeItem(at: count) }
+        try await connection.connect()
+        let windows = try await connection.call("list_windows", arguments: [:])
+        XCTAssertEqual(windows["windows"], .array([]))
+        XCTAssertNil(windows["new_window_ids"])
+        await connection.close()
+    }
 
-    /// Bound-window mutations carry `window_change_timeout_ms` so the
-    /// staged driver patch can shrink the fixed 1s post-action tail; the
-    /// stock binary projects the unknown argument away. Read-only calls
-    /// and window-producing tools must not carry it — their observation
-    /// window IS the evidence.
-    func testMutationCallsArmTheShortObservationTail() async throws {
+    // MARK: - mutation argument purity
+
+    /// Tool schemas are `additionalProperties:false` on the stock driver,
+    /// so a per-call observation-tail argument fails validation before any
+    /// typed projection can drop it. Mutating calls must travel with only
+    /// the caller's own arguments — the daemon-level tail knob lives on the
+    /// embedded spawn environment instead.
+    func testMutationCallsPassArgumentsUnmodified() async throws {
         let (connection, path, count) = try fixture()
         defer { try? FileManager.default.removeItem(at: path); try? FileManager.default.removeItem(at: count) }
         try await connection.connect()
 
         let mutated = try await connection.call("press_key", arguments: ["key": .string("return")])
-        XCTAssertEqual(mutated["echo"]?["window_change_timeout_ms"], .number(150))
+        XCTAssertEqual(mutated["echo"], .object(["key": .string("return")]))
 
-        // A caller-supplied value wins — never overwritten.
         let explicit = try await connection.call("hotkey", arguments: [
             "keys": .array([.string("command"), .string("v")]),
-            "window_change_timeout_ms": .number(300),
         ])
-        XCTAssertEqual(explicit["echo"]?["window_change_timeout_ms"], .number(300))
-
-        // Reads and window-producing mutations keep the full observer.
-        let launched = try await connection.call("launch_app", arguments: ["app": .string("Safari")])
-        XCTAssertNil(launched["echo"]?["window_change_timeout_ms"])
-        let listed = try await connection.call("list_windows", arguments: [:])
-        XCTAssertNil(listed["echo"]?["window_change_timeout_ms"])
+        XCTAssertEqual(explicit["echo"], .object(["keys": .array([.string("command"), .string("v")])]))
         await connection.close()
     }
 

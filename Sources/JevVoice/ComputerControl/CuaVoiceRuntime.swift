@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CoreGraphics
 import Foundation
 import JevVoiceCore
@@ -286,6 +287,14 @@ final class CuaVoiceRuntime {
     /// Front-app check handed to each drive loop — real NSWorkspace in
     /// production; simulated drivers pretend their fixture app is frontmost.
     private let isFrontmostApp: ((Int) -> Bool)?
+    /// Advisory planner seam. Nil (the default) resolves to the production
+    /// `CuaPlanner.shared`, gated by `Config.plannerEnabled`; an injected
+    /// client bypasses the flag — same posture as `judge:`/`fastLaneResolver:`
+    /// — but never the JARVIS_PLANNER=0 kill switch, which skips all of them.
+    private let planner: (any CuaPlanning)?
+    /// Per-app memory feeding `previous_context` — always on; the kill
+    /// switch gates the planner only.
+    private let appMemory: CuaAppMemory
     /// App/focus/pasteboard leases — the shared registry the drive loop and
     /// the agents lane also hold, so one canonical app identity serializes
     /// dispatch across every lane.
@@ -322,6 +331,9 @@ final class CuaVoiceRuntime {
 
     private var sessionStartTask: Task<CuaConnection, Error>?
     private var sessionLabel: String { "Jarvis runtime · \(instanceLabel)" }
+    /// Settings observers — the cursor policy re-applies on the live session
+    /// transport so a mid-session toggle doesn't wait for a re-mint.
+    private var configObservers: Set<AnyCancellable> = []
     /// The single owner of intents, attempts, relationships, questions and facts.
     /// Readable for diagnostics and tests; only the runtime mutates it.
     private(set) var dialogue = CuaDialogueState()
@@ -346,13 +358,18 @@ final class CuaVoiceRuntime {
     init(config: Config, makeConnection: @escaping () -> CuaConnection = {
         // Pool-bound: the voice lane proxies onto the shared daemon
         // alongside agent lanes instead of spawning a second driver stack.
-        CuaConnection(socketProvider: { try await CuaConnectionPool.shared.socket() })
+        // A refusal storm on this lane means the daemon itself is sick —
+        // recycle it so the next call mints a healthy one.
+        CuaConnection(socketProvider: { try await CuaConnectionPool.shared.socket() },
+                      onDaemonHealthFault: { Task { await CuaConnectionPool.shared.invalidateDaemon() } })
     },
          judge: CuaTaskAgent.Judge? = nil, dialogue: CuaDialogueState = CuaDialogueState(),
          agentBridge: (any AgentBridging)? = nil,
          fastLaneResolver: (@MainActor (String, String?, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = nil,
          screenLocked: @escaping () -> Bool = { CuaVoiceRuntime.consoleScreenLocked },
-         isFrontmostApp: ((Int) -> Bool)? = nil) {
+         isFrontmostApp: ((Int) -> Bool)? = nil,
+         planner: (any CuaPlanning)? = nil,
+         appMemory: CuaAppMemory = .shared) {
         self.config = config
         self.makeConnection = makeConnection
         self.dialogue = dialogue
@@ -360,6 +377,8 @@ final class CuaVoiceRuntime {
         self.agentBridge = agentBridge
         self.fastLaneResolver = fastLaneResolver
         self.isFrontmostApp = isFrontmostApp
+        self.planner = planner
+        self.appMemory = appMemory
         if let judge {
             self.judge = judge
             self.requiresAPIKey = false
@@ -386,6 +405,24 @@ final class CuaVoiceRuntime {
                     ?? spelling.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             }
         }
+        // A mid-session Settings toggle must not wait for a transport
+        // re-mint — re-apply on the live session connection when one exists.
+        config.$agentCursorEnabled.dropFirst().sink { [weak self] enabled in
+            Task { @MainActor [weak self] in self?.applyCursorPolicy(enabled) }
+        }.store(in: &configObservers)
+    }
+
+    /// Push the cursor-visibility policy onto the already-minted session.
+    /// Best-effort like the mint path — a daemon too old for the cursor
+    /// tools still serves the session.
+    private func applyCursorPolicy(_ enabled: Bool) {
+        guard let connection = sessionConnection else { return }
+        let label = sessionLabel
+        Task {
+            _ = try? await connection.call("set_agent_cursor_enabled", arguments: [
+                "session": .string(label),
+                "enabled": .bool(enabled)])
+        }
     }
 
     /// Lease identity for the shared registry — a display name or bundle
@@ -404,6 +441,40 @@ final class CuaVoiceRuntime {
             return bundle.lowercased()
         }
         return trimmed.lowercased()
+    }
+
+    /// The realtime model occasionally hands back a URL-encoded form of the
+    /// dictated text ("no+mistakes+by+kanye", "no%20mistakes"). The
+    /// instruction is the transcript — ground truth: when it spells the
+    /// literal verbatim (a real "c++", "a+b=c") the arg already copied
+    /// faithfully and stays; a de-encoded candidate is trusted only when it
+    /// lands inside the instruction on word boundaries — a multi-word
+    /// decoded form the user provably said.
+    nonisolated static func sanitizedLiteralText(_ literal: String, instruction: String) -> String {
+        guard literal.contains("+") || literal.contains("%"),
+              !instruction.localizedCaseInsensitiveContains(literal) else { return literal }
+        var candidates = [literal.replacingOccurrences(of: "+", with: " ")]
+        if let decoded = literal.removingPercentEncoding, decoded != literal {
+            candidates.append(decoded)
+        }
+        let boundary: (Character) -> Bool = { !$0.isLetter && !$0.isNumber }
+        for candidate in candidates {
+            let normalized = candidate.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            // A decoded form is only a plausible mangle when it carries the
+            // spaces the encoding ate — a wordless "c" from "c++" is not.
+            guard normalized.contains(" "), normalized != literal else { continue }
+            var searchStart = instruction.startIndex
+            while let range = instruction.range(of: normalized, options: .caseInsensitive,
+                                                range: searchStart..<instruction.endIndex) {
+                let beforeOK = range.lowerBound == instruction.startIndex
+                    || boundary(instruction[instruction.index(before: range.lowerBound)])
+                let afterOK = range.upperBound == instruction.endIndex
+                    || boundary(instruction[range.upperBound])
+                if beforeOK && afterOK { return normalized }
+                searchStart = range.upperBound
+            }
+        }
+        return literal
     }
 
     /// A deterministic floor under the planner's `foreground` flag: a request
@@ -510,7 +581,8 @@ final class CuaVoiceRuntime {
             feed.add(.route, "Fast lane: \(resolution.openVerb ?? "run") \(resolution.name)")
             kind = .fastLane(resolution, goal: trimmed)
         } else {
-            let literal = literalText?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let literal = (literalText?.trimmingCharacters(in: .whitespacesAndNewlines))
+                .map { Self.sanitizedLiteralText($0, instruction: trimmed) }
             let spec = TaskSpec(goal: trimmed, application: app,
                                 literalText: literal?.isEmpty == false ? literal : nil,
                                 foreground: Self.wantsForeground(trimmed))
@@ -795,6 +867,16 @@ final class CuaVoiceRuntime {
                 $0.localizedCaseInsensitiveContains(answer)
                     || answer.localizedCaseInsensitiveContains($0)
             } ?? answer
+            // A clarification answer that re-maps the target is durable app
+            // knowledge — the next drive plans on it. Fire-and-forget.
+            let target = spec.window ?? answer
+            if let bundleID = owner.intent.target?.bundle?.bundleID ?? spec.application,
+               !bundleID.isEmpty {
+                let memory = appMemory
+                Task { await memory.note(bundleID: bundleID,
+                    appName: spec.application ?? owner.intent.target?.application,
+                    record: CuaAppMemoryUpdate(note: "User clarified the target as \"\(target)\".")) }
+            }
         } else {
             spec.values["answer"] = answer
             spec.goal += "\nThe user answered \"\(question.prompt)\": \(answer)"
@@ -1033,6 +1115,9 @@ final class CuaVoiceRuntime {
             _ = try? await connection.call("end_session", arguments: ["session": .string(sessionLabel)], timeout: 5)
             await connection.close()
         }
+        // Drop the warm planner session with the runtime — the next task
+        // respawns it on demand.
+        await CuaPlanner.shared.close()
     }
 
     // MARK: - Utterance intake
@@ -1199,7 +1284,8 @@ final class CuaVoiceRuntime {
             do {
                 _ = try await self.fetchAppList().value
             } catch {
-                Self.log.notice("app_list_refresh_failed error=\(error.localizedDescription, privacy: .public)")
+                let detail = (error as? DriverConnectionError)?.diagnosticsDetail ?? ""
+                Self.log.notice("app_list_refresh_failed error=\(error.localizedDescription, privacy: .public) detail=\(detail, privacy: .public)")
             }
         }
     }
@@ -1486,6 +1572,98 @@ final class CuaVoiceRuntime {
         return { tool, arguments, timeout in try await core(tool, arguments, timeout) }
     }
 
+    // MARK: - Planner + app memory
+
+    /// Planner gate: `JARVIS_PLANNER=0` (also off/false/no) disables
+    /// unconditionally — even an injected client. An injected client then
+    /// wins outright; the Config flag gates only the production default so
+    /// the feature stays dark until its setting exists.
+    private func activePlanner() -> (any CuaPlanning)? {
+        let raw = config.environment["JARVIS_PLANNER"]
+            ?? getenv("JARVIS_PLANNER").map { String(cString: $0) }
+        if let raw, ["0", "false", "off", "no"].contains(raw.lowercased()) {
+            return nil
+        }
+        if let planner { return planner }
+        return config.plannerEnabled ? CuaPlanner.shared : nil
+    }
+
+    /// One bounded planner call — a cold codex spawn can eat seconds, so a
+    /// fixed ~4s budget races it; a slow turn keeps running detached on the
+    /// warm session and is simply ignored here.
+    private func planWithBudget(_ planner: any CuaPlanning, goal: String, appName: String?,
+                                windowTitle: String?, memoryContext: String?,
+                                previousContext: String?,
+                                budget: TimeInterval = 4) async -> DrivePlan? {
+        await withTaskGroup(of: DrivePlan?.self) { group in
+            group.addTask {
+                await planner.plan(goal: goal, appName: appName, windowTitle: windowTitle,
+                                   memoryContext: memoryContext, previousContext: previousContext)
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(budget))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// Ledger lines "<description> → <outcome>" mark dispatches that
+    /// landed; " — " lines are skips/failures and carry no outcome. Landed
+    /// descriptions map to coarse lane kinds memory can rank next time.
+    private static func laneKinds(in history: [String]) -> [String] {
+        var kinds: [String] = []
+        for line in history {
+            guard let sep = line.range(of: " → ") else { continue }
+            let description = String(line[..<sep.lowerBound])
+            let kind: String?
+            if description.hasPrefix("Pixel-click") { kind = "pixel" }
+            else if description.hasPrefix("Click the"), description.hasSuffix("seen on screen") { kind = "visual" }
+            else if description.hasPrefix("Click page element") { kind = "browser_click" }
+            else if description.hasPrefix("Type the supplied text into page field") { kind = "browser_type" }
+            else if description.hasPrefix("Click ") { kind = "click" }
+            else if description.hasPrefix("Type the supplied text") {
+                kind = description.contains("keyboard focus") ? "type_window" : "type"
+            }
+            else if description.hasPrefix("Set the value") { kind = "set_value" }
+            else if description.hasPrefix("Invoke the") { kind = "menu" }
+            else if description.hasPrefix("Press ") { kind = "key" }
+            else if description.hasPrefix("Scroll ") { kind = "scroll" }
+            else if description.hasPrefix("Navigate the tab") { kind = "navigate" }
+            else if description.hasPrefix("Open a new browser tab") { kind = "new_tab" }
+            else if description.hasPrefix("Accept the open") || description.hasPrefix("Dismiss the open") { kind = "dialog" }
+            else { kind = nil }
+            if let kind, !kinds.contains(kind) { kinds.append(kind) }
+        }
+        return kinds
+    }
+
+    /// Lanes grounded in the AX tree — a landed one proves the tree wasn't
+    /// sparse this run.
+    private static let axLaneKinds: Set<String> = ["click", "type", "set_value", "menu"]
+
+    /// Fold a settled drive into per-app memory. Reads only what the loop
+    /// observed — the terminal status and the dispatch ledger — never the
+    /// model's claims. Fire-and-forget: settlement never waits on a write.
+    private func recordDriveMemory(result: DriveResult, spec: TaskSpec, work: Work) {
+        let bundleID = result.bundleID ?? work.bundle ?? spec.application ?? ""
+        guard !bundleID.isEmpty else { return }
+        var update = CuaAppMemoryUpdate(laneKinds: Self.laneKinds(in: result.history))
+        if case .handedBack(.noInteractiveElements) = result.status {
+            update.axSparse = true
+        } else if update.laneKinds.contains(where: { Self.axLaneKinds.contains($0) }) {
+            update.axSparse = false
+        }
+        if update.laneKinds.contains("pixel") || update.laneKinds.contains("visual") {
+            update.prefersVisual = true
+        }
+        let appName = spec.application ?? work.bundle
+        let memory = appMemory
+        Task { await memory.note(bundleID: bundleID, appName: appName, record: update) }
+    }
+
     // MARK: - Worker
 
     private func runWork(_ kind: AcceptedKind, work: Work, invocation: Invocation) async {
@@ -1494,6 +1672,14 @@ final class CuaVoiceRuntime {
         do {
             try Task.checkCancellation()
             if work.stopRequested { throw CancellationError() }
+            // Spawn the planner now — the lease queue and consent asks below
+            // are dead time the codex cold start can overlap. Prewarm is
+            // fire-and-forget and survives cancellation (the spawn adopts
+            // its own result), so a queued-then-cancelled task still leaves
+            // the session warm.
+            if case .execute = kind, let planner = activePlanner() {
+                Task { await planner.warmUp() }
+            }
             work.phase = .working
             // On a locked console every activation and key event silently
             // no-ops — the driver reports `partial` for each bring_to_front
@@ -1568,6 +1754,12 @@ final class CuaVoiceRuntime {
                     outcome = .blocked(reason: connection.localizedDescription)
                 case .malformed, .toolRefused:
                     outcome = .failed(reason: connection.localizedDescription)
+                }
+                // The daemon's own refusal reason is stripped from the
+                // user-facing message; keep it in the local log — without it
+                // every distinct refusal collapses into the bare code.
+                if let detail = connection.diagnosticsDetail {
+                    Self.log.notice("voice_task_driver_detail \"\(work.request, privacy: .public)\" — \(detail, privacy: .public)")
                 }
             } else {
                 outcome = .failed(reason: error.localizedDescription)
@@ -1823,6 +2015,51 @@ final class CuaVoiceRuntime {
                 noteChange()
             }
         }
+        // Advisory planner + per-app memory — both only enrich
+        // `previous_context` and success strings. The plan sketches steps
+        // and adds proof strings; the loop's own observation still decides
+        // what dispatches and what counts as done.
+        var taskSuccessContains = spec.successContains
+        var taskPreviousContext = dialogue.entry(for: work.intentID)?.answers.last?.utterance
+        let appIdentity = work.bundle ?? spec.application
+        if let appIdentity, !appIdentity.isEmpty {
+            let memoryContext = await appMemory.context(forApp: appIdentity)
+            if let memoryContext {
+                taskPreviousContext = ([taskPreviousContext, memoryContext]
+                    .compactMap { $0 }.filter { !$0.isEmpty }).joined(separator: "\n")
+            }
+            if let planner = activePlanner() {
+                let plannerStarted = ProcessInfo.processInfo.systemUptime
+                defer {
+                    invocation.timings["Planner", default: 0] +=
+                        (ProcessInfo.processInfo.systemUptime - plannerStarted) * 1000
+                }
+                if let plan = await planWithBudget(planner, goal: goal,
+                                                   appName: spec.application ?? appIdentity,
+                                                   windowTitle: spec.window,
+                                                   memoryContext: memoryContext,
+                                                   previousContext: taskPreviousContext) {
+                    var advisory: [String] = []
+                    if !plan.steps.isEmpty {
+                        advisory.append("Plan: " + plan.steps.joined(separator: "; "))
+                    }
+                    if plan.hints.preferVisual {
+                        advisory.append("Planner hint: this app's surface may need the visual or pixel lanes.")
+                    }
+                    if let notes = plan.hints.notes {
+                        advisory.append("Planner note: \(notes)")
+                    }
+                    if !advisory.isEmpty {
+                        taskPreviousContext = (advisory + [taskPreviousContext]
+                            .compactMap { $0 }.filter { !$0.isEmpty }).joined(separator: "\n")
+                    }
+                    for claim in plan.successContains where !taskSuccessContains.contains(claim) {
+                        taskSuccessContains.append(claim)
+                    }
+                    feed.add(.route, "Planner: \(plan.steps.count) step\(plan.steps.count == 1 ? "" : "s")")
+                }
+            }
+        }
         let loop = CuaAgentLoop(call: makeToolCall(invocation: invocation, useInstalledAppCache: false),
             judge: makeTimedJudge(invocation),
             approve: { [weak self] description in
@@ -1849,10 +2086,10 @@ final class CuaVoiceRuntime {
             result = try await loop.drive(DriveTask(
                 goal: goal, application: spec.application,
                 windowName: spec.window,
-                previousContext: dialogue.entry(for: work.intentID)?.answers.last?.utterance,
+                previousContext: taskPreviousContext,
                 scope: spec.scope,
                 values: values, deny: spec.deny,
-                successContains: spec.successContains,
+                successContains: taskSuccessContains,
                 foreground: spec.foreground
                     || Self.wantsForeground(dialogue.entry(for: work.intentID)?.intent.utterance ?? goal)))
         } catch {
@@ -1866,6 +2103,9 @@ final class CuaVoiceRuntime {
         }
         work.bundle = result.bundleID ?? work.bundle
         work.window = result.windowID ?? work.window
+        // Feed the observed outcome back into per-app memory — the status
+        // and dispatch ledger, never the model's claims. Fire-and-forget.
+        recordDriveMemory(result: result, spec: spec, work: work)
         if let pendingAsk = pendingLoopQuestion(result.status) {
             // The loop needs an answer the caller never supplied — finish
             // this attempt honestly and re-open the intent with the ask; the

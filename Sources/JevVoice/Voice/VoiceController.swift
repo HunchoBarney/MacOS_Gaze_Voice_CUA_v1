@@ -194,6 +194,17 @@ final class VoiceController: ObservableObject {
         }
     }
 
+    /// Agent-side speakable events (consent asks, replies) join the realtime
+    /// voice whenever that lane exists — a dead socket queues for replay
+    /// rather than dropping the line. Returning false leaves the caller the
+    /// AVSpeechSynthesizer fallback; speaking both ways at once is the
+    /// two-voices-over-each-other glitch.
+    func voiceAgentEvent(_ text: String) -> Bool {
+        guard let lane = speech as? RealtimeVoiceLane else { return false }
+        lane.pushTaskEvent(text, speak: true)
+        return true
+    }
+
     /// An explicit retry resumes the intent in place through the runtime's
     /// direct path — same intent id, fresh attempt, re-observed state. It
     /// never replays a tool call or re-runs a worker directly. Requires an
@@ -980,9 +991,10 @@ final class VoiceController: ObservableObject {
         }
         // Only this session's dialogue decides the interaction's presentation.
         // A pending clarification is a normal question state, not a failure.
+        // The same question is already pushed to the model via task_question —
+        // speaking it again through TTS produces the double-voice glitch.
         if let question = interactionQuestion {
             detail = question.prompt
-            speak(question.prompt)
             status = .awaitingAnswer(question.prompt)
             return
         }

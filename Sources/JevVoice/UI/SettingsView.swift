@@ -91,6 +91,7 @@ struct SettingsView: View {
         .onAppear {
             apiKeyDraft = config.apiKey
             openAIKeyDraft = config.openAIAPIKey
+            config.codexAuth.refresh()
         }
         .onChange(of: apiKeyDraft) { apiKeySaved = false }
         .onChange(of: openAIKeyDraft) { openAIKeySaved = false }
@@ -224,6 +225,7 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            PlannerCard(auth: config.codexAuth, config: config)
             VoiceCard {
                 VStack(alignment: .leading, spacing: 16) {
                     Label("Command confirmation", systemImage: "checkmark.shield").font(.headline)
@@ -247,4 +249,62 @@ struct SettingsView: View {
 
     private func saveAPIKey() { apiKeySaved = config.saveAPIKey(apiKeyDraft) }
     private func saveOpenAIKey() { openAIKeySaved = config.saveOpenAIAPIKey(openAIKeyDraft) }
+}
+
+/// Planner lane card — ChatGPT sign-in through the vendored codex binary
+/// plus the live planner toggle. Watches CodexAuth directly so the spinner,
+/// device code and status line update as the flow progresses.
+private struct PlannerCard: View {
+    @ObservedObject var auth: CodexAuth
+    @ObservedObject var config: Config
+
+    var body: some View {
+        VoiceCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Planner", systemImage: "sparkles").font(.headline)
+                HStack(spacing: 8) {
+                    statusLine
+                    Spacer()
+                    if auth.signInInFlight { ProgressView().controlSize(.small) }
+                    if case .signedIn = auth.chatGPTAuthStatus, !auth.signInInFlight {
+                        // Signed in — nothing to do.
+                    } else {
+                        Button("Sign in with ChatGPT") { auth.beginChatGPTSignIn() }
+                            .disabled(auth.signInInFlight || !auth.binaryAvailable)
+                    }
+                }
+                if !auth.binaryAvailable {
+                    Text("The bundled codex runtime is missing — rebuild the app bundle to sign in.")
+                        .font(.caption).foregroundStyle(.orange)
+                } else if let code = auth.signInCode {
+                    Text("A sign-in page opened in your browser — enter code \(code) there. It's on your clipboard.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if auth.signInOpenedTerminal {
+                    Text("Finish signing in in the Terminal window that opened; this updates when it completes.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Plans voice turns through your own ChatGPT account using codex sign-in — no API key needed.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Planner", isOn: $config.plannerEnabled)
+                Text("When off, turns skip the planning step and act directly.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var statusLine: some View {
+        HStack(spacing: 6) {
+            switch auth.chatGPTAuthStatus {
+            case .signedIn(let label):
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.mint)
+                Text(label.map { "Signed in as \($0)" } ?? "Signed in").font(.callout)
+            case .signedOut:
+                Image(systemName: "circle").foregroundStyle(.secondary)
+                Text("Not signed in").font(.callout)
+            case .unreachable:
+                Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
+                Text("Codex runtime unavailable").font(.callout)
+            }
+        }
+    }
 }

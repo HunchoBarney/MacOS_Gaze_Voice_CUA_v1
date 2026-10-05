@@ -53,4 +53,55 @@ final class CuaFastLaneWave3Tests: XCTestCase {
         let resolved2 = sut.resolveFastLane(goal: "minimize Spotify's windows", apps: apps)
         XCTAssertEqual(resolved2?.bundle, "com.spotify.client")
     }
+
+    /// "search and play ..." should take the same deterministic Spotify lane
+    /// as "play ..." instead of falling into the drive loop's Electron typing.
+    func testSearchAndPlayRoutesToSpotifyFastLane() {
+        let sut = CuaTaskAgent(call: { _, _ in .object([:]) })
+        let apps = [app("Spotify", bundle: "com.spotify.client", running: true, pid: 9)]
+        let resolved = sut.resolveFastLane(goal: "search and play No Mistakes by Kanye", apps: apps)
+        XCTAssertEqual(resolved?.bundle, "com.spotify.client")
+        guard case .appSearch(_, let play) = resolved?.action?.body else {
+            return XCTFail("expected appSearch, got \(String(describing: resolved?.action?.body))")
+        }
+        XCTAssertTrue(play)
+        XCTAssertEqual(resolved?.launchURLs, ["spotify:search:no%20mistakes%20by%20kanye"])
+    }
+
+    /// Foreground phrasings are open-verbs with the verified-raise contract —
+    /// the exact production utterances that fell into the 17s drive lane.
+    func testBringToFrontIsAFastLane() {
+        let sut = CuaTaskAgent(call: { _, _ in .object([:]) })
+        let apps = [app("Messages", bundle: "com.apple.MobileSMS", running: true, pid: 7),
+                    app("Notes", bundle: "com.apple.Notes", running: true, pid: 5)]
+        for (phrase, verb) in [("bring messages to the front", "bring"),
+                               ("bring messages forward", "bring"),
+                               ("bring messages up", "bring"),
+                               ("bring messages up front", "bring"),
+                               ("foreground messages", "foreground"),
+                               ("pull up messages", "pull up"),
+                               ("bring up messages", "bring up")] {
+            let resolved = sut.resolveFastLane(goal: phrase, apps: apps)
+            XCTAssertEqual(resolved?.bundle, "com.apple.MobileSMS", phrase)
+            XCTAssertEqual(resolved?.openVerb, verb, phrase)
+        }
+        XCTAssertTrue(CuaFastAction.openRequiresRaise(goal: "bring messages to the front"))
+        XCTAssertTrue(CuaFastAction.openRequiresRaise(goal: "foreground notes"))
+        XCTAssertFalse(CuaFastAction.openRequiresRaise(goal: "open messages"))
+    }
+
+    /// "bring it to the front" names what the user is looking at — the
+    /// frontmost app, resolved through the captured hint.
+    func testPronounResolvesToFrontmost() {
+        let sut = CuaTaskAgent(call: { _, _ in .object([:]) })
+        let apps = [app("Messages", bundle: "com.apple.MobileSMS", running: true, pid: 7),
+                    app("Notes", bundle: "com.apple.Notes", running: true, pid: 5)]
+        let resolved = sut.resolveFastLane(goal: "bring it to the front", apps: apps,
+                                           frontmostBundleOverride: "com.apple.MobileSMS")
+        XCTAssertEqual(resolved?.bundle, "com.apple.MobileSMS")
+        XCTAssertEqual(resolved?.openVerb, "bring")
+        // No frontmost app → the pronoun can't resolve, stays with the loop.
+        XCTAssertNil(sut.resolveFastLane(goal: "bring it to the front", apps: apps,
+                                         frontmostBundleOverride: "com.example.unknown"))
+    }
 }

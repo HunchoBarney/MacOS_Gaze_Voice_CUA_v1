@@ -54,6 +54,16 @@ public enum DriverConnectionError: Error, LocalizedError, Equatable {
             return "Cua could not complete \(tool) (\(code)). Inspect the target before retrying."
         }
     }
+
+    /// The daemon's own refusal reason, for the local diagnostics log only —
+    /// kept out of `errorDescription` because refusal text can carry private
+    /// observed content and that description reaches user-facing surfaces.
+    /// The log file already records transcripts verbatim, so the same
+    /// privacy posture applies.
+    public var diagnosticsDetail: String? {
+        if case .toolRefused(_, _, let detail) = self, !detail.isEmpty { return detail }
+        return nil
+    }
 }
 
 /// Incremental framing with a bound, including for an unterminated line.

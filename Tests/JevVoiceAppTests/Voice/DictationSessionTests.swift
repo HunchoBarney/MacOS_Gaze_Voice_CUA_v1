@@ -43,7 +43,7 @@ final class DictationSessionTests: XCTestCase {
                             speaker: FakeSpeaker = FakeSpeaker(),
                             manual: Bool = false, latch: Bool = false) -> VoiceController {
         let config = Config(defaults: UserDefaults(suiteName: "test.dictation.\(UUID())")!,
-                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: [:])
+                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: ["JARVIS_PLANNER": "0"])
         config.autoExecute = !manual
         config.latchMode = latch
         let runtime = CuaVoiceRuntime(config: config, screenLocked: { false })

@@ -33,7 +33,7 @@ fetch() { # url dest
   curl -fL --retry 3 --retry-delay 2 -o "$2" "$1"
 }
 
-# --- cua-driver: the pinned v0.32.0 release build, embedded so TCC grants
+# --- cua-driver: the pinned v0.34.0 release build, embedded so TCC grants
 # attribute to Jev Voice instead of the standalone CuaDriver app. The
 # installed app copy satisfies the pin offline; otherwise fetch the release
 # tarball and extract the signed app-bundle binary (the bare top-level

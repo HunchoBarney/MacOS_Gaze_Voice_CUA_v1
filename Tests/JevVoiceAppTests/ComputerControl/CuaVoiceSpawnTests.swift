@@ -94,14 +94,16 @@ for line in sys.stdin:
                              calls: CallLog? = nil,
                              fastLaneResolver: (@MainActor (String, String?, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = { _, _, _, _ in nil }) -> CuaVoiceRuntime {
         let config = Config(defaults: UserDefaults(suiteName: "test.cua.spawn.\(UUID())")!,
-                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: [:])
+                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: ["JARVIS_PLANNER": "0"])
         return CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"),
                                             arguments: ["-u", script.path],
                                             onToolCall: { name, _ in calls?.record(name) }) },
             judge: judge,
             fastLaneResolver: fastLaneResolver,
-            screenLocked: { false })
+            screenLocked: { false },
+            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
     }
 
     private nonisolated func pick(_ choice: String) -> Answer {

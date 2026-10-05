@@ -1,10 +1,10 @@
 # Cua integration provenance and recovery
 
 The app verifies `/Applications/CuaDriver.app/Contents/MacOS/cua-driver`
-against SHA-256 `656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66`
-(the official upstream `cua-driver-rs` **v0.32.0** release build, tag
-`cua-driver-rs-v0.32.0` at commit `58aba84b5b83`; tarball hash verified
-against the published release manifest on 2026-10-02). The authoritative
+against SHA-256 `54e5d48128fb62323366c49b6be480ccef83cdee23bd7fc1f19431347a5df86b`
+(the official upstream `cua-driver-rs` **v0.34.0** release build, tag
+`cua-driver-rs-v0.34.0` at commit `b0968e1b1283`; tarball hash verified
+against the downloaded release tarball on 2026-10-05). The authoritative
 runtime constants are in
 [`CuaDependency.swift`](../../Sources/JevVoice/ComputerControl/CuaDependency.swift).
 Do not update the pin just to accept a different build.
@@ -19,6 +19,8 @@ fork's `type_chars_only` arg was removed from our calls. Browser `target_id`/
 from the same snapshot, immediately.
 
 Prior pins (recovery only):
+- `656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66` — upstream
+  v0.32.0, prior pin.
 - `eb08ff7afb89804822c4d7026df3c211feb23e5ab3926fa5ea2007aa08916379` — local
   combined watchdog + scroll-readback + menu-focus candidate (0.28.2-based),
   kept installed at `/Applications/CuaDriverLocal.app` as rollback.

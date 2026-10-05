@@ -36,6 +36,20 @@ final class Config: ObservableObject {
         didSet { defaults.set(agentCursorEnabled, forKey: "agentCursorEnabled") }
     }
 
+    /// Planner lane — the planning step that runs on the user's own ChatGPT
+    /// sign-in through codex auth. Live-applied: consumers sink
+    /// `$plannerEnabled` the same way `agentCursorEnabled` is observed.
+    @Published var plannerEnabled: Bool {
+        didSet { defaults.set(plannerEnabled, forKey: "plannerEnabled") }
+    }
+
+    /// ChatGPT/codex login state for the planner UI and runtime — mirrors
+    /// `codexAuth.chatGPTAuthStatus` so a Config handle alone is enough to
+    /// observe it.
+    @Published private(set) var chatGPTAuthStatus: CodexAuth.Status
+    /// ChatGPT sign-in surface: status probes and the device-auth flow.
+    let codexAuth: CodexAuth
+
     /// Spoken replies through the SpeechSynthesizing seam.
     @Published var ttsEnabled: Bool {
         didSet { defaults.set(ttsEnabled, forKey: "ttsEnabled") }
@@ -53,21 +67,31 @@ final class Config: ObservableObject {
         didSet { defaults.set(dictationHotkey, forKey: "dictationHotkey") }
     }
 
+    /// The launch environment snapshot — consulted for kill switches (e.g.
+    /// JARVIS_PLANNER) so tests can inject values without touching the
+    /// process environment.
+    let environment: [String: String]
+
     init(
         defaults: UserDefaults = .standard,
         keyStore: APIKeyStore = KeychainAPIKeyStore(),
         openAIKeyStore: APIKeyStore = KeychainAPIKeyStore(account: "openAIAPIKey"),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        codexAuth: CodexAuth = .shared
     ) {
         self.defaults = defaults
         self.keyStore = keyStore
         self.openAIKeyStore = openAIKeyStore
+        self.codexAuth = codexAuth
+        self.environment = environment
+        self.chatGPTAuthStatus = codexAuth.chatGPTAuthStatus
         self.apiKey = environment["TYPESAFE_API_KEY"] ?? ""
         self.openAIAPIKey = environment["OPENAI_API_KEY"] ?? ""
         self.microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.alwaysAllowComputerUse = defaults.object(forKey: "cuaStandingGrant.computerUseInput") as? Bool ?? false
-        self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? false
+        self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? true
+        self.plannerEnabled = defaults.object(forKey: "plannerEnabled") as? Bool ?? true
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
         self.latchMode = defaults.object(forKey: "latchMode") as? Bool ?? false
         self.dictationHotkey = defaults.object(forKey: "dictationHotkey") as? Bool ?? true
@@ -91,6 +115,8 @@ final class Config: ObservableObject {
         if openAIAPIKey.isEmpty {
             openAIAPIKey = (try? openAIKeyStore.read()) ?? ""
         }
+
+        codexAuth.$chatGPTAuthStatus.assign(to: &$chatGPTAuthStatus)
     }
 
     @discardableResult

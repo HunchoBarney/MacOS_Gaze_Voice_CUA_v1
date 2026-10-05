@@ -85,16 +85,20 @@ for line in sys.stdin:
 
     private func makeRuntime(script: URL,
                              judge: @escaping CuaTaskAgent.Judge,
-                             calls: CallLog? = nil) -> CuaVoiceRuntime {
-        let config = Config(defaults: UserDefaults(suiteName: "test.cua.fixes.\(UUID())")!,
-                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: [:])
+                             calls: CallLog? = nil,
+                             config: Config? = nil) -> CuaVoiceRuntime {
+        let config = config ?? Config(defaults: UserDefaults(suiteName: "test.cua.fixes.\(UUID())")!,
+                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(),
+                            environment: ["JARVIS_PLANNER": "0"])
         return CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"),
                                             arguments: ["-u", script.path],
                                             onToolCall: { name, _ in calls?.record(name) }) },
             judge: judge,
             fastLaneResolver: { _, _, _, _ in nil },
-            screenLocked: { false })
+            screenLocked: { false },
+            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
     }
 
     private nonisolated func pick(_ choice: String) -> Answer {
@@ -169,6 +173,59 @@ for line in sys.stdin:
                                                   app: "spotify"), "Simon and Garfunkel")
         XCTAssertEqual(CuaVoiceRuntime.impliedQuery(in: "find the nearest coffee shop", app: nil),
                        "the nearest coffee shop")
+    }
+
+    /// The model's URL-encoded literal hand-back ("no+mistakes+by+kanye")
+    /// is de-mangled only when the transcript proves the decoded form —
+    /// real "+" strings stay verbatim.
+    func testSanitizedLiteralTextDecodesOnlyWhenTranscriptProves() {
+        XCTAssertEqual(
+            CuaVoiceRuntime.sanitizedLiteralText("no+mistakes+by+kanye",
+                instruction: "search and play no mistakes by kanye"),
+            "no mistakes by kanye")
+        XCTAssertEqual(
+            CuaVoiceRuntime.sanitizedLiteralText("no%20mistakes%20by%20kanye",
+                instruction: "play no mistakes by kanye on Spotify"),
+            "no mistakes by kanye")
+        // A real plus: "c++" has no spaced equivalent in the utterance.
+        XCTAssertEqual(
+            CuaVoiceRuntime.sanitizedLiteralText("type c++ code",
+                instruction: "type c++ code in the editor"),
+            "type c++ code")
+        // Not in the instruction at all → verbatim, never invented.
+        XCTAssertEqual(
+            CuaVoiceRuntime.sanitizedLiteralText("hello+world",
+                instruction: "search spotify for harvest moon"),
+            "hello+world")
+        // No encoded marker → untouched.
+        XCTAssertEqual(
+            CuaVoiceRuntime.sanitizedLiteralText("marvin's room drake",
+                instruction: "play marvin's room by drake"),
+            "marvin's room drake")
+    }
+
+    /// The agent cursor ships on and a Settings toggle re-applies on the
+    /// live session transport — the mint path's one-shot enable is not the
+    /// only application, and a toggle mid-session must not wait for a
+    /// transport re-mint.
+    func testCursorToggleReappliesOnLiveSession() async throws {
+        let calls = CallLog()
+        let script = try driverScript()
+        let config = Config(defaults: UserDefaults(suiteName: "test.cua.cursor.\(UUID())")!,
+                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(),
+                            environment: [:])
+        XCTAssertTrue(config.agentCursorEnabled, "The agent cursor defaults on")
+        let runtime = makeRuntime(script: script, judge: { _, _ in self.answers(next: "done") },
+                                  calls: calls, config: config)
+        runtime.wakeDriverSession()
+        try await until { calls.count("set_agent_cursor_enabled") == 1 }
+        config.agentCursorEnabled = false
+        try await until { calls.count("set_agent_cursor_enabled") == 2 }
+        config.agentCursorEnabled = true
+        try await until { calls.count("set_agent_cursor_enabled") == 3 }
+        XCTAssertEqual(calls.count("start_session"), 1,
+                       "Toggling the cursor must not re-mint the session: \(calls.values)")
+        await runtime.shutdown()
     }
 
     /// The cold-cache accept path never waits on the driver: a roster read

@@ -48,7 +48,7 @@ final class VoiceSessionTests: XCTestCase {
     private func controller(_ speech: FakeSpeech, manual: Bool = false,
                             timings: VoiceTimings = VoiceTimings()) -> VoiceController {
         let config = Config(defaults: UserDefaults(suiteName: "test.voice.\(UUID())")!,
-                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: [:])
+                            keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: ["JARVIS_PLANNER": "0"])
         config.autoExecute = !manual
         return VoiceController(config: config, speech: speech, authorize: { true },
                                timings: timings, frontmost: { "Fixture" },

@@ -177,6 +177,7 @@ final class CuaAgentLoop {
         case typeIntoWindow
         case setValue(token: String, index: Int)
         case pixelClick(token: String, index: Int, x: Double, y: Double)
+        case visualClick(captureID: String, regionID: String, x: Double, y: Double)
         case invokeMenu(path: [String], index: Int)
         case browserDialog(accept: Bool)
         case launchApp(String)
@@ -196,6 +197,7 @@ final class CuaAgentLoop {
             case .typeIntoWindow: return "type_window"
             case .setValue(_, let i): return "setvalue_\(i)"
             case .pixelClick(_, let i, _, _): return "pixel_\(i)"
+            case .visualClick(_, let regionID, _, _): return "vclick_\(regionID)"
             case .invokeMenu(_, let i): return "menu_\(i)"
             case .browserDialog(let accept): return accept ? "bdialog_accept" : "bdialog_dismiss"
             case .launchApp: return "launch_app"
@@ -265,7 +267,7 @@ final class CuaAgentLoop {
         var mayProduceWindow: Bool {
             switch self {
             case .clickElement, .invokeMenu, .newTab, .navigate,
-                 .pixelClick, .browserClick, .launchApp:
+                 .pixelClick, .visualClick, .browserClick, .launchApp:
                 return true
             case .hotkey(let keys):
                 let set = Set(keys.map { $0.lowercased() })
@@ -650,6 +652,23 @@ final class CuaAgentLoop {
         /// this is their observed evidence, not a replayed claim.
         var visualTexts: [String] = []
         var visualParseTried = false
+        /// The hybrid AX+vision pool: an immutable capture's detected
+        /// text/icon regions offered as clickable candidates — armed by
+        /// fusion the moment the AX pool proves inadequate (sparse tree,
+        /// no goal-matched lane), or as the last-resort escalation out of
+        /// a stuck verdict. Cleared by any dispatch, whose mutation makes
+        /// the capture stale.
+        var visualCandidates: (captureID: String,
+                               regions: [(id: String, kind: String, label: String,
+                                          x: Double, y: Double)])?
+        /// The observation signature the last visual parse paid for —
+        /// identical consecutive reads never re-pay it, and a dispatched
+        /// mutation clears it so the post-mutation read re-arms (a scroll
+        /// reveals pixels the AX tree cannot see). It doubles as the
+        /// arming stamp: candidates scanned under a different signature
+        /// carry a stale capture and are dropped, never offered.
+        var lastVisualScanSignature: String?
+        var visualStuckTried = false
         var modelHistory: [JSONValue] = []
 
         for stepIndex in 0..<max(task.maxSteps, 1) {
@@ -848,10 +867,11 @@ final class CuaAgentLoop {
                 if isInteractive { interactive += 1 } else { continue }
                 if Self.isDenied(label, deny: task.deny) { continue }
                 elementCandidates += 1
+                let controlName = label.isEmpty ? "unlabeled \(role) (control \(index))" : "\(role) \"\(label)\""
                 if Self.textRoles.contains(role) {
                     textLaneOffered = true
                     offer(.typeIntoElement(token: token, index: index),
-                          "Type the supplied text into \(role) \"\(label)\"",
+                          "Type the supplied text into \(controlName)",
                           text: Self.elementText(element), element: element)
                     // Two equivalent fill lanes split the judge's confidence
                     // below the act threshold — an AX overwrite only earns an
@@ -865,7 +885,7 @@ final class CuaAgentLoop {
                     if failedLaneIDs.contains(Self.laneIdentity(
                         .typeIntoElement(token: token, index: index), element: element)) {
                         offer(.setValue(token: token, index: index),
-                              "Set the value of \(role) \"\(label)\" to the supplied text",
+                              "Set the value of \(controlName) to the supplied text",
                               text: Self.elementText(element), element: element)
                     }
                 } else if Self.menuRoles.contains(role) {
@@ -880,12 +900,15 @@ final class CuaAgentLoop {
                               text: Self.elementText(element), element: element)
                     }
                 } else {
+                    // Anonymous controls (icon-only buttons, drawn glyphs)
+                    // carry no label the judge can match — describe them by
+                    // role + ordinal so they're still reachable, not noise.
                     offer(.clickElement(token: token, index: index),
-                          "Click \(role) \"\(label)\"", text: Self.elementText(element),
+                          "Click the \(controlName)", text: Self.elementText(element),
                           element: element)
                     if Self.valueRoles.contains(role) {
                         offer(.setValue(token: token, index: index),
-                              "Set the value of \(role) \"\(label)\"", text: Self.elementText(element),
+                              "Set the value of \(controlName)", text: Self.elementText(element),
                               element: element)
                     }
                 }
@@ -909,6 +932,56 @@ final class CuaAgentLoop {
                                   index: index, x: point.x, y: point.y),
                       "Pixel-click \"\(label)\" at its observed center",
                       text: Self.elementText(element), element: element)
+            }
+            // Hybrid perception, Clicky-style: the visual lane pool joins
+            // the element pool the moment AX cannot carry the goal — a
+            // tree sparser than the element floor, or no goal-matched
+            // element lane — never only after a stuck verdict. An
+            // adequate AX pool pays nothing: the judge's option space
+            // stays AX-pure. The budget is one parse per NEW observation,
+            // stamped by the observation signature; an identical re-read
+            // is free and a dispatch clears the stamp so the next read
+            // re-arms fresh pixels.
+            let visualSignature = "\(wid)|\(fingerprint)"
+            if visualCandidates != nil, lastVisualScanSignature != visualSignature {
+                visualCandidates = nil  // armed under an older capture — stale
+            }
+            let goalWords = Self.contentWords(task.goal)
+            var elementGoalMatched = false
+            for (id, lane) in lanes where lane.elementIndex != nil {
+                let text = ((criteria[id] ?? nil) ?? "") + " " + (laneText[id] ?? "")
+                if !Self.contentWords(text).isDisjoint(with: goalWords) {
+                    elementGoalMatched = true
+                    break
+                }
+            }
+            if (elementCandidates < Self.elementLaneFloor || !elementGoalMatched),
+               lastVisualScanSignature != visualSignature {
+                lastVisualScanSignature = visualSignature
+                if let found = await readVisualRegions(pid: resolvedPID, wid: wid,
+                                                       snapshot: snapshot),
+                   !found.regions.isEmpty {
+                    visualCandidates = found
+                    for label in found.regions.map(\.label) where !visualTexts.contains(label) {
+                        visualTexts.append(label)
+                    }
+                    modelHistory.append(.object(["observation": .string(
+                        "The accessibility tree exposed too few candidates. A visual pass sees these on-screen items: \(found.regions.map(\.label).prefix(12).joined(separator: "; ")). If one matches the goal, pick its visual click lane.")]))
+                    ledger.append("thin accessibility — armed \(found.regions.count) visual candidates")
+                }
+            }
+            // Visual candidates carry the region's own pixel center + the
+            // immutable capture that produced it. The driver validates the
+            // capture at dispatch — a stale capture refuses rather than
+            // clicking a moved target.
+            if let visual = visualCandidates {
+                for region in visual.regions {
+                    guard !Self.isDenied(region.label, deny: task.deny) else { continue }
+                    offer(.visualClick(captureID: visual.captureID, regionID: region.id,
+                                       x: region.x, y: region.y),
+                          "Click the \(region.kind == "icon" ? "icon" : "text") \"\(region.label)\" seen on screen",
+                          text: region.label)
+                }
             }
             // Deny gates key names too — "delete" must not remain
             // reachable via the keyboard when the button is denied. Once the
@@ -1220,6 +1293,31 @@ final class CuaAgentLoop {
                 return finish(.done)
             }
             if let reason = judgment.blocked {
+                // One visual escalation before accepting a stuck verdict:
+                // a window that reads thin through AX (Messages' sidebar,
+                // Electron content, drawn controls) may still expose the
+                // target as a detected text/icon region. A pass already
+                // paid for THIS observation — fused candidates the judge
+                // saw and rejected, or a parse that found nothing — is
+                // never paid twice; only candidates gone stale since (an
+                // older observation's signature) earn the one remaining
+                // refresh. The candidates arrive on the next observation;
+                // a second consecutive stuck — or a visual pass that
+                // finds nothing — blocks honestly.
+                if lastVisualScanSignature != visualSignature, !visualStuckTried {
+                    visualStuckTried = true
+                    lastVisualScanSignature = visualSignature
+                    if let found = await readVisualRegions(pid: resolvedPID, wid: wid,
+                                                           snapshot: snapshot),
+                       !found.regions.isEmpty {
+                        visualCandidates = found
+                        visualTexts = found.regions.map(\.label)
+                        modelHistory.append(.object(["observation": .string(
+                            "The accessibility tree did not expose the target. A visual pass sees these on-screen items: \(found.regions.map(\.label).prefix(12).joined(separator: "; ")). If one matches the goal, pick its visual click lane.")]))
+                        ledger.append("stuck — armed \(found.regions.count) visual candidates")
+                        continue
+                    }
+                }
                 return finish(.blocked("The task could not be completed from \(appName)'s current state (\(reason)). Nothing further was dispatched."))
             }
 
@@ -1334,6 +1432,12 @@ final class CuaAgentLoop {
                 }
                 result = outcome
                 dispatchFailures = 0
+                // Any dispatched mutation invalidates the armed visual
+                // capture and its scan stamp — the candidates' pixels
+                // predate the new state, and the post-mutation read
+                // re-arms a fresh pass while the pool stays thin.
+                visualCandidates = nil
+                lastVisualScanSignature = nil
             } catch let error as DriverConnectionError {
                 if case .toolRefused(_, let code, _) = error, code.contains("consent") {
                     return finish(.blockedByConsent(code))
@@ -1567,6 +1671,7 @@ final class CuaAgentLoop {
         case .typeIntoElement: return "typeinto|" + signature(element)
         case .setValue: return "setvalue|" + signature(element)
         case .pixelClick: return "pixel|" + signature(element)
+        case .visualClick(_, let regionID, _, _): return "vclick|" + regionID
         case .invokeMenu(let path, _): return "menu|" + path.joined(separator: "\u{1F}")
         default: return lane.id
         }
@@ -1733,13 +1838,22 @@ final class CuaAgentLoop {
         "you", "me", "please", "into", "from", "click", "type", "press",
         "set", "open", "go", "do", "make", "new", "supplied", "text"]
 
+    /// Non-stopword tokens of length ≥2 — the goal-match vocabulary the
+    /// shortlist and the hybrid-perception trigger share.
+    private static func contentWords(_ text: String) -> Set<String> {
+        Set(text.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 2 && !shortlistStopwords.contains($0) })
+    }
+
     /// Role-priority tier for an element lane — text surfaces beat click
     /// surfaces beat value writes beat menu items when nothing matches
     /// the goal and the floor must pick.
     private static func elementTier(_ lane: Lane) -> Int {
         switch lane {
         case .typeIntoElement: return 0
-        case .clickElement, .pixelClick: return 1
+        case .clickElement, .pixelClick, .visualClick: return 1
         case .setValue: return 2
         case .invokeMenu: return 3
         default: return 9
@@ -1757,12 +1871,6 @@ final class CuaAgentLoop {
                                   laneText: [String: String], goal: String,
                                   values: [String: String])
         -> (lanes: [String: Lane], criteria: [String: String?], laneText: [String: String]) {
-        func contentWords(_ text: String) -> Set<String> {
-            Set(text.lowercased()
-                .split { !$0.isLetter && !$0.isNumber }
-                .map(String.init)
-                .filter { $0.count >= 2 && !shortlistStopwords.contains($0) })
-        }
         let goalWords = contentWords(goal)
         var elementIDs: [String] = []
         var keyboardIDs: [String] = []
@@ -1869,6 +1977,60 @@ final class CuaAgentLoop {
             .compactMap { $0["text"]?.string ?? $0["label"]?.string }
     }
 
+    /// The hybrid read a thin AX pool buys: one window capture parsed
+    /// into detected text/icon regions with pixel bounds — the clickable
+    /// candidate pool for windows the accessibility tree does not expose
+    /// usefully. Region centers are screenshot pixels; the returned
+    /// `capture_id` lets `click` re-resolve the exact coordinate
+    /// transform and atomically refuses a stale capture. When the
+    /// observation's own read already paid for a screenshot (pixel lanes
+    /// armed), its `capture_id` is reused — never a second capture of
+    /// the same pixels. Interactive regions sort first, then parser
+    /// confidence; capped so the candidate list stays a judgment, not a
+    /// dump.
+    private func readVisualRegions(pid: Int, wid: Int,
+                                   snapshot: JSONValue? = nil) async
+        -> (captureID: String,
+            regions: [(id: String, kind: String, label: String, x: Double, y: Double)])? {
+        var captureID = snapshot?["capture_id"]?.string
+        if captureID == nil {
+            captureID = (try? await call("get_window_state",
+                ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                 "include_screenshot": .bool(true),
+                 "include_accessibility_tree": .bool(false)]))?["capture_id"]?.string
+        }
+        guard let captureID,
+              let parsed = try? await call("parse_visual_regions",
+                  ["capture_id": .string(captureID)]) else { return nil }
+        func num(_ value: JSONValue?) -> Double? {
+            guard case .number(let n)? = value, n.isFinite else { return nil }
+            return n
+        }
+        let scored = (parsed["regions"]?.array ?? []).compactMap {
+            region -> (id: String, kind: String, label: String,
+                       x: Double, y: Double, confidence: Double, interactive: Bool)? in
+            guard let bx = num(region["bounds"]?["x"]),
+                  let by = num(region["bounds"]?["y"]),
+                  let bw = num(region["bounds"]?["width"]),
+                  let bh = num(region["bounds"]?["height"]) else { return nil }
+            let label = (region["text"]?.string ?? region["label"]?.string ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let interactive = region["interactive"] == .bool(true)
+            guard interactive || !label.isEmpty else { return nil }
+            return (id: region["id"]?.string ?? "\(Int(bx)),\(Int(by))",
+                    kind: region["kind"]?.string ?? "text",
+                    label: label.isEmpty ? "unlabeled region" : label,
+                    x: bx + bw / 2, y: by + bh / 2,
+                    confidence: num(region["confidence"]) ?? 0,
+                    interactive: interactive)
+        }
+        let regions = scored
+            .sorted { ($0.interactive ? 0 : 1, -$0.confidence) < ($1.interactive ? 0 : 1, -$1.confidence) }
+            .prefix(24)
+            .map { (id: $0.id, kind: $0.kind, label: $0.label, x: $0.x, y: $0.y) }
+        return (captureID, regions)
+    }
+
     /// Driver ActionResult honesty: `effect: confirmed` or an explicit
     /// `verified` readback (including nested postcondition reads like
     /// `exact_window_effect.verified`) is proof of the requested effect.
@@ -1960,6 +2122,11 @@ final class CuaAgentLoop {
         case .pixelClick(_, _, let x, let y):
             return try await call("click", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                             "x": .number(x), "y": .number(y),
+                                            "delivery_mode": .string("background")])
+        case .visualClick(let captureID, _, let x, let y):
+            return try await call("click", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                            "x": .number(x), "y": .number(y),
+                                            "capture_id": .string(captureID),
                                             "delivery_mode": .string("background")])
         case .invokeMenu(let path, _):
             // Menu invocation transiently fronts the app — serialize the

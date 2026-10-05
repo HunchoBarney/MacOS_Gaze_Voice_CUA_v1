@@ -82,8 +82,15 @@ enum CuaDaemonControl {
             .deletingLastPathComponent()  // MacOS
             .deletingLastPathComponent()  // Contents
             .deletingLastPathComponent()  // .app
+        // `--env` is the only channel that reaches a LaunchServices-spawned
+        // daemon. Same 300/50 post-mutation observation window the embedded
+        // spawn carries (see CuaEmbeddedDaemon): without it every bound-window
+        // mutation on this daemon pays the stock 1000ms wait-for-change tail.
         guard (try? await run(URL(fileURLWithPath: "/usr/bin/open"),
-                ["-n", "-g", bundle.path, "--args", "serve", "--grant", "existing-profile"],
+                ["-n", "-g",
+                 "--env", "CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=300",
+                 "--env", "CUA_DRIVER_WINDOW_CHANGE_POLL_MS=50",
+                 bundle.path, "--args", "serve", "--grant", "existing-profile"],
                 timeout: 10)) == true else { return false }
         // Bounded readiness wait: 30s wall-clock ceiling. Each status check
         // carries its own 2s timeout, so without a cap the attempt budget

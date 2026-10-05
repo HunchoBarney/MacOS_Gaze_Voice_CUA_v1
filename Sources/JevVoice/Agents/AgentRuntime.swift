@@ -191,6 +191,9 @@ final class AgentRuntime: ObservableObject {
     private let makeConnection: @MainActor () -> CuaConnection
     private let drivers: DriverDirectory
     private let apiKey: @Sendable () -> String
+    /// Read at each session mint — the Settings toggle governs agent
+    /// cursors the same way it governs the voice session's.
+    private let cursorEnabled: () -> Bool
     private let registry = EndpointRegistry()
     private var endpoints: [String: Endpoints] = [:]
     /// Driver session labels minted per transport lease — see
@@ -237,7 +240,8 @@ final class AgentRuntime: ObservableObject {
 
     init(store: AgentStore, bridge: CodexRuntimeBridge,
          makeConnection: @escaping @MainActor () -> CuaConnection,
-         apiKey: @escaping @Sendable () -> String) {
+         apiKey: @escaping @Sendable () -> String,
+         cursorEnabled: @escaping () -> Bool = { true }) {
         let fireBox = FireBox()
         let drivers = DriverDirectory()
         self.store = store; self.bridge = bridge
@@ -249,6 +253,7 @@ final class AgentRuntime: ObservableObject {
             await fireBox.fire?(slug, routine)
         })
         self.apiKey = apiKey
+        self.cursorEnabled = cursorEnabled
         fireBox.fire = { [weak self] slug, routine in
             await self?.fireRoutine(slug: slug, routine: routine)
         }
@@ -461,7 +466,7 @@ final class AgentRuntime: ObservableObject {
             // The cursor flag is cosmetic, so it stays best-effort.
             _ = try? await connection.call("set_agent_cursor_enabled",
                                            arguments: ["session": .string(label),
-                                                       "enabled": .bool(true)])
+                                                       "enabled": .bool(self.cursorEnabled())])
         }
     }
 

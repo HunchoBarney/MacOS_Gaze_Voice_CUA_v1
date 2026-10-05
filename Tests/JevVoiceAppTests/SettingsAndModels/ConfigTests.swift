@@ -135,6 +135,15 @@ final class ConfigTests: XCTestCase {
         let reloaded = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), openAIKeyStore: FakeAPIKeyStore(), environment: [:])
         XCTAssertFalse(reloaded.autoExecute)
     }
+
+    func testPlannerEnabledDefaultsOnAndPersists() {
+        let config = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), openAIKeyStore: FakeAPIKeyStore(), environment: [:])
+        XCTAssertTrue(config.plannerEnabled)
+        config.plannerEnabled = false
+
+        let reloaded = Config(defaults: defaults, keyStore: FakeAPIKeyStore(), openAIKeyStore: FakeAPIKeyStore(), environment: [:])
+        XCTAssertFalse(reloaded.plannerEnabled)
+    }
 }
 
 private final class FakeAPIKeyStore: APIKeyStore {

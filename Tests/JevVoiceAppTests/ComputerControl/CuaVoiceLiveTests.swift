@@ -30,6 +30,60 @@ final class CuaVoiceLiveTests: XCTestCase {
     func testNewTextEditDocumentThroughVoiceControllerOptIn() async throws {
         try await workflow(request: "Please open TextEdit and create a new document", bundle: "com.apple.TextEdit", newDocument: true)
     }
+    /// The production "open Messages" / "bring to front" failures ran the
+    /// fast lane on the app's own embedded daemon — this drives the same
+    /// runtime end-to-end but bound to the RUNNING app's daemon socket, so
+    /// every driver call executes under the app's TCC-blessed identity
+    /// instead of the test host's. JARVIS_APP_CUA_SOCKET must point at the
+    /// live app's jev-cua-*.sock.
+    func testMessagesCommandsThroughAppDaemonOptIn() async throws {
+        guard let socket = ProcessInfo.processInfo.environment["JARVIS_APP_CUA_SOCKET"],
+              FileManager.default.fileExists(atPath: socket) else {
+            throw XCTSkip("set JARVIS_APP_CUA_SOCKET to the running app's daemon socket")
+        }
+        let suite = "JarvisAppDaemonLive-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let config = Config(defaults: defaults, keyStore: Keys(key: ""),
+                            openAIKeyStore: Keys(key: ""),
+                            environment: ["JARVIS_PLANNER": "0"])
+        let runtime = CuaVoiceRuntime(config: config,
+            makeConnection: { CuaConnection(socketProvider: { socket }) },
+            judge: { _, _ in
+                throw DriverConnectionError.refused("judge must not run on the fast lane")
+            },
+            screenLocked: { false },
+            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
+        defer { Task { await runtime.shutdown() } }
+        let capture = Capture()
+        let controller = VoiceController(config: config, speech: capture,
+                                         authorize: { true }, cuaRuntime: runtime)
+        controller.begin()
+        for _ in 0..<100 where controller.status != .listening {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(controller.status, .listening)
+        defer { Task { await controller.shutdown() } }
+
+        for request in ["open Messages", "bring Messages to the front"] {
+            let priorTaskCount = controller.cuaTasks.count
+            let ack = await controller.cua.beginVoiceTask(request, app: "Messages")
+            print("Voice route ack:", ack)
+            for _ in 0..<600 {
+                if controller.cuaTasks.count > priorTaskCount,
+                   controller.cuaTasks.last?.active == false { break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            let task = try XCTUnwrap(controller.cuaTasks.last)
+            print("Voice route outcome:", task.status, task.message)
+            print("Stage timings ms:", task.timings)
+            XCTAssertEqual(task.status, "Completed", "\(request): \(task.message)")
+        }
+        XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                       "com.apple.MobileSMS", "Messages must be frontmost after both commands")
+    }
+
     func testHiddenCalculatorThroughVoiceControllerOptIn() async throws {
         guard ProcessInfo.processInfo.environment["JARVIS_CUA_VOICE_TEST"] == "1" else { throw XCTSkip("Opt-in macOS hide/show check") }
         let app = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.calculator").first)
@@ -48,7 +102,7 @@ final class CuaVoiceLiveTests: XCTestCase {
         let suite = "JarvisVoiceLive-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let config = Config(defaults: defaults, keyStore: Keys(key: key), openAIKeyStore: Keys(key: ""), environment: [:])
+        let config = Config(defaults: defaults, keyStore: Keys(key: key), openAIKeyStore: Keys(key: ""), environment: ["JARVIS_PLANNER": "0"])
         let observer = CuaConnection()
         var activeController: VoiceController?
         do {

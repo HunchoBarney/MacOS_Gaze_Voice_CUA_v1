@@ -243,9 +243,25 @@ struct CuaFastAction: Equatable {
     static func parseOpen(_ text: String) -> (verb: String, query: String)? {
         let normalized = normalize(text)
         guard !normalized.isEmpty, !isNegated(normalized) else { return nil }
-        for verb in ["open", "launch", "start", "show", "switch to", "bring up", "focus", "go to"] {
+        // "bring up" must precede "bring" — both share the prefix, and the
+        // longer verb keeps its distinct phrasing ("bring up Notes").
+        for verb in ["open", "launch", "start", "show", "switch to", "bring up",
+                     "focus", "go to", "bring", "foreground", "pull up", "raise"] {
             guard normalized.hasPrefix(verb + " ") else { continue }
-            let rest = normalized.dropFirst(verb.count + 1).trimmingCharacters(in: .whitespaces)
+            var rest = normalized.dropFirst(verb.count + 1).trimmingCharacters(in: .whitespaces)
+            // Foreground phrasing puts the target inside the verb frame —
+            // "bring messages to the front" — so the front-words are the
+            // verb's own tail, not part of the app name.
+            if verb == "bring" {
+                for suffix in [" to the front", " up front", " to front",
+                               " forward", " front", " up"] {
+                    if rest.hasSuffix(suffix) {
+                        rest = String(rest.dropLast(suffix.count))
+                            .trimmingCharacters(in: .whitespaces)
+                        break
+                    }
+                }
+            }
             if !rest.isEmpty { return (verb, rest) }
         }
         return nil
@@ -257,7 +273,8 @@ struct CuaFastAction: Equatable {
     /// running process; the foreground raise is best-effort evidence on top.
     static func openRequiresRaise(goal: String) -> Bool {
         guard let parsed = parseOpen(goal) else { return false }
-        return ["show", "switch to", "bring up", "focus", "go to"].contains(parsed.verb)
+        return ["show", "switch to", "bring up", "focus", "go to",
+                "bring", "foreground", "pull up", "raise"].contains(parsed.verb)
     }
 
     /// Resolve an open-command query: a uniquely named installed app, or a
@@ -274,6 +291,13 @@ struct CuaFastAction: Equatable {
             if q.hasSuffix(suffix) { q = String(q.dropLast(suffix.count)) }
         }
         guard !q.isEmpty else { return nil }
+        // Pronouns name what the user is looking at — "bring it to the
+        // front" — which is the captured frontmost app, not a text match.
+        if ["it", "this", "that", "this one", "that one"].contains(q),
+           let frontmostBundle,
+           let app = apps.first(where: { $0["bundle_id"]?.string == frontmostBundle }) {
+            return (app["name"]?.string ?? frontmostBundle, frontmostBundle)
+        }
         if genericBrowserQualifiers.contains(q) {
             return implicitBrowser(apps: apps, frontmostBundle: frontmostBundle)
         }
@@ -378,6 +402,11 @@ struct CuaFastAction: Equatable {
         -> (action: CuaFastAction, appQualifier: String?)? {
         if command.hasPrefix("play ") {
             let query = command.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard !query.isEmpty else { return nil }
+            return (queryAction(query, playTopHit: true), qualifier)
+        }
+        if command.hasPrefix("search and play ") {
+            let query = command.dropFirst(16).trimmingCharacters(in: .whitespaces)
             guard !query.isEmpty else { return nil }
             return (queryAction(query, playTopHit: true), qualifier)
         }

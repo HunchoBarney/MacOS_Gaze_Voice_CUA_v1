@@ -111,12 +111,14 @@ for line in sys.stdin:
                                             onToolCall: { name, _ in calls?.record(name) }) },
             judge: judge,
             fastLaneResolver: fastLaneResolver,
-            screenLocked: { false })
+            screenLocked: { false },
+            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
     }
 
     private func makeConfig() -> Config {
         Config(defaults: UserDefaults(suiteName: "test.cua.voice.\(UUID())")!,
-               keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: [:])
+               keyStore: MemoryKeyStore(), openAIKeyStore: MemoryKeyStore(), environment: ["JARVIS_PLANNER": "0"])
     }
 
     /// Judge/event closures run wherever the worker runs — the canned-answer

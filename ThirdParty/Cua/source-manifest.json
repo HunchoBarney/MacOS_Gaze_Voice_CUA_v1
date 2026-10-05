@@ -5,12 +5,12 @@
   "patch_sha256": "f513c985af5dbf06403d9ccf0eea51c9ca1bc439380830f88f5987c339016052",
   "vendored_binaries": {
     "cua-driver": {
-      "version": "0.32.0",
-      "url": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.32.0/cua-driver-rs-0.32.0-darwin-arm64.tar.gz",
-      "tarball_sha256": "31f278f38015616a02142ccbb396721897cee4892927db103a31b297f60035a9",
-      "member": "cua-driver-rs-0.32.0-darwin-arm64/CuaDriver.app/Contents/MacOS/cua-driver",
+      "version": "0.34.0",
+      "url": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.34.0/cua-driver-rs-0.34.0-darwin-arm64.tar.gz",
+      "tarball_sha256": "329bcc140c4840a5877e2cfc9f756351eb4a70c2c2d6acf4954751918122c60a",
+      "member": "cua-driver-rs-0.34.0-darwin-arm64/CuaDriver.app/Contents/MacOS/cua-driver",
       "installed": "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
-      "sha256": "656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66"
+      "sha256": "54e5d48128fb62323366c49b6be480ccef83cdee23bd7fc1f19431347a5df86b"
     },
     "codex": {
       "version": "0.160.0",

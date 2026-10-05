@@ -49,6 +49,11 @@ actor CuaConnection {
     /// instead of spawning a `serve --embedded` child — the pool path for
     /// per-lane transports that never owned a daemon in the first place.
     private let socketProvider: (@Sendable () async throws -> String)?
+    /// A read-only call that burns its whole retry budget on daemon
+    /// refusals means the daemon itself is sick — alive, answering, and
+    /// refusing every tool. Fired once per storm so the pool can re-mint
+    /// the daemon; a live-but-refusing daemon never heals on its own.
+    private let onDaemonHealthFault: (@Sendable () -> Void)?
     /// A wedged daemon can hold the socket open and never answer — two
     /// consecutive request timeouts mark the transport dead rather than
     /// letting every later call burn a full timeout forever.
@@ -81,7 +86,8 @@ actor CuaConnection {
     init(executable: URL = CuaDependency.executable,
          arguments: [String] = ["mcp"],
          onToolCall: (@Sendable (String, Int?) -> Void)? = nil,
-         socketProvider: (@Sendable () async throws -> String)? = nil) {
+         socketProvider: (@Sendable () async throws -> String)? = nil,
+         onDaemonHealthFault: (@Sendable () -> Void)? = nil) {
         // A write to a just-dead proxy raises SIGPIPE, whose default
         // disposition kills the process — ignore it once so EPIPE surfaces
         // as a thrown error instead of an app crash.
@@ -90,6 +96,7 @@ actor CuaConnection {
         self.arguments = arguments
         self.onToolCall = onToolCall
         self.socketProvider = socketProvider
+        self.onDaemonHealthFault = onDaemonHealthFault
     }
 
     deinit {
@@ -272,28 +279,18 @@ actor CuaConnection {
         }
     }
 
-    /// Mutations inside an already-bound window pay a fixed 1s post-action
-    /// observation window in the driver — the staged window-observation
-    /// patch shrinks that tail through `window_change_timeout_ms` (clamped
-    /// ≤1000). On the stock binary the argument is projected away
-    /// harmlessly; on the patched build the tail drops to the given ms.
-    /// Our own postcondition reads re-observe the window anyway, so a
-    /// short tail is correct here. `launch_app`, `browser_navigate` and
-    /// `invoke_menu` keep the full window — their produced-window/dialog
-    /// observations are the evidence itself.
-    private static let shortTailMutations: Set<String> = [
-        "click", "double_click", "right_click", "type_text", "press_key",
-        "hotkey", "scroll", "set_value", "drag"
-    ]
-
+    /// Mutations inside an already-bound window pay a post-action
+    /// observation window in the driver. The daemon-level tail is sized by
+    /// `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS`/`CUA_DRIVER_WINDOW_CHANGE_POLL_MS`
+    /// on the embedded spawn (see CuaDaemonControl) — per-call arguments are
+    /// NOT a safe channel: tool schemas are `additionalProperties:false`, so
+    /// an extra arg fails validation as `invalid_arguments` before the typed
+    /// projection can drop it.
     func callResult(_ name: String, arguments: [String: JSONValue], timeout: TimeInterval = 30) async throws -> CuaToolResult {
         guard initialized else { throw DriverConnectionError.closed }
         try Task.checkCancellation()
         onToolCall?(name, arguments["text"]?.string?.count)
-        var arguments = arguments
-        if Self.shortTailMutations.contains(name), arguments["window_change_timeout_ms"] == nil {
-            arguments["window_change_timeout_ms"] = .number(150)
-        }
+        let arguments = arguments
         var attempts = Self.isReadOnly(name, arguments: arguments) ? 4 : 1
         var backoff: Duration = .milliseconds(400)
         while true {
@@ -304,7 +301,22 @@ actor CuaConnection {
                 return result
             } catch let error as DriverConnectionError {
                 if case .timedOut = error { noteTimeout() }
-                guard attempts > 0, Self.transientReadFault(error) else { throw error }
+                guard attempts > 0, Self.transientReadFault(error) else {
+                    // A READ that exhausted its retries on daemon refusals is
+                    // a sick-daemon storm — four consecutive
+                    // tool_invocation_failed answers, not a slow transport:
+                    // a fresh proxy on the same daemon would refuse
+                    // identically. Kill this transport so the next call
+                    // re-mints it, and tell the pool's owner to recycle the
+                    // daemon itself. A single refusal on a mutation is a
+                    // real tool error, never a storm.
+                    if Self.isReadOnly(name, arguments: arguments),
+                       Self.transientReadFault(error) {
+                        disconnect(DriverConnectionError.closed)
+                        onDaemonHealthFault?()
+                    }
+                    throw error
+                }
                 // A daemon waking alongside the machine stalls in steps —
                 // bounded backoff covers seconds of it, never a mutation.
                 try? await Task.sleep(for: backoff)
@@ -350,7 +362,12 @@ actor CuaConnection {
         }
         guard value["content"] == nil || value["content"]?.array != nil else { throw DriverConnectionError.malformed }
         let content = value["content"]?.array ?? []
-        return CuaToolResult(structured: Self.mergeWindowChanges(body, content: content), content: content)
+        // The detector only appends window-change data to action results —
+        // reads skip the text-block JSON probe, which otherwise decodes (and
+        // brace-scans) every snapshot's tree_markdown for nothing.
+        let merged = Self.isReadOnly(name, arguments: arguments)
+            ? body : Self.mergeWindowChanges(body, content: content)
+        return CuaToolResult(structured: merged, content: content)
     }
 
     /// The driver's WindowChangeDetector appends `changes.new_windows` /
@@ -362,7 +379,9 @@ actor CuaConnection {
         guard var object = body.object,
               object["new_windows"] == nil, object["new_window_ids"] == nil else { return body }
         for block in content {
-            guard let text = block["text"]?.string,
+            // Both merge keys share the `new_window` prefix — a block without
+            // it can only cost a failed decode, so skip it before parsing.
+            guard let text = block["text"]?.string, text.contains("new_window"),
                   let extra = decodeJSONObject(in: text)?.object else { continue }
             for key in ["new_windows", "new_window_ids"] where object[key] == nil {
                 object[key] = extra[key] ?? extra["changes"]?[key]

@@ -77,7 +77,7 @@ final class RealtimeVoiceClient {
                     "properties": [
                         "instruction": ["type": "string", "description": "The user's instruction, verbatim."],
                         "app": ["type": "string", "description": "The app to act in, when the user named one or the screenshot shows one clearly."],
-                        "literal_text": ["type": "string", "description": "Exact text to type, when the user dictated what to write. Do not paraphrase it."]
+                        "literal_text": ["type": "string", "description": "Exact text to type, when the user dictated what to write. Do not paraphrase it — plain words with spaces, never URL-encoded forms."]
                     ],
                     "required": ["instruction"],
                     "additionalProperties": false

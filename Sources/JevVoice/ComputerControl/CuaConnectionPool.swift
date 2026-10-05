@@ -160,6 +160,19 @@ final class CuaConnectionPool {
         return try await task.value
     }
 
+    /// A daemon that answers MCP but refuses every tool is sick, not dead —
+    /// `isRunning` and the socket file both pass, so nothing would ever
+    /// re-mint it. Called when a read-only call burns its whole retry budget
+    /// on `tool_invocation_failed`: stop the daemon and drop every proxy
+    /// bound to its socket so the next sharedSocket() mints a fresh one.
+    func invalidateDaemon() async {
+        let stale = connections
+        connections = [:]
+        for connection in stale.values { await connection.close() }
+        daemon?.stop()
+        daemon = nil
+    }
+
     /// Ends every label's session and tears down the shared daemon. Not a
     /// tombstone — a later connection() lazily re-mints the daemon.
     func shutdown() async {

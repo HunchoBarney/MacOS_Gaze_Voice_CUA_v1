@@ -241,16 +241,14 @@ final class CuaTaskAgent {
                 break
             }
         }
-        // The running check rides on list_apps — the same `apps` rows the
-        // inventory tree carries, without the full AX walk.
-        let currentInventory = try await call("list_apps", [:])
-        let runningMatches = (currentInventory["apps"]?.array ?? []).filter {
-            $0["bundle_id"]?.string == bundle && ($0["pid"]?.integer ?? 0) > 0
-        }
+        // The running check rides the live process table — the same rows
+        // list_apps resolves `running`/`pid` from, without the ~1.7s
+        // inventory scan on every dispatch.
+        let runningMatches = try await runningPIDs(bundle: bundle)
         guard runningMatches.count <= 1 else {
             throw DriverConnectionError.refused("Multiple instances of this app are running. Specify the target before continuing.")
         }
-        var pid = runningMatches.first?["pid"]?.integer ?? 0
+        var pid = runningMatches.first ?? 0
         var launchResult: JSONValue?
         if runningMatches.isEmpty {
             // App-control verbs target a running app — launching one just to
@@ -273,10 +271,7 @@ final class CuaTaskAgent {
                 try Task.checkCancellation()
                 let inspection: String
                 do {
-                    let observed = try await call("list_apps", [:])
-                    let matches = (observed["apps"]?.array ?? []).filter {
-                        $0["bundle_id"]?.string == bundle && ($0["pid"]?.integer ?? 0) > 0
-                    }
+                    let matches = try await runningPIDs(bundle: bundle)
                     inspection = matches.count == 1 ? "The app was observed running after the timeout."
                         : matches.isEmpty ? "The app was not observed running at inspection time."
                         : "Several matching processes made the launch result ambiguous."
@@ -317,7 +312,7 @@ final class CuaTaskAgent {
             // A transport fault is not "no windows" — propagate it rather
             // than skipping the verified-front contract on a dead driver.
             var rows = launchWindows.isEmpty
-                ? try await listedWindowRows(pid: pid)
+                ? try await listedWindowRowsResilient(pid: pid)
                 : launchWindows
             if let pinned = windowID,
                !rows.contains(where: { $0["window_id"]?.integer == pinned }) {
@@ -333,7 +328,7 @@ final class CuaTaskAgent {
                 if let waited = try? await waitForLaunchWindow(pid: pid) {
                     rows = waited
                 } else {
-                    rows = try await listedWindowRows(pid: pid)
+                    rows = try await listedWindowRowsResilient(pid: pid)
                 }
             }
             if let wid = windowID ?? Self.bestWindowID(in: rows) {
@@ -827,8 +822,45 @@ final class CuaTaskAgent {
         return "Delivered the text to \(label) in \(name); its value is not independently readable."
     }
 
+    /// Live pids for a bundle: the workspace's process table first — the same
+    /// rows list_apps resolves `running`/`pid` from, without the ~1.7s
+    /// inventory scan. The driver read only runs when the workspace names no
+    /// live pid, so a launch/refuse verdict keeps its driver-side check.
+    private func runningPIDs(bundle: String) async throws -> [Int] {
+        let local = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+            .filter { !$0.isTerminated }
+        if !local.isEmpty { return local.map { Int($0.processIdentifier) } }
+        let inventory = try await call("list_apps", [:])
+        return (inventory["apps"]?.array ?? []).compactMap {
+            $0["bundle_id"]?.string == bundle ? $0["pid"]?.integer : nil
+        }.filter { $0 > 0 }
+    }
+
     private func listedWindowRows(pid: Int) async throws -> [JSONValue] {
         (try await call("list_windows", ["pid": .number(Double(pid))]))["windows"]?.array ?? []
+    }
+
+    /// `list_windows` with one recovery attempt: a daemon that refuses a
+    /// read across its whole retry budget is torn down and re-minted by the
+    /// transport layer, so the retry lands on a healthy daemon. Only
+    /// transient faults qualify — a real refusal propagates immediately.
+    private func listedWindowRowsResilient(pid: Int) async throws -> [JSONValue] {
+        do {
+            return try await listedWindowRows(pid: pid)
+        } catch let error as DriverConnectionError where CuaConnection.transientReadFault(error) {
+            try? await Task.sleep(for: .milliseconds(300))
+            return try await listedWindowRows(pid: pid)
+        }
+    }
+
+    /// `waitForLaunchWindow` with the same one-shot daemon-recovery retry.
+    private func launchWindowResilient(pid: Int) async throws -> [JSONValue] {
+        do {
+            return try await waitForLaunchWindow(pid: pid)
+        } catch let error as DriverConnectionError where CuaConnection.transientReadFault(error) {
+            try? await Task.sleep(for: .milliseconds(300))
+            return try await waitForLaunchWindow(pid: pid)
+        }
     }
 
     /// Real browser/document windows, excluding the off-screen untitled
@@ -972,6 +1004,68 @@ final class CuaTaskAgent {
         return "spotify:search:" + (query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query)
     }
 
+    /// `play track "spotify:search:q"` through Spotify's AppleScript
+    /// dictionary, then a `current track` readback — the only path that
+    /// both resolves the top hit inside Spotify AND proves what is
+    /// playing. Returns nil on a consent prompt, a missing Spotify, or any
+    /// script failure so the caller can fall back to the URI lane. The
+    /// 20s cap covers a first-run TCC consent prompt without stalling the
+    /// task forever.
+    nonisolated static func spotifyAppleScriptPlay(_ query: String) async
+        -> (track: String, artist: String)? {
+        let escaped = query.replacingOccurrences(of: "\\", with: "\\\\")
+                           .replacingOccurrences(of: "\"", with: "\\\"")
+        guard await runOsaScript(
+            "tell application \"Spotify\" to play track \"spotify:search:\(escaped)\"",
+            timeout: 20) != nil else { return nil }
+        // The search URI resolves asynchronously — the first readback can
+        // still show the previous state ("stopped"/"paused") while Spotify
+        // fetches the top hit. Poll a few seconds before giving up so a
+        // slow resolve doesn't fall through to the GUI fallback.
+        var parts: [String] = []
+        for _ in 0..<8 {
+            guard let state = await runOsaScript(
+                "tell application \"Spotify\" to get {name of current track, artist of current track, player state}",
+                timeout: 10) else { return nil }
+            // "{track, artist, playing}" — the state tail decides; name and
+            // artist take the rest, tolerating commas inside either.
+            parts = state.split(separator: ",", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            if parts.count >= 3, parts.last == "playing" { break }
+            if Task.isCancelled { return nil }
+            try? await Task.sleep(for: .milliseconds(600))
+        }
+        guard parts.count >= 3, parts.last == "playing" else { return nil }
+        parts.removeLast()
+        let artist = parts.removeLast()
+        return (track: parts.joined(separator: ", "), artist: artist)
+    }
+
+    /// One osascript invocation, capped — a pending Automation consent
+    /// blocks the process until the user answers, so the deadline must be
+    /// enforced outside it.
+    private nonisolated static func runOsaScript(_ source: String,
+                                                 timeout: TimeInterval) async -> String? {
+        await Task.detached(priority: .utility) {
+            let process = Process(), pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", source]
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            do { try process.run() } catch { return nil as String? }
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            if process.isRunning { process.terminate(); return nil as String? }
+            guard process.terminationStatus == 0 else { return nil as String? }
+            let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                              encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (text?.isEmpty == false) ? text : nil
+        }.value
+    }
+
     /// "type X here": AXSelectedText insertion at the live insertion point —
     /// the same element-scoped route dictation uses, no window binding
     /// needed. A nil return hands the request to the drive loop's richer
@@ -1072,6 +1166,16 @@ final class CuaTaskAgent {
            let bundle = front.bundleIdentifier,
            bundle != Bundle.main.bundleIdentifier, Self.supportsIsolatedBrowser(bundle) {
             return (Int(front.processIdentifier), front.localizedName ?? bundle, bundle)
+        }
+        // The workspace's live roster answers the uniquely-running check
+        // without an inventory roundtrip; the driver read only runs when it
+        // reports no live browser so ambiguity keeps its current verdict.
+        let localBrowsers = NSWorkspace.shared.runningApplications.filter {
+            !$0.isTerminated && Self.supportsIsolatedBrowser($0.bundleIdentifier ?? "")
+        }
+        if localBrowsers.count > 1 { return nil }
+        if let app = localBrowsers.first, let bundle = app.bundleIdentifier {
+            return (Int(app.processIdentifier), app.localizedName ?? bundle, bundle)
         }
         let apps = (try await call("list_apps", [:]))["apps"]?.array ?? []
         let running = apps.filter {
@@ -1198,6 +1302,19 @@ final class CuaTaskAgent {
     /// "playing".
     private func dispatchSpotifySearch(_ query: String, playTopHit: Bool, pid: Int, window wid: Int,
                                        name: String) async throws -> String {
+        // Deterministic play first: Spotify's own scripting bridge resolves
+        // "spotify:search:" to the top hit and starts it — no AX field, no
+        // blind Return, and `current track` proves what actually started. A
+        // consent wall or a Spotify build without the command returns nil
+        // and the URI+Return path below carries the task.
+        if playTopHit,
+           let played = await Self.spotifyAppleScriptPlay(query) {
+            recordPostcondition(.resultObserved,
+                                "Spotify reports playing \"\(played.track)\" by \(played.artist).",
+                                appName: name, bundleID: Self.spotifyBundle,
+                                processID: pid, windowID: wid)
+            return "Playing \(played.track) by \(played.artist) on Spotify."
+        }
         let uri = Self.spotifySearchURI(query)
         if !launchURIsDelivered {
             do {
@@ -1226,7 +1343,13 @@ final class CuaTaskAgent {
         // the URI query into its search box, so a field holding the query
         // is the page-rendered signal. Cold launches and login walls can
         // outlive a fixed sleep — Return pressed then lands on the home
-        // page's focused element, not the top result.
+        // page's focused element, not the top result. Spotify can mirror
+        // the ENCODED form back ("no+mistakes"/"no%20mistakes"), so the
+        // raw and both wire spellings all prove the page.
+        let queryForms = [query,
+                          query.replacingOccurrences(of: " ", with: "+"),
+                          query.addingPercentEncoding(withAllowedCharacters:
+                            .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? query]
         let resultsReady = try await pollDriver(attempts: 7, { () async throws -> Bool in
             let state = try await self.call("get_window_state", ["pid": .number(Double(pid)),
                                                                  "window_id": .number(Double(wid)),
@@ -1235,7 +1358,8 @@ final class CuaTaskAgent {
             return (state["elements"]?.array ?? []).contains { element in
                 let role = element["role"]?.string ?? ""
                 guard ["AXTextField", "AXComboBox", "AXSearchField", "AXTextArea"].contains(role) else { return false }
-                return element["value"]?.string?.localizedCaseInsensitiveContains(query) == true
+                guard let value = element["value"]?.string, !value.isEmpty else { return false }
+                return queryForms.contains { value.localizedCaseInsensitiveContains($0) }
             }
         }, until: { $0 }) ?? false
         if !playTopHit {

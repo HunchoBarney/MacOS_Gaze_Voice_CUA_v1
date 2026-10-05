@@ -38,6 +38,7 @@ for line in sys.stdin:
     elif req['params']['name']=='partial_effect': result={'isError':True,'structuredContent':{'status':'partial','observed':{'focused':False},'private':'fixture content'}}
     elif req['params']['name']=='indeterminate_text': result={'isError':True,'structuredContent':{'effect':'indeterminate','code':'type_text_synthesis_budget_exceeded','retryable':False,'escalation':{'recommended':'verify_state'}}}
     elif req['params']['name']=='partial_text': result={'structuredContent':{'effect':'partial','requested_chars':10,'delivered_chars':4}}
+    elif req['params']['name']=='storm': result={'isError':True,'structuredContent':{'code':'tool_invocation_failed','exit_code':1},'content':[{'type':'text','text':'daemon wedge'}]}
     elif req['params']['name']=='native_refusal': result={'isError':True,'structuredContent':{'status':'refused','refusal':{'code':'menu_path_unavailable','message':'private target contents'}}}
     elif req['params']['name']=='refuse_status': result={'structuredContent':{'status':'refused'}}
     elif req['params']['name']=='effect_refusal': result={'structuredContent':{'effect':'refused','escalation':{'reason':'route_unavailable','target':'page'}}}
@@ -91,6 +92,64 @@ for line in sys.stdin:
             XCTAssertFalse(error.localizedDescription.contains("private target contents"))
         }
         await connection.close()
+    }
+
+    /// A read-only call refused across its whole retry budget means the
+    /// daemon itself is sick: the transport is torn down so the next call
+    /// re-mints it, and the owner is told to recycle the daemon — a
+    /// live-but-refusing daemon never heals on its own.
+    func testRefusalStormKillsTransportAndReportsDaemonFault() async throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-fixture-\(UUID()).py")
+        try #"""
+import json,sys
+for line in sys.stdin:
+    req=json.loads(line)
+    if 'id' not in req: continue
+    if req['method']=='initialize':
+        result={'protocolVersion':'2025-03-26','capabilities':{'tools':{}},'serverInfo':{'version':'fixture'}}
+    elif req['params']['name']=='list_apps':
+        result={'isError':True,'structuredContent':{'code':'tool_invocation_failed','exit_code':1},'content':[{'type':'text','text':'daemon wedge'}]}
+    else: result={'structuredContent':{}}
+    print(json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result}),flush=True)
+"""#.write(to: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: path) }
+        var faulted = false
+        let connection = CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"),
+                                       arguments: ["-u", path.path],
+                                       onDaemonHealthFault: { faulted = true })
+        try await connection.connect()
+        do { _ = try await connection.call("list_apps", arguments: [:]); XCTFail("Accepted refusal storm") }
+        catch {
+            guard case .toolRefused = error as? DriverConnectionError else {
+                return XCTFail("expected toolRefused, got \(error)")
+            }
+        }
+        XCTAssertTrue(faulted, "sick-daemon storm must reach the pool owner")
+        let stillUp = await connection.connected
+        XCTAssertFalse(stillUp, "storm must tear the transport down")
+        await connection.close()
+    }
+
+    /// The same refusal on a mutating tool is a real tool error — one
+    /// attempt, no storm, transport stays up.
+    func testSingleMutationRefusalIsNotAStorm() async throws {
+        let (_, path) = try fixture()
+        defer { try? FileManager.default.removeItem(at: path) }
+        var faulted = false
+        let storming = CuaConnection(executable: URL(fileURLWithPath: "/usr/bin/python3"),
+                                     arguments: ["-u", path.path],
+                                     onDaemonHealthFault: { faulted = true })
+        try await storming.connect()
+        do { _ = try await storming.call("storm", arguments: [:]); XCTFail("Accepted refusal") }
+        catch {
+            guard case .toolRefused = error as? DriverConnectionError else {
+                return XCTFail("expected toolRefused, got \(error)")
+            }
+        }
+        XCTAssertFalse(faulted, "a single refusal is not a daemon storm")
+        let stillUp = await storming.connected
+        XCTAssertTrue(stillUp)
+        await storming.close()
     }
 
     func testSetupPermissionProbeMatchesTheInstalledToolInputSchema() async throws {

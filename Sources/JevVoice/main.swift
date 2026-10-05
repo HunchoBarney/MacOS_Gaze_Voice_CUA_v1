@@ -81,12 +81,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // delegation seam is wired late, never guessed at init time.
         controller.cua.agentBridge = VoiceAgentBridge(runtime: agentRuntime)
         agentRuntime?.onConsentAsk = { [weak self] request in
-            self?.speechOutput.speak(request.summary)
+            // One voice only — a live realtime lane voices the ask; the
+            // synthesizer is the fallback when no lane can carry it.
+            let payload = VoiceToolResult(
+                kind: VoiceToolResult.Kind.taskQuestion,
+                status: VoiceToolResult.Status.question,
+                say: VoiceToolResult.spoken(request.summary, words: 20),
+                detail: "An agent needs confirmation: \(request.summary). Ask the user; a plain yes or no resolves it through respond_to_task.").encoded()
+            if self?.controller.voiceAgentEvent(payload) != true {
+                self?.speechOutput.speak(request.summary)
+            }
         }
         agentRuntime?.onAgentReply = { [weak self] _, text in
             // Agent replies are documents — speak a bounded lead, not the whole thing.
             let lead = String((text.split(separator: ".").first.map(String.init) ?? text).prefix(200))
-            self?.speechOutput.speak(lead)
+            if self?.controller.voiceAgentEvent("[agent reply] \(lead)") != true {
+                self?.speechOutput.speak(lead)
+            }
         }
         agentRuntime?.start()
         // Cold-connect the Cua driver now so the first voice command doesn't
@@ -252,7 +263,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let runtime = AgentRuntime(store: store, bridge: bridge,
                                    makeConnection: { CuaConnection(socketProvider: {
                                        try await CuaConnectionPool.shared.socket()
-                                   }) }, apiKey: { jevKey })
+                                   }) }, apiKey: { jevKey },
+                                   cursorEnabled: { Config.shared.agentCursorEnabled })
         return runtime
     }
 

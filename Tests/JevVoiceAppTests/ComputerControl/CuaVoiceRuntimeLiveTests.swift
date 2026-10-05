@@ -196,7 +196,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             var nextConnection = 0
             var modelCalls = 0
             let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeParallel-\(identifier)")!,
-                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
+                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: ["JARVIS_PLANNER": "0"])
             let taskRuntime = CuaVoiceRuntime(config: config, makeConnection: {
                 let connection = runtimeConnections[nextConnection]
                 nextConnection += 1
@@ -502,7 +502,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             }
 
             let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeLiveTests-\(identifier)")!,
-                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
+                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: ["JARVIS_PLANNER": "0"])
             let toolCalls = ToolCalls()
             let taskRuntime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in toolCalls.record(tool, textLength: length) }) }, judge: { state, questions in
                 modelCalls += 1
@@ -621,7 +621,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
 
         let model = JevClient(apiKey: key)
         let config = Config(defaults: UserDefaults(suiteName: "CuaCalcRepro-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: ["JARVIS_PLANNER": "0"])
         let toolCalls = ToolCalls()
         let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in
             print("REPRO driver call:", tool, "textLength", length.map(String.init) ?? "-")
@@ -731,7 +731,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
 
         let model = JevClient(apiKey: key)
         let config = Config(defaults: UserDefaults(suiteName: "CuaChromeTab-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: ["JARVIS_PLANNER": "0"])
         let toolCalls = ToolCalls()
         let runtime = CuaVoiceRuntime(config: config, makeConnection: { CuaConnection(onToolCall: { tool, length in
             print("REPRO driver call:", tool, "textLength", length.map(String.init) ?? "-")
@@ -918,7 +918,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             var modelCalls = 0
             let toolCalls = ToolCalls()
             let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeDialogue-\(identifier)")!,
-                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
+                                keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: ["JARVIS_PLANNER": "0"])
             let taskRuntime = CuaVoiceRuntime(config: config,
                 makeConnection: { CuaConnection(onToolCall: { tool, length in toolCalls.record(tool, textLength: length) }) },
                 judge: { state, questions in
@@ -1041,7 +1041,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         let model = JevClient(apiKey: key)
         let toolCalls = ToolCalls()
         let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceRuntimeMatrix-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: ["JARVIS_PLANNER": "0"])
         let runtime = CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(onToolCall: { tool, length in
                 print("MATRIX driver call:", tool)
@@ -1197,7 +1197,7 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
         let model = JevClient(apiKey: key)
         let toolCalls = ToolCalls()
         let config = Config(defaults: UserDefaults(suiteName: "CuaVoiceWorkflowMatrix-\(UUID().uuidString)")!,
-                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: [:])
+                            keyStore: FixtureKeyStore(key: key), openAIKeyStore: FixtureKeyStore(key: ""), environment: ["JARVIS_PLANNER": "0"])
         let runtime = CuaVoiceRuntime(config: config,
             makeConnection: { CuaConnection(onToolCall: { tool, length in
                 print("WORKFLOW driver call:", tool)
