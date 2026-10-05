@@ -1,7 +1,160 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import JevVoiceCore
 import OSLog
+
+/// The JSON payload every voice tool result and pushed task event carries.
+/// The realtime lane voices `say` verbatim and routes on `status` — so `say`
+/// is always speakable text (no dashes, quotes or parens, word-capped) while
+/// `detail`/`options` stay machine-readable context. `kind` marks pushed
+/// events: "task_outcome" for settled work, "task_question" for parked asks.
+struct VoiceToolResult {
+    var kind: String?
+    var status: String
+    var say: String
+    var detail: String?
+    var options: [String]?
+
+    init(kind: String? = nil, status: String, say: String,
+         detail: String? = nil, options: [String]? = nil) {
+        self.kind = kind; self.status = status; self.say = say
+        self.detail = detail; self.options = options
+    }
+
+    /// Compact JSON, fixed key order: kind, status, say, detail, options.
+    /// The lane's acceptance check matches `"status":"started"` literally —
+    /// no whitespace after colons.
+    func encoded() -> String {
+        var parts: [String] = []
+        if let kind { parts.append("\"kind\":\(Self.jsonString(kind))") }
+        parts.append("\"status\":\(Self.jsonString(status))")
+        parts.append("\"say\":\(Self.jsonString(say))")
+        if let detail { parts.append("\"detail\":\(Self.jsonString(detail))") }
+        if let options {
+            parts.append("\"options\":[\(options.map(Self.jsonString).joined(separator: ","))]")
+        }
+        return "{" + parts.joined(separator: ",") + "}"
+    }
+
+    init?(jsonString: String) {
+        guard let data = jsonString.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = object["status"] as? String,
+              let say = object["say"] as? String else { return nil }
+        self.kind = object["kind"] as? String
+        self.status = status
+        self.say = say
+        self.detail = object["detail"] as? String
+        self.options = object["options"] as? [String]
+    }
+
+    private static func jsonString(_ value: String) -> String {
+        var out = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            default:
+                if scalar.value < 0x20 { out += String(format: "\\u%04x", scalar.value) }
+                else { out.unicodeScalars.append(scalar) }
+            }
+        }
+        return out + "\""
+    }
+
+    /// The spoken contract, enforced deterministically: dashes become commas
+    /// or spaces, quotes/parens/brackets drop, and the line ends on terminal
+    /// punctuation inside the word cap.
+    static func spoken(_ text: String, words cap: Int) -> String {
+        var s = text
+        s = s.replacingOccurrences(of: #"[—–‒]"#, with: ", ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(^|\s)[-‑](\s|$)"#, with: "$1, $2", options: .regularExpression)
+        s = s.replacingOccurrences(of: "-", with: " ")
+        s = s.replacingOccurrences(of: #"["“”`()\[\]{}<>#*|]"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: ";", with: ",")
+        s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\s+([,.:?!])"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #",([,.]+)"#, with: "$1", options: .regularExpression)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        var words = s.split(whereSeparator: \.isWhitespace).map(String.init)
+        if words.count > cap { words = Array(words.prefix(cap)) }
+        s = words.joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ,;:"))
+        guard !s.isEmpty else { return s }
+        if !s.hasSuffix(".") && !s.hasSuffix("?") && !s.hasSuffix("!") { s += "." }
+        return s
+    }
+
+    /// "opening Spotify" from "open Spotify": the leading verb as a gerund
+    /// plus the first few object words — deterministic, no model call. Nil
+    /// when no clean action verb leads the instruction.
+    static func gerundPhrase(for instruction: String) -> String? {
+        var words = instruction.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        let filler: Set<String> = ["please", "jarvis", "jev", "hey", "ok", "okay",
+                                   "can", "could", "would", "will", "you", "just",
+                                   "kindly", "go"]
+        while let first = words.first,
+              filler.contains(first.lowercased()
+                .trimmingCharacters(in: .punctuationCharacters)) {
+            words.removeFirst()
+        }
+        guard let verb = words.first, let gerund = gerund(of: verb) else { return nil }
+        var rest: [String] = []
+        for word in words.dropFirst() {
+            let cleaned = word.trimmingCharacters(in: CharacterSet(charactersIn: ",;:."))
+            if ["then", "afterwards", "after", "next", "please"].contains(cleaned.lowercased()) { break }
+            if cleaned.isEmpty || rest.count >= 5 { break }
+            rest.append(cleaned)
+        }
+        return ([gerund] + rest).joined(separator: " ")
+    }
+
+    private static func gerund(of verb: String) -> String? {
+        let w = verb.lowercased().trimmingCharacters(in: .punctuationCharacters)
+        guard w.count > 1, w.allSatisfy(\.isLetter) else { return nil }
+        let nonActions: Set<String> = ["what", "when", "where", "who", "whom", "why",
+            "how", "which", "the", "a", "an", "it", "its", "is", "are", "was",
+            "were", "am", "be", "i", "we", "they", "he", "she", "me", "him",
+            "them", "us", "my", "your", "his", "her", "their", "our", "this",
+            "that", "these", "those", "there", "here", "if", "but", "not", "no",
+            "yes", "to", "for", "in", "on", "at", "of", "as", "by", "or", "and",
+            "so", "do", "does", "did", "have", "has", "had", "shall", "should",
+            "may", "might", "must", "some", "any", "all"]
+        guard !nonActions.contains(w) else { return nil }
+        let doubles: Set<String> = ["run", "stop", "quit", "set", "cut", "hit",
+            "put", "shut", "sit", "win", "plan", "drag", "drop", "grab", "tap",
+            "hop", "skip", "swap", "wrap", "chat", "begin", "forget"]
+        if doubles.contains(w) { return w + String(w.last!) + "ing" }
+        if w.hasSuffix("ie") { return String(w.dropLast(2)) + "ying" }
+        if w.count <= 2 || w.hasSuffix("ee") { return w + "ing" }
+        if w.hasSuffix("e") { return String(w.dropLast()) + "ing" }
+        return w + "ing"
+    }
+}
+
+extension VoiceToolResult {
+    enum Status {
+        static let started = "started"
+        static let resumed = "resumed"
+        static let cancelled = "cancelled"
+        static let delegated = "delegated"
+        static let sent = "sent"
+        static let refused = "refused"
+        static let nothingPending = "nothing_pending"
+        static let nothingRunning = "nothing_running"
+        static let ok = "ok"
+        static let question = "question"
+    }
+    enum Kind {
+        static let taskOutcome = "task_outcome"
+        static let taskQuestion = "task_question"
+    }
+}
 
 @MainActor
 final class CuaVoiceRuntime {
@@ -49,13 +202,24 @@ final class CuaVoiceRuntime {
         var worker: Task<Void, Never>?
         var elapsedMs: Double = 0
         var timings: [String: Double] = [:]
+        /// systemOne token usage across the run's judge calls — counts, not
+        /// milliseconds, so they live beside `timings` rather than inside it.
+        var judgeInputTokens = 0
+        var judgeOutputTokens = 0
         var active = true
-        /// The attempt parked on a dialogue question — its [question] push is
+        /// The attempt parked on a dialogue question — its task_question push is
         /// the live ask, so settle must not contradict it with a "blocked"
         /// outcome or show the task as failed.
         var questionParked = false
+        /// Deterministic-lane work — a verified outcome is visible on screen
+        /// (the app opened, the window focused), so the settle push stays
+        /// silent instead of spending a spoken line confirming the obvious.
+        var tookFastLane = false
         var approval: String?
         var approvalContinuation: CheckedContinuation<Bool, Never>?
+        /// Uptime stamp of the last park — consent or question — so parked
+        /// asks keep a deterministic order for ordinal hints.
+        var askParkedAt: Double = 0
         var phase: Phase = .queued
         var outcome: CuaDialogueState.Outcome?
         var stopRequested = false
@@ -122,7 +286,10 @@ final class CuaVoiceRuntime {
     /// Front-app check handed to each drive loop — real NSWorkspace in
     /// production; simulated drivers pretend their fixture app is frontmost.
     private let isFrontmostApp: ((Int) -> Bool)?
-    private let queue = CuaWorkQueue()
+    /// App/focus/pasteboard leases — the shared registry the drive loop and
+    /// the agents lane also hold, so one canonical app identity serializes
+    /// dispatch across every lane.
+    private let registry = CuaLaneRegistry.shared
     private let appInventory = CuaAppInventory()
     private(set) var tasks: [Work] = []
     private(set) var selectedID: UUID?
@@ -135,6 +302,23 @@ final class CuaVoiceRuntime {
     /// remote-debugging setup on every command; a per-run session makes the
     /// standing approval actually stick. `end_session` fires at shutdown.
     private var sessionConnection: CuaConnection?
+
+    /// systemOne's measured latency and token usage can't flow through the
+    /// Judge signature (it returns only answers), so the production judge
+    /// drops each call's facts here and makeTimedJudge lifts them onto the
+    /// owning invocation — the last completed call is always the one the
+    /// wrapping defer just timed.
+    private final class JudgeCallFacts: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: (latencyMs: Double, inputTokens: Int?, outputTokens: Int?)?
+        func set(_ value: (Double, Int?, Int?)) { lock.lock(); stored = value; lock.unlock() }
+        func take() -> (latencyMs: Double, inputTokens: Int?, outputTokens: Int?)? {
+            lock.lock(); defer { lock.unlock() }
+            defer { stored = nil }
+            return stored
+        }
+    }
+    private let judgeFacts = JudgeCallFacts()
 
     private var sessionStartTask: Task<CuaConnection, Error>?
     private var sessionLabel: String { "Jarvis runtime · \(instanceLabel)" }
@@ -159,7 +343,11 @@ final class CuaVoiceRuntime {
         return users.contains { ($0["CGSSessionScreenIsLocked"] as? Bool) == true }
     }
 
-    init(config: Config, makeConnection: @escaping () -> CuaConnection = { CuaConnection() },
+    init(config: Config, makeConnection: @escaping () -> CuaConnection = {
+        // Pool-bound: the voice lane proxies onto the shared daemon
+        // alongside agent lanes instead of spawning a second driver stack.
+        CuaConnection(socketProvider: { try await CuaConnectionPool.shared.socket() })
+    },
          judge: CuaTaskAgent.Judge? = nil, dialogue: CuaDialogueState = CuaDialogueState(),
          agentBridge: (any AgentBridging)? = nil,
          fastLaneResolver: (@MainActor (String, String?, String?, [JSONValue]) -> CuaTaskAgent.FastResolution?)? = nil,
@@ -177,10 +365,45 @@ final class CuaVoiceRuntime {
             self.requiresAPIKey = false
         } else {
             self.requiresAPIKey = true
+            let judgeFacts = self.judgeFacts
             self.judge = { state, questions in
-                try await JevClient(apiKey: config.apiKey).systemOne(state: state, questions: questions).response.answers
+                let result = try await JevClient(apiKey: config.apiKey)
+                    .systemOne(state: state, questions: questions)
+                judgeFacts.set((result.latencyMs,
+                                result.response.usage?.inputTokens,
+                                result.response.usage?.outputTokens))
+                return result.response.answers
             }
         }
+        // Lease identity canonicalizes through our roster: "Spotify" and
+        // "com.spotify.client" hold one app lane. The resolver reads the
+        // cached app list; an unresolvable spelling falls back to its
+        // lowercase-trim self, so identical spellings still serialize.
+        let registry = self.registry
+        Task {
+            await registry.setAppIdentityResolver { [weak self] spelling in
+                await self?.canonicalAppIdentity(spelling)
+                    ?? spelling.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+        }
+    }
+
+    /// Lease identity for the shared registry — a display name or bundle
+    /// spelling resolves to the bundle id the roster knows; everything else
+    /// normalizes to lowercase-trim.
+    private func canonicalAppIdentity(_ spelling: String) async -> String {
+        let trimmed = spelling.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if trimmed.lowercased().hasPrefix("pid:") { return trimmed.lowercased() }
+        if let apps = try? await appList(
+                invocation: Invocation(receivedAt: ProcessInfo.processInfo.systemUptime)),
+           let match = apps.first(where: {
+               $0["bundle_id"]?.string?.caseInsensitiveCompare(trimmed) == .orderedSame
+                   || $0["name"]?.string?.caseInsensitiveCompare(trimmed) == .orderedSame
+           }), let bundle = match["bundle_id"]?.string, !bundle.isEmpty {
+            return bundle.lowercased()
+        }
+        return trimmed.lowercased()
     }
 
     /// A deterministic floor under the planner's `foreground` flag: a request
@@ -220,13 +443,17 @@ final class CuaVoiceRuntime {
     /// choice already IS the decision, so this goes straight to routing: fast
     /// lane when the instruction is deterministic, else the drive loop. It
     /// returns the moment the work is accepted; the verified outcome arrives
-    /// later as a pushed `[task outcome]` message. No waiters, no timers.
+    /// later as a pushed `task_outcome` event. No waiters, no timers. The
+    /// result is a VoiceToolResult payload — the lane voices `say` verbatim.
     func beginVoiceTask(_ instruction: String, app: String?,
                         frontmostHint: String? = nil, literalText: String? = nil,
                         transcriptHint: String? = nil,
                         captureID: UUID = UUID()) async -> String {
         var trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "No instruction was provided." }
+        guard !trimmed.isEmpty else {
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "That command didn't name anything to do.").encoded()
+        }
         // The realtime model sometimes emits the same call twice — an
         // identical instruction still live (running or parked on an ask)
         // must not run a second time.
@@ -237,47 +464,47 @@ final class CuaVoiceRuntime {
                 .filter { !$0.isEmpty }.joined(separator: " ").lowercased() == key
                 && ($0.active || $0.questionParked || $0.approvalContinuation != nil)
         }) {
-            return "That request is already running — \"\(dupe.request)\". A [task outcome] message arrives when it finishes."
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: "That request is already running.",
+                detail: "Duplicate of \"\(dupe.request)\"; a task_outcome push arrives when it finishes.").encoded()
         }
         feed.add(.heard, trimmed)
         let invocation = Invocation(receivedAt: ProcessInfo.processInfo.systemUptime)
         nextLabel += 1
         let label = "Jarvis \(nextLabel) · \(instanceLabel)"
-        var apps: [JSONValue] = []
-        var resolution: CuaTaskAgent.FastResolution?
-        do {
-            apps = try await appList(invocation: invocation)
-            // The tool args can diverge from the model's own transcript of
-            // the user's words — when both parse as "open X" naming DIFFERENT
-            // installed apps, what the user said is ground truth.
-            if let heard = transcriptHint?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !heard.isEmpty, heard.lowercased() != trimmed.lowercased(),
-               let heardOpen = CuaFastAction.parseOpen(heard),
-               let calledOpen = CuaFastAction.parseOpen(trimmed),
-               heardOpen.query.lowercased() != calledOpen.query.lowercased(),
-               let heardApp = CuaFastAction.resolveOpenApp(query: heardOpen.query,
-                                                         apps: apps, frontmostBundle: nil),
-               let calledApp = CuaFastAction.resolveOpenApp(query: calledOpen.query,
-                                                          apps: apps, frontmostBundle: nil),
-               heardApp.bundle != calledApp.bundle {
-                Self.log.notice("voice_transcript_divergence heard=\"\(heard, privacy: .public)\" called=\"\(trimmed, privacy: .public)\"")
-                trimmed = heard
-            }
-            // The controller captured who was frontmost before our own UI —
-            // resolve that name to a bundle so an accessory app being
-            // frontmost can't steal generic-command targeting.
-            let frontmostBundle = frontmostHint.flatMap { hint in
-                (apps.first { $0["name"]?.string?.localizedCaseInsensitiveCompare(hint) == .orderedSame })?["bundle_id"]?.string
-            }
-            resolution = (fastLaneResolver ?? { goal, hint, frontmost, list in
-                CuaTaskAgent(call: { _, _ in .object([:]) })
-                    .resolveFastLane(goal: goal, apps: list, appHint: hint,
-                                     frontmostBundleOverride: frontmost)
-            })(trimmed, app, frontmostBundle, apps)
-        } catch {
-            Self.log.notice("fast_lane_app_list_failed error=\(error.localizedDescription, privacy: .public)")
-            feed.add(.error, "The computer-use driver isn't reachable — the task will retry it directly.")
+        // The accept path never waits on the driver: a ≤45s roster snapshot
+        // routes this turn; a cold or expired cache kicks a background
+        // refresh and falls back to the instant local roster, so "open X"
+        // still resolves deterministically instead of paying list_apps
+        // inside the drive loop. The loop's own reads stay authoritative.
+        let apps = acceptPathAppList()
+        // The tool args can diverge from the model's own transcript of
+        // the user's words — when both parse as "open X" naming DIFFERENT
+        // installed apps, what the user said is ground truth.
+        if let heard = transcriptHint?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !heard.isEmpty, heard.lowercased() != trimmed.lowercased(),
+           let heardOpen = CuaFastAction.parseOpen(heard),
+           let calledOpen = CuaFastAction.parseOpen(trimmed),
+           heardOpen.query.lowercased() != calledOpen.query.lowercased(),
+           let heardApp = CuaFastAction.resolveOpenApp(query: heardOpen.query,
+                                                     apps: apps, frontmostBundle: nil),
+           let calledApp = CuaFastAction.resolveOpenApp(query: calledOpen.query,
+                                                      apps: apps, frontmostBundle: nil),
+           heardApp.bundle != calledApp.bundle {
+            Self.log.notice("voice_transcript_divergence heard=\"\(heard, privacy: .public)\" called=\"\(trimmed, privacy: .public)\"")
+            trimmed = heard
         }
+        // The controller captured who was frontmost before our own UI —
+        // resolve that name to a bundle so an accessory app being
+        // frontmost can't steal generic-command targeting.
+        let frontmostBundle = frontmostHint.flatMap { hint in
+            (apps.first { $0["name"]?.string?.localizedCaseInsensitiveCompare(hint) == .orderedSame })?["bundle_id"]?.string
+        }
+        let resolution = (fastLaneResolver ?? { goal, hint, frontmost, list in
+            CuaTaskAgent(call: { _, _ in .object([:]) })
+                .resolveFastLane(goal: goal, apps: list, appHint: hint,
+                                 frontmostBundleOverride: frontmost)
+        })(trimmed, app, frontmostBundle, apps)
         let kind: AcceptedKind
         if let resolution {
             feed.add(.route, "Fast lane: \(resolution.openVerb ?? "run") \(resolution.name)")
@@ -294,11 +521,19 @@ final class CuaVoiceRuntime {
                                   apps: apps, captureID: captureID, utterance: trimmed)
         guard work.active else {
             Self.log.notice("voice_task_rejected \"\(trimmed, privacy: .public)\" app=\(app ?? "-", privacy: .public)")
-            return work.message.isEmpty ? "The task could not be started." : work.message
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: VoiceToolResult.spoken(work.message, words: 12).isEmpty
+                    ? "The task could not be started."
+                    : VoiceToolResult.spoken(work.message, words: 12),
+                detail: work.message.isEmpty ? nil : work.message).encoded()
         }
         let lane = resolution != nil ? "fast" : "drive"
         Self.log.notice("voice_task_started lane=\(lane, privacy: .public) app=\(app ?? "-", privacy: .public) \"\(trimmed, privacy: .public)\"")
-        return "STARTED — \(work.request). Acknowledge briefly; a [task outcome] message arrives when it finishes."
+        let say = VoiceToolResult.gerundPhrase(for: trimmed)
+            .map { "On it, \($0)" } ?? "On it"
+        return VoiceToolResult(status: VoiceToolResult.Status.started,
+            say: VoiceToolResult.spoken(say, words: 12),
+            detail: work.request).encoded()
     }
 
     /// Spawns a Work for a voice instruction — same shape as acceptIntent but
@@ -356,34 +591,167 @@ final class CuaVoiceRuntime {
         return work
     }
 
-    /// `respond_to_task` — resolves the newest parked ask: a yes/no consent on
-    /// a running work, or a free-text question answer that resumes its intent.
-    /// Returns nil when nothing is waiting, so the caller can fall through to
-    /// other consent surfaces (the agent gate).
-    func respondToTask(_ answer: String, captureID: UUID = UUID()) async -> String? {
+    /// One parked user-facing ask: a yes/no consent on a live work or a
+    /// dialogue question waiting on an answer.
+    private enum ParkedAsk {
+        case consent(Work)
+        case question(CuaDialogueState.Entry, CuaDialogueState.Question)
+
+        var request: String {
+            switch self {
+            case .consent(let work): return work.request
+            case .question(let entry, _): return entry.intent.instruction
+            }
+        }
+        var appName: String? {
+            switch self {
+            case .consent(let work): return work.bundle
+            case .question(let entry, _):
+                return entry.intent.target?.application ?? entry.intent.target?.description
+            }
+        }
+    }
+
+    /// `respond_to_task` — resolves a parked ask: a yes/no consent on a
+    /// running work, or a free-text question answer that resumes its intent.
+    /// Resolution order: (a) a `task` hint — request text, app name, or a
+    /// park-order ordinal — picks the ask; (b) a single parked ask resolves
+    /// regardless; (c) several parked asks and no usable hint refuse with
+    /// the list rather than silently answering the newest. The input's shape
+    /// routes between kinds: verdict words go to consent asks, free text to
+    /// questions — a parked consent must not swallow text meant for a
+    /// question. Returns nil when nothing is waiting — nil (not a
+    /// `nothing_pending` payload) is deliberate: VoiceController falls
+    /// through nil to the agent-gate consent surface, so a string here
+    /// would swallow answers meant for that gate. Same for an empty answer.
+    func respondToTask(_ answer: String, task: String? = nil,
+                       captureID: UUID = UUID()) async -> String? {
         let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        if let work = tasks.last(where: { $0.approvalContinuation != nil && $0.active }) {
-            guard let verdict = Self.consentVerdict(trimmed) else {
-                return "Please answer yes or no — \"\(work.approval ?? work.request)\" is still waiting."
+        let asks = parkedAsks()
+        guard !asks.isEmpty else { return nil }
+        let hint = (task ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !hint.isEmpty {
+            if let match = Self.matchAsk(hint, in: asks) {
+                return await resolveAsk(match, answer: trimmed, captureID: captureID)
+            }
+            return asks.count == 1
+                ? await resolveAsk(asks[0], answer: trimmed, captureID: captureID)
+                : Self.askListRefusal(asks)
+        }
+        if asks.count == 1 {
+            return await resolveAsk(asks[0], answer: trimmed, captureID: captureID)
+        }
+        let verdict = Self.consentVerdict(trimmed)
+        let consents = asks.filter { if case .consent = $0 { return true }; return false }
+        let questions = asks.filter { if case .question = $0 { return true }; return false }
+        if verdict != nil {
+            if consents.count == 1 {
+                return await resolveAsk(consents[0], answer: trimmed, captureID: captureID)
+            }
+            if consents.isEmpty, questions.count == 1 {
+                return await resolveAsk(questions[0], answer: trimmed, captureID: captureID)
+            }
+        } else if questions.count == 1 {
+            return await resolveAsk(questions[0], answer: trimmed, captureID: captureID)
+        }
+        return Self.askListRefusal(asks)
+    }
+
+    /// Every ask waiting on the user in park order — consents stamp the work
+    /// when their continuation registers; questions stamp the owning work at
+    /// park time. A question with no surviving work sorts last.
+    private func parkedAsks() -> [ParkedAsk] {
+        var stamped: [(stamp: Double, ask: ParkedAsk)] = []
+        for work in tasks where work.approvalContinuation != nil && work.active {
+            stamped.append((work.askParkedAt, .consent(work)))
+        }
+        for entry in dialogue.awaitingAnswerEntries {
+            guard let question = entry.question else { continue }
+            let stamp = tasks.last { $0.intentID == entry.intent.id }?.askParkedAt
+                ?? .greatestFiniteMagnitude
+            stamped.append((stamp, .question(entry, question)))
+        }
+        return stamped.sorted { $0.stamp < $1.stamp }.map(\.ask)
+    }
+
+    /// Hint → ask: a park-order ordinal ("first", "second", "last", "2")
+    /// wins outright; otherwise the newest ask whose request text or app
+    /// name contains the hint.
+    private static func matchAsk(_ hint: String, in asks: [ParkedAsk]) -> ParkedAsk? {
+        if let index = ordinalIndex(of: hint, count: asks.count) { return asks[index] }
+        return asks.last {
+            $0.request.lowercased().contains(hint)
+                || ($0.appName?.lowercased().contains(hint) ?? false)
+        }
+    }
+
+    private static func ordinalIndex(of hint: String, count: Int) -> Int? {
+        let words = hint.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        let table: [String: Int] = ["first": 0, "1st": 0, "second": 1, "2nd": 1,
+                                    "third": 2, "3rd": 2, "fourth": 3, "4th": 3]
+        for word in words {
+            if let index = table[word] { return index < count ? index : nil }
+            if ["last", "latest", "newest"].contains(word) { return count - 1 }
+        }
+        if let n = words.compactMap({ Int($0) }).first, n >= 1, n <= count { return n - 1 }
+        return nil
+    }
+
+    /// Several parked asks and no addressing — refuse with the list so the
+    /// model can re-ask with a `task` hint instead of guessing at the newest.
+    private static func askListRefusal(_ asks: [ParkedAsk]) -> String {
+        let names = asks.prefix(2).map {
+            VoiceToolResult.spoken($0.request, words: 3)
+                .trimmingCharacters(in: CharacterSet(charactersIn: " .,!?"))
+        }
+        let say: String
+        if asks.count == 2, names.count == 2, names.allSatisfy({ !$0.isEmpty }),
+           asks.allSatisfy({ if case .consent = $0 { return true }; return false }) {
+            say = "Two tasks are waiting, say yes for \(names[0]) or \(names[1])."
+        } else {
+            say = "\(asks.count) tasks are waiting, name which one to answer."
+        }
+        let detail = asks.enumerated().map { index, ask in
+            "\(index + 1)) \(String(ask.request.prefix(80)))"
+        }.joined(separator: " | ")
+        return VoiceToolResult(status: VoiceToolResult.Status.refused,
+            say: VoiceToolResult.spoken(say, words: 14),
+            detail: "Parked asks: \(detail). Pass the task parameter to respond_to_task to choose.").encoded()
+    }
+
+    /// Resolve one chosen ask — a consent needs a verdict word; a question
+    /// takes free text, with denial words withdrawing the ask entirely.
+    private func resolveAsk(_ ask: ParkedAsk, answer: String, captureID: UUID) async -> String {
+        switch ask {
+        case .consent(let work):
+            guard let verdict = Self.consentVerdict(answer) else {
+                return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                    say: "Please answer yes or no.",
+                    detail: "\"\(work.approval ?? work.request)\" is still waiting.").encoded()
             }
             resolveApproval(work.id, approved: verdict)
-            return verdict ? "Approved — the action is running." : "Denied — the action was not run."
-        }
-        guard let pending = dialogue.pendingClarification else { return nil }
-        // A denial word is a cancel, not an answer — "never mind"/"stop it"
-        // must withdraw the ask, not resume the task with "never mind"
-        // merged into its spec.
-        if let denied = Self.questionDenied(trimmed), denied {
-            if let work = tasks.last(where: { $0.intentID == pending.entry.intent.id }) {
-                cancel(work.id)
-            } else {
-                try? dialogue.cancel(intentID: pending.entry.intent.id, reason: "Cancelled by the user.")
+            return verdict
+                ? VoiceToolResult(status: VoiceToolResult.Status.resumed, say: "On it.").encoded()
+                : VoiceToolResult(status: VoiceToolResult.Status.cancelled, say: "Skipped it.",
+                                  detail: "Denied — the action was not run.").encoded()
+        case .question(let entry, let question):
+            // A denial word is a cancel, not an answer — "never mind"/"stop
+            // it" must withdraw the ask, not resume the task with "never
+            // mind" merged into its spec.
+            if let denied = Self.questionDenied(answer), denied {
+                if let work = tasks.last(where: { $0.intentID == entry.intent.id }) {
+                    cancel(work.id)
+                } else {
+                    try? dialogue.cancel(intentID: entry.intent.id, reason: "Cancelled by the user.")
+                }
+                return VoiceToolResult(status: VoiceToolResult.Status.cancelled,
+                                       say: "Cancelled, nothing further runs.").encoded()
             }
-            return "Cancelled — nothing further runs."
+            return await resumeAnsweredQuestion(owner: entry, question: question,
+                                                answer: answer, captureID: captureID)
         }
-        return await resumeAnsweredQuestion(owner: pending.entry, question: pending.question,
-                                            answer: trimmed, captureID: captureID)
     }
 
     /// Cancel-shaped utterances that should withdraw a parked question
@@ -413,7 +781,9 @@ final class CuaVoiceRuntime {
             try dialogue.answer(.init(questionID: question.id, intentID: owner.intent.id,
                                       revision: owner.revision, source: source, utterance: answer))
         } catch {
-            return "That answer arrived too late — the task is no longer waiting. Repeat the instruction."
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: "That answer arrived too late.",
+                detail: "The task is no longer waiting. Repeat the instruction.").encoded()
         }
         var spec = intentSpecs[owner.intent.id]
             ?? TaskSpec(goal: owner.intent.instruction,
@@ -449,7 +819,8 @@ final class CuaVoiceRuntime {
             await self?.runWork(.execute(spec), work: work, invocation: invocation)
         }
         noteChange()
-        return "Resuming \"\(owner.intent.instruction)\" — acknowledge briefly; a [task outcome] message arrives when it finishes."
+        return VoiceToolResult(status: VoiceToolResult.Status.resumed, say: "On it.",
+                               detail: owner.intent.instruction).encoded()
     }
 
     /// `cancel_task` — a hint matches by request text, label or app; bare
@@ -463,11 +834,15 @@ final class CuaVoiceRuntime {
                 return false
             } ?? false)
         }
-        guard !live.isEmpty else { return "Nothing is running." }
+        guard !live.isEmpty else {
+            return VoiceToolResult(status: VoiceToolResult.Status.nothingRunning,
+                                   say: "Nothing is running.").encoded()
+        }
         let trimmed = (hint ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if trimmed.isEmpty || trimmed == "all" || trimmed == "everything" {
             stopAll()
-            return "Stopping everything."
+            return VoiceToolResult(status: VoiceToolResult.Status.cancelled,
+                                   say: "Stopping everything.").encoded()
         }
         let match = live.last {
             $0.request.lowercased().contains(trimmed)
@@ -475,25 +850,43 @@ final class CuaVoiceRuntime {
                 || ($0.bundle?.lowercased().contains(trimmed) ?? false)
         } ?? (live.count == 1 ? live[0] : nil)
         guard let match else {
-            return "Which task — \(live.map { "\"\($0.request)\"" }.joined(separator: " or "))?"
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: "Which task should I stop?",
+                detail: live.map(\.request).joined(separator: " | ")).encoded()
         }
         cancel(match.id)
-        return "Stopping \"\(match.request)\"."
+        return VoiceToolResult(status: VoiceToolResult.Status.cancelled,
+                               say: "Stopped.", detail: match.request).encoded()
     }
 
     /// `delegate_to_agent` — hands the task to a persistent background agent
-    /// (Clicky's sessions_*). The bridge already returns an acknowledgement,
-    /// never a completion claim.
+    /// (Clicky's sessions_*). The bridge already returns a VoiceToolResult
+    /// payload; a foreign AgentBridging answering plain text gets wrapped so
+    /// the lane always sees the same shape.
     func delegateToAgent(task: String, agent: String?, name: String?,
                          role: String?, description: String?) async -> String {
-        guard let agentBridge else { return "No agent backend is configured in this build." }
+        guard let agentBridge else {
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "No agents are configured in this build.").encoded()
+        }
         do {
-            return try await agentBridge.delegate(DelegationRequest(
+            let reply = try await agentBridge.delegate(DelegationRequest(
                 agentSlug: agent, newAgentName: name, newAgentRole: role,
                 newAgentDescription: description, message: task))
+            return Self.agentReply(reply)
         } catch {
-            return "The agent could not be reached: \(error.localizedDescription)"
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: "The agent could not be reached.",
+                detail: error.localizedDescription).encoded()
         }
+    }
+
+    /// Bridge replies are already VoiceToolResult payloads; anything else is
+    /// acknowledged honestly with the raw text kept as detail.
+    private static func agentReply(_ reply: String) -> String {
+        if VoiceToolResult(jsonString: reply) != nil { return reply }
+        return VoiceToolResult(status: VoiceToolResult.Status.delegated,
+                               say: "On it.", detail: reply).encoded()
     }
 
     func cancelSelected() { if let id = selectedID { cancel(id) } }
@@ -551,26 +944,56 @@ final class CuaVoiceRuntime {
         continuation.resume(returning: approved)
         noteChange()
     }
-    private func requestApproval(_ description: String, for work: Work) async throws -> Bool {
+    private func requestApproval(_ description: String, for work: Work,
+                                 invocation: Invocation? = nil) async throws -> Bool {
         try Task.checkCancellation()
         // Always-allow standing grant — the user opted out of per-action
         // confirmation; the driver still enforces deny lists and scope rules.
         guard !CuaStandingGrants.computerUseInput else { return true }
         feed.add(.consent, description)
+        // A parked ask must not hold the app lease — the wait is unbounded,
+        // so the lane drops here and re-acquires on approval.
+        await registry.release(app: work.bundle ?? "", pid: nil, workID: work.id.uuidString)
+        let consentStarted = ProcessInfo.processInfo.systemUptime
         let accepted = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 work.approval = description
                 work.approvalContinuation = continuation
+                work.askParkedAt = ProcessInfo.processInfo.systemUptime
                 work.message = description
                 selectedID = work.id
-                pushTaskEvent(work, "[needs confirmation] \(description) Ask the user to confirm; when they answer, call respond_to_task.", speak: true)
+                pushTaskEvent(work, VoiceToolResult(
+                    kind: VoiceToolResult.Kind.taskQuestion,
+                    status: VoiceToolResult.Status.question,
+                    say: Self.consentSay(description),
+                    detail: "[needs confirmation, task \(work.id.uuidString.prefix(8))] \"\(work.request)\" — ask the user to confirm; when they answer, call respond_to_task.",
+                    options: ["yes", "no"]).encoded(), speak: true)
                 noteChange()
             }
         } onCancel: {
             Task { @MainActor in self.resolveApproval(work.id, approved: false) }
         }
+        let waited = (ProcessInfo.processInfo.systemUptime - consentStarted) * 1000
+        invocation?.timings["Consent wait", default: 0] += waited
+        work.timings["Consent wait", default: 0] += waited
         try Task.checkCancellation()
-        if accepted { work.phase = .working; noteChange() }
+        if accepted {
+            // Re-take the app lease before dispatch resumes — a peer may be
+            // mid-run on the same app after the park released it. The pid is
+            // re-resolved so the lane matches the identity runWork took.
+            if let app = work.bundle, !app.isEmpty {
+                let queued = ProcessInfo.processInfo.systemUptime
+                let pid = await leasePID(for: app,
+                    invocation: invocation
+                        ?? Invocation(receivedAt: ProcessInfo.processInfo.systemUptime))
+                try await registry.acquire(app: app, pid: pid, workID: work.id.uuidString)
+                let requeued = (ProcessInfo.processInfo.systemUptime - queued) * 1000
+                invocation?.timings["Queue wait", default: 0] += requeued
+                work.timings["Queue wait", default: 0] += requeued
+            }
+            work.phase = .working
+            noteChange()
+        }
         return accepted
     }
     func select(_ id: UUID) { selectedID = id; onChange() }
@@ -580,8 +1003,15 @@ final class CuaVoiceRuntime {
     /// transport and exercises one read; failures are ignored by design.
     func wakeDriverSession() {
         Task { [weak self] in
-            guard let connection = try? await self?.sessionTransport() else { return }
-            _ = try? await connection.call("check_permissions", arguments: [:])
+            guard let self else { return }
+            if let connection = try? await self.sessionTransport() {
+                _ = try? await connection.call("check_permissions", arguments: [:])
+            }
+            // The roster cache expired while the machine slept — refresh it
+            // in the same pass so the first post-wake command routes on
+            // warm data instead of paying a cold list_apps mid-turn.
+            _ = try? await self.appList(
+                invocation: Invocation(receivedAt: ProcessInfo.processInfo.systemUptime))
         }
     }
     func shutdown() async {
@@ -592,6 +1022,10 @@ final class CuaVoiceRuntime {
         // let it finish so its session is released rather than leaked.
         _ = try? await sessionStartTask?.value
         sessionStartTask = nil
+        // A background roster refresh can be mid-read too — drain it before
+        // end_session or it could mint a fresh session past the teardown.
+        _ = try? await appListFetch?.value
+        appListFetch = nil
         // One `end_session` per run: the driver releases the run's grants and
         // rolls back remote-debugging setup it performed.
         if let connection = sessionConnection {
@@ -652,10 +1086,12 @@ final class CuaVoiceRuntime {
     /// blocked keep their verified facts; failed/succeeded re-revise.
     func retryWork(_ workID: UUID) async -> String {
         guard let anchor = tasks.first(where: { $0.id == workID }) else {
-            return "That task is gone."
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "That task is gone.").encoded()
         }
         guard let target = retryTarget(explicitIntentID: anchor.intentID) else {
-            return "There is nothing to retry."
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "There is nothing to retry.").encoded()
         }
         let invocation = Invocation(receivedAt: ProcessInfo.processInfo.systemUptime)
         nextLabel += 1
@@ -664,6 +1100,7 @@ final class CuaVoiceRuntime {
                         intentID: target.intent.id, attemptID: UUID())
         work.provenance = anchor.provenance
         work.timings = invocation.timings
+        invocation.work = work
         tasks.append(work)
         selectedID = work.id
         pruneWorks()
@@ -672,7 +1109,9 @@ final class CuaVoiceRuntime {
             work.outcome = .blocked(reason: "The request was already cancelled; it cannot be retried.")
             work.message = "The request was already cancelled; it cannot be retried."
             noteChange()
-            return work.message
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: VoiceToolResult.spoken(work.message, words: 12),
+                detail: work.message).encoded()
         }
         switch target.status {
         case .uncertain:
@@ -700,7 +1139,9 @@ final class CuaVoiceRuntime {
             guard let self else { return }
             await self.runWork(kind, work: work, invocation: invocation)
         }
-        return "Trying again: \(String(target.intent.instruction.prefix(60)))"
+        return VoiceToolResult(status: VoiceToolResult.Status.resumed,
+            say: "Trying that again.",
+            detail: String(target.intent.instruction.prefix(120))).encoded()
     }
 
 
@@ -713,6 +1154,73 @@ final class CuaVoiceRuntime {
     }
 
     private var appListCache: (fetched: TimeInterval, apps: [JSONValue])?
+    /// One in-flight roster read — the accept-path warm, lease resolution
+    /// and the drive loop's early reads join it instead of stacking
+    /// duplicate list_apps roundtrips on a cold or post-wake daemon.
+    private var appListFetch: Task<[JSONValue], Error>?
+
+    /// Accept-path roster read: the ≤45s snapshot when one exists, else an
+    /// instant local roster plus a background refresh — acknowledging a
+    /// command must never pay a driver roundtrip, and a cold cache must not
+    /// blind fast-lane resolution to apps macOS already knows are running.
+    private func acceptPathAppList() -> [JSONValue] {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard let cached = appListCache, now - cached.fetched < 45 else {
+            refreshAppList()
+            return Self.fallbackAppList()
+        }
+        if now - cached.fetched >= 15 { refreshAppList() }
+        return cached.apps
+    }
+
+    /// Instant routing roster for a cold cache: the live NSWorkspace
+    /// roster in the driver's list_apps shape — real names, bundle ids and
+    /// pids with no transport. Regular-activation apps only — accessory and
+    /// background rows can't be named targets anyway, and an app not yet
+    /// running resolves through the driver read the refresh lands.
+    /// Routing data, never dispatch authority.
+    static func fallbackAppList() -> [JSONValue] {
+        NSWorkspace.shared.runningApplications.compactMap { running in
+            guard running.activationPolicy == .regular,
+                  let bundle = running.bundleIdentifier, !bundle.isEmpty else { return nil }
+            return .object([
+                "name": .string(running.localizedName ?? bundle),
+                "bundle_id": .string(bundle),
+                "running": .bool(true),
+                "pid": .number(Double(running.processIdentifier))])
+        }
+    }
+
+    private func refreshAppList() {
+        // Join (or start) the single in-flight read — back-to-back commands
+        // on a stale roster must not stack duplicate list_apps roundtrips.
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.fetchAppList().value
+            } catch {
+                Self.log.notice("app_list_refresh_failed error=\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private func fetchAppList() -> Task<[JSONValue], Error> {
+        if let fetch = appListFetch { return fetch }
+        // Bypass the 60s inventory cache — the running/pid hints drive
+        // fast-lane candidacy and must reflect this read's own freshness.
+        let fetch = Task { () throws -> [JSONValue] in
+            defer { self.appListFetch = nil }
+            let result = try await self.makeToolCall(
+                invocation: Invocation(receivedAt: ProcessInfo.processInfo.systemUptime),
+                useInstalledAppCache: false)("list_apps", [:])
+            let apps = result["apps"]?.array ?? []
+            self.appListCache = (ProcessInfo.processInfo.systemUptime, apps)
+            return apps
+        }
+        appListFetch = fetch
+        return fetch
+    }
+
     private func appList(invocation: Invocation) async throws -> [JSONValue] {
         let now = ProcessInfo.processInfo.systemUptime
         if let cached = appListCache {
@@ -723,24 +1231,19 @@ final class CuaVoiceRuntime {
                 // read lands for the next turn rather than stalling this one
                 // on a ~2s list_apps roundtrip. Dispatch authority always
                 // comes from the loop's own fresh reads.
-                Task { [weak self] in
-                    guard let self,
-                          let result = try? await self.makeToolCall(
-                              invocation: Invocation(receivedAt: now),
-                              useInstalledAppCache: false)("list_apps", [:]),
-                          let apps = result["apps"]?.array else { return }
-                    self.appListCache = (ProcessInfo.processInfo.systemUptime, apps)
-                }
+                refreshAppList()
                 return cached.apps
             }
         }
-        // Bypass the 60s inventory cache — the running/pid hints drive
-        // fast-lane candidacy and must reflect this read's own freshness.
-        let result = try await makeToolCall(invocation: invocation,
-                                            useInstalledAppCache: false)("list_apps", [:])
-        let apps = result["apps"]?.array ?? []
-        appListCache = (ProcessInfo.processInfo.systemUptime, apps)
-        return apps
+        // A cold or expired read joins the shared fetch; the caller bills
+        // its wait — the same measure whether it spawned the read or not.
+        let started = ProcessInfo.processInfo.systemUptime
+        defer {
+            let elapsed = (ProcessInfo.processInfo.systemUptime - started) * 1000
+            invocation.timings["Cua list_apps", default: 0] += elapsed
+            invocation.work?.timings["Cua list_apps", default: 0] += elapsed
+        }
+        return try await fetchAppList().value
     }
 
     // MARK: - Intent acceptance
@@ -837,12 +1340,30 @@ final class CuaVoiceRuntime {
         return name
     }
 
+    /// The app's live pid when the roster pins one — a pid is the strongest
+    /// lane identity and wins outright over spelling canonicalization, so
+    /// every caller resolves it the same way at acquire time.
+    private func leasePID(for app: String, invocation: Invocation) async -> Int? {
+        guard let apps = try? await appList(invocation: invocation),
+              let match = apps.first(where: {
+                  $0["name"]?.string?.caseInsensitiveCompare(app) == .orderedSame
+                      || $0["bundle_id"]?.string?.caseInsensitiveCompare(app) == .orderedSame
+              }), let pid = match["pid"]?.integer, pid > 0 else { return nil }
+        return pid
+    }
+
     private func makeAgent(invocation: Invocation) -> CuaTaskAgent {
         CuaTaskAgent(call: makeToolCall(invocation: invocation, useInstalledAppCache: false),
             approve: { [weak self] description in
                 guard let self, let work = invocation.work else { return false }
-                return try await self.requestApproval(description, for: work)
-            })
+                return try await self.requestApproval(description, for: work, invocation: invocation)
+            },
+            // Leases must key on the owning work: a shared "" bucket would
+            // satisfy every parallel lane instantly, and releaseAll(workID:)
+            // at teardown could never reclaim a lane held under a name it
+            // doesn't know. A nil-work probe gets its own throwaway id
+            // rather than the shared bucket.
+            workID: invocation.work?.id.uuidString ?? UUID().uuidString)
     }
 
     /// The shared live transport, created lazily. A dead one is replaced
@@ -850,7 +1371,17 @@ final class CuaVoiceRuntime {
     /// call. Two tasks racing to build the first connection funnel through one
     /// serialized bootstrap so neither can orphan a transport or run calls on
     /// a session that was never started.
-    private func sessionTransport() async throws -> CuaConnection {
+    private func sessionTransport(invocation: Invocation? = nil) async throws -> CuaConnection {
+        // Daemon spawn + start_session is billed apart from the tool call
+        // that rides it — a cold runtime's first call used to hide the whole
+        // bootstrap inside "Cua <first tool>". Joiners of an in-flight
+        // bootstrap bill their wait here too.
+        let connectStarted = ProcessInfo.processInfo.systemUptime
+        defer {
+            let elapsed = (ProcessInfo.processInfo.systemUptime - connectStarted) * 1000
+            invocation?.timings["Driver connect", default: 0] += elapsed
+            invocation?.work?.timings["Driver connect", default: 0] += elapsed
+        }
         // Check-and-set is atomic here: every state check (including the
         // connected re-check) happens INSIDE the task, so two callers racing
         // a reconnect-after-death both join one bootstrap instead of
@@ -883,15 +1414,33 @@ final class CuaVoiceRuntime {
 
     private func makeTimedJudge(_ invocation: Invocation) -> CuaTaskAgent.Judge {
         { state, questions in
+            let judgeFacts = self.judgeFacts
+            _ = judgeFacts.take()
             let started = ProcessInfo.processInfo.systemUptime
-            defer { invocation.timings["Jev judgment", default: 0] += (ProcessInfo.processInfo.systemUptime - started) * 1000 }
+            defer {
+                invocation.timings["Jev judgment", default: 0] += (ProcessInfo.processInfo.systemUptime - started) * 1000
+                // The production judge stashed systemOne's measured latency
+                // and token usage; a scripted judge leaves the box empty.
+                // Latency is a duration and bills to timings; usage is a
+                // count and accumulates on the work beside them.
+                if let facts = judgeFacts.take() {
+                    invocation.timings["Jev latency", default: 0] += facts.latencyMs
+                    invocation.work?.judgeInputTokens += facts.inputTokens ?? 0
+                    invocation.work?.judgeOutputTokens += facts.outputTokens ?? 0
+                }
+            }
             return try await self.judge(state, questions)
         }
     }
 
-    private func makeToolCall(invocation: Invocation,
-                              useInstalledAppCache: Bool = true) -> CuaTaskAgent.Call {
-        { tool, arguments in
+    /// The core driver call shared by the plain and timeout-carrying seams:
+    /// session merge, transport resolution (billed apart under "Driver
+    /// connect"), the inventory cache, and "Cua <tool>" timing written
+    /// through to the work live so the inspector sees mid-run accumulation.
+    private func driverToolCall(invocation: Invocation,
+                                useInstalledAppCache: Bool)
+        -> (String, [String: JSONValue], TimeInterval?) async throws -> JSONValue {
+        { tool, arguments, timeout in
             try Task.checkCancellation()
             if let work = invocation.work,
                Self.dispatchesEffect(tool: tool, arguments: arguments) {
@@ -902,24 +1451,46 @@ final class CuaVoiceRuntime {
                     invocation.timings["Transcript to first dispatch"] = elapsed
                 }
             }
-            let started = ProcessInfo.processInfo.systemUptime
-            defer { invocation.timings["Cua \(tool)", default: 0] += (ProcessInfo.processInfo.systemUptime - started) * 1000 }
             let arguments = arguments.merging(["session": .string(self.sessionLabel)]) { _, current in current }
             // Resolve the transport per call: a dead connection is replaced
             // and re-sessioned inside sessionTransport, so a reconnect
             // mid-task never strands this closure on a stale transport.
-            let connection = try await self.sessionTransport()
+            let connection = try await self.sessionTransport(invocation: invocation)
+            let started = ProcessInfo.processInfo.systemUptime
+            defer {
+                let elapsed = (ProcessInfo.processInfo.systemUptime - started) * 1000
+                invocation.timings["Cua \(tool)", default: 0] += elapsed
+                invocation.work?.timings["Cua \(tool)", default: 0] += elapsed
+            }
             if tool == "list_apps", useInstalledAppCache {
                 return try await self.appInventory.read { try await connection.call(tool, arguments: arguments) }
             }
+            if let timeout {
+                return try await connection.call(tool, arguments: arguments, timeout: timeout)
+            }
             return try await connection.call(tool, arguments: arguments)
         }
+    }
+
+    private func makeToolCall(invocation: Invocation,
+                              useInstalledAppCache: Bool = true) -> CuaTaskAgent.Call {
+        let core = driverToolCall(invocation: invocation,
+                                  useInstalledAppCache: useInstalledAppCache)
+        return { tool, arguments in try await core(tool, arguments, nil) }
+    }
+
+    /// The loop's per-call-timeout seam — long type_text dispatches can
+    /// outrun the driver's default 30s at the synthesized-typing rate.
+    private func makeTimedToolCall(invocation: Invocation) -> CuaAgentLoop.TimedCall {
+        let core = driverToolCall(invocation: invocation, useInstalledAppCache: false)
+        return { tool, arguments, timeout in try await core(tool, arguments, timeout) }
     }
 
     // MARK: - Worker
 
     private func runWork(_ kind: AcceptedKind, work: Work, invocation: Invocation) async {
         let start = ContinuousClock.now
+        var outcome: CuaDialogueState.Outcome
         do {
             try Task.checkCancellation()
             if work.stopRequested { throw CancellationError() }
@@ -934,26 +1505,25 @@ final class CuaVoiceRuntime {
             }
 
             // Every app-bound attempt serializes on the app lease — the fast
-            // lane and the drive loop dispatch the same kind of effect.
+            // lane and the drive loop dispatch the same kind of effect. The
+            // registry canonicalizes the spelling to a resolved app identity,
+            // so "com.apple.Safari" and "Safari" can never dispatch
+            // concurrently; a live pid is the strongest identity.
             let queueApp: String? = {
                 switch kind {
                 case .execute(let spec): return spec.application
                 case .fastLane(let resolved, _): return resolved.name
                 }
             }()
-            // A bundle-id-shaped target shares its app's lease — the lease is
-            // an app identity, not a spelling, so "com.apple.Safari" and
-            // "Safari" can never dispatch concurrently.
-            var leaseKey = queueApp
-            if let raw = queueApp, !raw.isEmpty {
-                leaseKey = await leaseIdentity(for: raw, invocation: invocation)
-            }
-            if let leaseKey, !leaseKey.isEmpty {
+            if let queueApp, !queueApp.isEmpty {
+                let display = await leaseIdentity(for: queueApp, invocation: invocation)
                 work.phase = .waiting
-                work.message = "Waiting for \(leaseKey)…"
+                work.message = "Waiting for \(display)…"
                 noteChange()
                 let queued = ProcessInfo.processInfo.systemUptime
-                try await queue.acquire(work.id, app: leaseKey)
+                try await registry.acquire(app: queueApp,
+                                           pid: await leasePID(for: queueApp, invocation: invocation),
+                                           workID: work.id.uuidString)
                 invocation.timings["Queue wait", default: 0] +=
                     (ProcessInfo.processInfo.systemUptime - queued) * 1000
                 work.phase = .working
@@ -966,9 +1536,9 @@ final class CuaVoiceRuntime {
                 invocation.timings["Jev execution", default: 0] +=
                     (ProcessInfo.processInfo.systemUptime - executionStarted) * 1000
             }
-            var outcome: CuaDialogueState.Outcome
             switch kind {
             case .fastLane(let resolved, let goal):
+                work.tookFastLane = true
                 try await beginAttempt(for: work)
                 outcome = try await runFastLaneOutcome(resolved, goal: goal, work: work,
                                                        agent: makeAgent(invocation: invocation),
@@ -979,37 +1549,54 @@ final class CuaVoiceRuntime {
                                                  invocation: invocation)
             }
             try Task.checkCancellation()
-            work.timings["Transcript to observed result"] =
-                (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
-            settle(work: work, outcome: outcome)
         } catch is CancellationError {
-            settle(work: work, outcome: .cancelled(reason: "Cancelled. Already dispatched effects may have finished."))
+            outcome = .cancelled(reason: "Cancelled. Already dispatched effects may have finished.")
         } catch {
-            let mapped: CuaDialogueState.Outcome
             if Task.isCancelled || work.stopRequested {
-                mapped = .cancelled(reason: "Cancelled. Already dispatched effects may have finished.")
+                outcome = .cancelled(reason: "Cancelled. Already dispatched effects may have finished.")
             } else if let uncertain = error as? CuaUncertainOutcome {
-                mapped = .uncertain(reason: uncertain.localizedDescription)
+                outcome = .uncertain(reason: uncertain.localizedDescription)
             } else if let connection = error as? DriverConnectionError {
                 switch connection {
                 case .refused(let reason), .remote(let reason):
-                    mapped = .blocked(reason: reason)
+                    outcome = .blocked(reason: reason)
                 case .closed, .timedOut:
                     // The transport died after a dispatch could have landed —
                     // the outcome is unknowable, not failed.
-                    mapped = .uncertain(reason: connection.localizedDescription)
+                    outcome = .uncertain(reason: connection.localizedDescription)
                 case .unavailable:
-                    mapped = .blocked(reason: connection.localizedDescription)
+                    outcome = .blocked(reason: connection.localizedDescription)
                 case .malformed, .toolRefused:
-                    mapped = .failed(reason: connection.localizedDescription)
+                    outcome = .failed(reason: connection.localizedDescription)
                 }
             } else {
-                mapped = .failed(reason: error.localizedDescription)
+                outcome = .failed(reason: error.localizedDescription)
             }
-            settle(work: work, outcome: mapped)
+        }
+        // Every terminal path stamps the full transcript→result latency —
+        // not just the success one.
+        work.timings["Transcript to observed result"] =
+            (ProcessInfo.processInfo.systemUptime - invocation.receivedAt) * 1000
+        // Jarvis-side overhead: the execution span minus everything already
+        // billed to the driver, the model and the user's consent wait.
+        if let execution = invocation.timings["Jev execution"], execution > 0 {
+            let billed = invocation.timings.reduce(0.0) { sum, entry in
+                let key = entry.key
+                // "Jev latency" re-measures the "Jev judgment" span server-
+                // side — billing both would double-count the same wait.
+                guard key != "Jev latency" else { return sum }
+                return key.hasPrefix("Cua ")
+                    || (key.hasPrefix("Jev ") && key != "Jev execution")
+                    || key == "Consent wait" || key == "Driver connect"
+                    ? sum + entry.value : sum
+            }
+            invocation.timings["Internal waits"] = max(0, execution - billed)
         }
         for (name, milliseconds) in invocation.timings { work.timings[name] = milliseconds }
-        queue.release(work.id)
+        // Every lane this work may hold — app, focus, pasteboard — drops on
+        // teardown; a dead owner can neither hold nor later claim a slot.
+        await registry.releaseAll(workID: work.id.uuidString)
+        settle(work: work, outcome: outcome)
         let duration = start.duration(to: .now).components
         work.elapsedMs = Double(duration.seconds) * 1000 + Double(duration.attoseconds) / 1e15
         work.active = false
@@ -1106,7 +1693,9 @@ final class CuaVoiceRuntime {
     /// stopword ("play X and search for it" still lands X). Meta-tails cut
     /// at " then " / " and <verb>" / " please" — a plain " and " survives so
     /// "Simon and Garfunkel" keeps its name. A trailing " in <app>" naming
-    /// the spec's application is stripped.
+    /// the spec's application is stripped — and so is the app's first
+    /// occurrence inside the query when it leads it or sits before "for",
+    /// so "search Spotify for X" yields X, not "Spotify for X".
     static func impliedQuery(in goal: String, app: String?) -> String? {
         let pattern = #"\b(search for|searching for|search|look up|looking up|lookup|google|find|play|queue|listen to|watch|put on)\s+"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
@@ -1140,6 +1729,38 @@ final class CuaVoiceRuntime {
                         query = String(query.dropLast(suffix.count))
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         break
+                    }
+                }
+                // The app can also sit INSIDE the query — "search Spotify
+                // for X" binds the app as target, not payload. Strip its
+                // first occurrence when it leads the query or is directly
+                // followed by "for" (consuming the preposition with it).
+                // A possessive form counts as the app mention — "Spotify's"
+                // strips whole so the query never starts on a dangling 's.
+                if let range = query.range(
+                    of: "\\b\(NSRegularExpression.escapedPattern(for: app))(?:'s|’s)?\\b",
+                    options: [.caseInsensitive, .regularExpression]) {
+                    var head = String(query[..<range.lowerBound])
+                    var rest = query[range.upperBound...]
+                    var consumedFor = false
+                    let loweredRest = rest.lowercased()
+                    if loweredRest.hasPrefix(" for ") || loweredRest == " for" {
+                        rest = rest.dropFirst(4)
+                        consumedFor = true
+                    }
+                    if consumedFor || head.allSatisfy(\.isWhitespace) {
+                        head = head.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // "in Spotify for X" — the lead preposition dangles
+                        // once app+for strip; the query is X, not "in X".
+                        if consumedFor, !head.isEmpty,
+                           let last = head.split(whereSeparator: \.isWhitespace).last,
+                           ["in", "on", "at", "within", "inside", "using",
+                            "of", "for", "to"].contains(last.lowercased()) {
+                            head = String(head.dropLast(last.count))
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                        query = (head + String(rest))
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
                     }
                 }
             }
@@ -1179,12 +1800,15 @@ final class CuaVoiceRuntime {
             values["literal_text"] = literal
             goal += "\nInsert this exact text where the task calls for it: \(literal)"
         }
-        // The app lease was taken in runWork for every app-bound kind; the
-        // consent follow-up path re-acquires here only if runWork did not —
-        // through the same normalization, so spellings can't split the lease.
+        // The app lease was taken in runWork for every app-bound kind; this
+        // acquire is a re-entrant no-op while it holds — the registry
+        // satisfies a second acquire by the same work instantly, so the
+        // consent follow-up path re-acquires here only if runWork did not.
         if let app = spec.application, !app.isEmpty {
             let queued = ProcessInfo.processInfo.systemUptime
-            try await queue.acquire(work.id, app: await leaseIdentity(for: app, invocation: invocation))
+            try await registry.acquire(app: app,
+                                       pid: await leasePID(for: app, invocation: invocation),
+                                       workID: work.id.uuidString)
             invocation.timings["Queue wait", default: 0] +=
                 (ProcessInfo.processInfo.systemUptime - queued) * 1000
             // The inspector's app identity is the resolved bundle id, never
@@ -1203,13 +1827,23 @@ final class CuaVoiceRuntime {
             judge: makeTimedJudge(invocation),
             approve: { [weak self] description in
                 guard let self else { return false }
-                return try await self.requestApproval(description, for: work)
+                return try await self.requestApproval(description, for: work, invocation: invocation)
             },
             progress: { progress in
                 work.message = progress
                 self.noteChange()
             },
-            isFrontmostApp: isFrontmostApp)
+            isFrontmostApp: isFrontmostApp,
+            timedCall: makeTimedToolCall(invocation: invocation),
+            lanes: CuaLaneRegistry.shared,
+            workID: work.id.uuidString,
+            stepTiming: { step, phaseTimes in
+                for (key, milliseconds) in phaseTimes {
+                    let name = "step \(step) \(key)"
+                    invocation.timings[name, default: 0] += milliseconds
+                    work.timings[name, default: 0] += milliseconds
+                }
+            })
         let result: DriveResult
         do {
             result = try await loop.drive(DriveTask(
@@ -1250,14 +1884,23 @@ final class CuaVoiceRuntime {
                                            revision: revision))
                 }
                 work.message = pendingAsk.prompt
-                let options = pendingAsk.options.isEmpty ? ""
-                    : " Options: \(pendingAsk.options.joined(separator: ", "))."
-                pushTaskEvent(work, "[question] \(pendingAsk.prompt)\(options) Ask the user; when they answer, call respond_to_task.", speak: true)
+                pushTaskEvent(work, VoiceToolResult(
+                    kind: VoiceToolResult.Kind.taskQuestion,
+                    status: VoiceToolResult.Status.question,
+                    say: VoiceToolResult.spoken(pendingAsk.prompt, words: 20),
+                    detail: "Ask the user; when they answer, call respond_to_task. This ask belongs to task \(work.id.uuidString.prefix(8)): \"\(work.request)\".",
+                    options: pendingAsk.options.isEmpty ? nil : pendingAsk.options).encoded(),
+                    speak: true)
             } catch {
                 work.message = "The task was revised while a question was open."
             }
             work.questionParked = true
+            work.askParkedAt = ProcessInfo.processInfo.systemUptime
             work.active = false
+            // A parked ask holds no app lease — the answering resume spawns
+            // a fresh work that acquires it again through runWork.
+            await registry.release(app: spec.application ?? "", pid: nil,
+                                   workID: work.id.uuidString)
             noteChange()
             return .blocked(reason: work.message)
         }
@@ -1274,6 +1917,8 @@ final class CuaVoiceRuntime {
             return (prompt, [])
         case .needsWindow(let candidates):
             return ("Which window should I use?", candidates)
+        case .handedBack(.needsChoice(let options)):
+            return ("Which of these did you mean?", options)
         default:
             return nil
         }
@@ -1296,12 +1941,16 @@ final class CuaVoiceRuntime {
                                 loop: CuaAgentLoop) -> CuaDialogueState.Outcome {
         let facts = loop.observedPostconditions.compactMap { dialogueFact(from: $0, work: work) }
         let lastStep = result.history.last ?? "the task ended"
-        switch result.status {
-        case .done:
+        if case .done = result.status {
             if let fact = facts.first(where: { $0.kind == .resultObserved }) ?? facts.first {
                 return .verifiedFact(fact)
             }
             return .verified(evidence: lastStep)
+        }
+        let outcome: CuaDialogueState.Outcome
+        switch result.status {
+        case .done:
+            return .verified(evidence: lastStep) // unreachable — handled above
         case .handedBack(let reason):
             let detail = result.history.isEmpty
                 ? "Nothing was dispatched."
@@ -1316,33 +1965,59 @@ final class CuaVoiceRuntime {
                 honest = "The window showed no interactive elements. \(detail)"
             case .untrustedAnswer:
                 honest = "The proposed action was not trustworthy and was refused. \(detail)"
+            case .needsChoice(let options):
+                honest = "Several actions could match: \(options.prefix(3).joined(separator: "; ")). \(detail)"
             }
-            return result.history.isEmpty ? .blocked(reason: honest) : .uncertain(reason: honest)
+            outcome = result.history.isEmpty ? .blocked(reason: honest) : .uncertain(reason: honest)
         case .blocked(let reason):
-            return (work.stopRequested || Task.isCancelled) ? .cancelled(reason: reason) : .blocked(reason: reason)
+            outcome = (work.stopRequested || Task.isCancelled) ? .cancelled(reason: reason) : .blocked(reason: reason)
         case .blockedByConsent(let reason):
-            return .blocked(reason: reason)
+            outcome = .blocked(reason: reason)
         case .needsText(let label):
-            return .blocked(reason: "The field \(label) needs text that was never supplied.")
+            outcome = .blocked(reason: "The field \(label) needs text that was never supplied.")
         case .needsWindow(let candidates):
-            return .blocked(reason: "The named window is ambiguous among \(candidates.count) live windows.")
+            outcome = .blocked(reason: "The named window is ambiguous among \(candidates.count) live windows.")
         case .maxSteps:
-            return .uncertain(reason: "Stopped at the step limit — \(lastStep). The outcome is unverified.")
+            outcome = .uncertain(reason: "Stopped at the step limit — \(lastStep). The outcome is unverified.")
         case .cancelled:
-            return .cancelled(reason: "Cancelled. Already dispatched effects may have finished.")
+            outcome = .cancelled(reason: "Cancelled. Already dispatched effects may have finished.")
         }
+        // Verified observations from an unfinished run ride forward on the
+        // retained spec — a retry's fresh loop reads them off the goal
+        // instead of re-dispatching effects that already landed.
+        switch outcome {
+        case .blocked, .uncertain: carryForwardEvidence(facts, work: work)
+        default: break
+        }
+        return outcome
+    }
+
+    /// Facts observed before a blocked/uncertain settle attach to the
+    /// retained spec — retryWork reuses the spec verbatim, so the fresh
+    /// drive loop's goal carries what already landed.
+    private func carryForwardEvidence(_ facts: [CuaDialogueState.VerifiedFact], work: Work) {
+        guard !facts.isEmpty else { return }
+        var spec = intentSpecs[work.intentID]
+            ?? TaskSpec(goal: work.request, application: work.bundle)
+        let evidence = facts.map(\.evidence).joined(separator: "; ")
+        guard !spec.goal.contains("Already verified on screen") else { return }
+        spec.goal += "\nAlready verified on screen in an earlier attempt — do not redo these: \(evidence)"
+        intentSpecs[work.intentID] = spec
     }
 
     // MARK: - Agent delegation outcomes
 
     private func delegateOutcome(_ request: DelegationRequest) async -> (String, String) {
         guard let agentBridge else {
-            return ("refused", "Persistent agents are not available in this build.")
+            return ("refused", VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: "No agents are configured in this build.").encoded())
         }
         do {
-            return ("answer", try await agentBridge.delegate(request))
+            return ("answer", Self.agentReply(try await agentBridge.delegate(request)))
         } catch {
-            return ("refused", "The agent could not be delegated: \(error.localizedDescription)")
+            return ("refused", VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: "The agent could not be reached.",
+                detail: error.localizedDescription).encoded())
         }
     }
 
@@ -1371,10 +2046,12 @@ final class CuaVoiceRuntime {
     /// and cancelled utterances cannot accumulate against unresolved capacity.
     private func settle(work: Work, outcome: CuaDialogueState.Outcome) {
         if work.questionParked {
-            // The [question] push already told the model the task waits —
+            // The task_question push already told the model the task waits —
             // a "blocked" outcome now would contradict a live ask and read
-            // as failure while the question still expects an answer.
-            work.outcome = outcome
+            // as failure while the question still expects an answer. And a
+            // user-driven cancel that landed while this attempt was unwinding
+            // already recorded its verdict — keep it over the park reason.
+            if work.outcome == nil { work.outcome = outcome }
             noteChange()
             return
         }
@@ -1411,15 +2088,88 @@ final class CuaVoiceRuntime {
             feed.add(.error, work.message)
         }
         // Tell the lane what happened — the model speaks the verdict aloud.
-        // Cancelled work stays context-only: the user stopped it, they know.
+        // Cancelled work stays context-only (the user stopped it, they know)
+        // and so does a successful fast-lane effect — open/focus results are
+        // visible on screen, so a spoken "Done" is noise. Drive-loop and
+        // question-answering work still speaks: that result isn't visible.
         let verdict = Self.outcomeWord(outcome)
-        Self.log.notice("voice_task_settled \(verdict, privacy: .public) \"\(work.request, privacy: .public)\" — \(work.message, privacy: .public)")
-        pushTaskEvent(work, "[task outcome] \(work.request): \(verdict) — \(work.message)",
-                      speak: !outcome.isCancelled)
+        let timingSummary = work.timings.keys.sorted()
+            .map { "\($0)=\(Int(work.timings[$0] ?? 0))ms" }.joined(separator: " ")
+        let usage = work.judgeInputTokens + work.judgeOutputTokens > 0
+            ? " tokens=\(work.judgeInputTokens)in+\(work.judgeOutputTokens)out" : ""
+        Self.log.notice("voice_task_settled \(verdict, privacy: .public) \"\(work.request, privacy: .public)\" — \(work.message, privacy: .public) [\(timingSummary, privacy: .public)\(usage, privacy: .public)]")
+        let silentSuccess = work.tookFastLane && outcome.isSuccess
+        pushTaskEvent(work, VoiceToolResult(
+            kind: VoiceToolResult.Kind.taskOutcome,
+            status: Self.outcomeStatus(outcome),
+            say: Self.outcomeSay(outcome, message: work.message),
+            detail: "\(work.request): \(verdict) — \(work.message)").encoded(),
+            speak: !outcome.isCancelled && !silentSuccess)
         noteChange()
     }
 
-    /// The one-word verdict the model reads in a `[task outcome]` push.
+    /// A parked consent's spoken line — the verbatim description plus a short
+    /// ask so the lane can voice it without composing one.
+    private static func consentSay(_ description: String) -> String {
+        let ask = VoiceToolResult.spoken(description, words: 11)
+        if ask.isEmpty { return "I need your confirmation, shall I?" }
+        if ask.hasSuffix("?") { return ask }
+        return ask + " Shall I?"
+    }
+
+    /// The outcome's status token inside a task_outcome push — the same
+    /// honest verdict `outcomeWord` reports, as the contract's vocabulary.
+    private static func outcomeStatus(_ outcome: CuaDialogueState.Outcome) -> String {
+        switch outcome {
+        case .verified, .verifiedFact: return "verified"
+        case .partial: return "partial"
+        case .blocked: return "blocked"
+        case .failed: return "failed"
+        case .uncertain: return "uncertain"
+        case .cancelled: return VoiceToolResult.Status.cancelled
+        }
+    }
+
+    /// One spoken sentence per settled outcome — never upgraded, never a
+    /// claim the status contradicts.
+    private static func outcomeSay(_ outcome: CuaDialogueState.Outcome,
+                                   message: String) -> String {
+        let phrase = VoiceToolResult.spoken(message, words: 9)
+        switch outcome {
+        case .verified, .verifiedFact:
+            return phrase.isEmpty ? "Done." : "Done, \(phrase)"
+        case .partial:
+            return phrase.isEmpty ? "Partly done." : "Partly done, \(phrase)"
+        case .blocked, .failed:
+            return actionableSay(verdict: "I couldn't finish", message: message)
+        case .uncertain:
+            return actionableSay(verdict: "I'm not sure that landed", message: message)
+        case .cancelled:
+            return "Cancelled."
+        }
+    }
+
+    /// "<what to do next>. <verdict>." — reason strings end on the
+    /// actionable clause ("unlock it before running commands"), and a
+    /// generic verdict prefix used to consume the word budget so the advice
+    /// truncated away. The say composes from clauses instead: the reason's
+    /// tail first — it is the part the user can act on — verdict second,
+    /// two clauses at most.
+    private static func actionableSay(verdict: String, message: String) -> String {
+        let clauses = message
+            .replacingOccurrences(of: " — ", with: ". ")
+            .components(separatedBy: CharacterSet(charactersIn: ".;\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let actionable = clauses.count > 1 ? clauses.last! : (clauses.first ?? "")
+        let advice = VoiceToolResult.spoken(actionable, words: 8)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " .,!?"))
+        guard !advice.isEmpty else { return verdict + "." }
+        let leading = advice.prefix(1).uppercased() + advice.dropFirst()
+        return "\(leading). \(verdict)."
+    }
+
+    /// The one-word verdict inside a task_outcome push's detail.
     private static func outcomeWord(_ outcome: CuaDialogueState.Outcome) -> String {
         switch outcome {
         case .verified, .verifiedFact: return "done"
@@ -1451,6 +2201,13 @@ private extension CuaDialogueState.Outcome {
     var isCancelled: Bool {
         if case .cancelled = self { return true }
         return false
+    }
+    /// Verified or verified-with-facts — the success cases.
+    var isSuccess: Bool {
+        switch self {
+        case .verified, .verifiedFact: return true
+        default: return false
+        }
     }
 }
 

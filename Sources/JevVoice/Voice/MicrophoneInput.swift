@@ -59,25 +59,65 @@ final class MicrophoneInput: @unchecked Sendable {
     }
     let gate = MicrophoneAudioGate()
     private let queue = DispatchQueue(label: "voice.microphone", qos: .userInitiated)
+    private enum Backend { case legacy, duplex(RealtimeDuplexAudioEngine) }
+    private var activeBackend: Backend?
     private var engine: AVAudioEngine?
+    private var duplex: RealtimeDuplexAudioEngine?
+    /// A VPIO unit that refused to build won't succeed on the next hold
+    /// either — stick to the tap for the process lifetime instead of paying
+    /// failed-start latency on every Fn press.
+    private var duplexUnavailable = false
     private var deviceID: AudioDeviceID?
     private var preparedFormat: AVAudioFormat?
     private var observer: NSObjectProtocol?
     private var interrupted: (@Sendable () -> Void)?
+    /// When the duplex engine is live its render callback is the AEC echo
+    /// reference — the player routes decoded model audio through this.
+    var renderSink: RealtimeRenderSink? { duplex }
 
     func prepare(device: MicrophoneDevice, interrupted: @escaping @Sendable () -> Void) async throws -> Ready {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 do {
                     self.interrupted = interrupted
-                    if let engine = self.engine, self.deviceID == device.hardwareID, engine.isRunning {
-                        continuation.resume(returning: Ready(name: device.name, format: engine.inputNode.outputFormat(forBus: 0)))
-                        return
+                    if self.deviceID == device.hardwareID {
+                        if case .duplex(let duplex)? = self.activeBackend,
+                           duplex.running, let format = duplex.captureFormat {
+                            continuation.resume(returning: Ready(name: device.name, format: format))
+                            return
+                        }
+                        if let engine = self.engine, engine.isRunning {
+                            continuation.resume(returning: Ready(name: device.name, format: engine.inputNode.outputFormat(forBus: 0)))
+                            return
+                        }
                     }
                     self.stopOnQueue()
+                    // The VoiceProcessingIO unit only forms a valid AEC pair
+                    // on the system default input/output — anywhere else we
+                    // stay on the tap path unchanged.
+                    if !self.duplexUnavailable, RealtimeDuplexAudioEngine.isEligible(device: device) {
+                        Self.log.notice("duplex mic pin: policy=systemDefaultOnly — following default input")
+                        let duplex = RealtimeDuplexAudioEngine()
+                        duplex.onDeath = { [weak self] in
+                            self?.queue.async { self?.interrupted?() }
+                        }
+                        do {
+                            let format = try duplex.start(device: device, gate: self.gate)
+                            self.duplex = duplex
+                            self.deviceID = device.hardwareID
+                            self.activeBackend = .duplex(duplex)
+                            continuation.resume(returning: Ready(name: device.name, format: format))
+                            return
+                        } catch {
+                            Self.log.notice("duplex start failed — tap fallback: \(error.localizedDescription, privacy: .public)")
+                            self.duplexUnavailable = true
+                            duplex.stop()
+                        }
+                    }
                     let engine = AVAudioEngine()
                     let input = engine.inputNode
                     self.engine = engine; self.deviceID = device.hardwareID
+                    self.activeBackend = .legacy
                     // Observe before selecting the device or starting the graph. Changing an
                     // AUAudioUnit device can leave CoreAudio's graph reconfiguring while the
                     // first tap is installed. The notification lets us attach it again once
@@ -137,6 +177,9 @@ final class MicrophoneInput: @unchecked Sendable {
         engine?.stop()
         engine?.inputNode.removeTap(onBus: 0)
         engine = nil; deviceID = nil; preparedFormat = nil
+        duplex?.stop()
+        duplex = nil
+        activeBackend = nil
     }
     private func installTap(on input: AVAudioInputNode, format: AVAudioFormat) {
         let gate = self.gate

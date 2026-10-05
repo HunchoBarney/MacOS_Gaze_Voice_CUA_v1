@@ -1,5 +1,6 @@
 import AVFoundation
 import OSLog
+import Synchronization
 import JevVoiceCore
 
 /// The voice lane Clicky runs: one OpenAI realtime session carries hearing,
@@ -23,25 +24,41 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// outcome arrives later via `pushTaskEvent`. The UUID is the hold's
     /// capture id so the work binds to this interaction.
     var commandHandler: (String, String?, String?, UUID) async -> String = { _, _, _, _ in
-        "Computer control is unavailable."
+        #"{"status":"refused","say":"Computer control is unavailable."}"#
     }
-    /// Answers a parked ask — yes/no consent or a free-text task question —
-    /// on the newest waiting work. Wired by VoiceController.
-    var taskResponseHandler: (String, UUID) async -> String = { _, _ in "Nothing is waiting for an answer." }
+    /// Answers a parked ask — yes/no consent or a free-text task question.
+    /// The optional task hint (request text, app name, or an ordinal) picks
+    /// which ask when several are parked. Wired by VoiceController.
+    var taskResponseHandler: (String, String?, UUID) async -> String = { _, _, _ in
+        #"{"status":"nothing_pending","say":"Nothing is waiting for an answer."}"#
+    }
     /// Hands work to a persistent background agent (Clicky's sessions_*).
     var delegationHandler: (String, String?, String?, String?, String?) async -> String = { _, _, _, _, _ in
-        "No agents are configured."
+        #"{"status":"refused","say":"No agents are configured."}"#
     }
     /// Stops running work — "cancel that", "stop", "never mind".
-    var cancelHandler: (String?) async -> String = { _ in "Nothing is running." }
+    var cancelHandler: (String?) async -> String = { _ in
+        #"{"status":"nothing_running","say":"Nothing is running."}"#
+    }
     /// A screen image to attach to the turn — wired by VoiceController to
     /// ScreenCapture. Any failure returns nil; the turn still lands.
     var screenShotProvider: (() async -> Data?)?
+    /// Facts about right now — local time, active app, what's waiting.
+    /// Injected as a [context] note once per user turn (Clicky's
+    /// submitContextNote); wired by VoiceController.
+    var contextProvider: (@MainActor () async -> String)?
     /// Dictation holds commit audio but suppress the spoken reply — the
     /// transcript is delivered literally instead. `false` = commit only.
     var respondOnCommit = true
     /// Replies stay silent when the user muted spoken output in settings.
-    var audioRepliesEnabled = true
+    var audioRepliesEnabled = true {
+        didSet { outputGate.store(audioRepliesEnabled && !holding, ordering: .releasing) }
+    }
+    /// Off-actor playback gate = replies enabled && !holding. The socket
+    /// loop reads it directly: model audio enqueues without a MainActor
+    /// hop, and a stray response that outraced response.cancel dies here
+    /// instead of talking over the user's hold.
+    private let outputGate = Atomic<Bool>(true)
 
     private let apiKey: () -> String
     private let client: RealtimeVoiceClient
@@ -72,7 +89,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var transcriptInFlight = ""
     /// True while the user holds Fn — pushed outcomes wait as context until
     /// release rather than talking over them.
-    private var holding = false
+    private var holding = false {
+        didSet { outputGate.store(audioRepliesEnabled && !holding, ordering: .releasing) }
+    }
     /// response.create serialisation — the API rejects a second response
     /// while one is generating, so turns and pushed outcomes queue here.
     private var responseInFlight = false
@@ -90,9 +109,12 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// user actually looked at while speaking, and the encode+upload leaves
     /// the release→response.create serial path entirely.
     private var screenshotTask: Task<Data?, Never>?
-    /// An outcome push that hit a dead socket — re-sent when the next
-    /// session confirms, or the verified result is silently lost.
-    private var retryOutcomePush: String?
+    /// Outcome pushes that hit a dead socket — re-sent oldest-first when
+    /// the next session confirms, or verified results are silently lost.
+    private var retryOutcomePush = OutcomeRetryQueue()
+    /// Last injected [context] note — each turn replaces it rather than
+    /// stacking stale frontmost-app/time facts on top of each other.
+    private var lastContextItemID: String?
     /// Serializes cancel()'s server sends against the next hold's stream —
     /// a clearAudio landing late would wipe freshly streamed audio.
     private var teardownTask: Task<Void, Never>?
@@ -120,10 +142,36 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
+    /// Dead-socket outcome pushes — FIFO capped at 4, drop-oldest. A single
+    /// overwrite slot silently lost every verified outcome after the first
+    /// when several landed during one reconnect gap.
+    struct OutcomeRetryQueue {
+        private(set) var items: [String] = []
+        var isEmpty: Bool { items.isEmpty }
+        mutating func push(_ text: String) {
+            items.append(text)
+            if items.count > 4 { items.removeFirst() }
+        }
+        /// Empties the queue, returning items oldest-first.
+        mutating func drain() -> [String] {
+            let all = items
+            items = []
+            return all
+        }
+    }
+
     init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil) {
         self.apiKey = apiKey
         self.client = client ?? RealtimeVoiceClient()
         self.client.onEvent = { [weak self] event in
+            // Runs on the detached receive loop. Model audio enqueues
+            // straight from here — a MainActor hop would let a busy UI
+            // starve the speaker into underrun gaps. The atomic gate
+            // carries muted/holding state across the hop.
+            if case .outputAudio(let pcm, let itemID) = event,
+               let self, self.outputGate.load(ordering: .acquiring) {
+                self.player.enqueue(pcm, itemID: itemID)
+            }
             Task { @MainActor in self?.handle(event) }
         }
         player.onPlaybackIdle = { [weak self] in
@@ -216,6 +264,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 }
                 let feed = try ConvertedAudioFeed(input: hardware.format, output: pcm)
                 self.prepared = Session(name: hardware.name, feed: feed, sendsAudio: true)
+                // Duplex backend up → playback renders through the same
+                // VPIO unit, giving AEC the exact echo reference. Legacy
+                // capture leaves renderSink nil and the player keeps its
+                // own engine.
+                self.player.attachSink(self.input.renderSink)
                 self.onReadiness?(.ready(hardware.name))
                 return hardware.name
             } catch {
@@ -264,7 +317,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // playback locally and truncate what never reached the user. A
             // response mid-generation has no audio yet — cancel it too, or it
             // would start talking over this hold.
-            let interrupted = player.interrupt()
+            let interrupted = player.interrupt(untilResponseDone: responseInFlight)
             if interrupted.itemID != nil || responseInFlight {
                 do { try await client.cancelResponse() }
                 catch {
@@ -277,7 +330,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
                     try? await client.truncate(itemID: itemID, audioEndMs: interrupted.playedMs)
                 }
             }
-            try? await client.clearAudio()
+            // No clearAudio here: the gate is already streaming this hold's
+            // audio, so a clear now would clip its head. Stale audio from a
+            // dead hold was already cleared by the teardownTask awaited
+            // above — and that task now outlives the dead sender's last
+            // append, so nothing can land after it.
             // A cancel() that landed during the sends must not leave the mic
             // streaming into the socket with the UI idle — tear the
             // just-opened capture down before propagating.
@@ -314,9 +371,12 @@ final class RealtimeVoiceLane: SpeechCapturing {
         return session.name
     }
 
-    private func sendAudioChunk(_ pcm: Data, session id: UUID) async throws {
-        guard self.active?.id == id else { return }
-        try await client.sendAudio(pcm)
+    /// The detached pump's one trip back to the actor — a send that hit a
+    /// dead socket fails the owning capture only.
+    private func sendFailed(id: UUID, error: Error) {
+        guard active?.id == id, !Task.isCancelled else { return }
+        Self.log.notice("realtime_send_failed session=\(id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+        onEvent?(id, .failure("The voice connection dropped. Release Fn to retry."))
     }
 
     /// Internal for tests: a stale handler (preparationID no longer current)
@@ -340,6 +400,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // gate still has to free up.
         switch event {
         case .responseDone:
+            // A cancelled response's items can emit no more deltas — the
+            // player's barge-in drop rules are stale from here on.
+            player.responseDidFinish()
             responseInFlight = false
             responseWatchdog?.cancel()
             if let id = turnID, awaitingTurnEnd, pendingCalls.isEmpty {
@@ -355,16 +418,22 @@ final class RealtimeVoiceLane: SpeechCapturing {
             }
             flushSpeech()
             if turnID == nil { return }
-        case .outputAudio(let pcm, let itemID):
-            // Pushed outcome replies land between holds — there is no active
-            // capture, but the audio still must play.
-            if audioRepliesEnabled { player.enqueue(pcm, itemID: itemID) }
-            if active == nil { return }
+        case .outputAudio:
+            // Playback was already enqueued off-actor in client.onEvent —
+            // there is no capture-scoped handling for the deltas.
+            break
         case .failure:
             responseInFlight = false
             responseWatchdog?.cancel()
             awaitingTurnEnd = false
+        case .warning(let detail):
+            // A rejected request on a live socket (bad item.id, deleting an
+            // already-gone item) — the turn keeps streaming. The watchdog
+            // still covers the one dangerous case: a refused response.create
+            // leaves responseInFlight set until it fires.
+            Self.log.notice("realtime_warning \(detail, privacy: .public)")
         case .closed:
+            player.responseDidFinish()
             responseInFlight = false
             responseWatchdog?.cancel()
             speakQueue = []; wantResponse = false
@@ -375,13 +444,18 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // screenshot — reprepare must not be blocked by either. The
             // turn-scoped branch emits the user-visible .failure.
             screenshotItemID = nil
+            lastContextItemID = nil
             prepared = nil
         case .sessionUpdated:
-            // A fresh confirmed session — retry the outcome push a dead
-            // socket dropped, or the verified result never reaches the user.
-            if let retry = retryOutcomePush {
-                retryOutcomePush = nil
-                pushTaskEvent(retry, speak: true)
+            // A fresh confirmed session — replay the outcome pushes a dead
+            // socket dropped, oldest first, or verified results never reach
+            // the user. A re-failure re-queues at the tail, keeping order.
+            // Serial awaits: concurrent pushes would reorder on the wire.
+            // A rebuilt session also retires any stale barge-in drop rules.
+            player.responseDidFinish()
+            let retries = retryOutcomePush.drain()
+            Task { [weak self] in
+                for retry in retries { await self?.deliverPush(retry, speak: true) }
             }
         case .itemCreated(let itemID, let isImage):
             // Keep-latest-1 screenshot hygiene — the model already used the
@@ -392,6 +466,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 screenshotItemID = itemID
                 if let stale { Task { [weak self] in try? await self?.client.deleteItem(itemID: stale) } }
             }
+            // Context notes are only real once the server confirms the item —
+            // recording the id optimistically leaves a phantom we delete
+            // (warn on) next turn.
+            if itemID.hasPrefix("ctx-") { lastContextItemID = itemID }
         default: break
         }
         guard let id = turnID else {
@@ -413,6 +491,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 if Self.isFatalSessionError(detail) { lastSessionError = detail }
                 if !Self.isBenignRace(detail) { onReadiness?(.unavailable(detail)) }
                 flushSpeech()
+            case .warning(let detail):
+                Self.log.notice("realtime_idle_warning \(detail, privacy: .public)")
             default: break
             }
             return
@@ -459,6 +539,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // still streaming; only real faults surface as .failure.
             if !Self.isBenignRace(detail) { onEvent?(id, .failure(detail)) }
             flushSpeech()
+        case .warning:
+            break // logged in the session-level switch above
         case .closed:
             onEvent?(id, .failure("The voice session closed."))
         case .sessionStarted, .inputCommitted, .speechStarted,
@@ -498,17 +580,17 @@ final class RealtimeVoiceLane: SpeechCapturing {
             switch name {
             case "computer_command":
                 let instruction = (args["instruction"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                output = instruction.isEmpty ? "No instruction was provided."
+                output = instruction.isEmpty ? #"{"status":"refused","say":"No instruction was provided."}"#
                     : await self.commandHandler(instruction,
                                                 args["app"] as? String,
                                                 args["literal_text"] as? String, id)
             case "respond_to_task":
                 let answer = (args["answer"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                output = answer.isEmpty ? "No answer was provided."
-                    : await self.taskResponseHandler(answer, id)
+                output = answer.isEmpty ? #"{"status":"refused","say":"No answer was provided."}"#
+                    : await self.taskResponseHandler(answer, args["task"] as? String, id)
             case "delegate_to_agent":
                 let task = (args["task"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                output = task.isEmpty ? "No task was provided."
+                output = task.isEmpty ? #"{"status":"refused","say":"No task was provided."}"#
                     : await self.delegationHandler(task,
                                                    args["agent"] as? String,
                                                    args["name"] as? String,
@@ -518,11 +600,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 output = await self.cancelHandler(args["hint"] as? String)
             case "web_lookup":
                 let question = (args["question"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                output = question.isEmpty ? "No question was provided."
+                output = question.isEmpty ? #"{"status":"refused","say":"No question was provided."}"#
                     : await self.webLookup(question)
             case "send_to_higher_model":
                 let question = (args["question"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                output = question.isEmpty ? "No question was provided."
+                output = question.isEmpty ? #"{"status":"refused","say":"No question was provided."}"#
                     : await self.askHigherModel(question)
             default:
                 output = "Unknown tool \(name)."
@@ -539,12 +621,16 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 return
             }
             guard self.turnID == id else { return }
-            // A STARTED task was acknowledged by the model's beat before the
-            // call — re-arming a second response would speak 1.5-3s later
-            // over work already running (Clicky's ack-rides-the-call rule).
+            // A started task was already acknowledged by the pre-call beat —
+            // a second response would speak 1.5-3s late over running work
+            // (Clicky's returnToolResult: follow-up response suppressed).
+            // Every other status arms the response and voices `say` verbatim.
             // Emit the turn-end tail the earlier response.done skipped while
             // this call was pending; if it hasn't landed, it fires there.
-            if name == "computer_command", output.hasPrefix("STARTED") {
+            let acceptedTask = output.hasPrefix("STARTED")
+                || output.contains("\"status\":\"started\"")
+                || output.contains("\"status\": \"started\"")
+            if name == "computer_command", acceptedTask {
                 if self.pendingCalls.isEmpty {
                     self.awaitingTurnEnd = false
                     if self.player.playbackIdle { self.onEvent?(id, .turnEnded) }
@@ -564,14 +650,21 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// context; `speak` also queues a response once the model is free —
     /// never over a hold the user is mid-way through.
     func pushTaskEvent(_ text: String, speak: Bool) {
-        Task { [weak self] in
-            do { try await self?.client.sendText(text) }
-            catch {
-                Self.log.notice("realtime_push_failed error=\(error.localizedDescription, privacy: .public)")
-                // A verified outcome that hit a dead socket must not vanish —
-                // it's re-sent when the rebuilt session confirms.
-                if speak { self?.retryOutcomePush = text }
-            }
+        Task { [weak self] in await self?.deliverPush(text, speak: speak) }
+    }
+
+    /// The push's async core — queued speaks arm a response only after the
+    /// text is on the wire (arming before it landed asked the model to
+    /// voice an outcome it never received). Replays await it serially so
+    /// retried outcomes keep FIFO order.
+    private func deliverPush(_ text: String, speak: Bool) async {
+        do { try await client.sendText(text) }
+        catch {
+            Self.log.notice("realtime_push_failed error=\(error.localizedDescription, privacy: .public)")
+            // A verified outcome that hit a dead socket must not vanish —
+            // it's re-sent when the rebuilt session confirms.
+            if speak { retryOutcomePush.push(text) }
+            return
         }
         guard speak, speakQueue.count < 8 else { return }
         speakQueue.append(text)
@@ -585,13 +678,24 @@ final class RealtimeVoiceLane: SpeechCapturing {
         turnID = sessionID
         pendingCalls = []; handledCalls = []; toolCallsThisTurn = 0
         pendingTurnEndOnIdle = false
+        async let contextNote: () = injectTurnContext()
         try await client.sendText(text)
         if let jpeg = await screenShotProvider?() {
             try? await client.sendImage(jpegBase64: jpeg.base64EncodedString(),
                                         caption: "[screenshot] The user's screen.")
         }
+        await contextNote
         awaitingTurnEnd = true
         requestResponseWhenFree()
+    }
+
+    /// The per-turn [context] note — advisory, so a failed send never
+    /// wedges the turn; the previous confirmed note is deleted inside the
+    /// call and the new id lands via .itemCreated.
+    private func injectTurnContext() async {
+        guard let note = await contextProvider?(), !note.isEmpty else { return }
+        do { try await client.sendContextNote(note, replacing: lastContextItemID) }
+        catch { Self.log.notice("context_note_failed \(error.localizedDescription, privacy: .public)") }
     }
 
     /// Arms the drain defer: if the output engine wedges (device pulled,
@@ -681,29 +785,30 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     /// Spawns the session's socket sender and opens the mic gate — the
     /// caller binds `active`/`turnID` first so chunks never send anonymously.
+    /// The pump is detached: a MainActor-bound sender let any UI stall
+    /// carve silent gaps into the audio the model hears.
     private func beginStreaming(session: Session, id: UUID) {
-        session.sender = Task { [weak self] in
+        let feed = session.feed, sendsAudio = session.sendsAudio, client = self.client
+        session.sender = Task.detached { [weak self] in
             var pending = Data()
             do {
-                for try await buffer in session.feed.stream {
+                for try await buffer in feed.stream {
                     guard !Task.isCancelled else { return }
-                    guard session.sendsAudio else { continue }
+                    guard sendsAudio else { continue }
                     guard let samples = buffer.int16ChannelData?[0] else { continue }
                     pending.append(Data(bytes: samples, count: Int(buffer.frameLength) * MemoryLayout<Int16>.size))
                     // ~100 ms chunks — small enough for streaming transcription,
                     // large enough to keep frame overhead low.
                     if pending.count >= 4800 {
-                        try await self?.sendAudioChunk(pending, session: id)
+                        try await client.sendAudio(pending)
                         pending.removeAll(keepingCapacity: true)
                     }
                 }
                 if !pending.isEmpty, !Task.isCancelled {
-                    try await self?.sendAudioChunk(pending, session: id)
+                    try await client.sendAudio(pending)
                 }
             } catch {
-                guard let self, self.active?.id == id, !Task.isCancelled else { return }
-                Self.log.notice("realtime_send_failed session=\(id.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
-                self.onEvent?(id, .failure("The voice connection dropped. Release Fn to retry."))
+                await self?.sendFailed(id: id, error: error)
             }
         }
         input.gate.open(session.feed)
@@ -727,8 +832,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
             await session.sender?.value
             guard !Task.isCancelled else { return }
             // A tap with no speech isn't a turn — dismiss instead of asking
-            // the model to respond to silence.
-            guard session.sendsAudio, durations.input > 0.05 else {
+            // the model to respond to silence. The server rejects a commit
+            // under ~100ms of buffered audio, and the response.create that
+            // followed would answer a turn that never reached it — so the
+            // gate measures `converted` (post-drain resampled seconds =
+            // exactly what went on the wire), not raw input time.
+            guard session.sendsAudio,
+                  session.feed.audioSummary().converted >= 0.1 else {
                 screenshotTask.cancel()
                 self.holding = false
                 self.flushSpeech()
@@ -744,12 +854,17 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 // on a turn that isn't its own.
                 guard !Task.isCancelled, self.active?.id == active.id else { return }
                 if self.respondOnCommit {
+                    // The [context] note rides alongside the screenshot —
+                    // both must land before response.create, and neither
+                    // adds serial time to the other.
+                    async let contextNote: () = self.injectTurnContext()
                     if let jpeg = await screenshotTask.value {
                         guard !Task.isCancelled, self.active?.id == active.id else { return }
                         try? await self.client.sendImage(
                             jpegBase64: jpeg.base64EncodedString(),
                             caption: "[screenshot] The user's screen at the moment they spoke.")
                     }
+                    await contextNote
                     self.awaitingTurnEnd = true
                     self.holding = false
                     self.requestResponseWhenFree()
@@ -789,14 +904,19 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // a cancelled typed turn would still answer after the user bailed.
         wantResponse = false
         prior?.session.sender?.cancel()
-        if prior != nil {
+        // `prior == nil` is the typed-turn path — its response still has
+        // to die with the cancel, and playback still has to stop.
+        if prior != nil || needsCancel {
             // Captured so the next start() can await it — a clearAudio
-            // landing after the new hold streams would wipe it.
-            teardownTask = Task { [weak self] in
+            // landing after the new hold streams would wipe it. Awaiting
+            // the dead sender first closes the straggler hole: an append
+            // already on the wire lands before the clear, not after.
+            teardownTask = Task { [weak self, sender = prior?.session.sender] in
+                _ = await sender?.value
                 try? await self?.client.clearAudio()
                 if needsCancel { try? await self?.client.cancelResponse() }
             }
-            player.interrupt()
+            player.interrupt(untilResponseDone: responseInFlight)
         }
         prepareNext()
     }

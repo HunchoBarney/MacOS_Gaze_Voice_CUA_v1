@@ -7,6 +7,18 @@ protocol DriveExecuting: Sendable {
     func drive(_ task: DriveTask) async throws -> DriveResult
 }
 
+/// Lane-arbitration seam — the subset of `CuaLaneRegistry` the agent
+/// surfaces consume. The shared actor satisfies it at integration; tests
+/// record acquisitions on a stub.
+protocol AgentLaneLeasing: Sendable {
+    func acquire(app: String, pid: Int?, workID: String) async throws
+    func acquireFocus(workID: String) async throws
+    func acquirePasteboard(workID: String) async throws
+    func releaseAll(workID: String) async
+}
+
+extension CuaLaneRegistry: AgentLaneLeasing {}
+
 /// Advisory single-step seam — Clicky's `suggest_action` (TypeSafe Jev).
 /// Never acts, never generates text.
 protocol ActionSuggesting: Sendable {
@@ -183,4 +195,112 @@ struct JevUseMCPServer: Sendable {
             "content": .array([.object(["type": .string("text"), "text": .string(message)])])
         ])
     }
+}
+
+/// Clicky's `suggest_action` over the agent's own driver: snapshot the bound
+/// window, project its interactive elements into one flat choice list, and
+/// let a single systemOne call pick. Advisory only — nothing is dispatched,
+/// so it rides the observation path (no consent gate) and its candidate
+/// projection mirrors the drive loop's element filter (enabled elements in
+/// click/text/value roles, bounded).
+struct AgentActionSuggester: ActionSuggesting {
+    typealias Call = @Sendable (String, [String: JSONValue]) async throws -> JSONValue
+    typealias Judge = @Sendable (JSONValue, [String: Question]) async throws -> [String: Answer]
+
+    private static let maximumCandidates = 24
+
+    private let call: Call
+    private let judge: Judge
+
+    init(call: @escaping Call, judge: @escaping Judge) {
+        self.call = call; self.judge = judge
+    }
+
+    init(call: @escaping Call, apiKey: @escaping @Sendable () -> String) {
+        self.init(call: call, judge: { state, questions in
+            try await JevClient(apiKey: apiKey()).systemOne(state: state, questions: questions)
+                .response.answers
+        })
+    }
+
+    func suggestAction(pid: Int, windowID: Int) async throws -> StepJudgment {
+        let snapshot = try await call("get_window_state", [
+            "pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+            "include_screenshot": .bool(false), "max_elements": .number(200)])
+        let elements = snapshot["elements"]?.array ?? []
+        var candidates: [String: (token: String, kind: StepJudgment.Kind)] = [:]
+        var criteria: [String: String?] = [:]
+        for element in elements {
+            guard candidates.count < Self.maximumCandidates else { break }
+            guard element["enabled"] != .bool(false) else { continue }
+            let role = element["role"]?.string ?? ""
+            let index = element["element_index"]?.integer ?? -1
+            guard index >= 0, !role.isEmpty else { continue }
+            let kind: StepJudgment.Kind
+            if Self.textRoles.contains(role) { kind = .type }
+            else if Self.clickRoles.contains(role) || Self.valueRoles.contains(role) { kind = .press }
+            else { continue }
+            let token = element["element_token"]?.string ?? String(index)
+            // Label or title first, then AX description/help — icon-only
+            // controls name themselves there, and a bare `""` gives the
+            // judge nothing to pick on.
+            let name = CuaActionCatalog.elementName(element)
+            let detail = CuaActionCatalog.elementDetail(element, name: name)
+                .map { " — \($0)" } ?? ""
+            let id = "e\(index)"
+            candidates[id] = (token, kind)
+            criteria[id] = (kind == .type
+                ? "Type into \(role) \"\(name)\""
+                : "Press \(role) \"\(name)\"") + detail
+        }
+        guard !candidates.isEmpty else {
+            return StepJudgment(kind: .none, confidence: 0,
+                                blocked: "no_interactive_elements")
+        }
+        criteria["none"] = "No element action is useful from this state."
+        let state: JSONValue = .object([
+            "pid": .number(Double(pid)),
+            "window_id": .number(Double(windowID)),
+            "window_title": .string(snapshot["window"]?["title"]?.string
+                ?? snapshot["title"]?.string ?? snapshot["window_title"]?.string ?? ""),
+            "elements": .array(elements.prefix(80).map(Self.compactElement))])
+        let answers = try await judge(state, [
+            "next": .choice(
+                instructions: "Choose the single most useful next action on this window. This is advisory — nothing is dispatched. \"Press\" criteria activate a control; \"Type into\" criteria focus a text field for caller-supplied text — when the useful step is entering text, prefer the type lane over a press that merely reveals the field. Pick none only when no element action is clearly useful.",
+                criteria: criteria)])
+        let confidence = answers["next"].flatMap { answer -> Double? in
+            if case .choice(_, let confidence, _) = answer { return confidence }
+            return nil
+        } ?? 0
+        guard let picked = try? JevSelection.read(answers["next"], allowed: Set(criteria.keys)),
+              picked != "none", let candidate = candidates[picked] else {
+            return StepJudgment(kind: .none, confidence: confidence)
+        }
+        return StepJudgment(elementToken: candidate.token, kind: candidate.kind,
+                            confidence: confidence)
+    }
+
+    /// The same compact element shape the drive loop's state carries —
+    /// index, role, label, value — so a suggestion reads the window the way
+    /// the loop does.
+    private static func compactElement(_ element: JSONValue) -> JSONValue {
+        .object([
+            "i": element["element_index"] ?? .null,
+            "role": element["role"] ?? .null,
+            "label": element["label"] ?? element["title"] ?? .null,
+            "value": (element["value"]?.string).map { .string(String($0.prefix(80))) } ?? .null])
+    }
+
+    private static let clickRoles: Set<String> = [
+        "AXButton", "AXCheckBox", "AXRadioButton", "AXMenuItem", "AXMenuBarItem",
+        "AXPopUpButton", "AXComboBox", "AXTab", "AXLink", "AXImage",
+        "AXCell", "AXRow", "AXOutlineRow", "AXDisclosureTriangle", "AXIncrementor",
+        "AXSlider", "AXSegment", "AXToolbarButton", "AXScrollBar", "AXSwitch"]
+
+    private static let textRoles: Set<String> = [
+        "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"]
+
+    private static let valueRoles: Set<String> = [
+        "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXComboBox",
+        "AXSlider", "AXSwitch", "AXStepper", "AXIncrementor"]
 }

@@ -74,3 +74,35 @@ final class TestClock: @unchecked Sendable {
     private(set) var now = Date()
     func advance(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
 }
+
+struct StubError: Error {}
+
+/// Recording stand-in for the shared lane registry — logs every lease
+/// event, can refuse focus acquires, and can suspend inside the app
+/// acquire so cancellation tests land deterministically.
+actor RecordingLaneLeases: AgentLaneLeasing {
+    private(set) var events: [String] = []
+    private(set) var holding = false
+    private var blocksAcquire = false
+    private var holdWaiter: CheckedContinuation<Void, Never>?
+    private var focusError: Error?
+
+    func acquire(app: String, pid: Int?, workID: String) async throws {
+        events.append("acquire:\(app)")
+        guard blocksAcquire else { return }
+        await withCheckedContinuation { continuation in
+            holdWaiter = continuation
+            holding = true
+        }
+        holding = false
+    }
+    func acquireFocus(workID: String) async throws {
+        events.append("focus")
+        if let focusError { throw focusError }
+    }
+    func acquirePasteboard(workID: String) async throws { events.append("pasteboard") }
+    func releaseAll(workID: String) async { events.append("releaseAll") }
+    func blockAcquires() { blocksAcquire = true }
+    func unblock() { holdWaiter?.resume(); holdWaiter = nil }
+    func failFocus(_ error: Error?) { focusError = error }
+}

@@ -13,16 +13,22 @@ public actor RoutineScheduler {
 
     private struct Entry {
         var routine: Routine
-        var timer: Timer?
-        /// Identifies the schedule() generation — a timer whose attach lands
-        /// after its entry was replaced is invalidated, never adopted.
+        /// Identifies the schedule() generation — also the id the main-side
+        /// timer registry installs and retires under.
         var token: UUID
     }
 
     private let fire: @Sendable (String, Routine) async -> Void
     private let firstRunImmediate: Bool
+    /// Timers live on the main runloop. The registry, not actor state, owns
+    /// the Timer objects — Timer isn't Sendable, so every hop carries a
+    /// UUID token and all create/invalidate executes on MainActor.
+    private let timers = RoutineTimers()
     /// Key: "<slug>\u{1F}<routineID>".
     private var entries: [String: Entry] = [:]
+    /// Keys whose fire is still running — a slow send must not stack a
+    /// duplicate turn on the agent when the next tick lands.
+    private var inFlight: Set<String> = []
 
     public init(firstRunImmediate: Bool = true,
                 fire: @escaping @Sendable (String, Routine) async -> Void) {
@@ -43,7 +49,8 @@ public actor RoutineScheduler {
                 wanted[key(slug: agent.slug, routineID: routine.id)] = (agent.slug, routine)
             }
         }
-        for (entryKey, entry) in entries where wanted[entryKey]?.routine != entry.routine {
+        // Iterate a snapshot — unschedule mutates `entries`.
+        for (entryKey, entry) in Array(entries) where wanted[entryKey]?.routine != entry.routine {
             unschedule(entryKey)
         }
         for (entryKey, pair) in wanted where entries[entryKey] == nil {
@@ -53,61 +60,93 @@ public actor RoutineScheduler {
     }
 
     public func stopAll() {
-        for entryKey in Array(entries.keys) { unschedule(entryKey) }
+        let tokens = entries.values.map(\.token)
+        entries = [:]
+        if !tokens.isEmpty {
+            Task { @MainActor [timers] in timers.retire(tokens) }
+        }
     }
 
-    /// Timers live on the main runloop — bounce invalidation there so a
+    /// Timers live on the main runloop — retire every live token so a
     /// released scheduler leaves no repeater firing into the void.
     deinit {
-        let timers = entries.values.compactMap(\.timer)
-        if !timers.isEmpty {
-            DispatchQueue.main.async { for timer in timers { timer.invalidate() } }
+        let tokens = entries.values.map(\.token)
+        if !tokens.isEmpty {
+            Task { @MainActor [timers] in timers.retire(tokens) }
         }
     }
 
     /// Interval is a parameter so tests can run sub-second schedules.
-    /// Rescheduling the same key invalidates the prior timer before the new
+    /// Rescheduling the same key retires the prior token before the new
     /// entry is written — no orphaned repeaters survive a re-attach.
     func schedule(key entryKey: String, slug: String, routine: Routine,
                   interval: TimeInterval, fireNow: Bool? = nil) {
-        if let old = entries[entryKey]?.timer {
-            DispatchQueue.main.async { old.invalidate() }
+        if let old = entries[entryKey]?.token {
+            Task { @MainActor [timers] in timers.retire([old]) }
         }
         let token = UUID()
-        entries[entryKey] = Entry(routine: routine, timer: nil, token: token)
-        let fire = self.fire
-        DispatchQueue.main.async { [weak self] in
-            // Released before the hop landed: creating the timer anyway would
-            // leave an unattached repeater firing forever.
-            guard let self else { return }
-            let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-                Task { await fire(slug, routine) }
+        entries[entryKey] = Entry(routine: routine, token: token)
+        Task { @MainActor [weak self] in
+            // Released before the hop landed: installing anyway would leave
+            // an unattached repeater firing forever.
+            self?.timers.install(id: token, interval: interval) { [weak self] in
+                Task { await self?.dispatch(entryKey: entryKey, token: token,
+                                            slug: slug, routine: routine) }
             }
-            // The Task retains self until attach lands, so a pending attach
-            // can never race deinit.
-            Task { await self.attach(entryKey, timer: timer, token: token) }
         }
         if fireNow ?? firstRunImmediate {
-            Task { await fire(slug, routine) }
+            dispatch(entryKey: entryKey, token: token, slug: slug, routine: routine)
         }
     }
 
-    private func attach(_ entryKey: String, timer: Timer, token: UUID) {
-        guard entries[entryKey]?.token == token else {
-            // Unscheduled or replaced before the main-runloop hop landed —
-            // kill the timer on the thread that owns it.
-            DispatchQueue.main.async { timer.invalidate() }
-            return
+    /// One fire per entry at a time — ticks for a retired or replaced entry
+    /// drop instead of dispatching a stale routine, and a tick arriving
+    /// while the previous send still runs coalesces into it.
+    private func dispatch(entryKey: String, token: UUID, slug: String, routine: Routine) {
+        guard entries[entryKey]?.token == token, !inFlight.contains(entryKey) else { return }
+        inFlight.insert(entryKey)
+        let fire = self.fire
+        Task { [weak self] in
+            await fire(slug, routine)
+            await self?.removeInFlight(entryKey)
         }
-        entries[entryKey]?.timer = timer
+    }
+
+    private func removeInFlight(_ entryKey: String) {
+        inFlight.remove(entryKey)
     }
 
     private func unschedule(_ entryKey: String) {
-        guard let timer = entries.removeValue(forKey: entryKey)?.timer else { return }
-        DispatchQueue.main.async { timer.invalidate() }
+        guard let token = entries.removeValue(forKey: entryKey)?.token else { return }
+        Task { @MainActor [timers] in timers.retire([token]) }
     }
 
     private func key(slug: String, routineID: String) -> String {
         "\(slug)\u{1F}\(routineID)"
+    }
+}
+
+/// Main-runloop home for the scheduler's repeating Timers. Ordering between
+/// queued installs and retires is not guaranteed, so `retire` also records
+/// the id — an install that lands after its retire is refused outright, and
+/// a retire that lands after the install invalidates the live timer.
+@MainActor
+private final class RoutineTimers {
+    private var live: [UUID: Timer] = [:]
+    private var retired: Set<UUID> = []
+
+    /// The registry is only ever touched through MainActor hops after
+    /// construction — the actor keeps a reference without paying a hop.
+    nonisolated init() {}
+
+    func install(id: UUID, interval: TimeInterval, fire: @escaping @Sendable () -> Void) {
+        guard !retired.contains(id) else { return }
+        live[id]?.invalidate()
+        live[id] = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in fire() }
+    }
+
+    func retire(_ ids: [UUID]) {
+        retired.formUnion(ids)
+        for id in ids { live.removeValue(forKey: id)?.invalidate() }
     }
 }

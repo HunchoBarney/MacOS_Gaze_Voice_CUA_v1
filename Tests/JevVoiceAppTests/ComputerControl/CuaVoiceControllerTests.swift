@@ -24,26 +24,31 @@ final class CuaVoiceControllerTests: XCTestCase {
         private var waiting: CheckedContinuation<Void, Never>?
         private var released = false
         private(set) var entered = false
+        private func withLock<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
         func hold() async {
-            lock.lock()
-            entered = true
-            if released { lock.unlock(); return }
-            lock.unlock()
+            let alreadyReleased = withLock { () -> Bool in
+                entered = true
+                return released
+            }
+            if alreadyReleased { return }
             await withTaskCancellationHandler {
                 await withCheckedContinuation { continuation in
-                    self.lock.lock()
-                    if self.released { continuation.resume() }
-                    else { self.waiting = continuation }
-                    self.lock.unlock()
+                    let resumeNow = self.withLock {
+                        if self.released { return true }
+                        self.waiting = continuation
+                        return false
+                    }
+                    if resumeNow { continuation.resume() }
                 }
             } onCancel: { self.open() }
         }
         func open() {
-            lock.lock()
-            released = true
-            let pending = waiting
-            waiting = nil
-            lock.unlock()
+            let pending = withLock {
+                released = true
+                let p = waiting
+                waiting = nil
+                return p
+            }
             pending?.resume()
         }
     }
@@ -157,6 +162,15 @@ for line in sys.stdin:
         XCTAssertTrue(predicate(), "Timed out waiting for the voice pipeline", file: file, line: line)
     }
 
+    /// Every voice tool surface answers a VoiceToolResult payload — decode it
+    /// or fail the assertion outright.
+    private func decoded(_ json: String,
+                         file: StaticString = #filePath,
+                         line: UInt = #line) throws -> VoiceToolResult {
+        try XCTUnwrap(VoiceToolResult(jsonString: json),
+                      "Expected a VoiceToolResult payload: \(json)", file: file, line: line)
+    }
+
     // MARK: - Routing
 
     /// The deterministic fast lane: the resolver identifies the primitive; the
@@ -177,13 +191,23 @@ for line in sys.stdin:
                 return CuaTaskAgent.FastResolution(action: nil, openVerb: "open",
                                                    name: "Fixture", bundle: "test.fixture")
             })
+        var events: [(UUID, String, Bool)] = []
+        runtime.taskEventSink = { id, text, speak in events.append((id, text, speak)) }
         let ack = await runtime.beginVoiceTask("open Fixture", app: nil)
-        XCTAssertTrue(ack.hasPrefix("STARTED"), ack)
+        let started = try decoded(ack)
+        XCTAssertEqual(started.status, "started", ack)
+        XCTAssertEqual(started.say, "On it, opening Fixture.")
         let work = try XCTUnwrap(runtime.tasks.last)
         try await until { !work.active }
         XCTAssertEqual(work.status, "Completed", work.message)
         XCTAssertEqual(judged.value, 0, "The deterministic lane never spends a judgment")
         XCTAssertEqual(work.bundle, "test.fixture")
+        // A visible success doesn't spend a spoken line — the outcome still
+        // lands in the conversation as silent context.
+        let outcomes = events.compactMap { VoiceToolResult(jsonString: $0.1) }
+        XCTAssertEqual(outcomes.filter { $0.kind == "task_outcome" }.count, 1)
+        let pushes = events.filter { $0.2 }
+        XCTAssertTrue(pushes.isEmpty, "A verified fast-lane outcome must not speak: \(events)")
         await runtime.shutdown()
     }
 
@@ -218,7 +242,7 @@ for line in sys.stdin:
         XCTAssertEqual(pending[0].owner, "insert the reply in Fixture")
 
         let reply = await runtime.respondToTask("hello draft", captureID: first.provenance?.captureID ?? UUID())
-        XCTAssertTrue(reply?.hasPrefix("Resuming") ?? false, reply ?? "nil")
+        XCTAssertEqual(try decoded(try XCTUnwrap(reply)).status, "resumed", reply ?? "nil")
         answered.value = true
         let resumed = try XCTUnwrap(runtime.tasks.last)
         XCTAssertNotEqual(resumed.id, first.id)
@@ -273,11 +297,12 @@ for line in sys.stdin:
             }
             return self.answers(next: "done")
         })
-        XCTAssertEqual(runtime.cancelVoiceTask("anything"), "Nothing is running.")
+        let idle = try decoded(runtime.cancelVoiceTask("anything"))
+        XCTAssertEqual(idle.status, "nothing_running", idle.say)
         _ = await runtime.beginVoiceTask("press Delete in Fixture", app: "Fixture")
         try await until { runtime.tasks.last?.approval != nil }
-        let reply = runtime.cancelVoiceTask("delete")
-        XCTAssertTrue(reply.hasPrefix("Stopping"), reply)
+        let reply = try decoded(runtime.cancelVoiceTask("delete"))
+        XCTAssertEqual(reply.status, "cancelled", reply.say)
         let work = try XCTUnwrap(runtime.tasks.last)
         try await until { !work.active }
         XCTAssertTrue(work.stopRequested)
@@ -294,9 +319,10 @@ for line in sys.stdin:
         let judgeCalls = Counter()
         let runtime = makeRuntime(config: config, script: script, judge: { _, _ in
             judgeCalls.bump()
-            // The drive retries a thrown judge call once — both calls must
-            // fail for the work itself to fail.
-            if judgeCalls.value <= 2 { throw DriverConnectionError.refused("judgment unavailable") }
+            // The drive retries a transient thrown judge call once — both
+            // calls must fail for the work itself to fail. Only JevError
+            // faults earn that retry, so the stub throws one.
+            if judgeCalls.value <= 2 { throw JevError.transport(URLError(.timedOut)) }
             return self.answers(next: "done")
         })
         let controller = VoiceController(config: config, speech: Capture(),
@@ -306,8 +332,8 @@ for line in sys.stdin:
         try await until { !first.active }
         XCTAssertEqual(first.status, "Failed", first.message)
         XCTAssertTrue(controller.canRetryTask(first.id))
-        let reply = await runtime.retryWork(first.id)
-        XCTAssertTrue(reply.hasPrefix("Trying again"), reply)
+        let reply = try decoded(await runtime.retryWork(first.id))
+        XCTAssertEqual(reply.status, "resumed", reply.say)
         let retried = try XCTUnwrap(runtime.tasks.last)
         XCTAssertEqual(retried.intentID, first.intentID)
         XCTAssertNotEqual(retried.attemptID, first.attemptID)

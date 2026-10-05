@@ -1,0 +1,64 @@
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/mod.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/mod.rs
+@@ -290,19 +290,46 @@
+ /// Finish the post-action observation window. Embedded interactive clients
+ /// that already observe the target continuously may opt out through the
+ /// private registry argument to avoid adding a one-second acknowledgement
+-/// delay to every input event. Regular MCP callers retain the full observer.
++/// delay to every input event. Regular MCP callers retain the full observer
++/// by default but can opt out per call through the public
++/// `skip_window_change_detection` flag (drops the observation entirely) or
++/// shrink it through `window_change_timeout_ms` (clamped to the default
++/// window — it can only shorten the suppression tail, never extend it).
++/// Public callers cannot forge `_`-prefixed keys: registry ingress strips
++/// them, so the opt-in mirrors the private flag under a public name. Tool
++/// schemas intentionally do not advertise either field — the contract stays
++/// unchanged and unknown arguments are projected away by every mutating
++/// tool's input parser (parse_typed_projection / parse_legacy_click_input /
++/// raw ArgsExt), so an unpatched driver ignores them harmlessly. Callers
++/// acting inside a bound window where the action cannot spawn cross-app UI
++/// use them to avoid paying a fixed one-second tax per dispatch; calls that
++/// can surface windows or dialogs omit them and keep the full observer.
+ pub(crate) async fn finish_window_observation(
+     snapshot: crate::window_change_detector::Snapshot,
+     args: &serde_json::Value,
+ ) -> crate::window_change_detector::Changes {
+     if args
+         .get("_skip_window_change_detection")
++        .or_else(|| args.get("skip_window_change_detection"))
+         .and_then(serde_json::Value::as_bool)
+         .unwrap_or(false)
+     {
+         drop(snapshot);
+         crate::window_change_detector::Changes::no_change()
++    } else if let Some(ms) = args
++        .get("window_change_timeout_ms")
++        .and_then(serde_json::Value::as_u64)
++    {
++        // Shorter poll deadline — same spawn_blocking offload as
++        // `Snapshot::detect_async`, same 50ms poll interval. The lease
++        // still covers action + shortened detect window before dropping.
++        let timeout = std::time::Duration::from_millis(ms.min(1_000));
++        tokio::task::spawn_blocking(move || {
++            snapshot.detect_with(timeout, std::time::Duration::from_millis(50))
++        })
++        .await
++        .unwrap_or_else(|_| crate::window_change_detector::Changes::no_change())
+     } else {
+         snapshot.detect_async().await
+     }
+ }
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/set_value.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/set_value.rs
+@@ -212,7 +212,10 @@
+         )
+         .await;
+ 
+-        let changes = snapshot.detect_async().await;
++        // Route through the shared finish so the per-call opt-in and
++        // `window_change_timeout_ms` reach set_value too — it paid the same
++        // fixed one-second tail on every AX write.
++        let changes = super::finish_window_observation(snapshot, &args).await;
+ 
+         match result {
+             Ok(Ok(mut outcome)) => {

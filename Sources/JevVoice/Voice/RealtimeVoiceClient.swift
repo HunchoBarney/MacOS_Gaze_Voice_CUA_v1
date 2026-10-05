@@ -15,7 +15,7 @@ import OSLog
 ///              back as conversation.item.create function_call_output + response.create
 @MainActor
 final class RealtimeVoiceClient {
-    private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice.voice", category: "realtime")
+    private nonisolated static let log = Logger(subsystem: "com.chriswozniczek.jevvoice.voice", category: "realtime")
 
     enum Event {
         case sessionStarted(id: String)
@@ -35,15 +35,25 @@ final class RealtimeVoiceClient {
         case responseDone
         case closed
         case failure(String)
+        /// A request the server rejected but the session survived — bad
+        /// item ids, deletes of gone items, shape nits. Log-worthy, never
+        /// worth killing the turn over.
+        case warning(String)
     }
 
     enum Phase { case connecting, ready, closed }
 
     private(set) var phase: Phase = .connecting
-    var onEvent: ((Event) -> Void)?
+    /// Called off-actor from the detached receive loop — audio events
+    /// must never queue behind MainActor. Written once before connect().
+    nonisolated(unsafe) var onEvent: ((Event) -> Void)?
 
     private let urlSession: URLSession
-    private var socket: URLSessionWebSocketTask?
+    /// nonisolated so mic frames can send without a MainActor hop — any
+    /// UI stall would otherwise land in the stream as an audible gap.
+    /// Mutated only on the actor (connect/teardown); a stale read just
+    /// fails its send.
+    nonisolated(unsafe) private var socket: URLSessionWebSocketTask?
     private var receiver: Task<Void, Never>?
     private(set) var connectedAt: Date?
 
@@ -61,7 +71,7 @@ final class RealtimeVoiceClient {
             [
                 "type": "function",
                 "name": "computer_command",
-                "description": "Control the user's Mac — open or quit apps, click, type, scroll, menus, multi-step tasks across apps. Call this for anything the user wants DONE on the machine. Pass the user's instruction verbatim, in the language they spoke. Returns STARTED immediately; a '[task outcome]' message with the verified result arrives later — never claim a task finished before it does.",
+                "description": "Control the user's Mac — open or quit apps, click, type, scroll, menus, multi-step tasks across apps. Call this for anything the user wants DONE on the machine. Pass the user's instruction verbatim, in the language they spoke. Returns JSON — your pre-call beat was the acknowledgement, so a \"started\" status means stay quiet; voice the \"say\" text verbatim for every other status. A '{\"kind\":\"task_outcome\"}' message with the verified result arrives later — never claim a task finished before it does.",
                 "parameters": [
                     "type": "object",
                     "properties": [
@@ -76,11 +86,12 @@ final class RealtimeVoiceClient {
             [
                 "type": "function",
                 "name": "respond_to_task",
-                "description": "Answer a question a running task asked the user — a yes/no confirmation, which window to use, or text it needs. Call this whenever the user is replying to something you asked, not giving a new instruction.",
+                "description": "Answer a question a running task asked the user — a yes/no confirmation, which window to use, or text it needs. Call this whenever the user is replying to something you asked, not giving a new instruction. When more than one task is waiting for an answer, pass 'task' to say which one this answer is for.",
                 "parameters": [
                     "type": "object",
                     "properties": [
-                        "answer": ["type": "string", "description": "The user's answer, verbatim — 'yes', 'no', a window title, or the text to use."]
+                        "answer": ["type": "string", "description": "The user's answer, verbatim — 'yes', 'no', a window title, or the text to use."],
+                        "task": ["type": "string", "description": "Which waiting task this answer is for, when several are parked — a word from the task's request, the app name, or an ordinal like 'first' or 'second'."]
                     ],
                     "required": ["answer"],
                     "additionalProperties": false
@@ -152,36 +163,56 @@ final class RealtimeVoiceClient {
         what is visible right now. Answer questions about the screen directly \
         from it — no tool needed.
 
+        You are terse — every word is heard aloud. Never narrate, recap, \
+        greet, apologise, or add pleasantries. Whenever any tool result or \
+        pushed message carries a "say" field, that text is your ENTIRE \
+        spoken reply — nothing before it, nothing after it. When nothing \
+        carries "say", answer in one sentence; two at most, and only when \
+        the user asked for an explanation.
+
         To act on the Mac, speak one short beat — five words or fewer \
-        ("On it —", "Opening it", "Doing that") — and call computer_command \
+        ("On it,", "Opening it", "Doing that") — and call computer_command \
         in the same breath, with the user's instruction verbatim. That beat \
-        IS the acknowledgement: the tool returns STARTED, and you say \
-        nothing more — the verified result arrives later as a "[task \
-        outcome]" message; when it does, tell the user plainly what \
-        happened — done, blocked, or what stopped it. Never claim a task \
-        finished before its outcome arrives. Fill app when one is named \
-        or obvious from the screenshot (for media pick the likely one — \
+        IS the acknowledgement: when the tool returns status "started" you \
+        say nothing more. Fill app when one is \
+        named or obvious from the screenshot (for media pick the likely one — \
         Spotify, Music, the browser — don't spend a voice turn asking), and \
         literal_text with the content to type or search for — 'play Marvin's \
         Room by Drake' → literal_text "Marvin's Room Drake", not the whole \
         sentence. Repeat names, places, and titles exactly as the user said \
         them — never paraphrase (Yuba City stays Yuba City).
 
-        When you see "[needs confirmation]" or "[question]" a task is waiting \
-        on the user — ask it out loud in your own words, and when they answer, \
-        call respond_to_task with what they said. Plain "yes"/"no" turns after \
-        you asked a confirmation are answers, not new commands.
+        Tool results are JSON and carry a "say" field: voice the say text \
+        VERBATIM, word for word — it is the acknowledgement the task \
+        computed for you, and it is the whole reply. If a tool result has \
+        no "say" it carries content the user asked for — answer with it \
+        plainly, one sentence preferred.
 
-        For background or long-running work use delegate_to_agent. For \
-        "cancel"/"stop"/"never mind" use cancel_task. For anything that \
-        needs the live internet — news, facts, lookups — call web_lookup; \
-        say a short beat first ("checking") since it takes a moment. For \
-        questions deeper than the visible screen but answerable from what \
-        you know, use send_to_higher_model.
+        Later messages can arrive between your turns: \
+        {"kind":"task_outcome"} carries the verified result of work you \
+        started — voice its "say" verbatim and nothing else; \
+        {"kind":"task_question"} means a task is waiting on the user — ask \
+        its "say" verbatim, and when they answer call respond_to_task with \
+        what they said. Plain "yes"/"no" turns after you asked a \
+        confirmation are answers, not new commands. Never claim a task \
+        finished before its outcome arrives.
 
-        Keep replies to one or two sentences — this is voice. Answer in \
-        whatever language the user speaks. If they ask how to do something, \
-        explain briefly instead of acting. You may simply converse.
+        Messages starting with [context] are injected system notes — local \
+        time, the active app, what's waiting — they are facts about now, not \
+        the user's words. Use them silently; never read them aloud.
+
+        For background or long-running work use delegate_to_agent — the \
+        result's "say" is the whole reply; never also answer the delegated \
+        request yourself. For "cancel"/"stop"/"never mind" use cancel_task. \
+        For anything that needs the live internet — news, facts, lookups — \
+        call web_lookup; say a short beat first ("checking") since it takes \
+        a moment. For questions deeper than the visible screen but answerable \
+        from what you know, use send_to_higher_model.
+
+        Keep replies to one sentence — two at most, this is voice. Answer \
+        in whatever language the user speaks. If they ask how to do \
+        something, explain briefly instead of acting. You may simply \
+        converse — briefly.
         """
 
     /// Connect and configure. Resolves once the server confirms the session
@@ -235,7 +266,27 @@ final class RealtimeVoiceClient {
         }
         connectedAt = Date()
         phase = .ready
+        startKeepalive()
         Self.log.notice("realtime_connected model=\(model, privacy: .public)")
+    }
+
+    /// The socket has no application-level heartbeat: an idle hold-free
+    /// stretch (the app open, Fn untouched) lets NATs and intermediaries
+    /// drop the wire silently — the next press then commits audio into a
+    /// dead session. A WS ping every 25s keeps the path alive; a pong
+    /// failure surfaces through the ordinary receive loop's close.
+    private var keepalive: Task<Void, Never>?
+    private func startKeepalive() {
+        keepalive?.cancel()
+        keepalive = Task.detached { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(25))
+                guard !Task.isCancelled else { return }
+                guard self != nil else { return }
+                guard let socket = self?.socket, socket.state == .running else { continue }
+                socket.sendPing { _ in }
+            }
+        }
     }
 
     private var sessionReady: CheckedContinuation<Void, Error>?
@@ -254,9 +305,15 @@ final class RealtimeVoiceClient {
         phase == .ready && socket?.state == .running
     }
 
-    func sendAudio(_ pcm: Data) async throws {
-        guard isReady else { throw VoiceError("The realtime session is not connected.") }
-        try await send(["type": "input_audio_buffer.append", "audio": pcm.base64EncodedString()])
+    /// Mic frames take the hottest path in the app — no MainActor hop,
+    /// no JSONSerialization, just the base64 append straight onto the
+    /// wire. The socket tolerates sends from any thread; a torn-down one
+    /// fails the send, which the pump turns into a capture failure.
+    nonisolated func sendAudio(_ pcm: Data) async throws {
+        guard let socket else { throw VoiceError("The realtime session is not connected.") }
+        let frame = "{\"type\":\"input_audio_buffer.append\",\"audio\":\""
+            + pcm.base64EncodedString() + "\"}"
+        try await socket.send(.string(frame))
     }
 
     func commitAudio() async throws { try await send(["type": "input_audio_buffer.commit"]) }
@@ -305,27 +362,61 @@ final class RealtimeVoiceClient {
 
     /// Remove a conversation item — used for keep-latest-1 screenshot hygiene
     /// so old images stop re-billing and diluting attention every turn.
+    /// Per-turn context injection — Clicky's `submitContextNote`. A small
+    /// user-role note carrying facts about right now (local time, active
+    /// app, what's waiting); instructions tell the model to use it silently.
+    /// The previous turn's note is deleted first so stale context can't
+    /// accumulate into a contradictory stack. Returns the item id — keep it
+    /// and pass it back as `replacing` on the next turn.
+    @discardableResult
+    func sendContextNote(_ text: String, replacing priorItemID: String? = nil) async throws -> String {
+        if let priorItemID { try? await deleteItem(itemID: priorItemID) }
+        let itemID = Self.contextItemID()
+        try await send([
+            "type": "conversation.item.create",
+            "item": [
+                "id": itemID,
+                "type": "message",
+                "role": "user",
+                "content": [["type": "input_text", "text": text]]
+            ]
+        ])
+        return itemID
+    }
+
+    /// item.id caps at 32 chars server-side — a full UUID string (36+4)
+    /// got the whole session killed with a validation error. Keep it at
+    /// exactly 32.
+    nonisolated static func contextItemID() -> String {
+        "ctx-" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(28)
+    }
+
     func deleteItem(itemID: String) async throws {
         try await send(["type": "conversation.item.delete", "item_id": itemID])
     }
 
-    private func send(_ object: [String: Any]) async throws {
+    /// nonisolated so control sends don't occupy the main thread — the
+    /// release→response.create window already spends its latency on the
+    /// wire. Ordering still comes from each caller awaiting its own send.
+    nonisolated private func send(_ object: [String: Any]) async throws {
         guard let socket else { throw VoiceError("The realtime session is not connected.") }
         let data = try JSONSerialization.data(withJSONObject: object)
         try await socket.send(.string(String(decoding: data, as: UTF8.self)))
     }
 
+    /// Runs receive + JSON decode off-actor: every inbound frame used to
+    /// resume on MainActor, so one busy main thread stalled the whole
+    /// event stream — including the audio deltas feeding the speaker.
     private func startReceiver(_ socket: URLSessionWebSocketTask) {
-        receiver = Task { [weak self, weak socket] in
+        receiver = Task.detached { [weak self, socket] in
             while !Task.isCancelled {
                 do {
-                    guard let socket else { return }
                     let message = try await socket.receive()
                     guard let self, !Task.isCancelled else { return }
                     if case .string(let payload) = message {
                         for event in Self.decode(payload) {
-                            if case .sessionUpdated = event { self.confirmSessionReady() }
-                            if case .closed = event { self.failSessionReady(VoiceError("The realtime session closed.")) }
+                            if case .sessionUpdated = event { await self.confirmSessionReady() }
+                            if case .closed = event { await self.failSessionReady(VoiceError("The realtime session closed.")) }
                             self.onEvent?(event)
                         }
                     }
@@ -333,24 +424,29 @@ final class RealtimeVoiceClient {
                     guard let self, !Task.isCancelled else { return }
                     // A failed upgrade carries the HTTP status; a closed data
                     // phase carries the WS close code — surface both.
-                    let status = (socket?.response as? HTTPURLResponse)?.statusCode
-                    let close = socket?.closeCode.rawValue
-                    Self.log.notice("realtime_socket_ended error=\(error.localizedDescription, privacy: .public) http=\(status ?? 0, privacy: .public) close=\(close ?? -1, privacy: .public)")
-                    self.failSessionReady(error)
-                    self.phase = .closed
-                    if let status, status != 101 {
-                        self.onEvent?(.failure("Realtime connection refused (HTTP \(status))."))
-                    }
-                    self.onEvent?(.closed)
+                    let status = (socket.response as? HTTPURLResponse)?.statusCode
+                    let close = socket.closeCode.rawValue
+                    Self.log.notice("realtime_socket_ended error=\(error.localizedDescription, privacy: .public) http=\(status ?? 0, privacy: .public) close=\(close, privacy: .public)")
+                    await self.failSessionReady(error)
+                    await self.socketDidClose(httpStatus: status)
                     return
                 }
             }
         }
     }
 
+    private func socketDidClose(httpStatus status: Int?) {
+        phase = .closed
+        if let status, status != 101 {
+            onEvent?(.failure("Realtime connection refused (HTTP \(status))."))
+        }
+        onEvent?(.closed)
+    }
+
     /// Parse one JSON frame into zero or more events. Kept static and pure so
-    /// the contract stays unit-testable without a socket.
-    static func decode(_ payload: String) -> [Event] {
+    /// the contract stays unit-testable without a socket — and nonisolated
+    /// so the receive loop never hops onto MainActor to decode.
+    nonisolated static func decode(_ payload: String) -> [Event] {
         guard let data = payload.data(using: .utf8),
               let frame = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = frame["type"] as? String else { return [] }
@@ -424,10 +520,16 @@ final class RealtimeVoiceClient {
             events.append(.responseDone)
             return events
         case "error", "invalid_request_error":
-            let detail = (frame["error"] as? [String: Any])?["message"] as? String
-                ?? frame["message"] as? String ?? ""
-            let detail_ = detail.isEmpty ? "Realtime session error." : detail
-            return [.failure(detail_)]
+            let error = frame["error"] as? [String: Any] ?? frame
+            let detail = error["message"] as? String ?? ""
+            let text = detail.isEmpty ? "Realtime session error." : detail
+            // Session-fatal errors announce themselves by type/code — every
+            // other error frame is a rejected request on a live socket (an
+            // invalid item.id once killed the whole session via .failure).
+            let type = error["type"] as? String ?? ""
+            let code = error["code"] as? String ?? ""
+            let fatal = type.contains("session") || code.contains("session")
+            return [fatal ? .failure(text) : .warning(text)]
         default:
             return []
         }
@@ -438,6 +540,7 @@ final class RealtimeVoiceClient {
         // A connect() suspended on session confirmation would otherwise wait
         // out its 10s timeout — teardown is the definitive answer it needs.
         failSessionReady(VoiceError("The realtime session closed."))
+        keepalive?.cancel(); keepalive = nil
         receiver?.cancel(); receiver = nil
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil

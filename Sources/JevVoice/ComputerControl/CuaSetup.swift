@@ -44,11 +44,16 @@ final class CuaSetup: ObservableObject {
             let label = "Jarvis setup \(UUID().uuidString.prefix(6))"
             do {
                 try await connection.connect()
-                let permissions = try await CuaPermissionProbe.read(using: connection)
+                // The permission read and the session mint are independent
+                // roundtrips on the same transport — issue them together; the
+                // cleanup below ends the session even when a grant is missing.
+                async let permissionProbe = CuaPermissionProbe.read(using: connection)
+                async let session = connection.call("start_session", arguments: ["session": .string(label)])
+                let permissions = try await permissionProbe
+                _ = try await session
                 guard permissions["accessibility"] == .bool(true), permissions["screen_recording"] == .bool(true) else {
-                    throw DriverConnectionError.refused("Enable Cua Driver in macOS Accessibility and Screen Recording settings.")
+                    throw DriverConnectionError.refused(Self.permissionSummary(permissions))
                 }
-                _ = try await connection.call("start_session", arguments: ["session": .string(label)])
                 try Task.checkCancellation()
                 if browser { try await verifyBrowser(connection, label: label, apiKey: apiKey) }
                 else { try await verifyDocument(connection, label: label, apiKey: apiKey) }
@@ -66,10 +71,29 @@ final class CuaSetup: ObservableObject {
             task = nil
         }
     }
+    /// Names the missing grants and whose TCC identity answered — embedded
+    /// transports report the HOST app's grant state, so a generic "driver
+    /// failed" would send the user to the wrong Settings pane.
+    nonisolated static func permissionSummary(_ permissions: JSONValue) -> String {
+        var missing: [String] = []
+        if permissions["accessibility"] != .bool(true) { missing.append("Accessibility") }
+        if permissions["screen_recording"] != .bool(true) { missing.append("Screen Recording") }
+        let owner: String
+        switch permissions["source"]?["attribution"]?.string {
+        case "driver-daemon": owner = "the CuaDriver app"
+        case "caller": owner = "the app that launched the driver (its answer may not reflect the driver's own grants)"
+        default: owner = "Jev Voice"
+        }
+        return "Missing \(missing.joined(separator: " and ")) access for \(owner). Enable it in System Settings › Privacy & Security, then retry."
+    }
+
     private func verifyDocument(_ connection: CuaConnection, label: String, apiKey: String) async throws {
         let fixture = CuaSetupFixture.documentURL()
         let requestingForegroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         try "".write(to: fixture, atomically: true, encoding: .utf8)
+        // The fixture is disposable — drop the on-disk copy when the check
+        // ends either way; TextEdit keeps its open window.
+        defer { try? FileManager.default.removeItem(at: fixture) }
         message = "Opening a disposable TextEdit document…"
         // `launch_app` has no session field in the installed schema. Keep the
         // lifecycle label on later calls that actually accept it.
@@ -88,31 +112,14 @@ final class CuaSetup: ObservableObject {
         guard matches.count == 1, let wid = matches[0]["window_id"]?.integer else {
             throw DriverConnectionError.refused("Cua could not identify the disposable document. Nothing was typed.")
         }
-        // The installed Driver restores the previous foreground for eight seconds
-        // after launch_app opens a URL. Let that launch watchdog finish before the
-        // first explicit foreground request; an uncertain activation cannot be
-        // safely repeated. Recheck the exact window after the wait.
-        try await Task.sleep(for: .seconds(9))
-        try Task.checkCancellation()
-        guard let requestingForegroundPID,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == requestingForegroundPID else {
-            throw DriverConnectionError.refused("Another app took focus while the disposable document opened. Nothing was typed.")
-        }
-        let settled = try await connection.call("list_windows", arguments: [
-            "pid": .number(Double(pid)), "session": .string(label)
-        ])
-        guard (settled["windows"]?.array ?? []).filter({ $0["window_id"]?.integer == wid &&
-            $0["title"]?.string?.contains(fixture.lastPathComponent) == true }).count == 1 else {
-            throw DriverConnectionError.refused("The disposable document changed during launch. Nothing was typed.")
-        }
         let target: [String: JSONValue] = ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
             "session": .string(label), "include_screenshot": .bool(false), "max_elements": .number(150)]
-        let foreground = try await connection.call("bring_to_front", arguments: [
-            "pid": .number(Double(pid)), "window_id": .number(Double(wid)), "session": .string(label)
-        ])
-        guard foreground["activated"] == .bool(true), foreground["exact_window_effect"]?["verified"] == .bool(true) else {
-            throw DriverConnectionError.refused("Cua could not verify the disposable document in front. Nothing was typed.")
-        }
+        // The installed Driver restores the previous foreground for eight seconds
+        // after launch_app opens a URL, so the first explicit foreground request
+        // must wait out that watchdog — an uncertain activation cannot be safely
+        // repeated. The wait is fixed, but the field observation and the Jev
+        // choice need no foreground: they run inside it instead of after it.
+        async let watchdog: Void = Task.sleep(for: .seconds(9))
         var fields: [JSONValue] = []
         // TextEdit may create the URL-backed window before its editable AX body
         // is ready. Reobserve for a bounded settling window; never infer a target.
@@ -156,6 +163,29 @@ final class CuaSetup: ObservableObject {
         }
         guard (field["value"]?.string ?? "").isEmpty else {
             throw DriverConnectionError.refused("The selected field is not blank. Nothing was typed.")
+        }
+        // The launch watchdog's restore window must be fully elapsed before
+        // any activation — the observation and decision work above already
+        // ran inside it; this awaits only the remainder.
+        try await watchdog
+        try Task.checkCancellation()
+        guard let requestingForegroundPID,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == requestingForegroundPID else {
+            throw DriverConnectionError.refused("Another app took focus while the disposable document opened. Nothing was typed.")
+        }
+        // Recheck the exact window after the wait.
+        let settled = try await connection.call("list_windows", arguments: [
+            "pid": .number(Double(pid)), "session": .string(label)
+        ])
+        guard (settled["windows"]?.array ?? []).filter({ $0["window_id"]?.integer == wid &&
+            $0["title"]?.string?.contains(fixture.lastPathComponent) == true }).count == 1 else {
+            throw DriverConnectionError.refused("The disposable document changed during launch. Nothing was typed.")
+        }
+        let foreground = try await connection.call("bring_to_front", arguments: [
+            "pid": .number(Double(pid)), "window_id": .number(Double(wid)), "session": .string(label)
+        ])
+        guard foreground["activated"] == .bool(true), foreground["exact_window_effect"]?["verified"] == .bool(true) else {
+            throw DriverConnectionError.refused("Cua could not verify the disposable document in front. Nothing was typed.")
         }
         try Task.checkCancellation()
         // A model request creates a race with user edits. Reobserve before insertion.

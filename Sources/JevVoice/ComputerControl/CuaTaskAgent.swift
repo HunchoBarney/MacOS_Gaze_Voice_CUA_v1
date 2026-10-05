@@ -42,9 +42,15 @@ final class CuaTaskAgent {
     typealias Judge = (JSONValue, [String: Question]) async throws -> [String: Answer]
     private let call: Call
     private let approve: ((String) async throws -> Bool)?
+    /// Shared-state leases — deictic writes land on the frontmost app's
+    /// focused element, so a parallel lane's raise must not redirect them.
+    private let lanes: (any CuaLaneLeasing)?
     private(set) var bundleID: String?
     private(set) var windowID: Int?
     private(set) var launchedPID: Int?
+    /// True when this run's launch_app call already carried the resolution's
+    /// `launchURLs` — spares a redundant URI re-delivery to a fresh process.
+    private var launchURIsDelivered = false
     /// Postconditions independently observed during this agent's run, in order.
     /// Only Driver results and readback-verified state are recorded here.
     private(set) var observedPostconditions: [CuaObservedPostcondition] = []
@@ -59,10 +65,31 @@ final class CuaTaskAgent {
 
     init(call: @escaping Call,
          approve: ((String) async throws -> Bool)? = nil,
-         windowID: Int? = nil) {
+         windowID: Int? = nil,
+         lanes: (any CuaLaneLeasing)? = CuaLaneRegistry.shared,
+         workID: String = "") {
         self.call = call
         self.approve = approve
         self.windowID = windowID
+        self.lanes = lanes
+        self.workID = workID
+    }
+
+    /// Runs `body` holding the global focus lane — raises, launches and
+    /// menu invocations all mutate or depend on the frontmost app, which
+    /// parallel lanes share. A nil registry runs unleased (no peers).
+    private let workID: String
+    private func focusLeased<T>(_ body: () async throws -> T) async throws -> T {
+        guard let lanes else { return try await body() }
+        try await lanes.acquireFocus(workID: workID)
+        do {
+            let value = try await body()
+            await lanes.releaseFocus(workID: workID)
+            return value
+        } catch {
+            await lanes.releaseFocus(workID: workID)
+            throw error
+        }
     }
 
     // MARK: - Deterministic fast lane
@@ -74,6 +101,11 @@ final class CuaTaskAgent {
         let openVerb: String?
         let name: String
         let bundle: String
+        /// URLs delivered through launch_app's LaunchServices hand-off —
+        /// URI schemes and file/URL opens that ride the launch instead of
+        /// needing a second dispatch (Spotify search URIs). Empty for
+        /// ordinary launches.
+        var launchURLs: [String] = []
     }
 
     /// Parse + resolve only — no dispatch. Nil when the utterance is not
@@ -88,27 +120,92 @@ final class CuaTaskAgent {
         let frontmost = frontmostBundleOverride
             ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         if let parsed = CuaFastAction.parse(goal) {
+            // Global lanes need no app and must not queue behind an app
+            // lease — a media key is a system event, not a window action.
+            if case .mediaKey = parsed.action.body {
+                guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
+                else { return nil }
+                return FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: "")
+            }
             // A misheard model `app` arg must not sink an otherwise-valid
-            // command — it was never spoken, so resolve without it when the
-            // instruction itself names no app.
+            // command — and it must not outrank what the user is looking
+            // at. With no spoken qualifier the frontmost app resolves
+            // first; the model's hint is only a fallback when frontmost
+            // doesn't resolve ("press space" + app:"spotify" targets the
+            // app in front, not a backgrounded Spotify).
             let qualifiers: [String?] = parsed.appQualifier != nil
-                ? [parsed.appQualifier] : [appHint, nil]
+                ? [parsed.appQualifier] : [nil, appHint]
             for qualifier in qualifiers {
+                // "search google for X" names an engine, not an installed
+                // app — the engine URL is the deterministic target. The
+                // check runs before app resolution so an installed app
+                // whose name merely contains the engine word ("Google
+                // Chrome") can't capture a site-search intent.
+                if let qualifier, case .appSearch(let query, _) = parsed.action.body,
+                   let url = CuaActionCatalog.namedEngineSearchURL(engine: qualifier, query: query),
+                   !Self.requiresRiskJudgment(goal: goal,
+                                              actionDescription: "Searching \(qualifier) for “\(query)”") {
+                    return FastResolution(action: CuaFastAction(
+                            body: .navigateURL(url), generic: true,
+                            description: "Searching \(qualifier) for “\(query)”",
+                            result: "Opened the results", effect: .delivered),
+                        openVerb: nil, name: "", bundle: "")
+                }
                 guard let resolved = CuaFastAction.resolveApp(qualifier: qualifier,
                                                             action: parsed.action,
                                                             apps: apps, frontmostBundle: frontmost),
-                      !parsed.action.needsTabbableApp || CuaFastAction.tabbableBundles.contains(resolved.bundle) else { continue }
+                      !parsed.action.needsTabbableApp || CuaFastAction.tabbableBundles.contains(resolved.bundle) else {
+                    continue
+                }
+                // "type X here" means the live insertion point — a qualifier
+                // naming an app other than the frontmost one contradicts it;
+                // the drive loop owns that question.
+                if case .deicticType = parsed.action.body, resolved.bundle != frontmost { continue }
+                // "play X" only lands on a media app; a non-media resolution
+                // is the loop's question, not a search field to guess at.
+                if case .appSearch(_, let playTopHit) = parsed.action.body, playTopHit,
+                   !Self.mediaBundles.contains(resolved.bundle) { continue }
                 guard parsed.action.selfApproves
                         || !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description) else { break }
-                return FastResolution(action: parsed.action, openVerb: nil,
-                                      name: resolved.name, bundle: resolved.bundle)
+                var resolution = FastResolution(action: parsed.action, openVerb: nil,
+                                                name: resolved.name, bundle: resolved.bundle)
+                if case .appSearch(let query, _) = parsed.action.body, resolved.bundle == Self.spotifyBundle {
+                    resolution.launchURLs = [Self.spotifySearchURI(query)]
+                }
+                return resolution
+            }
+            // A bare "play X" that resolved no media app above still has one
+            // deterministic reading: the frontmost or uniquely-running media
+            // app, or an installed Spotify.
+            if parsed.appQualifier == nil, case .appSearch(_, let playTopHit) = parsed.action.body,
+               playTopHit,
+               !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description),
+               let media = Self.implicitMediaApp(apps: apps, frontmostBundle: frontmost) {
+                var resolution = FastResolution(action: parsed.action, openVerb: nil,
+                                                name: media.name, bundle: media.bundle)
+                if media.bundle == Self.spotifyBundle, case .appSearch(let query, _) = parsed.action.body {
+                    resolution.launchURLs = [Self.spotifySearchURI(query)]
+                }
+                return resolution
             }
         }
-        if let parsed = CuaFastAction.parseOpen(goal),
-           let resolved = CuaFastAction.resolveOpenApp(query: parsed.query, apps: apps,
-                                                     frontmostBundle: frontmost) {
-            return FastResolution(action: nil, openVerb: parsed.verb,
-                                  name: resolved.name, bundle: resolved.bundle)
+        if let parsed = CuaFastAction.parseOpen(goal) {
+            if let resolved = CuaFastAction.resolveOpenApp(query: parsed.query, apps: apps,
+                                                           frontmostBundle: frontmost) {
+                return FastResolution(action: nil, openVerb: parsed.verb,
+                                      name: resolved.name, bundle: resolved.bundle)
+            }
+            // A URL-shaped tail that resolved to no app is a navigation
+            // request — "go to apple.com" binds a browser or goes through
+            // LaunchServices; a tail carrying more than the address stays
+            // with the drive loop.
+            if let url = CuaActionCatalog.explicitBrowserNavigationURL(in: goal),
+               !Self.requiresRiskJudgment(goal: goal, actionDescription: "Opening \(url)") {
+                return FastResolution(action: CuaFastAction(
+                        body: .navigateURL(url), generic: true,
+                        description: "Opening \(url)", result: "Opened \(url)", effect: .delivered),
+                    openVerb: nil, name: "", bundle: "")
+            }
         }
         return nil
     }
@@ -121,9 +218,32 @@ final class CuaTaskAgent {
                      progress: @escaping (String) -> Void) async throws -> String? {
         let bundle = resolved.bundle
         let name = resolved.name
-        bundleID = bundle
+        if !bundle.isEmpty { bundleID = bundle }
+        launchURIsDelivered = false
         try Task.checkCancellation()
-        let currentInventory = try await call("get_accessibility_tree", [:])
+        // App-free lanes dispatch before any inventory read: media keys post
+        // to the HID tap, deictic text lands at the live insertion point, and
+        // a navigation URL binds a browser or goes through LaunchServices.
+        if let action = resolved.action {
+            switch action.body {
+            case .mediaKey(let key):
+                progress(action.description)
+                guard MediaKeys.post(key) else {
+                    throw DriverConnectionError.refused("The system key event could not be created. Nothing was delivered.")
+                }
+                recordPostcondition(.resultObserved, "\(action.result); posted to the HID event tap.")
+                return "\(action.result)."
+            case .deicticType(let payload):
+                return try await dispatchDeicticType(payload, action: action, name: name, progress: progress)
+            case .navigateURL(let url):
+                return try await dispatchURLLane(url, progress: progress)
+            default:
+                break
+            }
+        }
+        // The running check rides on list_apps — the same `apps` rows the
+        // inventory tree carries, without the full AX walk.
+        let currentInventory = try await call("list_apps", [:])
         let runningMatches = (currentInventory["apps"]?.array ?? []).filter {
             $0["bundle_id"]?.string == bundle && ($0["pid"]?.integer ?? 0) > 0
         }
@@ -142,13 +262,18 @@ final class CuaTaskAgent {
             progress("Opening \(name)…")
             let opened: JSONValue
             do {
-                opened = try await call("launch_app", ["bundle_id": .string(bundle)])
+                var args: [String: JSONValue] = ["bundle_id": .string(bundle)]
+                if !resolved.launchURLs.isEmpty {
+                    args["urls"] = .array(resolved.launchURLs.map { .string($0) })
+                }
+                opened = try await focusLeased { try await call("launch_app", args) }
                 launchResult = opened
+                launchURIsDelivered = !resolved.launchURLs.isEmpty
             } catch DriverConnectionError.timedOut {
                 try Task.checkCancellation()
                 let inspection: String
                 do {
-                    let observed = try await call("get_accessibility_tree", [:])
+                    let observed = try await call("list_apps", [:])
                     let matches = (observed["apps"]?.array ?? []).filter {
                         $0["bundle_id"]?.string == bundle && ($0["pid"]?.integer ?? 0) > 0
                     }
@@ -166,13 +291,8 @@ final class CuaTaskAgent {
             guard let process = opened["pid"]?.integer, process > 0 else { throw DriverConnectionError.malformed }
             pid = process
             launchedPID = process
-            // The lightweight running-process snapshot avoids scanning installed bundles again.
-            let fresh = try await call("get_accessibility_tree", [:])
-            guard (fresh["apps"]?.array ?? []).contains(where: {
-                $0["bundle_id"]?.string == bundle && $0["pid"]?.integer == pid
-            }) else {
-                throw DriverConnectionError.refused("The launched application was not observed running. I will not repeat the launch.")
-            }
+            // launch_app's resolved pid is the liveness evidence — no second
+            // inventory read is needed to confirm what the driver attested.
             recordPostcondition(.targetObserved, "Observed \(name) running after launch.",
                                 appName: name, bundleID: bundle, processID: pid)
         }
@@ -191,7 +311,8 @@ final class CuaTaskAgent {
             if launchedPID != nil, windowID == nil, launchWindows.isEmpty {
                 // Bounded patience for a just-launched app's first window; a
                 // menu-bar app may never show one and "opened" stays honest.
-                _ = try? await waitForLaunchWindow(pid: pid)
+                // The poll's own winning read is reused — no re-list.
+                launchWindows = (try? await waitForLaunchWindow(pid: pid)) ?? []
             }
             // A transport fault is not "no windows" — propagate it rather
             // than skipping the verified-front contract on a dead driver.
@@ -208,41 +329,64 @@ final class CuaTaskAgent {
             // — otherwise we refuse a request the system could satisfy.
             if rows.isEmpty, launchedPID == nil,
                CuaFastAction.openRequiresRaise(goal: goal) {
-                _ = try? await call("launch_app", ["bundle_id": .string(bundle)])
-                _ = try? await waitForLaunchWindow(pid: pid)
-                rows = try await listedWindowRows(pid: pid)
+                _ = try? await focusLeased { try await call("launch_app", ["bundle_id": .string(bundle)]) }
+                if let waited = try? await waitForLaunchWindow(pid: pid) {
+                    rows = waited
+                } else {
+                    rows = try await listedWindowRows(pid: pid)
+                }
             }
             if let wid = windowID ?? Self.bestWindowID(in: rows) {
                 // Every open verb ends at the same contract: the exact window
                 // verified in front. A just-launched window may still be
                 // materializing — settle once and retry the verified raise.
-                var activation = try await call("bring_to_front", ["pid": .number(Double(pid)), "window_id": .number(Double(wid))])
-                if !(activation["activated"] == .bool(true)
-                     && activation["exact_window_effect"]?["verified"] == .bool(true)) {
-                    try await Task.sleep(for: .milliseconds(400))
-                    activation = try await call("bring_to_front", ["pid": .number(Double(pid)), "window_id": .number(Double(wid))])
+                // A refused raise is caught so the retry and the workspace
+                // fallback below actually run; a transport fault still
+                // propagates — replaying on a dead transport is the unsafe
+                // retry this surface refuses. The raise+retry+verify hold
+                // the focus lane — a parallel lane's raise must not
+                // interleave between our raise and its verification.
+                return try await focusLeased { () -> String in
+                    var activation: JSONValue
+                    do {
+                        activation = try await call("bring_to_front", ["pid": .number(Double(pid)), "window_id": .number(Double(wid))])
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch let error as DriverConnectionError {
+                        switch error {
+                        case .closed, .timedOut, .unavailable, .malformed, .toolRefused: throw error
+                        case .refused, .remote: activation = .object([:])
+                        }
+                    }
+                    if !(activation["activated"] == .bool(true)
+                         && activation["exact_window_effect"]?["verified"] == .bool(true)) {
+                        try await Task.sleep(for: .milliseconds(400))
+                        activation = (try? await call("bring_to_front", ["pid": .number(Double(pid)), "window_id": .number(Double(wid))])) ?? activation
+                    }
+                    // The driver's exact-window verification is stricter than the
+                    // outcome the user sees: some apps (Calculator) sit in front
+                    // without satisfying it. The workspace frontmost read plus an
+                    // on-screen window is real evidence too — report which proof
+                    // stood rather than refusing a raise that visibly happened.
+                    // When the driver already verified, the re-list is skipped.
+                    let driverVerified = activation["activated"] == .bool(true)
+                        && activation["exact_window_effect"]?["verified"] == .bool(true)
+                    var workspaceFronted = false
+                    if !driverVerified,
+                       NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(pid),
+                       let row = try await windowRow(pid: pid, windowID: wid) {
+                        workspaceFronted = row["is_on_screen"] != .bool(false)
+                    }
+                    guard driverVerified || workspaceFronted else {
+                        throw DriverConnectionError.refused("\(name)'s window could not be verified in front. The foreground request was not satisfied.")
+                    }
+                    let proof = driverVerified ? "verified its window in front." : "verified as the front app."
+                    let done = (CuaFastAction.openRequiresRaise(goal: goal)
+                        ? "Brought \(name) forward; " : "Opened \(name); ") + proof
+                    recordPostcondition(.resultObserved, done,
+                                        appName: name, bundleID: bundle, processID: pid, windowID: wid)
+                    return done
                 }
-                // The driver's exact-window verification is stricter than the
-                // outcome the user sees: some apps (Calculator) sit in front
-                // without satisfying it. The workspace frontmost read plus an
-                // on-screen window is real evidence too — report which proof
-                // stood rather than refusing a raise that visibly happened.
-                let driverVerified = activation["activated"] == .bool(true)
-                    && activation["exact_window_effect"]?["verified"] == .bool(true)
-                var workspaceFronted = false
-                if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(pid),
-                   let row = try await windowRow(pid: pid, windowID: wid) {
-                    workspaceFronted = row["is_on_screen"] != .bool(false)
-                }
-                guard driverVerified || workspaceFronted else {
-                    throw DriverConnectionError.refused("\(name)'s window could not be verified in front. The foreground request was not satisfied.")
-                }
-                let proof = driverVerified ? "verified its window in front." : "verified as the front app."
-                let done = (CuaFastAction.openRequiresRaise(goal: goal)
-                    ? "Brought \(name) forward; " : "Opened \(name); ") + proof
-                recordPostcondition(.resultObserved, done,
-                                    appName: name, bundleID: bundle, processID: pid, windowID: wid)
-                return done
             }
             if CuaFastAction.openRequiresRaise(goal: goal) {
                 throw DriverConnectionError.refused("\(name) has no observable window to bring forward.")
@@ -251,7 +395,7 @@ final class CuaTaskAgent {
             // request has a visible effect; apps that never front (menu-bar
             // agents) fall through to the observed-running report.
             if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
-                _ = app.activate(options: [])
+                try await focusLeased { _ = app.activate(options: []) }
             }
             recordPostcondition(.resultObserved, "Observed \(name) running.",
                                 appName: name, bundleID: bundle, processID: pid)
@@ -259,8 +403,11 @@ final class CuaTaskAgent {
         }
 
         guard let action = resolved.action else { throw DriverConnectionError.malformed }
+        // launch_app already polled for the window — its returned `windows[]`
+        // spares a re-list while a first window is still materializing.
+        let launchWindows = launchResult?["windows"]?.array ?? []
         return try await runFastLane(action, pid: pid, name: name, bundle: bundle,
-                                     foreground: false, progress: progress)
+                                     initialRows: launchWindows, progress: progress)
     }
 
     /// Deterministic one-shot dispatch: resolve the window once, send the
@@ -272,20 +419,30 @@ final class CuaTaskAgent {
     /// editable fields); once an input is dispatched the outcome is proven or
     /// honestly refused — never a silent partial.
     private func runFastLane(_ fast: CuaFastAction, pid: Int, name: String, bundle: String,
-                             foreground: Bool, progress: (String) -> Void) async throws -> String? {
+                             initialRows: [JSONValue] = [],
+                             progress: (String) -> Void) async throws -> String? {
         if case .appControl(let verb) = fast.body {
             return try await runAppControl(verb, pid: pid, name: name, bundle: bundle,
                                            progress: progress)
         }
-        var rows = try await listedWindowRows(pid: pid)
+        var rows = initialRows.isEmpty ? try await listedWindowRows(pid: pid) : initialRows
         if windowID == nil, rows.isEmpty {
-            // A running-but-windowless app materializes a window on the reopen
-            // event launch_app sends (e.g. Chrome with all windows closed).
-            _ = try await call("launch_app", ["bundle_id": .string(bundle)])
-            for _ in 0..<20 {
-                try await Task.sleep(for: .milliseconds(150))
-                rows = try await listedWindowRows(pid: pid)
-                if !rows.isEmpty { break }
+            // Confirm the app is truly windowless before spending the reopen
+            // event and the materialization poll: a second cheap
+            // list_windows read a beat later catches a transient
+            // under-report while a window is still materializing.
+            try await Task.sleep(for: .milliseconds(150))
+            rows = try await listedWindowRows(pid: pid)
+            if rows.isEmpty {
+                // A running-but-windowless app materializes a window on the
+                // reopen event launch_app sends (e.g. Chrome with all
+                // windows closed).
+                _ = try await focusLeased { try await call("launch_app", ["bundle_id": .string(bundle)]) }
+                for _ in 0..<20 {
+                    try await Task.sleep(for: .milliseconds(150))
+                    rows = try await listedWindowRows(pid: pid)
+                    if !rows.isEmpty { break }
+                }
             }
         }
         // A retained/pinned window id is a preference, never a substitute
@@ -340,22 +497,10 @@ final class CuaTaskAgent {
             break // app verbs never reach this pre-state pass
         }
 
-        // Window-scoped delivery targets the window by id, so a failed raise
-        // (locked screen, off-Space or minimized window) is a caveat on the
-        // report, never a reason to skip a provably-targeted action.
-        var focusNote = ""
-        if foreground {
-            do {
-                let activation = try await call("bring_to_front", ["pid": .number(Double(pid)), "window_id": .number(Double(wid))])
-                guard activation["activated"] == .bool(true), activation["exact_window_effect"]?["verified"] == .bool(true) else {
-                    throw DriverConnectionError.refused("The requested window could not be verified in front.")
-                }
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                focusNote = " \(name) could not be brought to the front."
-            }
-        }
+        // Window-scoped delivery targets the window by id — it dispatches
+        // in the background without a raise, so `focusNote` stays empty;
+        // the caveat slot survives for evidence strings that need it.
+        let focusNote = ""
         try Task.checkCancellation()
         progress(fast.description)
 
@@ -363,53 +508,73 @@ final class CuaTaskAgent {
         case .type(let payload):
             let typed = try await dispatchFastType(payload, pid: pid, window: wid, name: name, bundle: bundle)
             return typed.map { $0 + focusNote }
+        case .appSearch(let query, let playTopHit):
+            let searched = bundle == Self.spotifyBundle
+                ? try await dispatchSpotifySearch(query, playTopHit: playTopHit, pid: pid, window: wid, name: name)
+                : try await dispatchAppSearch(query, playTopHit: playTopHit, pid: pid, window: wid, name: name)
+            return searched.map { $0 + focusNote }
         case .appControl:
             throw DriverConnectionError.malformed // app verbs dispatch in runAppControl
+        case .mediaKey, .deicticType, .navigateURL:
+            throw DriverConnectionError.malformed // dispatched before window binding
         case .hotkey(let keys, _):
-            _ = try await call("hotkey", [
-                "keys": .array(keys.map { .string($0) }),
-                "target": .object(["kind": .string("window"), "pid": .number(Double(pid)), "window_id": .number(Double(wid))])
-            ])
-        case .scroll(let direction):
+            if keys.count == 1, let key = keys.first {
+                // `hotkey` requires ≥2 keys (a chord) — a single key is a
+                // `press_key` call or the schema validator rejects it.
+                _ = try await call("press_key", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                 "key": .string(key),
+                                                 "delivery_mode": .string("background")])
+            } else {
+                // Flat pid/window_id/keys — the driver's schema declares
+                // no `target` object and rejects additional properties.
+                _ = try await call("hotkey", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                              "keys": .array(keys.map { .string($0) }),
+                                              "delivery_mode": .string("background")])
+            }
+        case .scroll(let direction, let pages):
             _ = try await call("scroll", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                           "direction": .string(direction), "by": .string("page"),
-                                          "amount": .number(1), "delivery_mode": .string("background")])
+                                          "amount": .number(Double(pages)),
+                                          "delivery_mode": .string("background")])
         }
         let shortcut = fast.shortcut ?? ""
 
         switch fast.effect {
         case .tabsDelta(let delta):
+            // Cheap reads first: the window-title poll rides list_windows;
+            // the tab-strip walk (a full window snapshot per attempt) runs
+            // only when the title never moved.
+            if let title = try await pollDriver({ try await self.windowTitle(pid: pid, window: wid) },
+                                            until: { $0 != nil && $0 != beforeTitle }) {
+                recordPostcondition(.resultObserved, "\(fast.result) in \(name); window title changed to \"\(title ?? "")\".",
+                                    appName: name, bundleID: bundle, processID: pid, windowID: wid)
+                return "\(fast.result) in \(name); the window title changed." + focusNote
+            }
             // `>=`, not `==`: a single-tab Chrome window hides its strip, so a
             // 0→2 materialization is the real new-tab transition there.
-            if let observed = await pollDriver({ try await self.tabStrip(pid: pid, window: wid).count },
+            if let observed = try await pollDriver({ try await self.tabStrip(pid: pid, window: wid).count },
                                                until: { $0 >= beforeCount + delta }) {
                 recordPostcondition(.resultObserved, "\(fast.result) in \(name); observed tab count \(beforeCount)→\(observed).",
                                     appName: name, bundleID: bundle, processID: pid, windowID: wid)
                 return "\(fast.result) in \(name); tabs \(beforeCount)→\(observed)." + focusNote
             }
-            if let title = await pollDriver({ try await self.windowTitle(pid: pid, window: wid) },
+            throw DriverConnectionError.refused("Sent \(shortcut) to \(name), but could not confirm the tab effect from the window's observed state." + focusNote)
+        case .tabSelectionDelta:
+            if let title = try await pollDriver({ try await self.windowTitle(pid: pid, window: wid) },
                                             until: { $0 != nil && $0 != beforeTitle }) {
                 recordPostcondition(.resultObserved, "\(fast.result) in \(name); window title changed to \"\(title ?? "")\".",
                                     appName: name, bundleID: bundle, processID: pid, windowID: wid)
                 return "\(fast.result) in \(name); the window title changed." + focusNote
             }
-            throw DriverConnectionError.refused("Sent \(shortcut) to \(name), but could not confirm the tab effect from the window's observed state." + focusNote)
-        case .tabSelectionDelta:
-            if let observed = await pollDriver({ try await self.tabStrip(pid: pid, window: wid).selected },
+            if let observed = try await pollDriver({ try await self.tabStrip(pid: pid, window: wid).selected },
                                                until: { $0 != nil && $0 != beforeSelected }) {
                 recordPostcondition(.resultObserved, "\(fast.result) in \(name); selected tab became \"\(observed ?? "")\".",
                                     appName: name, bundleID: bundle, processID: pid, windowID: wid)
                 return "\(fast.result) in \(name)." + focusNote
             }
-            if let title = await pollDriver({ try await self.windowTitle(pid: pid, window: wid) },
-                                            until: { $0 != nil && $0 != beforeTitle }) {
-                recordPostcondition(.resultObserved, "\(fast.result) in \(name); window title changed to \"\(title ?? "")\".",
-                                    appName: name, bundleID: bundle, processID: pid, windowID: wid)
-                return "\(fast.result) in \(name); the window title changed." + focusNote
-            }
             throw DriverConnectionError.refused("Sent \(shortcut) to \(name), but could not confirm the navigation from the window's observed state." + focusNote)
         case .windowDelta(let delta):
-            if let observed = await pollDriver({ try await Self.realWindowCount(in: self.listedWindowRows(pid: pid)) },
+            if let observed = try await pollDriver({ try await Self.realWindowCount(in: self.listedWindowRows(pid: pid)) },
                                                until: { $0 >= beforeWindows + delta }) {
                 recordPostcondition(.resultObserved, "\(fast.result) in \(name); observed window count \(beforeWindows)→\(observed).",
                                     appName: name, bundleID: bundle, processID: pid)
@@ -417,7 +582,7 @@ final class CuaTaskAgent {
             }
             throw DriverConnectionError.refused("Sent \(shortcut) to \(name), but could not confirm a new window appeared." + focusNote)
         case .windowOffScreen:
-            let gone = await pollDriver({ () async throws -> Bool in
+            let gone = try await pollDriver({ () async throws -> Bool in
                 guard let row = try await self.windowRow(pid: pid, windowID: wid) else { return true }
                 return row["is_on_screen"] == .bool(false)
             }, until: { $0 })
@@ -428,7 +593,7 @@ final class CuaTaskAgent {
             }
             throw DriverConnectionError.refused("Sent \(shortcut) to \(name), but the window stayed on screen." + focusNote)
         case .appOffScreen:
-            let hidden = await pollDriver({ () async throws -> Bool in
+            let hidden = try await pollDriver({ () async throws -> Bool in
                 let rows = try await self.listedWindowRows(pid: pid)
                 return rows.isEmpty || rows.allSatisfy { $0["is_on_screen"] == .bool(false) }
             }, until: { $0 })
@@ -439,7 +604,7 @@ final class CuaTaskAgent {
             }
             throw DriverConnectionError.refused("Sent \(shortcut) to \(name), but its windows stayed on screen." + focusNote)
         case .boundsToScreen:
-            let full = await pollDriver({ () async throws -> Bool in
+            let full = try await pollDriver({ () async throws -> Bool in
                 Self.boundsCoverAScreen(try await self.windowRow(pid: pid, windowID: wid)?["bounds"])
             }, until: { $0 })
             if full == true {
@@ -449,7 +614,7 @@ final class CuaTaskAgent {
             }
             throw DriverConnectionError.refused("Sent \(shortcut) to \(name), but the window never covered the screen." + focusNote)
         case .boundsFromScreen:
-            let shrunk = await pollDriver({ () async throws -> Bool in
+            let shrunk = try await pollDriver({ () async throws -> Bool in
                 guard let bounds = try await self.windowRow(pid: pid, windowID: wid)?["bounds"] else { return false }
                 return !Self.boundsCoverAScreen(bounds)
             }, until: { $0 })
@@ -496,10 +661,18 @@ final class CuaTaskAgent {
         case .hide:
             guard !app.isHidden else { return "\(name) is already hidden." }
             progress("Hiding \(name)")
+            // A windowless/LSUIElement app has nothing for hide() to hide —
+            // refusing is honest, whereas an empty rows poll would claim success.
+            let rows = try await listedWindowRows(pid: pid)
+            guard !rows.isEmpty else {
+                throw DriverConnectionError.refused("\(name) has no windows to hide.")
+            }
             // hide()/unhide() return before the transition completes and their
             // Bool is unreliable — the observation poll below is the verdict.
-            _ = app.hide()
-            let hidden = await pollDriver({ () async throws -> Bool in
+            // Hiding the frontmost app activates the next one — a focus
+            // mutation, same as a raise.
+            try await focusLeased { _ = app.hide() }
+            let hidden = try await pollDriver({ () async throws -> Bool in
                 let rows = try await self.listedWindowRows(pid: pid)
                 return rows.isEmpty || rows.allSatisfy { $0["is_on_screen"] == .bool(false) }
             }, until: { $0 })
@@ -510,13 +683,21 @@ final class CuaTaskAgent {
             }
             throw DriverConnectionError.refused("\(name) was asked to hide, but its windows stayed on screen.")
         case .unhide:
-            if app.isHidden {
-                progress("Unhiding \(name)")
-                app.unhide()
-            } else {
-                _ = app.activate(options: [])
+            // Already-visible windowless apps have nothing to unhide — say
+            // so instead of claiming success on an empty rows poll.
+            let wasHidden = app.isHidden
+            let preRows = try await listedWindowRows(pid: pid)
+            let hasWindows = !preRows.isEmpty
+            if !wasHidden, !hasWindows {
+                return "\(name) is already visible and has no windows to unhide."
             }
-            let shown = await pollDriver({ () async throws -> Bool in
+            if wasHidden {
+                progress("Unhiding \(name)")
+                try await focusLeased { _ = app.unhide() }
+            } else {
+                try await focusLeased { _ = app.activate(options: []) }
+            }
+            let shown = try await pollDriver({ () async throws -> Bool in
                 guard NSRunningApplication(processIdentifier: pid_t(pid))?.isHidden == false else { return false }
                 let rows = try await self.listedWindowRows(pid: pid)
                 return rows.isEmpty || rows.contains { $0["is_on_screen"] != .bool(false) }
@@ -524,13 +705,21 @@ final class CuaTaskAgent {
             if shown == true {
                 recordPostcondition(.resultObserved, "Unhid \(name); it is visible again.",
                                     appName: name, bundleID: bundle, processID: pid)
-                return "Unhid \(name)."
+                return wasHidden ? "Unhid \(name)." : "\(name) was already visible."
             }
             throw DriverConnectionError.refused("\(name) was asked to unhide, but no window returned to the screen.")
         case .minimize:
             let rows = try await listedWindowRows(pid: pid)
-            guard let wid = Self.bestWindowID(in: rows) else {
-                throw DriverConnectionError.refused("\(name) has no observable window to minimize.")
+            // Honor a pinned window when one exists; otherwise the topmost
+            // visible window is the most likely target, matching the loop.
+            let wid: Int
+            if let pinned = self.windowID, rows.contains(where: { $0["window_id"]?.integer == pinned }) {
+                wid = pinned
+            } else {
+                guard let best = Self.bestWindowID(in: rows) else {
+                    throw DriverConnectionError.refused("\(name) has no observable window to minimize.")
+                }
+                wid = best
             }
             // invoke_menu temporarily focuses a background app — same standing
             // grant the loop asks for; a hidden/minimized app is unaffected.
@@ -544,23 +733,26 @@ final class CuaTaskAgent {
             }
             progress("Minimizing \(name)'s window")
             // A just-shown/just-raised app can still be building its menu bar;
-            // one settle+retry absorbs that. Only a rejection retries — the
-            // driver answered, so nothing dispatched. A transport fault means
-            // the first call may have landed; replaying a mutation on a dead
-            // transport is exactly the unsafe retry this surface refuses.
-            do {
-                _ = try await call("invoke_menu", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-                                                   "path": .array([.string("Window"), .string("Minimize")])])
-            } catch let error as DriverConnectionError {
-                switch error {
-                case .closed, .timedOut, .remote: throw error
-                case .refused, .malformed, .toolRefused, .unavailable: break
+            // one settle+retry absorbs an answered-but-refused menu path.
+            // Only .refused/.toolRefused retry — the driver answered, so the
+            // menu definitely did not dispatch. A transport fault means the
+            // first call may have landed; .unavailable/.malformed mean the
+            // path itself is bad or the slot is gone, not a transient state.
+            try await focusLeased {
+                do {
+                    _ = try await call("invoke_menu", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                       "path": .array([.string("Window"), .string("Minimize")])])
+                } catch let error as DriverConnectionError {
+                    switch error {
+                    case .closed, .timedOut, .remote, .unavailable, .malformed: throw error
+                    case .refused, .toolRefused: break
+                    }
+                    try await Task.sleep(for: .milliseconds(400))
+                    _ = try await call("invoke_menu", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                       "path": .array([.string("Window"), .string("Minimize")])])
                 }
-                try await Task.sleep(for: .milliseconds(400))
-                _ = try await call("invoke_menu", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-                                                   "path": .array([.string("Window"), .string("Minimize")])])
             }
-            let gone = await pollDriver({ () async throws -> Bool in
+            let gone = try await pollDriver({ () async throws -> Bool in
                 guard let row = try await self.windowRow(pid: pid, windowID: wid) else { return true }
                 return row["is_on_screen"] == .bool(false)
             }, until: { $0 })
@@ -572,8 +764,10 @@ final class CuaTaskAgent {
             throw DriverConnectionError.refused("Invoked Window → Minimize in \(name), but the window stayed on screen.")
         case .quit:
             progress("Quitting \(name)")
-            _ = app.terminate()
-            let gone = await pollDriver({ () async throws -> Bool in
+            // Terminating the frontmost app activates whatever is next —
+            // same focus mutation as hide().
+            try await focusLeased { _ = app.terminate() }
+            let gone = try await pollDriver({ () async throws -> Bool in
                 NSRunningApplication(processIdentifier: pid_t(pid))?.isTerminated ?? true
             }, until: { $0 })
             if gone == true {
@@ -604,13 +798,22 @@ final class CuaTaskAgent {
             "delivery_mode": .string("background"),
             "text": .string(payload)
         ])
-        let token = target["element_token"]?.string ?? ""
-        let observed = await pollDriver { () async throws -> String? in
+        // Element tokens are re-minted per snapshot, so the readback matches
+        // by the element's slot — index first, role+label when the order
+        // shifted — never by token.
+        let targetIndex = target["element_index"]?.integer
+        let targetRole = target["role"]?.string
+        let targetLabel = target["label"]?.string ?? target["description"]?.string
+        let observed = try await pollDriver { () async throws -> String? in
             let fresh = try await self.call("get_window_state", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
                                                                  "include_screenshot": .bool(false), "max_elements": .number(220)])
-            return fresh["elements"]?.array?.first(where: { $0["element_token"]?.string == token })?["value"]?.string
+            return Self.sameElement(in: fresh["elements"]?.array ?? [], index: targetIndex,
+                                    role: targetRole, label: targetLabel)?["value"]?.string
         } until: { value in
             guard let value else { return false }
+            // A field that already ended with the payload reads identical
+            // before and after — an unchanged value proves nothing.
+            if let before, value == before { return false }
             return value.hasSuffix(payload) || (before != nil && value == before! + payload)
         }
         let label = target["label"]?.string ?? target["description"]?.string ?? "text field"
@@ -644,26 +847,36 @@ final class CuaTaskAgent {
         return candidates.max { ($0["z_index"]?.integer ?? Int.min) < ($1["z_index"]?.integer ?? Int.min) }?["window_id"]?.integer
     }
 
+    /// Browser chrome lives outside the page's AXWebArea — in-page
+    /// lookalikes (radio groups, search inputs) must not be mistaken for
+    /// app-level controls.
+    private static func insideWebArea(_ element: JSONValue, indexed: [Int: JSONValue]) -> Bool {
+        var node = element
+        var hops = 0
+        while let parent = node["parent_index"]?.integer, let upper = indexed[parent], hops < 12 {
+            if upper["role"]?.string == "AXWebArea" { return true }
+            node = upper; hops += 1
+        }
+        return false
+    }
+
+    /// An element-index map for ancestor walks — indices are per-snapshot
+    /// identifiers stable enough to key within one read.
+    private static func elementIndexMap(_ elements: [JSONValue]) -> [Int: JSONValue] {
+        Dictionary(elements.compactMap { e in e["element_index"]?.integer.map { ($0, e) } },
+                   uniquingKeysWith: { a, _ in a })
+    }
+
     /// The window's browser-level tab strip: radio/tab elements that are NOT
     /// inside page content. On real Chrome, browser tabs are AXRadioButton
     /// children of AXWindow while in-page tab widgets live under AXWebArea —
     /// the ancestor exclusion is what separates them. `selected` carries a
     /// position-prefixed label so equal titles on different tabs still differ.
     private static func tabStrip(in elements: [JSONValue]) -> (count: Int, selected: String?) {
-        let indexed = Dictionary(elements.compactMap { e in e["element_index"]?.integer.map { ($0, e) } },
-                                 uniquingKeysWith: { a, _ in a })
-        func insideWebArea(_ element: JSONValue) -> Bool {
-            var node = element
-            var hops = 0
-            while let parent = node["parent_index"]?.integer, let upper = indexed[parent], hops < 12 {
-                if upper["role"]?.string == "AXWebArea" { return true }
-                node = upper; hops += 1
-            }
-            return false
-        }
+        let indexed = elementIndexMap(elements)
         var count = 0
         var selected: String?
-        for e in elements where ["AXRadioButton", "AXTab"].contains(e["role"]?.string ?? "") && !insideWebArea(e) {
+        for e in elements where ["AXRadioButton", "AXTab"].contains(e["role"]?.string ?? "") && !insideWebArea(e, indexed: indexed) {
             let label = e["label"]?.string ?? e["title"]?.string ?? e["value"]?.string ?? ""
             if e["selected"]?.bool == true || e["value"]?.integer == 1 { selected = "\(count)|\(label)" }
             count += 1
@@ -682,6 +895,379 @@ final class CuaTaskAgent {
                 && !($0["element_token"]?.string ?? "").isEmpty
         }
         return candidates.count == 1 ? candidates[0] : nil
+    }
+
+    /// The window's sole app-level search field: an AXSearchField, or an
+    /// editable text element labelled for search — always outside page
+    /// content, where a web input with "search" in its name is the app's
+    /// affordance. More than one candidate is a targeting question the
+    /// drive loop owns.
+    static func uniqueSearchTarget(in elements: [JSONValue]) -> JSONValue? {
+        let indexed = elementIndexMap(elements)
+        let editableRoles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox"]
+        let candidates = elements.filter { e in
+            guard e["enabled"] != .bool(false),
+                  !(e["element_token"]?.string ?? "").isEmpty,
+                  !insideWebArea(e, indexed: indexed) else { return false }
+            let role = e["role"]?.string ?? ""
+            if role == "AXSearchField" { return true }
+            guard editableRoles.contains(role) else { return false }
+            let label = (e["label"]?.string ?? e["description"]?.string ?? e["title"]?.string ?? "").lowercased()
+            return label.contains("search")
+        }
+        return candidates.count == 1 ? candidates[0] : nil
+    }
+
+    /// Element identity across snapshots: tokens are re-minted per read, so
+    /// the match is the element's slot — index first, role+label as the
+    /// fallback when the list order shifted.
+    static func sameElement(in elements: [JSONValue], index: Int?, role: String?, label: String?) -> JSONValue? {
+        if let index, let hit = elements.first(where: { $0["element_index"]?.integer == index }) {
+            return hit
+        }
+        guard let role else { return nil }
+        return elements.first {
+            $0["role"]?.string == role && ($0["label"]?.string ?? $0["description"]?.string) == label
+        }
+    }
+
+    // MARK: - Deterministic lanes beyond the keystroke table
+
+    /// Apps "play X" may land on — the media-capable set, not "any app with
+    /// a search field". Qualified plays gate on this; unqualified plays
+    /// resolve the frontmost or uniquely-running member.
+    private static let mediaBundles: Set<String> = [
+        "com.spotify.client", "com.apple.Music", "com.apple.TV"
+    ]
+    private static let spotifyBundle = "com.spotify.client"
+
+    /// The deterministic "play X" target: the frontmost media app, else the
+    /// uniquely running one, else Spotify when installed — a user who keeps
+    /// a music player installed and asks to play a song means that one.
+    /// Several running candidates or no resolvable player stays with the
+    /// drive loop.
+    private static func implicitMediaApp(apps: [JSONValue], frontmostBundle: String?) -> (name: String, bundle: String)? {
+        if let frontmostBundle, mediaBundles.contains(frontmostBundle),
+           let app = apps.first(where: { $0["bundle_id"]?.string == frontmostBundle }),
+           (app["pid"]?.integer ?? 0) > 0 {
+            return (app["name"]?.string ?? frontmostBundle, frontmostBundle)
+        }
+        let running = apps.filter {
+            mediaBundles.contains($0["bundle_id"]?.string ?? "") && ($0["pid"]?.integer ?? 0) > 0
+        }
+        if running.count == 1, let app = running.first, let bundle = app["bundle_id"]?.string {
+            return (app["name"]?.string ?? bundle, bundle)
+        }
+        if running.isEmpty, let app = apps.first(where: { $0["bundle_id"]?.string == spotifyBundle }),
+           let bundle = app["bundle_id"]?.string, !bundle.isEmpty {
+            return (app["name"]?.string ?? bundle, bundle)
+        }
+        return nil
+    }
+
+    /// `spotify:search:<query>` — the URI form Spotify resolves to its
+    /// results page when LaunchServices hands it over.
+    nonisolated static func spotifySearchURI(_ query: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        return "spotify:search:" + (query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query)
+    }
+
+    /// "type X here": AXSelectedText insertion at the live insertion point —
+    /// the same element-scoped route dictation uses, no window binding
+    /// needed. A nil return hands the request to the drive loop's richer
+    /// fallback rather than failing it; a dispatched insert is verified by
+    /// the focused element's AXValue readback where the app exposes one.
+    private func dispatchDeicticType(_ payload: String, action: CuaFastAction, name: String,
+                                     progress: (String) -> Void) async throws -> String? {
+        progress(action.description)
+        // The insert targets whatever app is frontmost right now — hold
+        // the focus lane so a parallel task's raise can't redirect it.
+        // The lease keys on this work's own id: an ad-hoc "deictic-*" name
+        // would be invisible to the owning work's releaseAll at teardown,
+        // and a detached release could race the next acquire.
+        return try await focusLeased {
+            let before = DictationDelivery.focusedElementValue()
+            guard DictationDelivery.insertAtInsertionPoint(payload) else { return nil }
+            return try await self.confirmDeicticInsert(payload, name: name, before: before)
+        }
+    }
+
+    /// The bounded readback for a deictic insert — the insert already
+    /// landed; this only proves or denies the field now holds the payload.
+    private func confirmDeicticInsert(_ payload: String, name: String,
+                                      before: String?) async throws -> String {
+        for attempt in 0..<3 {
+            if attempt > 0 { try? await Task.sleep(for: .milliseconds(150)) }
+            try Task.checkCancellation()
+            guard let value = DictationDelivery.focusedElementValue() else {
+                if attempt < 2 { continue }
+                recordPostcondition(.resultObserved, "Inserted text at the insertion point in \(name); the field's value is not readable.",
+                                    appName: name, bundleID: bundleID)
+                return "Delivered the text at the insertion point in \(name); the focused field's value is not readable."
+            }
+            // A field that already contained the payload (a rerun of the
+            // same request) reads identical before and after — unchanged
+            // is not proof of insertion.
+            if value != before, value.contains(payload) {
+                recordPostcondition(.resultObserved, "Observed the typed text at the insertion point in \(name).",
+                                    appName: name, bundleID: bundleID)
+                return "Typed the text at the insertion point in \(name)."
+            }
+            if attempt == 2 {
+                recordPostcondition(.resultObserved, "Inserted text at the insertion point in \(name); readback did not confirm it.",
+                                    appName: name, bundleID: bundleID)
+                return "Delivered the text at the insertion point in \(name); the field's value did not confirm it."
+            }
+        }
+        return "Delivered the text at the insertion point in \(name)."
+    }
+
+    /// "go to / open <url>": a bound Chrome/Edge window takes the URL over
+    /// the driver's DOM route and proves it with a page readback; otherwise
+    /// LaunchServices delivers to the default browser — honest delivery,
+    /// never a claimed page load.
+    private func dispatchURLLane(_ url: String, progress: (String) -> Void) async throws -> String {
+        progress("Opening \(url)…")
+        if let browser = try await boundIsolatedBrowser() {
+            do {
+                if let evidence = try await navigateBoundBrowser(browser, url: url) {
+                    return evidence
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let outcome as CuaUncertainOutcome {
+                throw outcome // dispatched but unverifiable — don't double-navigate
+            } catch let error as DriverConnectionError {
+                switch error {
+                case .timedOut, .closed, .unavailable:
+                    // The wire died mid-dispatch — the tab may already
+                    // hold the URL, so a LaunchServices re-delivery would
+                    // navigate it twice.
+                    throw error
+                default:
+                    break
+                }
+            } catch {
+                // Binding/refusal means the DOM route is unavailable — the
+                // LaunchServices path below delivers the same URL honestly.
+            }
+        }
+        guard let target = URL(string: url) else {
+            throw DriverConnectionError.refused("The URL could not be delivered to any browser.")
+        }
+        // LaunchServices activates the default browser — same focus lane
+        // the driver's bring_to_front takes.
+        guard try await focusLeased({ NSWorkspace.shared.open(target) }) else {
+            throw DriverConnectionError.refused("The URL could not be delivered to any browser.")
+        }
+        recordPostcondition(.resultObserved, "Opened \(url) in the default browser via LaunchServices.")
+        return "Opened \(url) in the default browser."
+    }
+
+    /// The deterministic browser for a navigation lane: the frontmost app
+    /// when it carries an ownable DevTools endpoint, else the uniquely
+    /// running one. Ambiguity returns nil and LaunchServices answers.
+    private func boundIsolatedBrowser() async throws -> (pid: Int, name: String, bundle: String)? {
+        if let front = NSWorkspace.shared.frontmostApplication,
+           let bundle = front.bundleIdentifier,
+           bundle != Bundle.main.bundleIdentifier, Self.supportsIsolatedBrowser(bundle) {
+            return (Int(front.processIdentifier), front.localizedName ?? bundle, bundle)
+        }
+        let apps = (try await call("list_apps", [:]))["apps"]?.array ?? []
+        let running = apps.filter {
+            Self.supportsIsolatedBrowser($0["bundle_id"]?.string ?? "") && ($0["pid"]?.integer ?? 0) > 0
+        }
+        guard running.count == 1, let app = running.first,
+              let bundle = app["bundle_id"]?.string, let pid = app["pid"]?.integer else { return nil }
+        return (pid, app["name"]?.string ?? bundle, bundle)
+    }
+
+    /// browser_navigate against the bound window's resolvable tab, verified
+    /// by the page's own URL readback — the same contract the drive loop's
+    /// navigate case honors. A nil return means no addressable browser was
+    /// bound at all; an unverified dispatch throws uncertain, not refused.
+    private func navigateBoundBrowser(_ browser: (pid: Int, name: String, bundle: String),
+                                      url: String) async throws -> String? {
+        let rows = try await listedWindowRows(pid: browser.pid)
+        guard let wid = Self.bestWindowID(in: rows) else { return nil }
+        let state = try await call("get_browser_state", ["pid": .number(Double(browser.pid)),
+                                                         "window_id": .number(Double(wid))])
+        let tabs = CuaBrowserTarget.tabs(state)
+        guard let targetID = CuaBrowserTarget.targetID(state),
+              let tab = CuaBrowserTarget.resolveNavigationTab(tabs: tabs, baseline: nil, newTabRequested: false),
+              let tabID = tab["tab_id"]?.string else { return nil }
+        let outcome = try await call("browser_navigate", [
+            "target_id": targetID, "tab_id": .string(tabID), "url": .string(url)])
+        // Verify on the addressed tab itself: a page-scoped read must report
+        // the destination url — never a same-titled sibling tab. Host
+        // equality, not substring: "apple.com" must not pass against
+        // "notapple.com", while subdomains still match their registrable
+        // host.
+        let wantedHost = URLComponents(string: url)?.host?.lowercased()
+            ?? url.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+                .split(separator: "/").first.map(String.init)?.lowercased()
+        for _ in 0..<6 {
+            // `page.url` exists only under semantic_v2; the default
+            // dom_refs_v1 read carries the address at the top level.
+            if let after = try? await call("get_browser_state", ["pid": .number(Double(browser.pid)),
+                                                                 "window_id": .number(Double(wid)),
+                                                                 "target_id": targetID, "tab_id": .string(tabID)]),
+               let pageURL = after["page"]?["url"]?.string ?? after["url"]?.string,
+               let wantedHost,
+               Self.urlHostMatches(pageURL, wanted: wantedHost) {
+                bundleID = browser.bundle
+                recordPostcondition(.resultObserved, "Opened \(url) in \(browser.name); the tab reports the destination.",
+                                    appName: browser.name, bundleID: browser.bundle, processID: browser.pid, windowID: wid)
+                return "Opened \(url) in \(browser.name)."
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        throw CuaUncertainOutcome(tool: "browser_navigate", result: outcome)
+    }
+
+    /// Host equality with a subdomain allowance: "www.apple.com" satisfies
+    /// a request for "apple.com" (and vice versa — the site redirects), but
+    /// "notapple.com" never does.
+    static func urlHostMatches(_ pageURL: String, wanted host: String) -> Bool {
+        var observed = URLComponents(string: pageURL)?.host?.lowercased() ?? ""
+        if observed.isEmpty {
+            observed = pageURL.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+                .split(separator: "/").first.map(String.init)?.lowercased() ?? ""
+        }
+        let observedHost = observed.split(separator: ":").first.map(String.init) ?? observed
+        let wantedHost = host.split(separator: ":").first.map(String.init) ?? host
+        guard !wantedHost.isEmpty else { return false }
+        return observedHost == wantedHost
+            || observedHost.hasSuffix("." + wantedHost)
+            || wantedHost.hasSuffix("." + observedHost)
+    }
+
+    /// "search <app> for X" on a non-Spotify target: element-scoped text into
+    /// the app's unique search field plus a window-scoped Return. The field's
+    /// value readback is the typed-text evidence; a cheap title poll after
+    /// Return is the navigation evidence — either unobservable side is
+    /// reported as delivered, never as confirmed.
+    private func dispatchAppSearch(_ query: String, playTopHit: Bool, pid: Int, window wid: Int,
+                                   name: String) async throws -> String? {
+        let snapshot = try await call("get_window_state", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                           "include_screenshot": .bool(false), "max_elements": .number(220)])
+        let elements = snapshot["elements"]?.array ?? []
+        guard let target = Self.uniqueSearchTarget(in: elements) else { return nil }
+        let before = target["value"]?.string
+        let targetIndex = target["element_index"]?.integer
+        let targetRole = target["role"]?.string
+        let targetLabel = target["label"]?.string ?? target["description"]?.string
+        _ = try await call("type_text", [
+            "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+            "element_token": .string(target["element_token"]?.string ?? ""),
+            "delivery_mode": .string("background"),
+            "text": .string(query)
+        ])
+        let fieldHoldsQuery = try await pollDriver { () async throws -> Bool in
+            let fresh = try await self.call("get_window_state", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                                 "include_screenshot": .bool(false), "max_elements": .number(220)])
+            let value = Self.sameElement(in: fresh["elements"]?.array ?? [], index: targetIndex,
+                                         role: targetRole, label: targetLabel)?["value"]?.string
+            // Identical before and after means nothing landed — the query
+            // already sat in the field.
+            return value != before && value?.localizedCaseInsensitiveContains(query) == true
+        } until: { $0 }
+        let beforeTitle = try? await windowTitle(pid: pid, window: wid)
+        _ = try await call("press_key", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                         "key": .string("return"), "delivery_mode": .string("background")])
+        let moved = try await pollDriver(attempts: 4, { try await self.windowTitle(pid: pid, window: wid) },
+                                     until: { $0 != nil && $0 != beforeTitle }) ?? nil
+        let label = targetLabel ?? "the search field"
+        let verb = playTopHit ? "Dispatched play for" : "Searched \(name) for"
+        if fieldHoldsQuery == true {
+            let evidence = "\(verb) \"\(query)\"; the field held it."
+            recordPostcondition(.resultObserved, evidence, appName: name, bundleID: bundleID,
+                                processID: pid, windowID: wid, windowTitle: moved)
+            return moved != nil ? "\(evidence) The window moved to results." : evidence
+        }
+        recordPostcondition(.resultObserved, "Delivered \"\(query)\" to \(label) in \(name) and pressed Return; the field's value was not independently confirmed.",
+                            appName: name, bundleID: bundleID, processID: pid, windowID: wid)
+        return "Delivered \"\(query)\" to \(label) in \(name) and pressed Return; the field's value was not independently confirmed."
+    }
+
+    /// Spotify's deterministic search URI: launch_app hands the URI to
+    /// LaunchServices (no activation needed), the app lands on the results
+    /// page, and a window-scoped Return starts the top hit. Spotify's AX
+    /// tree blanks for ~a beat around submission, so verification reads
+    /// around the gap and the result is reported as dispatched — never as
+    /// "playing".
+    private func dispatchSpotifySearch(_ query: String, playTopHit: Bool, pid: Int, window wid: Int,
+                                       name: String) async throws -> String {
+        let uri = Self.spotifySearchURI(query)
+        if !launchURIsDelivered {
+            do {
+                _ = try await focusLeased { try await call("launch_app", ["bundle_id": .string(Self.spotifyBundle),
+                                                  "urls": .array([.string(uri)])]) }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as DriverConnectionError {
+                switch error {
+                case .timedOut, .closed, .unavailable:
+                    // A dead transport after dispatch could mean the URI
+                    // already reached LaunchServices — re-delivering it
+                    // would fire the same hand-off twice.
+                    throw error
+                default:
+                    // The driver's URL hand-off is LaunchServices
+                    // underneath — the workspace route delivers the same
+                    // URI honestly.
+                    guard let target = URL(string: uri) else { throw error }
+                    guard try await focusLeased({ NSWorkspace.shared.open(target) }) else { throw error }
+                }
+            }
+            launchURIsDelivered = true
+        }
+        // Wait for the results surface, not a fixed delay: Spotify mirrors
+        // the URI query into its search box, so a field holding the query
+        // is the page-rendered signal. Cold launches and login walls can
+        // outlive a fixed sleep — Return pressed then lands on the home
+        // page's focused element, not the top result.
+        let resultsReady = try await pollDriver(attempts: 7, { () async throws -> Bool in
+            let state = try await self.call("get_window_state", ["pid": .number(Double(pid)),
+                                                                 "window_id": .number(Double(wid)),
+                                                                 "include_screenshot": .bool(false),
+                                                                 "max_elements": .number(220)])
+            return (state["elements"]?.array ?? []).contains { element in
+                let role = element["role"]?.string ?? ""
+                guard ["AXTextField", "AXComboBox", "AXSearchField", "AXTextArea"].contains(role) else { return false }
+                return element["value"]?.string?.localizedCaseInsensitiveContains(query) == true
+            }
+        }, until: { $0 }) ?? false
+        if !playTopHit {
+            recordPostcondition(.resultObserved, "Delivered \(uri) to Spotify; the results page is Spotify's to render.",
+                                appName: name, bundleID: Self.spotifyBundle, processID: pid, windowID: wid)
+            return "Opened a Spotify search for \"\(query)\"."
+        }
+        guard resultsReady == true else {
+            // No evidence the results page exists — a blind Return presses
+            // whatever element holds focus. The search was delivered;
+            // top-hit play is honestly undispatched.
+            recordPostcondition(.resultObserved, "Delivered \(uri) to Spotify but the results page never became observable; play was not dispatched.",
+                                appName: name, bundleID: Self.spotifyBundle, processID: pid, windowID: wid)
+            return "Opened a Spotify search for \"\(query)\"; the results page could not be confirmed, so play was not dispatched."
+        }
+        let beforeTitle = try? await windowTitle(pid: pid, window: wid)
+        _ = try await call("press_key", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                         "key": .string("return"), "delivery_mode": .string("background")])
+        // Spotify's title rarely reflects the track — an unchanged title
+        // proves nothing either way, so a moved title is evidence and a
+        // still one is honest delivery.
+        let moved = try await pollDriver(attempts: 4, { try await self.windowTitle(pid: pid, window: wid) },
+                                     until: { $0 != nil && $0 != beforeTitle }) ?? nil
+        if let moved {
+            recordPostcondition(.resultObserved, "Spotify's window moved to \"\(moved)\" after the dispatched play.",
+                                appName: name, bundleID: Self.spotifyBundle, processID: pid,
+                                windowID: wid, windowTitle: moved)
+            return "Searched Spotify for \"\(query)\" and dispatched play to the top result; the window moved to \"\(moved)\"."
+        }
+        recordPostcondition(.resultObserved, "Delivered \(uri) to Spotify and sent Return to the top result.",
+                            appName: name, bundleID: Self.spotifyBundle, processID: pid, windowID: wid)
+        return "Searched Spotify for \"\(query)\" and dispatched play to the top result."
     }
 
     private func tabStrip(pid: Int, window wid: Int) async throws -> (count: Int, selected: String?) {
@@ -717,13 +1303,16 @@ final class CuaTaskAgent {
 
     /// Poll a cheap Driver read until `until` holds or the budget expires.
     /// Keystroke effects land in tens of milliseconds; the bound keeps an
-    /// undeliverable effect honest instead of hanging the task.
+    /// undeliverable effect honest instead of hanging the task. Read
+    /// failures propagate — a dead transport or an uncertain outcome must
+    /// never be folded into "the effect did not happen."
     private func pollDriver<T>(attempts: Int = 10,
-                               _ read: () async throws -> T, until: (T) -> Bool) async -> T? {
+                               _ read: () async throws -> T, until: (T) -> Bool) async throws -> T? {
         for attempt in 0..<attempts {
-            if attempt > 0 { try? await Task.sleep(for: .milliseconds(150)) }
-            if Task.isCancelled { return nil }
-            if let value = try? await read(), until(value) { return value }
+            if attempt > 0 { try await Task.sleep(for: .milliseconds(150)) }
+            try Task.checkCancellation()
+            let value = try await read()
+            if until(value) { return value }
         }
         return nil
     }
@@ -735,27 +1324,29 @@ final class CuaTaskAgent {
         ["com.google.Chrome", "com.microsoft.edgemac"].contains(bundle)
     }
 
-    private func waitForLaunchWindow(pid: Int) async throws {
+    /// Returns the successful poll's window rows so callers reuse them
+    /// rather than paying a second list_windows for the same observation.
+    private func waitForLaunchWindow(pid: Int) async throws -> [JSONValue] {
         // Bounded patience for a just-launched first window — a real window
         // materializes in well under a second; a menu-bar app never shows one
         // and "opened" stays honest instead of stalling the whole lane.
         for _ in 0..<8 {
             try Task.checkCancellation()
-            let result = try await call("list_windows", ["pid": .number(Double(pid))])
-            if (result["windows"]?.array ?? []).contains(where: {
+            let windows = (try await call("list_windows", ["pid": .number(Double(pid))]))["windows"]?.array ?? []
+            if windows.contains(where: {
                 $0["is_on_screen"] != .bool(false) || !($0["title"]?.string ?? "").isEmpty
-            }) { return }
+            }) { return windows }
             try await Task.sleep(for: .milliseconds(100))
         }
         // A slow first launch can need a nudge: activating a running app opens
         // its main window for document-style apps before this refuses.
-        NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+        _ = try? await focusLeased { NSRunningApplication(processIdentifier: pid_t(pid))?.activate() }
         for _ in 0..<4 {
             try Task.checkCancellation()
-            let result = try await call("list_windows", ["pid": .number(Double(pid))])
-            if (result["windows"]?.array ?? []).contains(where: {
+            let windows = (try await call("list_windows", ["pid": .number(Double(pid))]))["windows"]?.array ?? []
+            if windows.contains(where: {
                 $0["is_on_screen"] != .bool(false) || !($0["title"]?.string ?? "").isEmpty
-            }) { return }
+            }) { return windows }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw DriverConnectionError.refused("The launched app did not show an observable window. The launch was not repeated; inspect the app before retrying.")

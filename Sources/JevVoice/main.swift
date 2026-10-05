@@ -1,8 +1,12 @@
 import AppKit
 import Combine
+import OSLog
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Single-instance guard: a second launch exits cleanly instead of
+    /// spawning duplicate driver daemons and overlays.
+    private var instanceLock: FileHandle?
     private var statusItem: NSStatusItem!
     private var windows: VoiceWindows!
     private let speechOutput = SpeechOutput()
@@ -20,6 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var microphonePermissionGranted = Permission.microphone.isGranted
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard acquireInstanceLock() else {
+            Self.log.error("Jev Voice is already running; terminating duplicate launch.")
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.accessory)
         installEditMenu()
         windows = VoiceWindows(controller: controller, microphones: microphones, input: input)
@@ -83,6 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Cold-connect the Cua driver now so the first voice command doesn't
         // pay the process spawn + MCP handshake inside the turn.
         controller.cua.warm()
+        // Same for the roster: codex app-server spawn + per-agent driver
+        // daemons warm in the background so the first delegation doesn't
+        // pay them inside the turn. Failures log and the lazy path retries.
+        agentRuntime?.prewarm()
         if let runtime = agentRuntime {
             // The AgentRuntime is the seam — sends run its endpoint setup —
             // and it owns the single event-stream consumer, fanning events
@@ -188,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         input.stop()
         Task {
             await controller.shutdown()
+            await agentRuntime?.stopAll()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -232,8 +246,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             codexBinary: codex, provider: provider, environment: environment))
         let jevKey = Config.shared.apiKey
         let store = AgentStore(directory: AgentWorkspace.root())
+        // Each agent mints its own proxy on the shared daemon — one shared
+        // transport would serialize every agent's driver calls into a
+        // single FIFO, but a daemon per agent is equally wrong.
         let runtime = AgentRuntime(store: store, bridge: bridge,
-                                   connection: CuaConnection(), apiKey: { jevKey })
+                                   makeConnection: { CuaConnection(socketProvider: {
+                                       try await CuaConnectionPool.shared.socket()
+                                   }) }, apiKey: { jevKey })
         return runtime
     }
 
@@ -262,6 +281,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettings() { windows.show(.voice) }
     @objc private func showActivity() { windows.show(.activity) }
     @objc private func showAgents() { windows.showAgents() }
+
+    /// Locks the shared instance marker in the app support directory.
+    /// Returns true when this process acquired the lock; false if another
+    /// instance is running.
+    private func acquireInstanceLock() -> Bool {
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return true }
+        let dir = support.appendingPathComponent("Jev Voice", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("instance.lock")
+        guard FileManager.default.createFile(atPath: url.path, contents: nil, attributes: nil) else { return true }
+        let fd = open(url.path, O_RDWR)
+        guard fd >= 0 else { return true }
+        let locked = flock(fd, LOCK_EX | LOCK_NB) == 0
+        if locked {
+            self.instanceLock = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        } else {
+            close(fd)
+        }
+        return locked
+    }
+
+    private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice", category: "AppDelegate")
 
     private func installEditMenu() {
         let mainMenu = NSMenu()

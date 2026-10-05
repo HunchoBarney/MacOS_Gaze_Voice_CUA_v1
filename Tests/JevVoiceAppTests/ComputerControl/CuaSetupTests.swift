@@ -38,6 +38,27 @@ final class CuaSetupTests: XCTestCase {
         XCTAssertNotEqual(first, second)
     }
 
+    /// A failed permission check names the missing grant and whose TCC
+    /// identity answered — embedded transports report the host's grants, so
+    /// the fix lands in the right Settings pane.
+    func testPermissionSummaryNamesTheMissingGrantAndTccOwner() {
+        let hostMissingAX = CuaSetup.permissionSummary(.object([
+            "accessibility": .bool(false), "screen_recording": .bool(true),
+            "source": .object(["attribution": .string("host")])
+        ]))
+        XCTAssertTrue(hostMissingAX.contains("Accessibility"))
+        XCTAssertFalse(hostMissingAX.contains("Screen Recording"))
+        XCTAssertTrue(hostMissingAX.contains("Jev Voice"))
+
+        let daemonMissingBoth = CuaSetup.permissionSummary(.object([
+            "accessibility": .bool(false), "screen_recording": .bool(false),
+            "source": .object(["attribution": .string("driver-daemon")])
+        ]))
+        XCTAssertTrue(daemonMissingBoth.contains("Accessibility"))
+        XCTAssertTrue(daemonMissingBoth.contains("Screen Recording"))
+        XCTAssertTrue(daemonMissingBoth.contains("CuaDriver"))
+    }
+
     func testSetupPermissionProbeUsesSchemaBoundReadOnlyCall() async throws {
         let probe = PermissionStatusProbe()
 

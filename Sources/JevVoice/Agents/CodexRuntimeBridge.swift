@@ -189,7 +189,10 @@ public actor CodexRuntimeBridge {
 
     private func session(for agent: CompanionAgent) async throws -> Session {
         let slug = agent.slug
-        if let session = sessions[slug], await session.client.connected { return session }
+        // The connected check suspends — a stop() can land in between. Only
+        // return the session if it's still the registered one afterwards.
+        if let session = sessions[slug], await session.client.connected,
+           sessions[slug]?.client === session.client { return session }
         // A cold start is already running — share its outcome rather than
         // spawn a twin app-server against the same CODEX_HOME.
         if let pending = starting[slug] { return try await pending.value }
@@ -334,6 +337,7 @@ public actor CodexRuntimeBridge {
             case "\\": out += "\\\\"
             case "\"": out += "\\\""
             case "\n": out += "\\n"
+            case "\r": out += "\\r"
             case "\t": out += "\\t"
             default: out.unicodeScalars.append(scalar)
             }

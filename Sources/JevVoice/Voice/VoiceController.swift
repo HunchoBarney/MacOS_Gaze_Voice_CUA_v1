@@ -77,7 +77,17 @@ final class VoiceController: ObservableObject {
     func selectTask(_ id: UUID) { cua.select(id) }
     func cancelTask(_ id: UUID) { cua.cancel(id) }
     func approveTask(_ id: UUID, approved: Bool) { cua.resolveApproval(id, approved: approved) }
-    var pendingTaskApproval: CuaVoiceRuntime.Work? { cuaTasks.first(where: { $0.approval != nil }) }
+    /// All parked approval asks, oldest task first — every row's Confirm is
+    /// id-scoped (approveTask → resolveApproval), so it resolves its own ask.
+    var pendingTaskApprovals: [CuaVoiceRuntime.Work] {
+        cuaTasks.filter { $0.approval != nil || $0.approvalContinuation != nil }
+    }
+    /// The single-Confirm surface must aim at the ask the voice path would
+    /// resolve — respond_to_task answers the NEWEST parked approval.
+    var pendingTaskApproval: CuaVoiceRuntime.Work? {
+        pendingTaskApprovals.last { $0.approvalContinuation != nil && $0.active }
+            ?? pendingTaskApprovals.last
+    }
 
     /// A pending clarification as a display row: the question plus the request
     /// it is about. Viewing it is informational and grants no control over the
@@ -88,43 +98,55 @@ final class VoiceController: ObservableObject {
         let owner: String
     }
 
-    /// Intents this hold's capture created or resumed — the current
-    /// interaction. Identity comes from provenance capture ids, never from
-    /// task-list recency or the diagnostic selection.
-    private var sessionIntentIDs: Set<UUID> {
-        guard let sessionID else { return [] }
-        var ids = Set<UUID>()
-        for entry in cua.dialogue.entries {
-            if entry.intent.source.captureID == sessionID ||
-               entry.answers.contains(where: { $0.source.captureID == sessionID }) {
-                ids.insert(entry.intent.id)
+    /// This interaction's derived state — its intents, its works, its newest
+    /// parked question and every parked ask — computed once per runtime
+    /// change and per session. The cuaChanged fan-out used to re-walk the
+    /// dialogue and task lists 3-4× through independent accessors.
+    private struct SessionSlice {
+        var sessionID: UUID?
+        var intentIDs: Set<UUID> = []
+        var works: [CuaVoiceRuntime.Work] = []
+        var question: CuaDialogueState.Question?
+        var parkedQuestions: [PendingQuestionItem] = []
+    }
+    private var sliceCache: SessionSlice?
+
+    private var sessionSlice: SessionSlice {
+        if let cached = sliceCache, cached.sessionID == sessionID { return cached }
+        var slice = SessionSlice(sessionID: sessionID)
+        if let sessionID {
+            // Intents this hold's capture created or resumed — the current
+            // interaction. Identity comes from provenance capture ids, never
+            // from task-list recency or the diagnostic selection.
+            for entry in cua.dialogue.entries {
+                if entry.intent.source.captureID == sessionID ||
+                   entry.answers.contains(where: { $0.source.captureID == sessionID }) {
+                    slice.intentIDs.insert(entry.intent.id)
+                }
+            }
+            for work in cua.tasks where work.provenance?.captureID == sessionID {
+                slice.intentIDs.insert(work.intentID)
             }
         }
-        for work in cua.tasks where work.provenance?.captureID == sessionID {
-            ids.insert(work.intentID)
+        for entry in cua.dialogue.awaitingAnswerEntries {
+            guard let question = entry.question else { continue }
+            slice.parkedQuestions.append(PendingQuestionItem(id: question.id,
+                prompt: question.prompt, owner: entry.intent.utterance))
+            if slice.intentIDs.contains(entry.intent.id) { slice.question = question }
         }
-        return ids
+        slice.works = cua.tasks.filter { slice.intentIDs.contains($0.intentID) }
+        sliceCache = slice
+        return slice
     }
 
+    private var sessionIntentIDs: Set<UUID> { sessionSlice.intentIDs }
+
     /// Attempts belonging to the current interaction, in creation order.
-    private var interactionWorks: [CuaVoiceRuntime.Work] {
-        let intents = sessionIntentIDs
-        return cua.tasks.filter { intents.contains($0.intentID) }
-    }
+    private var interactionWorks: [CuaVoiceRuntime.Work] { sessionSlice.works }
 
     /// A pending clarification owned by the current interaction. It is normal
     /// dialogue state — question text plus its owning intent — not an error.
-    private var interactionQuestion: CuaDialogueState.Question? {
-        let intents = sessionIntentIDs
-        return cua.dialogue.entries.last(where: { entry in
-            guard intents.contains(entry.intent.id),
-                  case .awaitingAnswer(let id) = entry.status,
-                  let question = entry.question,
-                  question.id == id, question.revision == entry.revision
-            else { return false }
-            return true
-        })?.question
-    }
+    private var interactionQuestion: CuaDialogueState.Question? { sessionSlice.question }
 
     /// The interaction's own conversational text: its pending question or its
     /// latest attempt's progress — never the diagnostically selected task's
@@ -155,18 +177,10 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// Pending clarification questions across the dialogue, for surfaces that
-    /// show dialogue state without granting control authority.
-    var pendingQuestions: [PendingQuestionItem] {
-        cua.dialogue.entries.compactMap { entry in
-            guard case .awaitingAnswer(let id) = entry.status,
-                  let question = entry.question,
-                  question.id == id, question.revision == entry.revision
-            else { return nil }
-            return PendingQuestionItem(id: question.id, prompt: question.prompt,
-                                       owner: entry.intent.utterance)
-        }
-    }
+    /// Pending clarification questions across the dialogue, oldest ask
+    /// first, for surfaces that show dialogue state without granting
+    /// control authority.
+    var pendingQuestions: [PendingQuestionItem] { sessionSlice.parkedQuestions }
 
     /// A task may offer explicit retry only while its intent rests in a
     /// retryable state; the runtime's in-place retry policy still owns the
@@ -189,12 +203,28 @@ final class VoiceController: ObservableObject {
         let lane = speech as? RealtimeVoiceLane
         Task { [weak self] in
             let reply = await self?.cua.retryWork(id) ?? "That task is gone."
-            lane?.pushTaskEvent("[task outcome] retry: \(reply)", speak: true)
+            lane?.pushTaskEvent(reply, speak: true)
         }
     }
 
-    /// Typed and reviewed commands take the same model turn the voice does —
-    /// one decision surface (the realtime model), one screen, one tool set.
+    /// The per-turn [context] note — the model's world is frozen at session
+    /// connect without it (Clicky injects the same facts every turn). Facts
+    /// only, one line; the instructions tell the model to use them silently.
+    private func turnContextNote() -> String {
+        var parts = ["local time: \(Self.timeFormatter.string(from: Date()))"]
+        if let app = commandFrontmostApp ?? lastExternalApp { parts.append("active app: \(app)") }
+        let waiting = pendingQuestions.prefix(2).map { "[\($0.owner)] \"\($0.prompt)\"" }
+        if !waiting.isEmpty { parts.append("waiting on your answer: \(waiting.joined(separator: ", "))") }
+        let confirms = pendingTaskApprovals.prefix(3).map { "[\($0.request)] \"\($0.approval ?? "")\"" }
+        if !confirms.isEmpty { parts.append("needs confirmation: \(confirms.joined(separator: ", "))") }
+        let running = cuaTasks.filter(\.active).prefix(2).map(\.request)
+        if !running.isEmpty { parts.append("running: \(running.joined(separator: ", "))") }
+        return "[context] " + parts.joined(separator: " · ")
+    }
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
+    }()
+
     /// Typed and reviewed commands take the same model turn the voice does —
     /// one decision surface (the realtime model), one screen, one tool set.
     private func routeCommand(_ text: String) {
@@ -325,9 +355,17 @@ final class VoiceController: ObservableObject {
         }
     }
     var operationActive: Bool {
-        // Gates the Escape consume — a background task must not eat the key
-        // in other apps; only a presented interaction owns it.
-        switch status { case .idle, .done, .error: return false; default: return true }
+        // Gates the Escape consume — the key is ours only while a real
+        // interaction sits on the card: a live capture, a review/confirm
+        // prompt, or a parked question/approval/consent ask. Bare background
+        // work (executing/thinking with nothing asked) must not eat the
+        // frontmost app's Escape — the user's key press belongs to them.
+        if captureActive { return true }
+        switch status {
+        case .awaitingConfirm, .reviewTranscript, .awaitingAnswer: return true
+        default: break
+        }
+        return interactionQuestion != nil || pendingTaskApproval != nil || pendingConsent() != nil
     }
     var captureActive: Bool { status == .starting || status == .listening || status == .finishing || status == .awaitingRelease || status == .testingMicrophone }
 
@@ -363,40 +401,44 @@ final class VoiceController: ObservableObject {
         if let lane = self.speech as? RealtimeVoiceLane {
             lane.audioRepliesEnabled = config.ttsEnabled
             lane.commandHandler = { [weak self] instruction, app, literalText, captureID in
-                guard let self else { return "Jev is not available." }
+                guard let self else { return #"{"status":"refused","say":"Jev is not available right now."}"# }
                 return await self.cua.beginVoiceTask(
                     instruction, app: app,
                     frontmostHint: self.commandFrontmostApp ?? self.lastExternalApp,
                     literalText: literalText,
                     transcriptHint: self.transcript, captureID: captureID)
             }
-            lane.taskResponseHandler = { [weak self] answer, captureID in
+            lane.taskResponseHandler = { [weak self] answer, task, captureID in
                 guard let self else { return "Nothing is waiting for an answer." }
                 // A parked voice ask (task consent or question) wins; then
                 // the agent-gate consent; then an honest "nothing pending".
-                if let reply = await self.cua.respondToTask(answer, captureID: captureID) {
+                if let reply = await self.cua.respondToTask(answer, task: task,
+                                                            captureID: captureID) {
                     return reply
                 }
                 if let pending = self.pendingConsent(),
                    let approved = Self.consentAnswer(answer) {
                     self.onConsentResolution(pending, approved)
-                    return approved ? "Confirmed — go ahead." : "Cancelled."
+                    return approved
+                        ? #"{"status":"resumed","say":"Confirmed, go ahead."}"#
+                        : #"{"status":"cancelled","say":"Cancelled."}"#
                 }
-                return "Nothing is waiting for an answer."
+                return #"{"status":"nothing_pending","say":"Nothing is waiting for an answer."}"#
             }
             lane.delegationHandler = { [weak self] task, agent, name, role, description in
-                guard let self else { return "Jev is not available." }
+                guard let self else { return #"{"status":"refused","say":"Jev is not available right now."}"# }
                 return await self.cua.delegateToAgent(task: task, agent: agent,
                                                       name: name, role: role,
                                                       description: description)
             }
             lane.cancelHandler = { [weak self] hint in
-                guard let self else { return "Nothing is running." }
+                guard let self else { return #"{"status":"refused","say":"Jev is not available right now."}"# }
                 return self.cua.cancelVoiceTask(hint)
             }
             lane.screenShotProvider = {
                 try? await ScreenCapture.jpeg()
             }
+            lane.contextProvider = { [weak self] in self?.turnContextNote() ?? "" }
             self.cua.taskEventSink = { [weak lane] _, text, speak in
                 lane?.pushTaskEvent(text, speak: speak)
             }
@@ -731,8 +773,15 @@ final class VoiceController: ObservableObject {
             guard status != .idle, status != .done else { return }
             // A parked question or approval still needs the card — the
             // STARTED fast-path ends turns while work is live, and an ask
-            // that lands after dismissal would be unreachable.
+            // that lands after dismissal would be unreachable. An ask parked
+            // outside this interaction owns the card too — a minimal
+            // presence beats completing to .done and hiding it.
             if interactionQuestion != nil || pendingTaskApproval != nil { return }
+            if let ask = pendingQuestions.last {
+                detail = ask.prompt
+                status = .awaitingAnswer(ask.prompt)
+                return
+            }
             // The reply already played through the lane's speaker — complete
             // without re-speaking it via the TTS seam.
             complete(reply.isEmpty ? "Done." : reply, session: id, voiced: false)
@@ -898,6 +947,9 @@ final class VoiceController: ObservableObject {
     }
 
     private func cuaChanged() {
+        // Every runtime mutation lands here — drop the memoized slice so the
+        // accessors below recompute once and share it for the whole pass.
+        sliceCache = nil
         objectWillChange.send()
         guard !isMicrophoneTest else { return }
         if held {
@@ -923,7 +975,7 @@ final class VoiceController: ObservableObject {
         switch status {
         case .thinking, .executing, .awaitingAnswer: break
         case .idle, .done:
-            guard interactionQuestion != nil || pendingTaskApproval != nil else { return }
+            guard !pendingQuestions.isEmpty || pendingTaskApproval != nil else { return }
         default: return
         }
         // Only this session's dialogue decides the interaction's presentation.
@@ -944,10 +996,29 @@ final class VoiceController: ObservableObject {
             status = .error(failure)
             return
         }
-        if case .awaitingAnswer = status, interactionWorks.isEmpty {
+        if case .awaitingAnswer = status, interactionWorks.isEmpty,
+           pendingQuestions.isEmpty, pendingTaskApproval == nil {
             // The question was withdrawn without an answer; the interaction ends.
             status = .idle
             return
+        }
+        // An ask parked outside this interaction still owns the card's
+        // minimal presence — an outstanding ask stays reachable instead of
+        // hiding with .idle.
+        switch status {
+        case .idle, .done, .awaitingAnswer:
+            if let ask = pendingQuestions.last {
+                detail = ask.prompt
+                status = .awaitingAnswer(ask.prompt)
+                return
+            }
+            if let approval = pendingTaskApproval {
+                let text = approval.approval ?? approval.request
+                detail = text
+                status = .awaitingAnswer(text)
+                return
+            }
+        default: break
         }
         // The lane's reply stream owns the display once a turn is committed —
         // work settling between turns updates the task list, not this card.

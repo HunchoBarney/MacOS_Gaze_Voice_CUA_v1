@@ -52,12 +52,23 @@ struct CuaFastAction: Equatable {
         case hotkey(keys: [String], shortcut: String)
         /// Exact text into the window's single unambiguous editable element.
         case type(String)
-        /// One page of window-scoped scroll — direction is the driver's
+        /// Exact text at the live insertion point — the deictic "type X
+        /// here" destination, resolved by focus rather than by window.
+        case deicticType(String)
+        /// Pages of window-scoped scroll — direction is the driver's
         /// vocabulary ("up"/"down"/"left"/"right").
-        case scroll(String)
+        case scroll(direction: String, pages: Int)
         /// A verb applied to the resolved app itself, independent of which
         /// window is in front (hide Calculator, minimize Notes' window).
         case appControl(AppVerb)
+        /// A global system key posted to the HID tap — no app, no window.
+        case mediaKey(MediaKeys.Key)
+        /// A URL handed to a bound browser window or LaunchServices.
+        case navigateURL(String)
+        /// Element-scoped text into the app's unique search field plus a
+        /// Return — "search <app> for X"; `playTopHit` is the "play X"
+        /// variant, which additionally starts the top result on Spotify.
+        case appSearch(query: String, playTopHit: Bool)
     }
 
     /// Whole-app verbs dispatched without a model call. Their effect is
@@ -139,6 +150,11 @@ struct CuaFastAction: Equatable {
         // Typed payloads are case/punctuation-exact, so they parse on the raw
         // text — the normalized command would corrupt "Hello, World".
         if let typed = parseType(text) { return typed }
+        // System media keys are global — the whole utterance must be exactly
+        // the phrase, so they match before the app-qualifier split. A peeled
+        // qualifier ("mute in zoom") can't scope system volume, so it drops
+        // to the loop rather than pretending otherwise.
+        if let media = mediaTable[normalized] { return (media, nil) }
         var command = normalized
         var qualifier: String?
         if let split = splitAppQualifier(normalized) {
@@ -149,7 +165,11 @@ struct CuaFastAction: Equatable {
         // window in notes" keeps its ⌘M+qualifier meaning; a phrase that peels
         // a qualifier AND leaves a verb-first tail is ambiguous — the loop owns it.
         if qualifier == nil, let control = parseAppControl(command) { return control }
-        guard let action = table[command] else { return nil }
+        guard let action = table[command] else {
+            if let lane = parseQueryLane(command, qualifier: qualifier) { return lane }
+            if let scroll = parseScrollReps(command) { return (scroll, qualifier) }
+            return nil
+        }
         return (action, qualifier)
     }
 
@@ -199,7 +219,12 @@ struct CuaFastAction: Equatable {
 
     private static func normalize(_ text: String) -> String {
         var s = text.lowercased()
-        s = s.replacingOccurrences(of: #"[.,!?;:'"’‘“”]+"#, with: " ", options: .regularExpression)
+        // Apostrophes bind to their word: "Marvin's" → "marvins" keeps the
+        // title searchable ("marvin s" matches nothing), and "don't" →
+        // "dont" still hits the negator head list. Contractions that keep
+        // the following letter are also covered by the head list.
+        s = s.replacingOccurrences(of: #"[''’‘]"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"[.,!?;:"“”]+"#, with: " ", options: .regularExpression)
         s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         s = s.trimmingCharacters(in: .whitespaces)
         for filler in fillers {
@@ -236,10 +261,18 @@ struct CuaFastAction: Equatable {
     }
 
     /// Resolve an open-command query: a uniquely named installed app, or a
-    /// generic "browser" word routed to the implicit browser.
+    /// generic "browser" word routed to the implicit browser. Spoken
+    /// articles and the trailing "app" word are packaging, not the name —
+    /// "open the notes app" names Notes.
     static func resolveOpenApp(query: String, apps: [JSONValue],
                                frontmostBundle: String?) -> (name: String, bundle: String)? {
-        let q = normalize(query)
+        var q = normalize(query)
+        for prefix in ["the ", "my "] {
+            if q.hasPrefix(prefix) { q = String(q.dropFirst(prefix.count)) }
+        }
+        for suffix in [" app", " application"] {
+            if q.hasSuffix(suffix) { q = String(q.dropLast(suffix.count)) }
+        }
         guard !q.isEmpty else { return nil }
         if genericBrowserQualifiers.contains(q) {
             return implicitBrowser(apps: apps, frontmostBundle: frontmostBundle)
@@ -248,15 +281,42 @@ struct CuaFastAction: Equatable {
     }
 
     /// The named-app match shared by qualifier and open-query resolution.
+    /// Exact-name matches outrank substring hits, which outrank bundle
+    /// hits — an exact "music" answers Music even when an unrelated bundle
+    /// also contains the word. A trailing 's' that survived normalization
+    /// is also tried as a fallback, covering flattened possessives
+    /// ("spotifys windows" → "spotifys" → "spotify") without mangling
+    /// non-possessive plural forms into a weaker substring tier.
     private static func namedApp(_ q: String, in apps: [JSONValue]) -> (name: String, bundle: String)? {
-        let matches = apps.filter { app in
+        guard !q.isEmpty else { return nil }
+        let collapsed = q.replacingOccurrences(of: " ", with: "")
+        func tier(_ app: JSONValue, query: String) -> Int? {
             let name = normalize(app["name"]?.string ?? "")
             let bundle = (app["bundle_id"]?.string ?? "").lowercased()
-            return name == q || (!q.isEmpty && (name.contains(q) || bundle.contains(q.replacingOccurrences(of: " ", with: ""))))
+            if name == query { return 0 }
+            if name.contains(query) { return 1 }
+            if bundle.contains(collapsed) { return 2 }
+            return nil
         }
-        guard matches.count == 1, let app = matches.first,
-              let bundle = app["bundle_id"]?.string, !bundle.isEmpty else { return nil }
-        return (app["name"]?.string ?? bundle, bundle)
+        let queries: [String]
+        if q.hasSuffix("s"), !q.hasSuffix("ss") {
+            queries = [q, String(q.dropLast())]
+        } else {
+            queries = [q]
+        }
+        // The strongest non-empty tier decides — an ambiguous exact-name
+        // set can't be resolved by a weaker substring or bundle match on
+        // a different app. Primary query ranks before fallback.
+        for query in queries {
+            for level in 0...2 {
+                let tierMatches = apps.filter { tier($0, query: query) == level }
+                guard !tierMatches.isEmpty else { continue }
+                guard tierMatches.count == 1, let app = tierMatches.first,
+                      let bundle = app["bundle_id"]?.string, !bundle.isEmpty else { return nil }
+                return (app["name"]?.string ?? bundle, bundle)
+            }
+        }
+        return nil
     }
 
     /// `hide|unhide|minimize|quit <app>` — the verb leads and the remainder
@@ -274,15 +334,21 @@ struct CuaFastAction: Equatable {
             var rest = String(normalized.dropFirst(verb.count + 1))
             if rest.hasPrefix("the ") { rest = String(rest.dropFirst(4)) }
             var hadWindowSuffix = false
-            for suffix in ["'s windows", "'s window", " windows", " window", " app"] {
+            // " window*" and " app" packaging only; possessive flattening
+            // ("spotify's windows" → "spotifys windows") is recovered by
+            // namedApp's trailing-'s' fallback so "notes window" isn't
+            // mangled into a substring that can turn ambiguous.
+            for suffix in [" windows", " window", " app"] {
                 if rest.hasSuffix(suffix) {
                     hadWindowSuffix = suffix.contains("window")
                     rest = String(rest.dropLast(suffix.count)); break
                 }
             }
             // "close Spotify's window" means ⌘W, not ⌘Q — a window-suffixed
-            // close must not lane as an app quit.
+            // close must not lane as an app quit. "exit full screen" is
+            // likewise a window/fullscreen toggle, never an app quit.
             if hadWindowSuffix, verb == "close" { continue }
+            if verb == "exit", ["fullscreen", "full screen", "full-screen"].contains(rest) { continue }
             rest = rest.trimmingCharacters(in: .whitespaces)
             // "minimize window", "hide the app" and vague referents keep their
             // frontmost table meaning; only a resolvable app name may lane.
@@ -301,6 +367,72 @@ struct CuaFastAction: Equatable {
                     rest)
         }
         return nil
+    }
+
+    /// Query-bearing lanes: "play X" is a media-app search plus top-hit play;
+    /// "search <app> for X" splits the app words from the query. Whether the
+    /// middle words name an installed app or an engine is the resolver's
+    /// call, never the parser's. A qualifier peeled upstream ("search X in
+    /// notes", "play X in spotify") supplies the app instead.
+    private static func parseQueryLane(_ command: String, qualifier: String?)
+        -> (action: CuaFastAction, appQualifier: String?)? {
+        if command.hasPrefix("play ") {
+            let query = command.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard !query.isEmpty else { return nil }
+            return (queryAction(query, playTopHit: true), qualifier)
+        }
+        if let qualifier {
+            // "search [for] X in <app>" — the peeled qualifier is the app.
+            guard let query = searchQueryTail(command) else { return nil }
+            return (queryAction(query, playTopHit: false), qualifier)
+        }
+        // "search <app> for <query>" — the lazy middle is the app candidate;
+        // app resolution downstream decides whether it's an app, an engine,
+        // or nobody's lane.
+        guard let expression = try? NSRegularExpression(pattern: #"^search\s+(.+?)\s+for\s+(.+)$"#),
+              let match = expression.firstMatch(in: command, range: NSRange(command.startIndex..., in: command)),
+              let appRange = Range(match.range(at: 1), in: command),
+              let queryRange = Range(match.range(at: 2), in: command) else { return nil }
+        let app = String(command[appRange]).trimmingCharacters(in: .whitespaces)
+        let query = String(command[queryRange]).trimmingCharacters(in: .whitespaces)
+        guard !app.isEmpty, !query.isEmpty else { return nil }
+        return (queryAction(query, playTopHit: false), app)
+    }
+
+    /// `search [for] <query>` — the query tail of a command whose app came
+    /// from the qualifier split. A bare "search"/"search for" has no lane.
+    private static func searchQueryTail(_ command: String) -> String? {
+        guard command.hasPrefix("search ") else { return nil }
+        var tail = String(command.dropFirst(7))
+        if tail.hasPrefix("for ") { tail = String(tail.dropFirst(4)) }
+        tail = tail.trimmingCharacters(in: .whitespaces)
+        return tail.isEmpty ? nil : tail
+    }
+
+    private static func queryAction(_ query: String, playTopHit: Bool) -> CuaFastAction {
+        CuaFastAction(body: .appSearch(query: query, playTopHit: playTopHit), generic: true,
+                      description: playTopHit ? "Playing “\(query)”" : "Searching for “\(query)”",
+                      result: playTopHit ? "Dispatched play for “\(query)”" : "Searched for “\(query)”",
+                      effect: .delivered)
+    }
+
+    /// `scroll <dir> [the page] <N> times` — a counted repetition the static
+    /// phrases can't enumerate. Pages are capped; beyond ten the drive loop
+    /// decides what "a lot" means in the window.
+    private static func parseScrollReps(_ command: String) -> CuaFastAction? {
+        guard let expression = try? NSRegularExpression(
+                pattern: #"^scroll (up|down|left|right)(?: (?:the page|a little|a bit))? (\d+|two|three|four|five|six|seven|eight|nine|ten) times?$"#),
+              let match = expression.firstMatch(in: command, range: NSRange(command.startIndex..., in: command)),
+              let dirRange = Range(match.range(at: 1), in: command),
+              let numRange = Range(match.range(at: 2), in: command) else { return nil }
+        let words = ["two": 2, "three": 3, "four": 4, "five": 5,
+                     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10]
+        let token = String(command[numRange])
+        guard let count = Int(token) ?? words[token], count > 0 else { return nil }
+        let direction = String(command[dirRange])
+        return CuaFastAction(body: .scroll(direction: direction, pages: min(count, 10)), generic: true,
+                             description: "Scrolling \(direction)", result: "Scrolled \(direction)",
+                             effect: .delivered)
     }
 
     /// The same leading-filler strip on raw text (case-insensitive), so a
@@ -340,24 +472,45 @@ struct CuaFastAction: Equatable {
               let prefix = Range(match.range, in: stripped) else { return nil }
         var rest = String(stripped[prefix.upperBound...])
         var qualifier: String?
+        var deictic = false
         if let quoted = fullyQuoted(rest) {
             rest = quoted
         } else {
-            var words = rest.split(whereSeparator: \.isWhitespace).map(String.init)
-            let prepositions: Set<String> = ["in", "on", "inside", "with", "using", "into", "onto"]
-            outer: for k in stride(from: min(6, words.count - 1), through: 2, by: -1) {
-                guard prepositions.contains(normalize(words[words.count - k])) else { continue }
-                let candidate = normalize(words.suffix(k - 1).joined(separator: " "))
-                guard !candidate.isEmpty else { continue }
-                words.removeLast(k)
-                rest = words.joined(separator: " ")
-                qualifier = candidate
-                break outer
+            // A deictic destination names the live insertion point, not an
+            // app — strip it from the payload so "type X here" types X, not
+            // "X here". It runs before the qualifier peel: "into this" is a
+            // destination, never an app name. Longest suffixes win so
+            // "right here" beats "here".
+            if let strippedDeictic = stripDeicticSuffix(rest) {
+                rest = strippedDeictic
+                deictic = true
+            }
+            if !deictic {
+                var words = rest.split(whereSeparator: \.isWhitespace).map(String.init)
+                let prepositions: Set<String> = ["in", "on", "inside", "with", "using", "into", "onto"]
+                outer: for k in stride(from: min(6, words.count - 1), through: 2, by: -1) {
+                    guard prepositions.contains(normalize(words[words.count - k])) else { continue }
+                    let candidate = normalize(words.suffix(k - 1).joined(separator: " "))
+                    guard !candidate.isEmpty else { continue }
+                    words.removeLast(k)
+                    rest = words.joined(separator: " ")
+                    qualifier = candidate
+                    break outer
+                }
+                // "type X here in notes" — a qualifier AND a deictic suffix
+                // is a contradiction the resolver arbitrates, not the parser.
+                if let strippedDeictic = stripDeicticSuffix(rest) {
+                    rest = strippedDeictic
+                    deictic = true
+                }
             }
             // A destination preposition inside the payload ("into this
-            // document", "in the notes field") is a targeting decision — the
-            // literal path resolves it with Jev's app/field choice.
-            let destinations = prepositions.union(["at", "to", "toward", "towards", "within", "through"])
+            // document", "in the notes field") is a targeting decision —
+            // the literal path resolves it with Jev's app/field choice. It
+            // runs for deictic payloads too: "type X in notes here" must not
+            // type "X in notes" verbatim.
+            let destinations: Set<String> = ["in", "on", "inside", "with", "using", "into",
+                                             "onto", "at", "to", "toward", "towards", "within", "through"]
             let payloadWords = rest.split(whereSeparator: \.isWhitespace).map { normalize(String($0)) }
             for (index, word) in payloadWords.enumerated() where index < payloadWords.count - 1 {
                 if destinations.contains(word) { return nil }
@@ -365,10 +518,38 @@ struct CuaFastAction: Equatable {
         }
         let payload = unquote(rest.trimmingCharacters(in: .whitespaces))
         guard !payload.isEmpty else { return nil }
-        return (CuaFastAction(body: .type(payload), generic: true,
-                              description: "Typing “\(payload.count > 40 ? String(payload.prefix(40)) + "…" : payload)”",
-                              result: "Typed the text", effect: .typedText),
+        let shown = payload.count > 40 ? String(payload.prefix(40)) + "…" : payload
+        return (CuaFastAction(body: deictic ? .deicticType(payload) : .type(payload), generic: true,
+                              description: "Typing “\(shown)”\(deictic ? " at the insertion point" : "")",
+                              result: "Typed the text", effect: deictic ? .delivered : .typedText),
                 qualifier)
+    }
+
+    /// The payload with a trailing deictic destination stripped, or nil when
+    /// none is present. The suffix must follow a whitespace boundary so
+    /// "sphere" never loses its tail; longest suffixes win so "right here"
+    /// beats "here".
+    private static func stripDeicticSuffix(_ text: String) -> String? {
+        let suffixes = ["right here", "over here", "at the insertion point", "at my cursor",
+                        "at the cursor", "into this field", "into the field",
+                        "into this document", "in this field", "into this", "here"]
+        /// Words that complete "here" as payload rather than point at a
+        /// destination — "type come here" means the text, not the cursor.
+        let herePartners: Set<String> = ["come", "go", "get", "meet", "stay", "wait",
+                                          "live", "sit", "stand", "be", "me", "you",
+                                          "us", "them", "mine", "yours"]
+        let working = text.trimmingCharacters(in: .whitespaces.union(.punctuationCharacters))
+        for suffix in suffixes {
+            guard working.count > suffix.count,
+                  working.suffix(suffix.count).lowercased() == suffix,
+                  working[working.index(working.endIndex, offsetBy: -(suffix.count + 1))].isWhitespace
+            else { continue }
+            let payload = String(working.dropLast(suffix.count + 1)).trimmingCharacters(in: .whitespaces)
+            if suffix == "here", let last = payload.split(separator: " ").last,
+               herePartners.contains(last.lowercased()) { continue }
+            return payload
+        }
+        return nil
     }
 
     /// Returns the inner text only when the whole string is wrapped in one
@@ -388,9 +569,15 @@ struct CuaFastAction: Equatable {
     }
 
     private static func isNegated(_ words: String) -> Bool {
-        // `normalize` maps apostrophes to spaces — "don't" arrives as
-        // "don t", so the un-apostrophed pairs must be listed too.
-        words.range(of: #"\b(?:do not|don't|dont|don t|won't|wont|won t|never|without|stop|avoid|no new)\b"#, options: .regularExpression) != nil
+        // Negation only counts where it can negate — the command head. A
+        // negator inside a query is content ("play never gonna give you up"
+        // must not dead-end). `without` stays global: "quit without saving"
+        // qualifies the command no matter where it sits. `normalize` maps
+        // apostrophes to spaces — "don't" arrives as "don t".
+        let head = ["never", "don't", "dont", "don t", "won't", "wont", "won t",
+                    "do not", "no new", "stop", "avoid"]
+        if head.contains(where: { words == $0 || words.hasPrefix($0 + " ") }) { return true }
+        return words.range(of: #"\bwithout\b"#, options: .regularExpression) != nil
     }
 
     /// Peel a trailing "in/on/with/using <app>" qualifier. Only peels when the
@@ -482,8 +669,8 @@ struct CuaFastAction: Equatable {
         /// Window-scoped scroll is the single most common pointer
         /// replacement a voice user asks for — the driver's delivery receipt
         /// is the honest effect; scroll position is not reliably AX-readable.
-        func addScroll(_ phrases: [String], _ direction: String, _ label: String) {
-            let action = CuaFastAction(body: .scroll(direction), generic: true,
+        func addScroll(_ phrases: [String], _ direction: String, _ label: String, pages: Int = 1) {
+            let action = CuaFastAction(body: .scroll(direction: direction, pages: pages), generic: true,
                                        description: "Scrolling \(label)",
                                        result: "Scrolled \(label)", effect: .delivered)
             for phrase in phrases { t[phrase] = action }
@@ -494,6 +681,30 @@ struct CuaFastAction: Equatable {
                    "scroll up a bit", "scroll up a little"], "up", "up")
         addScroll(["scroll left", "scroll to the left"], "left", "left")
         addScroll(["scroll right", "scroll to the right"], "right", "right")
+        addScroll(["scroll down a lot", "scroll way down", "scroll down a bunch",
+                   "scroll down a few pages"], "down", "down", pages: 3)
+        addScroll(["scroll up a lot", "scroll way up", "scroll up a bunch",
+                   "scroll up a few pages"], "up", "up", pages: 3)
+        // Document-new is ⌘N everywhere, but in Notes/Mail/Messages it makes
+        // an item, not a window — the delivery receipt is the honest effect,
+        // never a window delta.
+        add(["new note", "new email", "new e-mail", "new message", "new mail",
+             "new reminder", "new event", "compose", "compose an email",
+             "compose a message", "compose a new email", "write a new email",
+             "create a note", "create a new note", "make a note", "make a new note"],
+            ["cmd", "n"], "⌘N", "Creating a new item", "Created a new item", .delivered,
+            generic: true)
+        // ⌘↑/⌘↓ jump to the document edges — same honesty as other scrolls.
+        add(["scroll to top", "scroll to the top", "scroll to the top of the page",
+             "go to the top", "go to the top of the page", "back to the top",
+             "scroll all the way up", "jump to the top"],
+            ["cmd", "up"], "⌘↑", "Scrolling to the top", "Scrolled to the top", .delivered,
+            generic: true)
+        add(["scroll to bottom", "scroll to the bottom", "scroll to the bottom of the page",
+             "go to the bottom", "go to the bottom of the page", "scroll all the way down",
+             "jump to the bottom"],
+            ["cmd", "down"], "⌘↓", "Scrolling to the bottom", "Scrolled to the bottom", .delivered,
+            generic: true)
         add(["next tab", "go to next tab", "go to the next tab", "switch to next tab",
              "switch to the next tab", "move to next tab", "move to the next tab",
              "tab over", "cycle tabs forward"],
@@ -545,6 +756,58 @@ struct CuaFastAction: Equatable {
         // chords): delivered to a backgrounded browser the omnibox-focus
         // semantic still activates the app — the fast lane resolves a
         // uniquely-running tabbable app that need not be frontmost.
+        return t
+    }()
+
+    /// Whole-utterance system-key phrases — NX_SYSDEFINED media/system keys
+    /// posted to the HID tap, no app or window involved. They live outside
+    /// `table` so a peeled qualifier can never pretend to scope a global
+    /// key, and they match before the qualifier split for the same reason.
+    /// "stop" is deliberately absent: the play/pause key toggles, so a stop
+    /// request on a paused player would resume it — the opposite effect.
+    private static let mediaTable: [String: CuaFastAction] = {
+        var t: [String: CuaFastAction] = [:]
+        func add(_ phrases: [String], _ key: MediaKeys.Key, _ description: String, _ result: String) {
+            let action = CuaFastAction(body: .mediaKey(key), generic: true,
+                                       description: description, result: result, effect: .delivered)
+            for phrase in phrases { t[phrase] = action }
+        }
+        // Pronoun/empty referents after "play" mean resume, not a search —
+        // "play it" unpauses; only "play <named thing>" is the play lane.
+        add(["play", "pause", "resume", "unpause", "play pause", "play/pause",
+             "play music", "play the music", "play some music", "play something",
+             "pause music", "pause the music", "resume music", "resume the music",
+             "resume playback", "toggle play", "play it", "play that", "play this",
+             "play the track", "play the song", "play that song", "play this song",
+             "play that track", "play the one"],
+            .playPause, "Toggling play/pause", "Toggled play/pause")
+        add(["next track", "next song", "skip", "skip track", "skip this track",
+             "skip song", "skip this song", "play the next track", "play next track",
+             "play the next song", "play next song", "forward a track"],
+            .nextTrack, "Skipping to the next track", "Skipped to the next track")
+        add(["previous track", "previous song", "last track", "last song",
+             "play the previous track", "play previous track", "play the last track",
+             "go back a track", "back a track", "restart the track"],
+            .previousTrack, "Going to the previous track", "Went to the previous track")
+        add(["mute", "unmute", "mute the volume", "mute volume", "mute audio",
+             "mute the audio", "unmute the volume", "toggle mute"],
+            .mute, "Toggling mute", "Toggled mute")
+        add(["volume up", "turn the volume up", "turn it up", "louder",
+             "raise the volume", "increase the volume", "increase volume",
+             "make it louder", "turn up the volume", "volume higher"],
+            .volumeUp, "Turning the volume up", "Turned the volume up")
+        add(["volume down", "turn the volume down", "turn it down", "quieter",
+             "lower the volume", "decrease the volume", "decrease volume",
+             "make it quieter", "turn down the volume"],
+            .volumeDown, "Turning the volume down", "Turned the volume down")
+        add(["brightness up", "brighter", "increase the brightness", "increase brightness",
+             "turn the brightness up", "make the screen brighter", "screen brighter",
+             "brighten the screen"],
+            .brightnessUp, "Turning the brightness up", "Turned the brightness up")
+        add(["brightness down", "dimmer", "dim the screen", "decrease the brightness",
+             "decrease brightness", "turn the brightness down", "make the screen dimmer",
+             "screen dimmer", "darken the screen", "make the screen darker"],
+            .brightnessDown, "Turning the brightness down", "Turned the brightness down")
         return t
     }()
 }

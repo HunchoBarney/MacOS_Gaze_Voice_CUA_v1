@@ -50,13 +50,29 @@ public enum DriveStatus: Sendable, Equatable {
     case maxSteps(history: [String])
     case cancelled
 
-    public enum HandBackReason: String, Sendable {
+    public enum HandBackReason: Sendable, Equatable {
         /// confidence < 0.5 — guessing; hand to the planner/LLM.
-        case lowConfidence = "low_confidence"
-        case noCandidate = "no_candidate"
+        case lowConfidence
+        /// Kept for parity with the Clicky vocabulary — the loop resolves
+        /// "no pick" as untrustedAnswer today rather than producing this.
+        case noCandidate
         /// AX tree empty/inert → caller should escalate to pixel/screenshot.
-        case noInteractiveElements = "no_interactive_elements"
-        case untrustedAnswer = "untrusted_answer"
+        case noInteractiveElements
+        case untrustedAnswer
+        /// The judge could not pick confidently — the caller asks the user
+        /// to choose among these candidate action descriptions.
+        case needsChoice(options: [String])
+
+        /// Stable wire string — consumers (JevUseMCPServer) key on it.
+        public var rawValue: String {
+            switch self {
+            case .lowConfidence: return "low_confidence"
+            case .noCandidate: return "no_candidate"
+            case .noInteractiveElements: return "no_interactive_elements"
+            case .untrustedAnswer: return "untrusted_answer"
+            case .needsChoice: return "needs_choice"
+            }
+        }
     }
 }
 

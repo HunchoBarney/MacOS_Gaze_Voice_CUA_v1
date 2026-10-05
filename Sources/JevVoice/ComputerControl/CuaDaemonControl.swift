@@ -19,17 +19,48 @@ enum CuaDaemonControl {
     /// single-flights concurrent callers (the check-then-set race would
     /// double `stop` and double `open -a` the daemon).
     private static var reconcileTask: Task<Bool, Never>?
+    /// Callers arrive from several actors at once (each CuaConnection's
+    /// connect, CuaSetup) — the check-and-set on `reconcileTask` must be
+    /// atomic or two callers can both pass the nil check and double
+    /// stop/open the daemon.
+    private static let reconcileLock = NSLock()
 
     /// Reconciles once per process. Skips a restart only when the daemon is
     /// already listening AND this install previously verified it carries the
     /// grant — the driver exposes no grant query, so an unknown running daemon
     /// is restarted rather than guessed about.
     static func ensureExistingProfileGrant() async {
-        if let task = reconcileTask { _ = await task.value; return }
+        // NSLock is unavailable in async contexts — the check-and-set lives
+        // in synchronous claim/release helpers; only awaiting the task's
+        // value stays on this path.
+        let (task, owner) = claimReconcile()
+        guard owner else {
+            _ = await task.value
+            return
+        }
+        let ok = await task.value
+        if !ok { releaseReconcile(task) }
+    }
+
+    /// Atomic single-flight claim: returns the in-flight task for joiners,
+    /// or mints and returns a fresh one for the caller that owns this
+    /// reconcile.
+    private static func claimReconcile() -> (task: Task<Bool, Never>, owner: Bool) {
+        reconcileLock.lock()
+        defer { reconcileLock.unlock() }
+        if let task = reconcileTask { return (task, false) }
         let task = Task { await reconcile() }
         reconcileTask = task
-        let ok = await task.value
-        if !ok { reconcileTask = nil }
+        return (task, true)
+    }
+
+    /// Clear only OUR task — a caller that joined this one may have already
+    /// cleared the slot, and a later caller may have replaced it; wiping a
+    /// newer task would double the reconcile.
+    private static func releaseReconcile(_ task: Task<Bool, Never>) {
+        reconcileLock.lock()
+        if reconcileTask == task { reconcileTask = nil }
+        reconcileLock.unlock()
     }
 
     private static func reconcile() async -> Bool {
@@ -37,6 +68,11 @@ enum CuaDaemonControl {
         let listening = (try? await run(executable, ["status"], timeout: 3)) == true
         if listening && UserDefaults.standard.bool(forKey: configuredKey) { return true }
         if listening {
+            // A daemon restart tombstones every session on live transports.
+            // While any connection is up, defer — returning false clears the
+            // single-flight so the next idle connect() retries — rather than
+            // killing in-flight work underneath other lanes.
+            guard CuaConnection.liveConnectionCount == 0 else { return false }
             // Unknown grant state; `serve` grants are immutable after launch.
             _ = try? await run(executable, ["stop"], timeout: 10)
         }
@@ -49,7 +85,11 @@ enum CuaDaemonControl {
         guard (try? await run(URL(fileURLWithPath: "/usr/bin/open"),
                 ["-n", "-g", bundle.path, "--args", "serve", "--grant", "existing-profile"],
                 timeout: 10)) == true else { return false }
-        for _ in 0..<100 {
+        // Bounded readiness wait: 30s wall-clock ceiling. Each status check
+        // carries its own 2s timeout, so without a cap the attempt budget
+        // could stretch to minutes when the daemon is stuck launching.
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
             if (try? await run(executable, ["status"], timeout: 2)) == true {
                 UserDefaults.standard.set(true, forKey: configuredKey)
                 return true

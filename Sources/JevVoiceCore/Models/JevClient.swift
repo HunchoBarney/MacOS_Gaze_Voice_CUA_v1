@@ -43,8 +43,9 @@ public final class JevClient {
         var request = URLRequest(url: baseURL)
         request.httpMethod = "POST"
         // Per-step judgments sit inside a voice hold: a hung request must
-        // bound out long before the user gives up on it.
-        request.timeoutInterval = 20
+        // bound out fast. The drive loop adds one bounded retry, so 8s
+        // caps a step's judge stall near 16s — the old 20s doubled to 40.
+        request.timeoutInterval = 8
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(

@@ -36,16 +36,45 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
     /// Cap on live asks — `requests` only holds pendings, but a flooding
     /// caller can mint one per distinct (agent, turn) key.
     private static let requestLimit = 128
+    /// Session lifecycle is host-owned — the runtime mints one driver
+    /// session per agent transport, and an agent ending (or escalating) a
+    /// session would strand its own later calls on a tombstoned label.
+    private static let agentDeniedTools: Set<String> = [
+        "start_session", "end_session", "escalate_session"
+    ]
+    /// pid → app identity resolution rides `list_apps`; the result is stable
+    /// on a lease timescale, so a short cache avoids a driver roundtrip on
+    /// every forwarded input call.
+    private static let pidIdentityTTL: TimeInterval = 30
 
-    private let driver: any DriverToolCalling
+    /// Per-caller driver resolution — each agent gets its own CuaConnection
+    /// (its own embedded daemon), so the gate must ask per call rather than
+    /// hold one fixed transport.
+    private let driverFor: @Sendable (String?) -> (any DriverToolCalling)?
+    /// Shared lane arbitration — voice tasks and agent calls serialize on
+    /// the same app/focus/pasteboard leases. Nil keeps the gate usable in
+    /// isolation (tests, single-slot embedders).
+    private let lanes: (any AgentLaneLeasing)?
     private let nilTurnDenialTTL: TimeInterval
     private let now: @Sendable () -> Date
     private let lock = NSLock()
     private var state = State()
 
-    init(driver: any DriverToolCalling, nilTurnDenialTTL: TimeInterval = 60,
+    init(driver: any DriverToolCalling, lanes: (any AgentLaneLeasing)? = nil,
+         nilTurnDenialTTL: TimeInterval = 60,
          now: @escaping @Sendable () -> Date = { Date() }) {
-        self.driver = driver
+        self.driverFor = { _ in driver }
+        self.lanes = lanes
+        self.nilTurnDenialTTL = nilTurnDenialTTL
+        self.now = now
+    }
+
+    init(driverFor: @escaping @Sendable (String?) -> (any DriverToolCalling)?,
+         lanes: (any AgentLaneLeasing)? = nil,
+         nilTurnDenialTTL: TimeInterval = 60,
+         now: @escaping @Sendable () -> Date = { Date() }) {
+        self.driverFor = driverFor
+        self.lanes = lanes
         self.nilTurnDenialTTL = nilTurnDenialTTL
         self.now = now
     }
@@ -59,9 +88,15 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
     }
 
     /// Per-caller label deny list — the coordinator copies `DriveTask.deny`
-    /// (or the voice path's equivalent) here before arming a turn.
+    /// (or the voice path's equivalent) here before arming a turn. Entries
+    /// are normalized: a whitespace-wrapped label would otherwise substring-
+    /// match almost nothing and silently weaken the ban.
     func setDenyList(_ labels: [String], agentSlug: String?) {
-        locked { $0.denyLists[agentSlug] = labels.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty } }
+        locked {
+            $0.denyLists[agentSlug] = labels
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
     }
 
     /// The driver session label this caller's calls should carry. The runtime
@@ -84,9 +119,15 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
             return Self.refusal("scope_refused",
                 "refused: desktop scope moves the user's real pointer. Drive a window_id instead.")
         }
-        if ConsentContract.requiresConsent(name) {
+        if agentSlug != nil, Self.agentDeniedTools.contains(name) {
+            return Self.refusal("host_owned_tool",
+                "refused: \(name) manages the driver's session lifecycle — sessions are owned by the host, not agents. Your session is already bound; call the tool you need directly.")
+        }
+        let gated = ConsentContract.requiresConsent(name)
+        if gated {
             if let hit = deniedLabel(in: args, agentSlug: agentSlug) {
-                return Self.refusal("denied_label", "refused: \"\(hit)\" is on this caller's deny list.")
+                return Self.refusal("denied_label",
+                    "refused: \"\(hit)\" is on this caller's deny list — pick a different element or report the step as blocked.")
             }
             // bring_to_front is exempt from the delivery_mode policy: the
             // driver treats that tool as inherently foreground (tool.rs), so
@@ -95,7 +136,7 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
             if name != "bring_to_front",
                let mode = args["delivery_mode"], mode != .null, mode != .string(ConsentContract.requiredDeliveryMode) {
                 return Self.refusal("delivery_mode_required",
-                    "refused: delivery_mode must be \"\(ConsentContract.requiredDeliveryMode)\" — input never steals focus.")
+                    "refused: delivery_mode must be \"\(ConsentContract.requiredDeliveryMode)\" or omitted — input never steals focus.")
             }
             do {
                 // Permit + consume in one lock: a nil-turn approval is spent
@@ -117,20 +158,75 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
                 args["delivery_mode"] = .string(ConsentContract.requiredDeliveryMode)
             }
         }
-        if let agentSlug, args["session"] == nil {
+        // Lane arbitration: input calls take the target app's lease for the
+        // call's duration, and focus/pasteboard-touching tools take those
+        // lanes too — the registry serializes agents against the voice
+        // runtime's work on the same resources. A lease that can't be taken
+        // (a cancelled call) fails closed rather than dispatching unsorted.
+        var acquiredWorkID: String?
+        if let lanes {
+            // Full UUID, not a prefix — a workID collision would let one
+            // call's releaseAll free another live call's lanes mid-dispatch.
+            let workID = "agent-\(agentSlug ?? "jev")-gate-\(UUID().uuidString.lowercased())"
+            do {
+                var held = false
+                if gated, let identity = await appIdentity(for: name, args: args, agentSlug: agentSlug) {
+                    try await lanes.acquire(app: identity, pid: args["pid"]?.integer, workID: workID)
+                    held = true
+                }
+                // Only gated calls take the focus lane — a read carrying a
+                // forged delivery_mode must not serialize on the global
+                // lane. The pasteboard stays unconditional: clipboard_read
+                // is observation yet still races a held clipboard write.
+                if gated, Self.requestsFocus(name: name, args: args) {
+                    try await lanes.acquireFocus(workID: workID)
+                    held = true
+                }
+                if Self.touchesPasteboard(name: name, args: args) {
+                    try await lanes.acquirePasteboard(workID: workID)
+                    held = true
+                }
+                if held { acquiredWorkID = workID }
+            } catch {
+                await lanes.releaseAll(workID: workID)
+                return Self.error("lane_unavailable",
+                    "\(name) could not be scheduled — the target's lane is unavailable. Retry once; if it persists, report the step as blocked.")
+            }
+        }
+        // A caller cancelled after leasing but before dispatch must not land
+        // input nobody is watching — hand the lease back and fail closed.
+        if Task.isCancelled {
+            if let lanes, let acquiredWorkID {
+                await lanes.releaseAll(workID: acquiredWorkID)
+            }
+            return Self.error("cancelled", "\(name) was cancelled before it could run.")
+        }
+        if let agentSlug {
             // Per-agent driver session — the badge + session-colored cursor
-            // the driver renders is this agent's visible identity.
+            // the driver renders is this agent's visible identity. The arg
+            // is rewritten unconditionally: a caller-supplied label would
+            // let one agent drive under another's identity.
             let label = locked { $0.sessionLabels[agentSlug] ?? ("agent-" + agentSlug) }
             args["session"] = .string(label)
         }
-        return await forward(name, args)
+        let result = await forward(name, args, agentSlug: agentSlug)
+        if let lanes, let acquiredWorkID {
+            await lanes.releaseAll(workID: acquiredWorkID)
+        }
+        return result
     }
 
     /// One endpoint per agent — the coordinator writes `Endpoint.url`/`.token`
     /// into the agent's `mcp_servers` config, binding every call to its slug.
+    /// The driver resolves per request so each agent's calls run on its own
+    /// connection; an unminted transport reads as `.closed`, which codex
+    /// treats as "server broken" — endpoints only go live after connect.
     func server(agentSlug: String?, token: String? = nil) -> LoopbackMCPServer {
         LoopbackMCPServer(serverName: "jev-computer-use", token: token,
-            tools: { [driver] in try await driver.tools() },
+            tools: { [driverFor] in
+                guard let driver = driverFor(agentSlug) else { throw DriverConnectionError.closed }
+                return try await driver.tools()
+            },
             onCall: { name, args in await self.callTool(name, arguments: args, agentSlug: agentSlug) })
     }
 
@@ -172,18 +268,25 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
 
     /// Same check keyed to the agent's live turn — the resolution callTool
     /// performs internally, exposed for tool surfaces that execute work
-    /// outside a tools/call envelope (jev-use drive_until).
+    /// outside a tools/call envelope (jev-use drive_until). A nil-turn
+    /// approval is spent exactly like callTool spends it: one "yes" arms one
+    /// call, never a standing grant.
     func assertPermittedNow(tool: String, agentSlug: String?) throws {
         try locked { state in
-            try state.assertPermitted(tool: tool,
-                key: ConsentKey(agent: agentSlug, turn: state.activeTurns[agentSlug] ?? nil),
+            let key = ConsentKey(agent: agentSlug, turn: state.activeTurns[agentSlug] ?? nil)
+            try state.assertPermitted(tool: tool, key: key,
                 now: now(), nilTurnDenialTTL: nilTurnDenialTTL)
+            if key.turn == nil { state.approved.remove(key) }
         }
     }
 
     // MARK: Forwarding
 
-    private func forward(_ name: String, _ args: [String: JSONValue]) async -> JSONValue {
+    private func forward(_ name: String, _ args: [String: JSONValue], agentSlug: String?) async -> JSONValue {
+        guard let driver = driverFor(agentSlug) else {
+            return Self.error("driver_unavailable",
+                "This agent's driver connection is not up yet — wait a moment and retry.")
+        }
         do {
             let result = try await driver.callResult(name, arguments: args)
             return .object(["structuredContent": result.structured, "content": .array(result.content)])
@@ -199,6 +302,65 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
             return Self.error("driver_error",
                 (error as? LocalizedError)?.errorDescription ?? "The driver call failed.")
         }
+    }
+
+    /// Lease identity for a forwarded call's target: a pid resolves to its
+    /// app's bundle/name via `list_apps` (cached — process identity is
+    /// stable on a lease timescale), launch/kill args carry the app's own
+    /// spelling, and a bare window_id falls back to a window-scoped key —
+    /// window ids are globally unique, so every caller of the same window
+    /// still serializes.
+    private func appIdentity(for name: String, args: [String: JSONValue],
+                             agentSlug: String?) async -> String? {
+        if let pid = args["pid"]?.integer { return await pidIdentity(pid, agentSlug: agentSlug) }
+        for key in ["application", "bundle_id", "app", "app_name"] {
+            if let value = args[key]?.string, !value.isEmpty { return value }
+        }
+        if ["launch_app", "kill_app"].contains(name),
+           let value = args["name"]?.string, !value.isEmpty { return value }
+        if let wid = args["window_id"]?.integer { return "window-\(wid)" }
+        return nil
+    }
+
+    private func pidIdentity(_ pid: Int, agentSlug: String?) async -> String {
+        if let cached = locked({ $0.pidIdentities[pid] }),
+           now().timeIntervalSince(cached.at) < Self.pidIdentityTTL {
+            return cached.identity
+        }
+        var identity = "pid-\(pid)"
+        if let driver = driverFor(agentSlug),
+           let result = try? await driver.callResult("list_apps", arguments: [:]),
+           let match = result.structured["apps"]?.array?.first(where: { $0["pid"]?.integer == pid }) {
+            identity = match["bundle_id"]?.string ?? match["name"]?.string ?? identity
+        }
+        locked { $0.pidIdentities[pid] = (identity, now()) }
+        return identity
+    }
+
+    /// Focus-class calls mutate what the user is looking at — raising a
+    /// window, walking a menu bar, launching an app, or any caller that
+    /// somehow still carries foreground delivery (bring_to_front is exempt
+    /// from the forced-background rewrite, so the arg must be checked, not
+    /// assumed gone).
+    private static func requestsFocus(name: String, args: [String: JSONValue]) -> Bool {
+        if ["bring_to_front", "invoke_menu", "launch_app"].contains(name) { return true }
+        return args["delivery_mode"]?.string?.lowercased() == "foreground"
+    }
+
+    /// The pasteboard is a single shared resource — ⌘V delivered while
+    /// another lane holds a clipboard write lands the wrong payload.
+    private static func touchesPasteboard(name: String, args: [String: JSONValue]) -> Bool {
+        if ["clipboard_write", "clipboard_read"].contains(name) { return true }
+        guard name == "hotkey" else { return false }
+        var keys = (args["keys"]?.array?.compactMap(\.string) ?? [])
+        if let chord = args["chord"]?.string { keys.append(chord) }
+        if let single = args["key"]?.string { keys.append(single) }
+        let parts = keys.flatMap {
+            $0.lowercased().split(separator: "+").map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        let set = Set(parts)
+        return !set.isDisjoint(with: ["cmd", "command", "meta", "⌘"])
+            && !set.isDisjoint(with: ["c", "x", "v"])
     }
 
     private func deniedLabel(in args: [String: JSONValue], agentSlug: String?) -> String? {
@@ -245,6 +407,7 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
         var activeTurns: [String?: String] = [:]
         var denyLists: [String?: [String]] = [:]
         var sessionLabels: [String?: String] = [:]
+        var pidIdentities: [Int: (identity: String, at: Date)] = [:]
 
         mutating func setActiveTurn(_ turnID: String?, agentSlug: String?) {
             guard activeTurns[agentSlug] != turnID else { return }
@@ -268,7 +431,7 @@ final class ComputerUseGate: ConsentGating, @unchecked Sendable {
                     denied[key] = nil
                 } else {
                     throw GateError.blockedByConsent(summary:
-                        "computer-use consent was denied for this turn. Observation tools still work.")
+                        "computer-use consent was denied for this turn — do not retry input tools; observation tools still work.")
                 }
             }
             if asked.insert(key).inserted {

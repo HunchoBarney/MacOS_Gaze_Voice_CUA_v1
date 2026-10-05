@@ -21,8 +21,30 @@ struct DictationDelivery: DictationDelivering {
 
     func deliver(_ text: String) async throws {
         guard !text.isEmpty else { return }
-        if insertText(text) { return }
-        if await pasteText(text) { return }
+        // Dictation writes to whatever is frontmost and (on the paste
+        // path) to the global pasteboard — both are shared lanes. Holding
+        // focus for the whole deliver and pasteboard for the paste window
+        // keeps a parallel task's raise or ⌘C from redirecting either.
+        let workID = "dictation-\(UUID().uuidString.prefix(8))"
+        let lanes = CuaLaneRegistry.shared
+        try await lanes.acquireFocus(workID: workID)
+        var ok = insertText(text)
+        if !ok {
+            do {
+                try await lanes.acquirePasteboard(workID: workID)
+                ok = await pasteText(text)
+                await lanes.releasePasteboard(workID: workID)
+            } catch {
+                // A thrown pasteboard acquire must still free the focus
+                // lease — every deliver owns a fresh workID, so a skipped
+                // release parks the global focus lane behind a holder
+                // nothing can ever identify or release.
+                await lanes.releaseFocus(workID: workID)
+                throw error
+            }
+        }
+        await lanes.releaseFocus(workID: workID)
+        if ok { return }
         throw VoiceError("No editable field is focused for dictation.")
     }
 
@@ -36,6 +58,21 @@ struct DictationDelivery: DictationDelivering {
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
         return AXUIElementSetAttributeValue(value as! AXUIElement,
             kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success
+    }
+
+    /// The focused element's AXValue readback, when the app exposes it as a
+    /// string — nil means unreadable, which is never evidence of a failed
+    /// write (secure fields and masked editors simply don't mirror it).
+    static func focusedElementValue() -> String? {
+        let system = AXUIElementCreateSystemWide()
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        var contents: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(value as! AXUIElement,
+            kAXValueAttribute as CFString, &contents) == .success,
+              let text = contents as? String else { return nil }
+        return text
     }
 
     /// Snapshot → set dictated text → ⌘V → restore. The restore waits out a

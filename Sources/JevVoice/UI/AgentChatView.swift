@@ -4,14 +4,14 @@ import SwiftUI
 struct AgentChatView: View {
     @ObservedObject var model: AgentsViewModel
     let agent: CompanionAgent
+    /// Typing lives in @State — publishing every keystroke through
+    /// `model.drafts` re-renders the whole roster and chat per character.
+    /// `model.drafts` still carries drafts across agent switches/closes.
+    @State private var draft = ""
 
     private var chat: AgentChat { model.chat(for: agent.slug) }
-    private var draft: Binding<String> {
-        Binding(get: { model.drafts[agent.slug] ?? "" },
-                set: { model.drafts[agent.slug] = $0 })
-    }
     private var canSend: Bool {
-        !model.drafts[agent.slug, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -83,7 +83,7 @@ struct AgentChatView: View {
             }
             Divider()
             HStack(spacing: 8) {
-                TextField("Message \(agent.name)…", text: draft)
+                TextField("Message \(agent.name)…", text: $draft)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(send)
                 Button("Send", action: send).buttonStyle(.borderedProminent).disabled(!canSend)
@@ -91,10 +91,17 @@ struct AgentChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { draft = model.drafts[agent.slug] ?? "" }
+        .onChange(of: agent.slug) { previous, next in
+            model.drafts[previous] = draft
+            draft = model.drafts[next] ?? ""
+        }
+        .onDisappear { model.drafts[agent.slug] = draft }
     }
 
     private func send() {
-        model.send(model.drafts[agent.slug, default: ""], to: agent.slug)
+        model.send(draft, to: agent.slug)
+        draft = ""
     }
 
     @ViewBuilder

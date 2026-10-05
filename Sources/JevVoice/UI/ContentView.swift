@@ -19,6 +19,19 @@ struct OverlayView: View {
         controller.status == .reviewTranscript || controller.status == .awaitingConfirm || isError
     }
     private var isError: Bool { if case .error = controller.status { return true }; return false }
+    /// Every parked approval/question gets a row — capped at 3 with an
+    /// overflow count — each Confirm is id-scoped to its own ask.
+    private var approvalRows: [CuaVoiceRuntime.Work] {
+        Array(controller.pendingTaskApprovals.prefix(3))
+    }
+    private var questionRows: [VoiceController.PendingQuestionItem] {
+        Array(controller.pendingQuestions.prefix(max(0, 3 - approvalRows.count)))
+    }
+    private var hiddenAsks: Int {
+        controller.pendingTaskApprovals.count + controller.pendingQuestions.count
+            - approvalRows.count - questionRows.count
+    }
+    private var hasAsks: Bool { !approvalRows.isEmpty || !questionRows.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -64,12 +77,27 @@ struct OverlayView: View {
                         .help("Escape to cancel")
                 }
             }
-            if let task = controller.pendingTaskApproval, let operation = task.approval {
-                Text(operation).font(.caption).fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button("Confirm operation") { controller.approveTask(task.id, approved: true) }.buttonStyle(.borderedProminent)
-                    Button("Cancel operation") { controller.approveTask(task.id, approved: false) }
-                }.controlSize(.small)
+            ForEach(approvalRows) { task in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.request).font(.caption2).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+                    if let operation = task.approval {
+                        Text(operation).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack {
+                        Button("Confirm") { controller.approveTask(task.id, approved: true) }
+                            .buttonStyle(.borderedProminent)
+                        Button("Cancel") { controller.approveTask(task.id, approved: false) }
+                    }.controlSize(.small)
+                }
+            }
+            ForEach(questionRows) { question in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(question.prompt).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    Text("for: \(question.owner)").font(.caption2).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+                }
+            }
+            if hiddenAsks > 0 {
+                Text("+\(hiddenAsks) more").font(.caption2).foregroundStyle(.white.opacity(0.5))
             }
             if showsActions {
                 HStack(spacing: 10) {
@@ -85,14 +113,14 @@ struct OverlayView: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 13)
-        .frame(width: showText || !message.isEmpty || showsActions ? 380 : 290)
+        .frame(width: showText || !message.isEmpty || showsActions || hasAsks ? 380 : 290)
         .fixedSize(horizontal: false, vertical: true)
         .background {
-            let shape = RoundedRectangle(cornerRadius: showText || showsActions ? 22 : 26, style: .continuous)
+            let shape = RoundedRectangle(cornerRadius: showText || showsActions || hasAsks ? 22 : 26, style: .continuous)
             if reduceTransparency { shape.fill(Color(white: 0.10)) }
             else { shape.fill(.ultraThinMaterial).overlay(shape.fill(Color.black.opacity(0.68))) }
         }
-        .overlay(RoundedRectangle(cornerRadius: showText || showsActions ? 22 : 26).stroke(.white.opacity(0.14), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: showText || showsActions || hasAsks ? 22 : 26).stroke(.white.opacity(0.14), lineWidth: 1))
         .foregroundStyle(.white)
         .colorScheme(.dark)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: controller.status)

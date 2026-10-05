@@ -37,7 +37,7 @@ actor LoopbackMCPServer {
     var connectionCount: Int { connections.count }
 
     init(serverName: String, serverVersion: String = "1", path: String = "/mcp", token: String? = nil,
-         readDeadline: TimeInterval = 30, maxConnections: Int = 64,
+         readDeadline: TimeInterval = 300, maxConnections: Int = 64,
          tools: @escaping @Sendable () async throws -> [JSONValue],
          onCall: @escaping @Sendable (_ name: String, _ arguments: JSONValue) async throws -> JSONValue) {
         self.serverName = serverName; self.serverVersion = serverVersion; self.path = path
@@ -116,6 +116,9 @@ actor LoopbackMCPServer {
     }
 
     private func serve(_ connection: NWConnection, id: UUID) async {
+        // Connection idle watchdog, not a per-request timeout: drive_until
+        // and other long multi-turn calls must stay alive across many
+        // seconds with no traffic. Tests override this for fast reap checks.
         let watchdog = Task {
             try? await Task.sleep(for: .seconds(readDeadline))
             guard !Task.isCancelled else { return }

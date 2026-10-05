@@ -155,6 +155,10 @@ public actor CodexProtocolClient {
     private var nextID = 0
     private var generation = UUID()
     private var initialized = false
+    /// Latched by disconnect — the events stream finishes with the transport,
+    /// so a "restarted" client would stream nothing. Replacement is wholesale:
+    /// the bridge builds a fresh client rather than reviving this one.
+    private var closed = false
     /// Absolute CODEX_HOME the server reported at initialize.
     public private(set) var codexHome: String?
     public nonisolated let events: AsyncStream<CodexEvent>
@@ -185,6 +189,7 @@ public actor CodexProtocolClient {
     }
 
     public func start() async throws {
+        guard !closed else { throw CodexConnectionError.closed }
         guard process == nil else { throw CodexConnectionError.remote("Codex client already started.") }
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw CodexConnectionError.unavailable
@@ -228,6 +233,14 @@ public actor CodexProtocolClient {
                             onStderrLine(line)
                         }
                         rest.removeSubrange(...end)
+                    }
+                    // A newline-free stderr flood must not grow `rest`
+                    // forever — flush at a bound like a terminal would.
+                    if rest.count > 64 * 1024 {
+                        if let line = String(data: rest, encoding: .utf8) {
+                            onStderrLine(line)
+                        }
+                        rest.removeAll()
                     }
                 }
             }
@@ -341,14 +354,20 @@ public actor CodexProtocolClient {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 pending[id] = continuation
+                // Arm the deadline BEFORE the write so a blocked/dying pipe
+                // can't starve the timeout; if the write itself fails, the
+                // task is cancelled before it can fire on a stale request.
+                deadlines[id] = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
+                    await self?.cancel(id, error: CodexConnectionError.timedOut)
+                }
                 do {
                     try write(.object(["jsonrpc": .string("2.0"), "id": .number(Double(id)),
                                        "method": .string(method), "params": params]))
-                    deadlines[id] = Task { [weak self] in
-                        do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
-                        await self?.cancel(id, error: CodexConnectionError.timedOut)
-                    }
-                } catch { complete(id, result: .failure(error)) }
+                } catch {
+                    deadlines.removeValue(forKey: id)?.cancel()
+                    complete(id, result: .failure(error))
+                }
             }
         } onCancel: {
             Task { await self.cancel(id, error: CancellationError()) }
@@ -430,6 +449,7 @@ public actor CodexProtocolClient {
     private func disconnect(_ error: Error) {
         generation = UUID()
         initialized = false
+        closed = true
         for id in Array(pending.keys) { complete(id, result: .failure(error)) }
         reader?.cancel(); reader = nil
         stderrReader?.cancel(); stderrReader = nil

@@ -2,11 +2,13 @@ import Foundation
 import JevVoiceCore
 
 /// The voice path's delegation seam into the persistent-agent runtime.
+/// Every String return is a VoiceToolResult payload — the lane voices `say`
+/// verbatim and routes on `status`.
 protocol AgentBridging: Sendable {
     /// Slugs/names/roles the tool surface may route to.
     func roster() async -> [CompanionAgent]
     /// `delegate_to_agent` tool: found or reuse a persistent agent. Returns
-    /// the user-facing line the runtime reports.
+    /// the acknowledgement payload the runtime reports.
     func delegate(_ request: DelegationRequest) async throws -> String
     /// A follow-up into an existing agent's thread.
     func sendToAgent(slug: String, message: String) async throws -> String
@@ -50,7 +52,7 @@ final class VoiceAgentBridge: AgentBridging {
             // wrong-target risk, never a reason to found a substitute. The
             // model passes NAMES ("Inbox Desk") — match name, slug, and the
             // slugified name before refusing.
-            guard let existing = try? await resolveAgent(slug, runtime: runtime) else {
+            guard let existing = try await resolveAgent(slug, runtime: runtime) else {
                 throw Failure.unknownAgent(slug)
             }
             agent = existing
@@ -61,7 +63,8 @@ final class VoiceAgentBridge: AgentBridging {
                 description: request.newAgentDescription ?? request.message)
         }
         try await runtime.send(request.message, to: agent)
-        return "\(agent.name) is on it."
+        return VoiceToolResult(status: VoiceToolResult.Status.delegated,
+            say: VoiceToolResult.spoken("On it, \(agent.name) has it", words: 12)).encoded()
     }
 
     func sendToAgent(slug: String, message: String) async throws -> String {
@@ -70,7 +73,8 @@ final class VoiceAgentBridge: AgentBridging {
             throw Failure.unknownAgent(slug)
         }
         try await runtime.send(message, to: agent)
-        return "Passed to \(agent.name)."
+        return VoiceToolResult(status: VoiceToolResult.Status.sent,
+            say: VoiceToolResult.spoken("Sent to \(agent.name)", words: 12)).encoded()
     }
 
     /// The agent's curated memory is the "Notes" section of its AGENTS.md —
@@ -82,18 +86,32 @@ final class VoiceAgentBridge: AgentBridging {
         }
         let url = URL(fileURLWithPath: agent.workspacePath)
             .appendingPathComponent("AGENTS.md")
+        let empty = VoiceToolResult(status: VoiceToolResult.Status.ok,
+            say: VoiceToolResult.spoken("\(agent.name) has no recorded findings yet",
+                                        words: 20)).encoded()
         guard let text = try? String(contentsOf: url, encoding: .utf8),
               let range = text.range(of: "## Notes") else {
-            return "\(agent.name) has no recorded findings yet."
+            return empty
         }
         let notes = String(text[range.upperBound...])
             .components(separatedBy: "\n## ").first?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return notes.isEmpty ? "\(agent.name) has no recorded findings yet." : notes
+        guard !notes.isEmpty else { return empty }
+        // Short notes read aloud verbatim; longer ones get a spoken summary
+        // line and the full text stays in detail for the model to paraphrase.
+        let spoken = VoiceToolResult.spoken(notes, words: 20)
+        let short = notes.split(whereSeparator: \.isWhitespace).count <= 20
+        return VoiceToolResult(status: VoiceToolResult.Status.ok,
+            say: short ? spoken
+                : VoiceToolResult.spoken("\(agent.name) has notes on file, too long to read aloud", words: 20),
+            detail: notes).encoded()
     }
 
     func interruptAgent(hint: String?) async -> String {
-        guard let runtime else { return "Persistent agents are not available in this build." }
+        guard let runtime else {
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: "No agents are configured in this build.").encoded()
+        }
         let agents = await runtime.store.agents()
         let needle = hint?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         let matches = agents.filter {
@@ -102,14 +120,21 @@ final class VoiceAgentBridge: AgentBridging {
         }
         guard let agent = matches.count == 1 ? matches[0]
                 : (needle.isEmpty ? agents.last : nil) else {
-            return matches.isEmpty ? "No running agent matches \"\(hint ?? "")\"."
-                : "Several agents could match — name one."
+            return matches.isEmpty
+                ? VoiceToolResult(status: VoiceToolResult.Status.nothingRunning,
+                    say: "No running agent matches.", detail: hint).encoded()
+                : VoiceToolResult(status: VoiceToolResult.Status.refused,
+                    say: "Several agents could match, name one.",
+                    detail: matches.map(\.name).joined(separator: ", ")).encoded()
         }
         do {
             try await runtime.interrupt(slug: agent.slug)
-            return "Stopped \(agent.name)."
+            return VoiceToolResult(status: VoiceToolResult.Status.cancelled,
+                say: VoiceToolResult.spoken("Stopped \(agent.name)", words: 12)).encoded()
         } catch {
-            return "\(agent.name) could not be stopped: \(error.localizedDescription)"
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                say: VoiceToolResult.spoken("\(agent.name) could not be stopped", words: 12),
+                detail: error.localizedDescription).encoded()
         }
     }
 

@@ -134,6 +134,17 @@ for line in sys.stdin:
         await client.close()
     }
 
+    /// The events stream finishes with the transport — a "restarted" client
+    /// would spawn a process yet stream nothing, so start() must refuse.
+    func testStartAfterCloseIsRefused() async throws {
+        let (client, path) = try fixture()
+        defer { try? FileManager.default.removeItem(at: path) }
+        try await client.start()
+        await client.close()
+        do { try await client.start(); XCTFail("closed client restarted") }
+        catch { XCTAssertEqual(error as? CodexConnectionError, .closed) }
+    }
+
     /// Opt-in end-to-end check against the installed codex binary: real
     /// initialize → thread/start → turn/start → streamed events →
     /// turn/completed. Needs the user's own CODEX_HOME auth; the thread is
@@ -311,6 +322,23 @@ final class RoutineSchedulerTests: XCTestCase {
         func bump(_ entry: String) { fired.append(entry) }
     }
 
+    /// Gates a fire mid-run so the test can hold one in flight while ticks
+    /// land — every blocked fire parks until open() releases them all.
+    private actor Release {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private var opened = false
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                if opened { continuation.resume() } else { waiters.append(continuation) }
+            }
+        }
+        func open() {
+            opened = true
+            for waiter in waiters { waiter.resume() }
+            waiters = []
+        }
+    }
+
     func testTimerFiresRepeatsAndStopsOnSync() async throws {
         let counter = Counter()
         let scheduler = RoutineScheduler { slug, routine in
@@ -395,6 +423,33 @@ final class RoutineSchedulerTests: XCTestCase {
         // One 0.1s timer over 0.4s ≈ 4 fires; a ghost doubles it to ~8.
         XCTAssertGreaterThanOrEqual(delta, 2)
         XCTAssertLessThanOrEqual(delta, 6)
+        await scheduler.stopAll()
+    }
+
+    /// A tick landing while the previous fire still runs coalesces — one
+    /// routine must never stack duplicate sends onto its agent.
+    func testInFlightFireCoalescesTicks() async throws {
+        let counter = Counter()
+        let release = Release()
+        let scheduler = RoutineScheduler { slug, routine in
+            await counter.bump("\(slug):\(routine.id)")
+            await release.wait()
+        }
+        let routine = Routine(id: "r1", everyMinutes: 5, task: "sweep")
+        await scheduler.schedule(key: "a\u{1F}r1", slug: "a", routine: routine,
+                                 interval: 0.05, fireNow: true)
+        for _ in 0..<40 where await counter.fired.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let started = await counter.fired.count
+        XCTAssertEqual(started, 1)
+        // ~6 ticks pass while the first fire is still blocked — each one
+        // must drop, not queue another send.
+        try await Task.sleep(for: .milliseconds(300))
+        let stacked = await counter.fired.count
+        XCTAssertEqual(stacked, 1,
+                       "ticks during a live fire must coalesce, not stack")
+        await release.open()
         await scheduler.stopAll()
     }
 

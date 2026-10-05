@@ -324,8 +324,10 @@ final class ComputerUseGateTests: XCTestCase {
         XCTAssertEqual(calls[1].args["session"], .string("agent-research"))
     }
 
-    /// The companion's direct path (nil agent) never gains a session rewrite —
-    /// and a caller-supplied session is never clobbered.
+    /// The companion's direct path (nil agent) never gains a session rewrite.
+    /// An agent-supplied session IS clobbered — letting a caller name its
+    /// label would let one agent drive under another's identity, so the gate
+    /// rewrites to the registered (or default) label unconditionally.
     func testSessionInjectionLeavesDirectAndExplicitCallsAlone() async throws {
         let (gate, driver) = fixture()
         _ = await gate.callTool("list_windows", arguments: .object([:]), agentSlug: nil)
@@ -334,6 +336,6 @@ final class ComputerUseGateTests: XCTestCase {
                                 agentSlug: "inbox")
         let calls = await driver.calls
         XCTAssertNil(calls[0].args["session"])
-        XCTAssertEqual(calls[1].args["session"], .string("caller"))
+        XCTAssertEqual(calls[1].args["session"], .string("agent-inbox"))
     }
 }

@@ -4,12 +4,16 @@ import XCTest
 final class CuaDialogueStateTests: XCTestCase {
     private func intent(_ instruction: String = "open the document",
                         id: UUID = UUID(), capture: UUID = UUID()) -> CuaDialogueState.Intent {
-        .init(id: id,
-              source: .init(captureID: capture, handoffID: UUID(), revision: 0,
-                            transcriptRanges: [0..<instruction.count]),
-              utterance: instruction, instruction: instruction,
-              target: .init(application: "Notes", windowID: "window-1",
-                            description: "the document"))
+        let source = CuaDialogueState.Source(captureID: capture, handoffID: UUID(),
+                                             revision: 0,
+                                             transcriptRanges: [0..<instruction.count])
+        return .init(id: id, source: source, utterance: instruction,
+                     instruction: instruction,
+                     target: .init(bundle: .init(bundleID: "com.apple.Notes",
+                                                 displayName: "Notes"),
+                                   window: .init(windowID: "window-1", title: nil),
+                                   description: "the document",
+                                   provenance: .source(source)))
     }
 
     private func answerSource() -> CuaDialogueState.Source {
@@ -58,7 +62,8 @@ final class CuaDialogueStateTests: XCTestCase {
         try state.add(first)
         try state.add(refinement, relationship: .refinement(of: first.id))
         try state.add(dependent, relationship: .continuation(of: first.id),
-                      prerequisite: .init(intentID: dependent.id, requiresIntentID: first.id))
+                      prerequisite: .init(intentID: dependent.id, requiresIntentID: first.id,
+                                          requiredFact: .resultObserved))
         XCTAssertTrue(state.canExecute(refinement.id))
         XCTAssertFalse(state.canExecute(dependent.id))
         let attempt = CuaDialogueState.Attempt(intentID: first.id, instruction: "first")
@@ -76,7 +81,10 @@ final class CuaDialogueStateTests: XCTestCase {
         try state.begin(factAttempt)
         XCTAssertThrowsError(try state.finish(attemptID: factAttempt.id, intentID: factSource.id,
                                               outcome: .verifiedFact(.init(kind: .targetObserved,
-                                                                          evidence: "readback"))))
+                                                                           intentID: UUID(),
+                                                                           attemptID: UUID(),
+                                                                           revision: 0,
+                                                                           evidence: "readback"))))
         let mismatchedTarget = CuaDialogueState.Target(
             bundle: .init(bundleID: "com.apple.Notes", displayName: "Notes"),
             process: .init(processIdentifier: 42, bundleID: "com.apple.Notes"),
@@ -140,7 +148,8 @@ final class CuaDialogueStateTests: XCTestCase {
         let uncertain = intent("uncertain")
         try state.add(prerequisite)
         try state.add(waiting, relationship: .continuation(of: prerequisite.id),
-                      prerequisite: .init(intentID: waiting.id, requiresIntentID: prerequisite.id))
+                      prerequisite: .init(intentID: waiting.id, requiresIntentID: prerequisite.id,
+                                          requiredFact: .resultObserved))
         try state.add(uncertain)
         let first = CuaDialogueState.Attempt(intentID: prerequisite.id, instruction: "first")
         try state.begin(first)
@@ -177,7 +186,8 @@ final class CuaDialogueStateTests: XCTestCase {
                                                      revision: 0, source: work.source,
                                                      utterance: "answer")))
         XCTAssertThrowsError(try state.add(intent("self", id: UUID()),
-                                           prerequisite: .init(intentID: UUID(), requiresIntentID: work.id)))
+                                           prerequisite: .init(intentID: UUID(), requiresIntentID: work.id,
+                                                               requiredFact: .targetObserved)))
     }
 
     func testRevisionAnswerProvenanceAndIdentityCannotBeReused() throws {
@@ -210,7 +220,8 @@ final class CuaDialogueStateTests: XCTestCase {
         let dependent = intent("dependent")
         try state.add(prerequisite)
         try state.add(dependent, prerequisite: .init(intentID: dependent.id,
-                                                     requiresIntentID: prerequisite.id))
+                                                     requiresIntentID: prerequisite.id,
+                                                     requiredFact: .resultObserved))
         let question = CuaDialogueState.Question(intentID: prerequisite.id, prompt: "Which?")
         try state.ask(question)
         try state.cancel(intentID: prerequisite.id)
@@ -239,7 +250,8 @@ final class CuaDialogueStateTests: XCTestCase {
         try state.add(base)
         let question = CuaDialogueState.Question(intentID: base.id, prompt: "Which?")
         try state.ask(question)
-        XCTAssertEqual(state.questionOwner(for: question.id), base.id)
+        XCTAssertEqual(state.awaitingAnswerEntries
+            .first(where: { $0.question?.id == question.id })?.intent.id, base.id)
         let answer = CuaDialogueState.Answer(questionID: question.id, intentID: base.id,
                                              revision: 0, source: answerSource(), utterance: "A")
         try state.answer(answer)
@@ -250,8 +262,9 @@ final class CuaDialogueStateTests: XCTestCase {
         XCTAssertEqual(state.entry(for: base.id)?.answers, [answer])
         XCTAssertEqual(state.entry(for: base.id)?.question, question,
                        "the question remains as history on the owner entry")
-        XCTAssertNil(state.questionOwner(for: question.id),
-                     "an answered question no longer owns new answers")
+        XCTAssertNil(state.awaitingAnswerEntries
+            .first(where: { $0.question?.id == question.id }),
+            "an answered question no longer owns new answers")
         XCTAssertThrowsError(try state.answer(answer)) { error in
             XCTAssertEqual(error as? CuaDialogueState.TransitionError, .invalidQuestion)
         }
@@ -430,7 +443,8 @@ final class CuaDialogueStateTests: XCTestCase {
                                                   attemptID: attempt.id, revision: 1,
                                                   target: observed, evidence: "readback")
         let invalid: [CuaDialogueState.VerifiedFact] = [
-            .init(kind: .targetObserved, evidence: "unbound"),
+            .init(kind: .targetObserved, intentID: UUID(), attemptID: UUID(),
+                  revision: 0, evidence: "unbound"),
             .init(kind: .targetObserved, intentID: source.id, attemptID: UUID(),
                   revision: 1, target: observed, evidence: "other attempt"),
             .init(kind: .targetObserved, intentID: source.id, attemptID: attempt.id,
@@ -439,7 +453,17 @@ final class CuaDialogueStateTests: XCTestCase {
                   revision: 1, target: .init(bundle: observed.bundle, window: observed.window,
                                              description: "other attempt target",
                                              provenance: .observed(attemptID: UUID())),
-                  evidence: "wrong target provenance")
+                  evidence: "wrong target provenance"),
+            .init(kind: .resultObserved, intentID: source.id, attemptID: attempt.id,
+                  revision: 1, target: .init(bundle: observed.bundle, window: observed.window,
+                                             description: "foreign result target",
+                                             provenance: .observed(attemptID: UUID())),
+                  evidence: "result facts cannot carry another attempt's target"),
+            .init(kind: .targetObserved, intentID: source.id, attemptID: attempt.id,
+                  revision: 1, target: .init(bundle: observed.bundle,
+                                             description: "utterance-shaped target",
+                                             provenance: .source(answerSource())),
+                  evidence: "a source-stamped target is not an observation")
         ]
         for fact in invalid {
             XCTAssertThrowsError(try state.finish(attemptID: attempt.id, intentID: source.id,
@@ -474,5 +498,68 @@ final class CuaDialogueStateTests: XCTestCase {
                          outcome: .verified(evidence: "done"))
         XCTAssertNotNil(state.entry(for: ancestor.id))
         XCTAssertNotNil(state.entry(for: parent.id))
+    }
+
+    private func observedTarget(attemptID: UUID) -> CuaDialogueState.Target {
+        .init(bundle: .init(bundleID: "com.apple.Notes", displayName: "Notes"),
+              window: .init(windowID: "window-1", title: "Notes"),
+              description: "observed Notes window",
+              provenance: .observed(attemptID: attemptID))
+    }
+
+    private func partialWithTargetFact(on state: inout CuaDialogueState,
+                                       intentID: UUID) throws -> CuaDialogueState.VerifiedFact {
+        let attempt = CuaDialogueState.Attempt(intentID: intentID, instruction: "inspect")
+        try state.begin(attempt)
+        let fact = CuaDialogueState.VerifiedFact(kind: .targetObserved, intentID: intentID,
+                                                 attemptID: attempt.id, revision: 0,
+                                                 target: observedTarget(attemptID: attempt.id),
+                                                 evidence: "window readback")
+        try state.finish(attemptID: attempt.id, intentID: intentID,
+                         outcome: .partial(evidence: "target found",
+                                           blockedReason: "rest uncertain",
+                                           verifiedFacts: [fact]))
+        return fact
+    }
+
+    func testRevisionBumpInvalidatesEarlierFactsAndRetryCannotInheritThem() throws {
+        var state = CuaDialogueState()
+        let source = intent("inspect")
+        let dependent = intent("dependent")
+        try state.add(source)
+        try state.add(dependent, prerequisite: .init(intentID: dependent.id,
+                                                     requiresIntentID: source.id,
+                                                     requiredFact: .targetObserved))
+        let fact = try partialWithTargetFact(on: &state, intentID: source.id)
+        XCTAssertTrue(state.canExecute(dependent.id))
+        // A revision bump ends the fact's currency; the record stays as history.
+        try state.revise(intentID: source.id)
+        XCTAssertFalse(state.canExecute(dependent.id),
+                       "evidence from a pre-revision context must not satisfy the edge")
+        XCTAssertEqual(state.entry(for: source.id)?.verifiedFacts, [fact])
+        // The next attempt verifies without recording the required fact —
+        // attempt N's evidence must not silently satisfy attempt N+1.
+        let retry = CuaDialogueState.Attempt(intentID: source.id,
+                                           instruction: source.instruction, revision: 1)
+        try state.begin(retry)
+        try state.finish(attemptID: retry.id, intentID: source.id,
+                         outcome: .verified(evidence: "done"))
+        XCTAssertFalse(state.canExecute(dependent.id),
+                       "a plain verified retry records no fact and inherits none")
+    }
+
+    func testCancelEvictsRecordedFactsForPrerequisites() throws {
+        var state = CuaDialogueState()
+        let source = intent("inspect")
+        let dependent = intent("dependent")
+        try state.add(source)
+        try state.add(dependent, prerequisite: .init(intentID: dependent.id,
+                                                     requiresIntentID: source.id,
+                                                     requiredFact: .targetObserved))
+        _ = try partialWithTargetFact(on: &state, intentID: source.id)
+        XCTAssertTrue(state.canExecute(dependent.id))
+        try state.cancel(intentID: source.id)
+        XCTAssertFalse(state.canExecute(dependent.id),
+                       "a cancelled intent's stale evidence cannot unlock a dependent")
     }
 }

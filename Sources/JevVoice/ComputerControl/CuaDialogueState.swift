@@ -4,9 +4,8 @@ import Foundation
 /// executes computer actions, records audio, or grants an assertion of success.
 ///
 /// Slimmed for the planner split: intents, pending questions, answers, attempts
-/// and outcomes — plus consent asks tracked alongside them. The planner handles
-/// routing; this store only records what was asked, answered, attempted and
-/// concluded.
+/// and outcomes. The planner handles routing; this store only records what was
+/// asked, answered, attempted and concluded.
 struct CuaDialogueState {
     /// Derivable provenance only: transcriptRanges are word offsets into the owning
     /// TranscriptHandoff's transcript.
@@ -30,16 +29,14 @@ struct CuaDialogueState {
         let utterance: String
         let instruction: String
         let target: Target?
-        let revision: Int
 
         init(id: UUID = UUID(), source: Source, utterance: String,
-             instruction: String, target: Target? = nil, revision: Int = 0) {
+             instruction: String, target: Target? = nil) {
             self.id = id
             self.source = source
             self.utterance = utterance
             self.instruction = instruction
             self.target = target
-            self.revision = revision
         }
     }
 
@@ -62,7 +59,9 @@ struct CuaDialogueState {
     }
 
     /// Describes a new intent only. Answers and retries resume the referenced entry in
-    /// place via answer() and revise(); they are never relationships.
+    /// place via answer() and revise(); they are never relationships. No caller adds
+    /// non-independent intents — the cases persist because VoiceController's task
+    /// diagnostics still switch on the recorded value.
     enum Relationship: Equatable {
         case independent
         case refinement(of: UUID)
@@ -70,19 +69,13 @@ struct CuaDialogueState {
         case correction(of: UUID)
     }
 
-    /// An execution-blocking edge between intents. The planner no longer creates
-    /// these — the field survives on Entry only because the task diagnostics in
-    /// VoiceController surface it.
+    /// An execution-blocking edge between intents. Nothing creates these anymore —
+    /// the type survives on Entry only because the task diagnostics in
+    /// VoiceController and the settle path in CuaVoiceRuntime still read it.
     struct Prerequisite: Equatable {
         let intentID: UUID
         let requiresIntentID: UUID
         let requiredFact: FactKind
-
-        init(intentID: UUID, requiresIntentID: UUID, requiredFact: FactKind = .resultObserved) {
-            self.intentID = intentID
-            self.requiresIntentID = requiresIntentID
-            self.requiredFact = requiredFact
-        }
     }
 
     enum FactKind: Equatable {
@@ -94,9 +87,9 @@ struct CuaDialogueState {
     /// never an assertion of success the executor granted itself.
     struct VerifiedFact: Equatable {
         let kind: FactKind
-        let intentID: UUID?
-        let attemptID: UUID?
-        let revision: Int?
+        let intentID: UUID
+        let attemptID: UUID
+        let revision: Int
         let target: Target?
         let evidence: String
 
@@ -107,16 +100,6 @@ struct CuaDialogueState {
             self.attemptID = attemptID
             self.revision = revision
             self.target = target
-            self.evidence = evidence
-        }
-
-        /// Source-compatible construction for older adapters; intentionally cannot satisfy prerequisites.
-        init(kind: FactKind, evidence: String) {
-            self.kind = kind
-            self.intentID = nil
-            self.attemptID = nil
-            self.revision = nil
-            self.target = nil
             self.evidence = evidence
         }
     }
@@ -134,43 +117,29 @@ struct CuaDialogueState {
             let windowID: String
             let title: String?
         }
+        /// `source` is derived from the utterance; `observed` is a postcondition
+        /// readback bound to the producing attempt — the only claim that may
+        /// satisfy a fact.
         enum Provenance: Equatable {
             case source(Source)
             case observed(attemptID: UUID)
-            case retained(intentID: UUID, revision: Int)
-            case legacyUnbound
         }
 
         let bundle: BundleIdentity?
         let process: ProcessIdentity?
         let window: WindowIdentity?
-        let elementID: String?
         let description: String
         let provenance: Provenance
 
         var application: String? { bundle?.displayName ?? bundle?.bundleID }
-        var windowID: String? { window?.windowID }
 
         init(bundle: BundleIdentity? = nil, process: ProcessIdentity? = nil,
-             window: WindowIdentity? = nil, elementID: String? = nil,
-             description: String, provenance: Provenance) {
+             window: WindowIdentity? = nil, description: String, provenance: Provenance) {
             self.bundle = bundle
             self.process = process
             self.window = window
-            self.elementID = elementID
             self.description = description
             self.provenance = provenance
-        }
-
-        /// Source-compatible construction for older adapters; preserves data but marks it unauthoritative.
-        init(application: String? = nil, windowID: String? = nil,
-             elementID: String? = nil, description: String) {
-            self.bundle = application.map { BundleIdentity(bundleID: $0, displayName: $0) }
-            self.process = nil
-            self.window = windowID.map { WindowIdentity(windowID: $0, title: nil) }
-            self.elementID = elementID
-            self.description = description
-            self.provenance = .legacyUnbound
         }
     }
 
@@ -181,15 +150,28 @@ struct CuaDialogueState {
         let options: [String]
         let target: Target?
         let revision: Int
+        /// Monotonic ask order, stamped by ask() so resolvers can order
+        /// parked asks oldest→newest. Ordering metadata, not identity:
+        /// excluded from Equatable so the stored (stamped) record still
+        /// equals the one the caller asked with.
+        let sequence: Int
 
         init(id: UUID = UUID(), intentID: UUID, prompt: String,
-             options: [String] = [], target: Target? = nil, revision: Int = 0) {
+             options: [String] = [], target: Target? = nil, revision: Int = 0,
+             sequence: Int = 0) {
             self.id = id
             self.intentID = intentID
             self.prompt = prompt
             self.options = options
             self.target = target
             self.revision = revision
+            self.sequence = sequence
+        }
+
+        static func == (lhs: Question, rhs: Question) -> Bool {
+            lhs.id == rhs.id && lhs.intentID == rhs.intentID && lhs.prompt == rhs.prompt
+                && lhs.options == rhs.options && lhs.target == rhs.target
+                && lhs.revision == rhs.revision
         }
     }
 
@@ -209,15 +191,6 @@ struct CuaDialogueState {
         case cancelled(reason: String)
         case failed(reason: String)
         case uncertain(reason: String)
-
-        /// Only outcomes where re-dispatch is meaningful and safe: the work
-        /// did not verifiably complete and was not deliberately cancelled.
-        var isRetryable: Bool {
-            switch self {
-            case .uncertain, .blocked, .failed, .partial: return true
-            case .verified, .verifiedFact, .cancelled: return false
-            }
-        }
     }
 
     enum Status: Equatable {
@@ -226,7 +199,7 @@ struct CuaDialogueState {
         case executing(attemptID: UUID)
         case uncertain(attemptID: UUID, reason: String)
         case partial(attemptID: UUID, evidence: String, blockedReason: String)
-        case blocked(attemptID: UUID?, reason: String)
+        case blocked(attemptID: UUID, reason: String)
         case cancelled(reason: String)
         case succeeded(attemptID: UUID, evidence: String)
         case failed(attemptID: UUID, reason: String)
@@ -271,6 +244,7 @@ struct CuaDialogueState {
     private var knownIntentIDs: Set<UUID> = []
     private var knownQuestionIDs: Set<UUID> = []
     private var knownAttemptIDs: Set<UUID> = []
+    private var questionSequence = 0
 
     init(resolvedHistoryLimit: Int = 32, unresolvedLimit: Int = 32) {
         self.resolvedHistoryLimit = max(0, resolvedHistoryLimit)
@@ -281,23 +255,18 @@ struct CuaDialogueState {
 
     /// Whether the intent may begin an attempt: pending, with its prerequisite
     /// (when present) discharged by a verified fact of the required kind on the
-    /// required intent. A plain `verified` finish records no fact and can never
-    /// satisfy a fact-bound prerequisite.
+    /// required intent — and only while that fact is revision-current. Answer,
+    /// revise and cancel all bump the required intent's revision, and every
+    /// path that re-opens an intent after a fact-recording finish goes through
+    /// one of them, so evidence an earlier context produced can never satisfy
+    /// a later attempt or a cancelled intent silently. A plain `verified`
+    /// finish records no fact and can never satisfy a fact-bound prerequisite.
     func canExecute(_ id: UUID) -> Bool {
         guard let candidate = entry(for: id), candidate.status == .pending else { return false }
         guard let prerequisite = candidate.prerequisite else { return true }
         guard let required = entry(for: prerequisite.requiresIntentID) else { return false }
-        return required.verifiedFacts.contains { $0.kind == prerequisite.requiredFact }
-    }
-
-    func questionOwner(for id: UUID) -> UUID? {
-        currentQuestionOwner(for: id)?.intent.id
-    }
-
-    private func currentQuestionOwner(for id: UUID) -> Entry? {
-        entries.first { entry in
-            entry.question?.id == id && entry.status == .awaitingAnswer(questionID: id) &&
-                entry.question?.revision == entry.revision
+        return required.verifiedFacts.contains {
+            $0.kind == prerequisite.requiredFact && $0.revision == required.revision
         }
     }
 
@@ -311,6 +280,20 @@ struct CuaDialogueState {
             return (entry, question)
         }
         return nil
+    }
+
+    /// Every parked clarification, oldest ask first — the multi-ask
+    /// complement to pendingClarification's newest-only view. Resolvers that
+    /// enumerate or address a specific ask read this; the stamped question
+    /// sequence is the ordering.
+    var awaitingAnswerEntries: [Entry] {
+        entries.filter { entry in
+            guard let question = entry.question,
+                  case .awaitingAnswer(let id) = entry.status,
+                  question.id == id, question.revision == entry.revision
+            else { return false }
+            return true
+        }.sorted { ($0.question?.sequence ?? 0) < ($1.question?.sequence ?? 0) }
     }
 
     mutating func add(_ intent: Intent, relationship: Relationship = .independent,
@@ -350,7 +333,11 @@ struct CuaDialogueState {
         guard question.revision == entries[index].revision,
               !knownQuestionIDs.contains(question.id) else { throw TransitionError.invalidQuestion }
         knownQuestionIDs.insert(question.id)
-        entries[index].question = question
+        questionSequence += 1
+        entries[index].question = Question(id: question.id, intentID: question.intentID,
+                                           prompt: question.prompt, options: question.options,
+                                           target: question.target, revision: question.revision,
+                                           sequence: questionSequence)
         entries[index].status = .awaitingAnswer(questionID: question.id)
     }
 
@@ -401,15 +388,23 @@ struct CuaDialogueState {
         }
         let revision = entries[index].revision
         func validate(_ fact: VerifiedFact) throws {
-            guard !fact.evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  fact.intentID == intentID,
-                  fact.attemptID == attemptID,
-                  fact.revision == revision else {
+            guard !fact.evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw TransitionError.emptyEvidence
             }
-            if fact.kind == .targetObserved {
-                guard let target = fact.target,
-                      case .observed(attemptID) = target.provenance else {
+            guard fact.intentID == intentID,
+                  fact.attemptID == attemptID,
+                  fact.revision == revision else {
+                throw TransitionError.invalidProvenance
+            }
+            // Any carried target must be this attempt's own observation —
+            // a target read back under another attempt can never be re-stamped
+            // onto this one, whatever kind of fact rides on it.
+            if let target = fact.target {
+                guard case .observed(attemptID) = target.provenance else {
+                    throw TransitionError.invalidProvenance
+                }
+            } else {
+                guard fact.kind != .targetObserved else {
                     throw TransitionError.invalidProvenance
                 }
             }
@@ -466,7 +461,8 @@ struct CuaDialogueState {
 
     /// An uncertain attempt may be retried in place: the intent re-opens
     /// pending with the SAME revision — a retry is another attempt, not a
-    /// revision — and the recorded verified facts survive for prerequisites.
+    /// revision. Recorded verified facts remain as history; prerequisite
+    /// satisfaction still requires a revision-current fact.
     mutating func retryUncertain(intentID: UUID) throws {
         guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
             throw TransitionError.unknownIntent

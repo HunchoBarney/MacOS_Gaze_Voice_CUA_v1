@@ -137,9 +137,29 @@ for line in sys.stdin:
         XCTAssertTrue(predicate(), "Timed out waiting for the voice pipeline", file: file, line: line)
     }
 
-    /// computer_command returns the moment the work is accepted — "STARTED"
-    /// with an acknowledgement instruction — while the drive loop is still
-    /// mid-judgment. The verified outcome settles later.
+    /// Every voice tool surface answers a VoiceToolResult payload — decode it
+    /// or fail the assertion outright.
+    private func decoded(_ json: String,
+                         file: StaticString = #filePath,
+                         line: UInt = #line) throws -> VoiceToolResult {
+        try XCTUnwrap(VoiceToolResult(jsonString: json),
+                      "Expected a VoiceToolResult payload: \(json)", file: file, line: line)
+    }
+
+    /// The lane voices `say` verbatim — assert the shape it depends on.
+    private func assertSpeakable(_ result: VoiceToolResult,
+                                 file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertFalse(result.say.isEmpty, "say must carry a spoken line", file: file, line: line)
+        XCTAssertLessThanOrEqual(result.say.split(whereSeparator: \.isWhitespace).count, 14,
+                                 "say must stay under 14 words: \(result.say)", file: file, line: line)
+        XCTAssertNil(result.say.range(of: #"[-—–"“”`()]"#, options: .regularExpression),
+                     "say must never carry dashes, quotes or parens: \(result.say)",
+                     file: file, line: line)
+    }
+
+    /// computer_command returns the moment the work is accepted — a "started"
+    /// payload whose say line acknowledges the work — while the drive loop is
+    /// still mid-judgment. The verified outcome settles later.
     func testVoiceCommandReturnsAcknowledgementWhileWorkSettles() async throws {
         let gate = JudgeGate()
         let calls = CallLog()
@@ -154,7 +174,9 @@ for line in sys.stdin:
             },
             calls: calls)
         let ack = await runtime.beginVoiceTask("press Save in Fixture", app: "Fixture")
-        XCTAssertTrue(ack.hasPrefix("STARTED") || ack.lowercased().contains("acknowledge"), ack)
+        let accepted = try decoded(ack)
+        XCTAssertEqual(accepted.status, "started", ack)
+        assertSpeakable(accepted)
         try await until { gate.entered }
         let work = try XCTUnwrap(runtime.tasks.last)
         XCTAssertTrue(work.active, "The ack must return while work is still running")
@@ -193,7 +215,7 @@ for line in sys.stdin:
         try await until { work.approval != nil }
         XCTAssertEqual(work.status, "Needs confirmation")
         let reply = await runtime.respondToTask("yes", captureID: captureID)
-        XCTAssertTrue(reply?.hasPrefix("Approved") ?? false, reply ?? "nil")
+        XCTAssertEqual(try decoded(try XCTUnwrap(reply)).status, "resumed", reply ?? "nil")
         try await until { !work.active }
         XCTAssertEqual(work.status, "Completed", work.message)
         await runtime.shutdown()
@@ -222,7 +244,7 @@ for line in sys.stdin:
         let work = try XCTUnwrap(runtime.tasks.last)
         try await until { work.approval != nil }
         let reply = await runtime.respondToTask("no")
-        XCTAssertTrue(reply?.hasPrefix("Denied") ?? false, reply ?? "nil")
+        XCTAssertEqual(try decoded(try XCTUnwrap(reply)).status, "cancelled", reply ?? "nil")
         try await until { !work.active }
         XCTAssertNotEqual(work.status, "Completed")
         XCTAssertEqual(calls.count("click"), 0, "A denied action must never dispatch")
@@ -230,9 +252,9 @@ for line in sys.stdin:
         await runtime.shutdown()
     }
 
-    /// Settlement pushes `[task outcome]` to the lane's sink carrying the same
-    /// capture id the command was submitted under — the model hears the verdict
-    /// on the turn that spawned the work.
+    /// Settlement pushes a task_outcome payload to the lane's sink carrying
+    /// the same capture id the command was submitted under — the model hears
+    /// the verdict on the turn that spawned the work.
     func testOutcomeSettlesThroughTaskEventSinkWithCaptureID() async throws {
         let script = try driverScript(
             apps: "[{'name':'Fixture','bundle_id':'test.fixture','pid':4242,'running':True}]",
@@ -249,19 +271,158 @@ for line in sys.stdin:
         try await until { !work.active }
         XCTAssertEqual(work.status, "Completed", work.message)
         XCTAssertEqual(work.provenance?.captureID, captureID)
-        let outcomes = events.filter { $0.0 == captureID && $0.1.hasPrefix("[task outcome]") }
+        let outcomes = events.filter { $0.0 == captureID }
+            .compactMap { VoiceToolResult(jsonString: $0.1) }
+            .filter { $0.kind == "task_outcome" }
         XCTAssertEqual(outcomes.count, 1, "Exactly one outcome push per settled work: \(events)")
-        XCTAssertTrue(outcomes[0].1.contains("press Save in Fixture"))
+        XCTAssertEqual(outcomes[0].status, "verified")
+        assertSpeakable(outcomes[0])
+        XCTAssertTrue(outcomes[0].say.hasPrefix("Done"), outcomes[0].say)
+        XCTAssertTrue(outcomes[0].detail?.contains("press Save in Fixture") ?? false,
+                      outcomes[0].detail ?? "nil")
         await runtime.shutdown()
     }
 
     func testEmptyInstructionRefusesWithoutWork() async throws {
         let runtime = makeRuntime(script: try driverScript(), judge: { _, _ in [:] })
-        let ack = await runtime.beginVoiceTask("   ", app: nil)
-        XCTAssertEqual(ack, "No instruction was provided.")
+        let ack = try decoded(await runtime.beginVoiceTask("   ", app: nil))
+        XCTAssertEqual(ack.status, "refused")
+        assertSpeakable(ack)
         XCTAssertTrue(runtime.tasks.isEmpty)
         await runtime.shutdown()
     }
+
+    /// The accepted say derives deterministically from the instruction's
+    /// leading verb — "open X" voices "On it, opening X."
+    func testAcceptedSayCarriesTheGerundPhrase() async throws {
+        let runtime = makeRuntime(script: try driverScript(), judge: { _, _ in [:] })
+        let ack = try decoded(await runtime.beginVoiceTask("open Fixture", app: nil))
+        XCTAssertEqual(ack.status, "started", ack.say)
+        XCTAssertEqual(ack.say, "On it, opening Fixture.")
+        assertSpeakable(ack)
+        await runtime.shutdown()
+    }
+
+    /// A repeat of a live instruction refuses without spawning a second work.
+    func testDuplicateInstructionRefuses() async throws {
+        let gate = JudgeGate()
+        let script = try driverScript(
+            apps: "[{'name':'Fixture','bundle_id':'test.fixture','pid':4242,'running':True}]",
+            windows: "[{'window_id':7,'title':'Fixture','is_on_screen':True}]",
+            elements: "[{'element_index':0,'element_token':'save0','role':'AXButton','label':'Save','enabled':True}]")
+        let runtime = makeRuntime(script: script, judge: { _, _ in
+            await gate.hold()
+            return self.answers(next: "done")
+        })
+        _ = await runtime.beginVoiceTask("press Save in Fixture", app: "Fixture")
+        try await until { gate.entered }
+        let dupe = try decoded(await runtime.beginVoiceTask("press Save in Fixture", app: "Fixture"))
+        XCTAssertEqual(dupe.status, "refused", dupe.say)
+        assertSpeakable(dupe)
+        XCTAssertEqual(runtime.tasks.count, 1)
+        gate.open()
+        await runtime.shutdown()
+    }
+
+    /// cancel_task's vocabulary: nothing_running when idle, cancelled once a
+    /// live work is matched.
+    func testCancelVoiceTaskStatuses() async throws {
+        let gate = JudgeGate()
+        let script = try driverScript(
+            apps: "[{'name':'Fixture','bundle_id':'test.fixture','pid':4242,'running':True}]",
+            windows: "[{'window_id':7,'title':'Fixture','is_on_screen':True}]",
+            elements: "[{'element_index':0,'element_token':'save0','role':'AXButton','label':'Save','enabled':True}]")
+        let runtime = makeRuntime(script: script, judge: { _, _ in
+            await gate.hold()
+            return self.answers(next: "done")
+        })
+        let idle = try decoded(runtime.cancelVoiceTask(nil))
+        XCTAssertEqual(idle.status, "nothing_running")
+        assertSpeakable(idle)
+        _ = await runtime.beginVoiceTask("press Save in Fixture", app: "Fixture")
+        try await until { gate.entered }
+        let stopped = try decoded(runtime.cancelVoiceTask(nil))
+        XCTAssertEqual(stopped.status, "cancelled")
+        assertSpeakable(stopped)
+        gate.open()
+        await runtime.shutdown()
+    }
+
+    /// A live ask parks the work as a task_question push whose say IS the
+    /// question — the lane asks it verbatim.
+    func testQuestionPushCarriesTheVerbatimPrompt() async throws {
+        let script = try driverScript(
+            apps: "[{'name':'Fixture','bundle_id':'test.fixture','pid':4242,'running':True}]",
+            windows: "[{'window_id':7,'title':'Draft','is_on_screen':True}]",
+            elements: "[{'element_index':0,'element_token':'body0','role':'AXTextArea','label':'Body','enabled':True}]")
+        var events: [String] = []
+        let runtime = makeRuntime(script: script, judge: { _, questions in
+            if let id = self.nextLaneID(questions, containing: "Type the supplied text") {
+                return self.answers(next: id, fill: "unavailable")
+            }
+            return self.answers(next: "done")
+        })
+        runtime.taskEventSink = { _, text, _ in events.append(text) }
+        _ = await runtime.beginVoiceTask("insert the reply in Fixture", app: "Fixture")
+        let work = try XCTUnwrap(runtime.tasks.last)
+        try await until { !work.active }
+        let asks = events.compactMap { VoiceToolResult(jsonString: $0) }
+            .filter { $0.kind == "task_question" }
+        XCTAssertEqual(asks.count, 1, events.joined(separator: " | "))
+        XCTAssertEqual(asks[0].status, "question")
+        XCTAssertEqual(asks[0].say, "What text should go in Body?")
+        await runtime.shutdown()
+    }
+
+    /// delegate_to_agent's bridge reply reaches the lane intact — the say
+    /// line names the agent that took the work.
+    func testDelegateToAgentCarriesTheAgentName() async throws {
+        let runtime = makeRuntime(script: try driverScript(), judge: { _, _ in [:] })
+        runtime.agentBridge = StubBridge(
+            reply: #"{"status":"delegated","say":"On it, Inbox Desk has it."}"#)
+        let reply = try decoded(await runtime.delegateToAgent(
+            task: "watch the inbox", agent: "Inbox Desk", name: nil, role: nil,
+            description: nil))
+        XCTAssertEqual(reply.status, "delegated")
+        XCTAssertTrue(reply.say.contains("Inbox Desk"), reply.say)
+        assertSpeakable(reply)
+        await runtime.shutdown()
+    }
+
+    /// A bridge answering plain text still produces a payload — the lane
+    /// never sees a bare string.
+    func testDelegateToAgentWrapsPlainReplies() async throws {
+        let runtime = makeRuntime(script: try driverScript(), judge: { _, _ in [:] })
+        runtime.agentBridge = StubBridge(reply: "Inbox Desk is on it.")
+        let reply = try decoded(await runtime.delegateToAgent(
+            task: "watch the inbox", agent: nil, name: nil, role: nil,
+            description: nil))
+        XCTAssertEqual(reply.status, "delegated")
+        assertSpeakable(reply)
+        XCTAssertEqual(reply.detail, "Inbox Desk is on it.")
+        await runtime.shutdown()
+    }
+
+    func testDelegateWithoutBridgeRefuses() async throws {
+        let runtime = makeRuntime(script: try driverScript(), judge: { _, _ in [:] })
+        let reply = try decoded(await runtime.delegateToAgent(
+            task: "watch the inbox", agent: nil, name: nil, role: nil,
+            description: nil))
+        XCTAssertEqual(reply.status, "refused")
+        assertSpeakable(reply)
+        await runtime.shutdown()
+    }
+}
+
+/// A minimal AgentBridging stub — the runtime must pass VoiceToolResult
+/// payloads through untouched and wrap anything else.
+private struct StubBridge: AgentBridging {
+    let reply: String
+    func roster() async -> [CompanionAgent] { [] }
+    func delegate(_ request: DelegationRequest) async throws -> String { reply }
+    func sendToAgent(slug: String, message: String) async throws -> String { reply }
+    func agentMemory(slug: String) async throws -> String { reply }
+    func interruptAgent(hint: String?) async -> String { reply }
 }
 
 private final class MemoryKeyStore: APIKeyStore {

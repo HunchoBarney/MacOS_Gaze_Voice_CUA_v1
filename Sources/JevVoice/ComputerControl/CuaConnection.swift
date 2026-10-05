@@ -27,12 +27,11 @@ actor CuaConnection {
     private let arguments: [String]
     private let onToolCall: (@Sendable (String, Int?) -> Void)?
     private var process: Process?
-    /// The `serve --embedded` daemon the MCP proxy connects to when the
-    /// executable resolved to the bundle-embedded driver. Its stdin is a
-    /// liveness pipe: EOF after host exit shuts the daemon down.
-    private var daemon: Process?
-    private var daemonLiveness: FileHandle?
-    private var daemonSocketPath: String?
+    /// The `serve --embedded` daemon this transport spawned itself. Its
+    /// stdin is a liveness pipe: EOF after host exit shuts the daemon
+    /// down. Pool transports spawn proxies only — CuaConnectionPool owns
+    /// the shared daemon and its socket.
+    private var embeddedDaemon: CuaEmbeddedDaemon?
     private var input: FileHandle?
     private var output: FileHandle?
     private var reader: Task<Void, Never>?
@@ -46,6 +45,10 @@ actor CuaConnection {
     /// second connect spawns a second daemon, overwrites `process`, and the
     /// first caller's teardown kills the live transport.
     private var connectInFlight = false
+    /// When set, `connect()` proxies onto this shared daemon's socket
+    /// instead of spawning a `serve --embedded` child — the pool path for
+    /// per-lane transports that never owned a daemon in the first place.
+    private let socketProvider: (@Sendable () async throws -> String)?
     /// A wedged daemon can hold the socket open and never answer — two
     /// consecutive request timeouts mark the transport dead rather than
     /// letting every later call burn a full timeout forever.
@@ -55,9 +58,30 @@ actor CuaConnection {
     /// still alive. Lets the runtime reuse one transport across tasks.
     var connected: Bool { initialized && process?.isRunning == true }
 
+    /// Live transports across the whole process — daemon-wide decisions
+    /// (grant reconcile, shared-daemon teardown) consult it before
+    /// restarting anything that would tombstone live sessions.
+    private static let live = LiveConnections()
+    static var liveConnectionCount: Int { live.count }
+
+    /// Object-identity set behind a lock — touched from actor teardown and
+    /// deinit alike.
+    private final class LiveConnections: @unchecked Sendable {
+        private let lock = NSLock()
+        private var members = Set<ObjectIdentifier>()
+        var count: Int { lock.lock(); defer { lock.unlock() }; return members.count }
+        func add(_ member: CuaConnection) {
+            lock.lock(); members.insert(ObjectIdentifier(member)); lock.unlock()
+        }
+        func remove(_ member: CuaConnection) {
+            lock.lock(); members.remove(ObjectIdentifier(member)); lock.unlock()
+        }
+    }
+
     init(executable: URL = CuaDependency.executable,
          arguments: [String] = ["mcp"],
-         onToolCall: (@Sendable (String, Int?) -> Void)? = nil) {
+         onToolCall: (@Sendable (String, Int?) -> Void)? = nil,
+         socketProvider: (@Sendable () async throws -> String)? = nil) {
         // A write to a just-dead proxy raises SIGPIPE, whose default
         // disposition kills the process — ignore it once so EPIPE surfaces
         // as a thrown error instead of an app crash.
@@ -65,14 +89,15 @@ actor CuaConnection {
         self.executable = executable
         self.arguments = arguments
         self.onToolCall = onToolCall
+        self.socketProvider = socketProvider
     }
 
     deinit {
         reader?.cancel()
         try? input?.close()
         if process?.isRunning == true { process?.terminate() }
-        try? daemonLiveness?.close()
-        if daemon?.isRunning == true { daemon?.terminate() }
+        embeddedDaemon?.stop()
+        Self.live.remove(self)
     }
 
     func connect() async throws {
@@ -84,11 +109,26 @@ actor CuaConnection {
         }
         connectInFlight = true
         defer { connectInFlight = false }
+        // Pool-bound transports never mint a daemon — resolve the shared
+        // socket and spawn only the proxy (same path as connect(proxyOnlyOn:)).
+        if let socketProvider {
+            if let bundled = CuaDependency.bundledExecutable, executable == bundled {
+                try CuaDependency.verify(executable, expectedSHA256: CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
+            } else if executable == CuaDependency.installedExecutable {
+                // Same pin the standalone path enforces — the proxy spawns
+                // this binary directly, bundled or not.
+                try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
+            }
+            let socket = try await socketProvider()
+            try await startProxy(launchArguments: ["mcp", "--embedded", "--socket", socket,
+                                                   "--host-bundle-id", CuaDependency.hostBundleID])
+            return
+        }
         var launchArguments = arguments
         if let bundled = CuaDependency.bundledExecutable, executable == bundled {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
             try await startEmbeddedDaemon()
-            launchArguments = ["mcp", "--embedded", "--socket", daemonSocketPath ?? "",
+            launchArguments = ["mcp", "--embedded", "--socket", embeddedDaemon?.socketPath ?? "",
                                "--host-bundle-id", CuaDependency.hostBundleID]
         } else if executable == CuaDependency.installedExecutable {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
@@ -97,6 +137,33 @@ actor CuaConnection {
             // later consent request never finds a grantless daemon.
             await CuaDaemonControl.ensureExistingProfileGrant()
         }
+        try await startProxy(launchArguments: launchArguments)
+    }
+
+    /// Pool path — CuaConnectionPool owns the shared embedded daemon and
+    /// its socket; this transport spawns only its own `mcp --embedded`
+    /// proxy onto it. Same single-flight, handshake, and teardown contract
+    /// as connect(); session mint stays caller-side.
+    func connect(proxyOnlyOn socket: String) async throws {
+        guard process == nil, !connectInFlight else {
+            throw DriverConnectionError.remote("Cua connection already started.")
+        }
+        connectInFlight = true
+        defer { connectInFlight = false }
+        // The proxy is the same pinned binary — verify before spawning even
+        // though the daemon itself is pool-owned.
+        if let bundled = CuaDependency.bundledExecutable, executable == bundled {
+            try CuaDependency.verify(executable, expectedSHA256: CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
+        } else if executable == CuaDependency.installedExecutable {
+            try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
+        }
+        try await startProxy(launchArguments: ["mcp", "--embedded", "--socket", socket,
+                                               "--host-bundle-id", CuaDependency.hostBundleID])
+    }
+
+    /// Spawn the stdio proxy and run the MCP initialize handshake. Split
+    /// from daemon spawn so the pool can attach many proxies to one socket.
+    private func startProxy(launchArguments: [String]) async throws {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw DriverConnectionError.unavailable }
         let process = Process(), stdin = Pipe(), stdout = Pipe()
         let token = UUID()
@@ -113,6 +180,7 @@ actor CuaConnection {
         }
         try process.run()
         self.process = process
+        Self.live.add(self)
         input = stdin.fileHandleForWriting
         output = stdout.fileHandleForReading
         let handle = stdout.fileHandleForReading
@@ -177,19 +245,56 @@ actor CuaConnection {
         "clipboard_read", "parse_visual_regions", "verify_state", "page"
     ]
 
-    private static func transientReadFault(_ error: Error) -> Bool {
+    /// `page` is polymorphic: get_text/query_dom read, while
+    /// execute_javascript / click_element / insert_text / type_keystrokes /
+    /// enable_javascript_apple_events mutate (behind the driver's legacy-
+    /// mutations env). Only the two read actions earn a retry.
+    private static let pageReadActions: Set<String> = ["get_text", "query_dom"]
+
+    static func isReadOnly(_ name: String, arguments: [String: JSONValue]) -> Bool {
+        guard readOnlyTools.contains(name) else { return false }
+        if name == "page" {
+            return pageReadActions.contains(arguments["action"]?.string ?? "")
+        }
+        return true
+    }
+
+    /// Only genuinely transient faults earn a retry: `.timedOut` plus
+    /// transport-level failures (tool_invocation_failed, closed). A
+    /// deterministic JSON-RPC rejection (.remote) or bad envelope
+    /// (.malformed) never succeeds on retry — retrying one burned ~4
+    /// calls and seconds of backoff for nothing.
+    static func transientReadFault(_ error: Error) -> Bool {
         switch error as? DriverConnectionError {
-        case .timedOut, .remote, .malformed: return true
+        case .timedOut, .closed: return true
         case .toolRefused(_, let code, _): return code == "tool_invocation_failed"
         default: return false
         }
     }
 
+    /// Mutations inside an already-bound window pay a fixed 1s post-action
+    /// observation window in the driver — the staged window-observation
+    /// patch shrinks that tail through `window_change_timeout_ms` (clamped
+    /// ≤1000). On the stock binary the argument is projected away
+    /// harmlessly; on the patched build the tail drops to the given ms.
+    /// Our own postcondition reads re-observe the window anyway, so a
+    /// short tail is correct here. `launch_app`, `browser_navigate` and
+    /// `invoke_menu` keep the full window — their produced-window/dialog
+    /// observations are the evidence itself.
+    private static let shortTailMutations: Set<String> = [
+        "click", "double_click", "right_click", "type_text", "press_key",
+        "hotkey", "scroll", "set_value", "drag"
+    ]
+
     func callResult(_ name: String, arguments: [String: JSONValue], timeout: TimeInterval = 30) async throws -> CuaToolResult {
         guard initialized else { throw DriverConnectionError.closed }
         try Task.checkCancellation()
         onToolCall?(name, arguments["text"]?.string?.count)
-        var attempts = Self.readOnlyTools.contains(name) ? 4 : 1
+        var arguments = arguments
+        if Self.shortTailMutations.contains(name), arguments["window_change_timeout_ms"] == nil {
+            arguments["window_change_timeout_ms"] = .number(150)
+        }
+        var attempts = Self.isReadOnly(name, arguments: arguments) ? 4 : 1
         var backoff: Duration = .milliseconds(400)
         while true {
             attempts -= 1
@@ -244,7 +349,39 @@ actor CuaConnection {
             throw DriverConnectionError.refused(body["refusal"]?["message"]?.string ?? "Cua refused this action.")
         }
         guard value["content"] == nil || value["content"]?.array != nil else { throw DriverConnectionError.malformed }
-        return CuaToolResult(structured: body, content: value["content"]?.array ?? [])
+        let content = value["content"]?.array ?? []
+        return CuaToolResult(structured: Self.mergeWindowChanges(body, content: content), content: content)
+    }
+
+    /// The driver's WindowChangeDetector appends `changes.new_windows` /
+    /// `new_window_ids` to the action result's TEXT block — structuredContent
+    /// doesn't carry it, so it was silently discarded. Merge those keys
+    /// upward (top level or under `changes`) so callers can skip a
+    /// list_windows re-poll; existing structured keys always win.
+    static func mergeWindowChanges(_ body: JSONValue, content: [JSONValue]) -> JSONValue {
+        guard var object = body.object,
+              object["new_windows"] == nil, object["new_window_ids"] == nil else { return body }
+        for block in content {
+            guard let text = block["text"]?.string,
+                  let extra = decodeJSONObject(in: text)?.object else { continue }
+            for key in ["new_windows", "new_window_ids"] where object[key] == nil {
+                object[key] = extra[key] ?? extra["changes"]?[key]
+            }
+            if object["new_windows"] != nil || object["new_window_ids"] != nil { break }
+        }
+        return .object(object)
+    }
+
+    private static func decodeJSONObject(in text: String) -> JSONValue? {
+        func decode(_ string: String) -> JSONValue? {
+            guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(string.utf8)),
+                  value.object != nil else { return nil }
+            return value
+        }
+        if let value = decode(text) { return value }
+        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end
+        else { return nil }
+        return decode(String(text[start...end]))
     }
 
     func close() { disconnect(DriverConnectionError.closed) }
@@ -254,68 +391,14 @@ actor CuaConnection {
     /// to a second CuaDriver identity. Mirrors the driver's documented host
     /// contract: private socket, liveness stdin pipe, host attribution env.
     private func startEmbeddedDaemon() async throws {
-        let socket = Self.embeddedSocketPath()
-        try? FileManager.default.removeItem(atPath: socket)
-        // Env allowlist only — never inherit host secrets or ambient
-        // CUA_DRIVER_* vars (an exported DANGEROUSLY_BYPASS_APPROVALS would
-        // break startup; the SDK's env_clear + allowlist contract).
-        var environment: [String: String] = [:]
-        for key in ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "USER", "SHELL",
-                    "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "__CF_USER_TEXT_ENCODING"] {
-            if let value = ProcessInfo.processInfo.environment[key] { environment[key] = value }
-        }
-        environment["CUA_DRIVER_EMBEDDED"] = "1"
-        environment["CUA_DRIVER_HOST_BUNDLE_ID"] = CuaDependency.hostBundleID
-        environment["CUA_DRIVER_EMBEDDED_HOST_PID"] = "\(ProcessInfo.processInfo.processIdentifier)"
-        let liveness = Pipe()
-        let daemon = Process()
-        daemon.executableURL = executable
-        daemon.arguments = ["serve", "--embedded", "--parent-liveness-stdio",
-                            "--no-permissions-gate", "--socket", socket,
-                            "--host-bundle-id", CuaDependency.hostBundleID,
-                            "--permission-mode", "standard",
-                            "--grant", "existing-profile"]
-        daemon.environment = environment
-        // Daemon logs may contain observed content; do not persist them.
-        // JARVIS_DRIVER_STDERR redirects stderr for diagnostics only.
-        daemon.standardOutput = FileHandle.nullDevice
-        if let logPath = ProcessInfo.processInfo.environment["JARVIS_DRIVER_STDERR"] {
-            _ = FileManager.default.createFile(atPath: logPath, contents: nil)
-            daemon.standardError = FileHandle(forWritingAtPath: logPath) ?? FileHandle.nullDevice
-        } else {
-            daemon.standardError = FileHandle.nullDevice
-        }
-        daemon.standardInput = liveness
-        try daemon.run()
-        self.daemon = daemon
-        daemonLiveness = liveness.fileHandleForWriting
-        daemonSocketPath = socket
-        let deadline = Date().addingTimeInterval(10)
-        while daemon.isRunning && !FileManager.default.fileExists(atPath: socket) && Date() < deadline {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        guard daemon.isRunning, FileManager.default.fileExists(atPath: socket) else {
-            stopEmbeddedDaemon()
-            throw DriverConnectionError.unavailable
-        }
-    }
-
-    private static func embeddedSocketPath() -> String {
-        let name = "jev-cua-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(8).lowercased()).sock"
-        let preferred = NSTemporaryDirectory() + name
-        // Unix socket paths are limited to ~104 bytes.
-        return preferred.utf8.count < 96 ? preferred : "/tmp/" + name
+        let daemon = CuaEmbeddedDaemon(executable: executable)
+        try await daemon.start()
+        embeddedDaemon = daemon
     }
 
     private func stopEmbeddedDaemon() {
-        if daemon?.isRunning == true { daemon?.terminate() }
-        daemon = nil
-        try? daemonLiveness?.close()
-        daemonLiveness = nil
-        if let socket = daemonSocketPath {
-            try? FileManager.default.removeItem(atPath: socket)
-            daemonSocketPath = nil
-        }
+        embeddedDaemon?.stop()
+        embeddedDaemon = nil
     }
 
     private func request(_ method: String, params: JSONValue, timeout: TimeInterval = 30) async throws -> JSONValue {
@@ -326,15 +409,15 @@ actor CuaConnection {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 pending[id] = continuation
-                // The deadline arms BEFORE the write — a write that never
-                // returns (full pipe, wedged daemon) must still let the
-                // timeout fire the request's owner.
-                deadlines[id] = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
-                    await self?.cancel(id, error: DriverConnectionError.timedOut)
-                }
+                // Writes serialize through the actor — a request queued
+                // behind a slow dispatch must not burn its deadline before
+                // it is even sent, so the deadline arms at WRITE time. It
+                // still lands BEFORE the blocking write itself: a write
+                // that never returns (full pipe, wedged daemon) must still
+                // let the timeout fire the request's owner.
                 Task { [weak self] in
                     guard let self else { return }
+                    guard await self.armDeadline(id, timeout: timeout) else { return }
                     do {
                         try await self.write(.object(["jsonrpc": .string("2.0"), "id": .number(Double(id)),
                                            "method": .string(method), "params": params]))
@@ -346,16 +429,41 @@ actor CuaConnection {
         }
     }
 
+    /// Arms the timeout — returns false when the request is already gone
+    /// (cancelled or the transport torn down) so a stale write never ships.
+    private func armDeadline(_ id: Int, timeout: TimeInterval) -> Bool {
+        guard pending[id] != nil else { return false }
+        deadlines[id]?.cancel()
+        deadlines[id] = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
+            await self?.cancel(id, error: DriverConnectionError.timedOut)
+        }
+        return true
+    }
+
+    /// Chains detached writes FIFO — the actor alone does NOT serialize them:
+    /// a request blocked in `write` suspends, and a later write (another
+    /// queued request, a cancel notification, a method-not-supported reply)
+    /// would run its own detached block concurrently and could interleave
+    /// bytes on the pipe. Each write awaits its predecessor so exactly one
+    /// blocking syscall touches the handle at a time.
+    private var writeTail: Task<Void, Never>?
+
     /// FileHandle.write is a blocking syscall — on the actor executor a full
-    /// pipe would wedge every request, deadline, and disconnect behind it.
-    /// Writes are already serialized by the actor (each request writes before
-    /// its continuation suspends), so moving the block off-actor preserves
-    /// order while the timeout machinery stays reachable.
+    /// pipe would wedge every request, deadline, and disconnect behind it,
+    /// so the syscall runs off-actor behind the write tail. Order is
+    /// preserved while the timeout machinery stays reachable.
     private func write(_ message: JSONValue) async throws {
         guard let input else { throw DriverConnectionError.closed }
         var data = try JSONEncoder().encode(message)
         data.append(10)
-        try await Task.detached { try input.write(contentsOf: data) }.value
+        let prior = writeTail
+        let write = Task.detached {
+            _ = await prior?.value
+            try input.write(contentsOf: data)
+        }
+        writeTail = Task { _ = try? await write.value }
+        try await write.value
     }
 
     private func receive(_ bytes: Data, token: UUID) {
@@ -408,9 +516,18 @@ actor CuaConnection {
     private func disconnect(_ error: Error) {
         generation = UUID()
         initialized = false
+        Self.live.remove(self)
         for id in Array(pending.keys) { complete(id, result: .failure(error)) }
         reader?.cancel(); reader = nil
-        try? input?.close(); input = nil
+        // Close behind the write tail: closing a FileHandle mid-write can
+        // raise an ObjC exception, and the child exit below fails any
+        // blocked write so the deferred close always runs.
+        if let input {
+            let prior = writeTail
+            Task { _ = await prior?.value; try? input.close() }
+            self.input = nil
+            writeTail = nil
+        }
         if process?.isRunning == true { process?.terminate() }
         process?.terminationHandler = nil
         process = nil

@@ -22,14 +22,74 @@ enum CuaDependency {
         Bundle.main.object(forInfoDictionaryKey: "JevCuaDriverSHA256") as? String
     }
 
+    /// A passing full hash is remembered per path — in memory because every
+    /// connect() and pool proxy verifies, and in UserDefaults so a cold app
+    /// start also skips the ~72MB read. The record is bound to the pin, so a
+    /// new expectedSHA256 always rehashes.
+    private static var memoryVerified: [String: (sha: String, fingerprint: String)] = [:]
+    private static let memoryVerifiedLock = NSLock()
+    private static let verifiedDefaultsKey = "cuaDependencyVerifiedStat"
+
+    /// `stat` identity of the file a hash covered: dev, ino, size and both
+    /// timestamps. The record is taken BEFORE the read, so a mid-read swap
+    /// can only cost an extra rehash, never pass unverified content — and
+    /// ctime cannot be rewound by a writer preserving size and mtime.
+    private static func statFingerprint(_ path: String) -> String? {
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        return "\(info.st_dev):\(info.st_ino):\(info.st_size):"
+            + "\(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec):"
+            + "\(info.st_ctimespec.tv_sec).\(info.st_ctimespec.tv_nsec)"
+    }
+
+    private static func recordedFingerprint(path: String, sha: String) -> String? {
+        memoryVerifiedLock.lock()
+        let hit = memoryVerified[path]
+        memoryVerifiedLock.unlock()
+        if let hit { return hit.sha == sha ? hit.fingerprint : nil }
+        guard let entry = UserDefaults.standard.dictionary(forKey: verifiedDefaultsKey)?[path] as? [String: String],
+              entry["sha"] == sha, let fingerprint = entry["fp"] else { return nil }
+        memoryVerifiedLock.lock()
+        memoryVerified[path] = (sha: sha, fingerprint: fingerprint)
+        memoryVerifiedLock.unlock()
+        return fingerprint
+    }
+
+    private static func recordVerified(path: String, sha: String, fingerprint: String) {
+        memoryVerifiedLock.lock()
+        memoryVerified[path] = (sha: sha, fingerprint: fingerprint)
+        memoryVerifiedLock.unlock()
+        var all = UserDefaults.standard.dictionary(forKey: verifiedDefaultsKey) ?? [:]
+        // Verified targets are the two executable paths plus test fixtures —
+        // cap the record so throwaway paths cannot grow it without bound.
+        if all.count >= 8, all[path] == nil { all.removeAll(keepingCapacity: true) }
+        all[path] = ["sha": sha, "fp": fingerprint]
+        UserDefaults.standard.set(all, forKey: verifiedDefaultsKey)
+    }
+
+    private static func forgetVerified(path: String) {
+        memoryVerifiedLock.lock()
+        memoryVerified.removeValue(forKey: path)
+        memoryVerifiedLock.unlock()
+        if var all = UserDefaults.standard.dictionary(forKey: verifiedDefaultsKey),
+           all.removeValue(forKey: path) != nil {
+            UserDefaults.standard.set(all, forKey: verifiedDefaultsKey)
+        }
+    }
+
     static func verify(_ file: URL, expectedSHA256: String) throws {
-        guard FileManager.default.isExecutableFile(atPath: file.path) else {
+        let path = file.standardizedFileURL.path
+        guard FileManager.default.isExecutableFile(atPath: path) else {
             throw DriverConnectionError.refused("The required Cua Driver Local build is missing from Applications. Restore the pinned migration dependency before connecting.")
         }
+        let fingerprint = statFingerprint(path)
+        if let fingerprint, recordedFingerprint(path: path, sha: expectedSHA256) == fingerprint { return }
         let data = try Data(contentsOf: file, options: .mappedIfSafe)
         let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         guard actual == expectedSHA256 else {
+            forgetVerified(path: path)
             throw DriverConnectionError.refused("Cua Driver Local differs from the tested migration build. Restore the pinned dependency; no fallback Driver was started.")
         }
+        if let fingerprint { recordVerified(path: path, sha: expectedSHA256, fingerprint: fingerprint) }
     }
 }

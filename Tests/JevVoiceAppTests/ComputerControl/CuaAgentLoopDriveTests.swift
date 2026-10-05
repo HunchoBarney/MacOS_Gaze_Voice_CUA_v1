@@ -40,6 +40,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
     private func harness(states: [JSONValue],
                          steps: @escaping (Int) -> [String: Answer],
                          listWindows: ((Int) -> JSONValue)? = nil,
+                         apps: [JSONValue] = [],
                          frontmost: Bool = true,
                          raiseMakesFrontmost: Bool = true,
                          dispatch: @escaping (String, [String: JSONValue]) throws -> JSONValue = { _, _ in
@@ -58,7 +59,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             }
             // Observation calls are not dispatches — the pid-only target path
             // consults list_apps to recover bundle identity.
-            if name == "list_apps" { return .object(["apps": .array([])]) }
+            if name == "list_apps" { return .object(["apps": .array(apps)]) }
             if name == "list_windows" {
                 defer { listCount += 1 }
                 return listWindows?(listCount) ?? .object(["windows": .array([])])
@@ -152,7 +153,13 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             states: [window([element(0, role: "AXButton", label: "Go")])],
             steps: { _ in self.answers(next: "click_0", confidence: 0.3) })
         let result = try await loop.drive(DriveTask(goal: "go", pid: 7, windowID: 42))
-        XCTAssertEqual(result.status, .handedBack(.lowConfidence))
+        // A first low-confidence pick re-observes once; a second asks the
+        // user to choose rather than dying — the offered candidates ride
+        // along so the ask can name them.
+        guard case .handedBack(.needsChoice(let options)) = result.status else {
+            return XCTFail("expected needsChoice, got \(result.status)")
+        }
+        XCTAssertFalse(options.isEmpty)
         XCTAssertFalse(calls.value.contains { $0.0 == "click" })
     }
 
@@ -302,7 +309,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
                     ? .object(["windows": .array([oldDoc])])
                     : .object(["windows": .array([oldDoc, newDoc])])
             })
-        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, scope: .create))
+        let result = try await loop.drive(DriveTask(goal: "press cmd+n for a new document", pid: 7, scope: .create))
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(result.windowID, 99)
         let reads = calls.value.filter { $0.0 == "get_window_state" }
@@ -369,7 +376,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
                 }
                 return .object(["effect": .string("confirmed")])
             })
-        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42))
+        let result = try await loop.drive(DriveTask(goal: "press cmd+n for a new document", pid: 7, windowID: 42))
         XCTAssertEqual(result.status, .done)
         let hotkeys = calls.value.filter { $0.0 == "hotkey" }
         XCTAssertEqual(hotkeys.count, 2)
@@ -398,7 +405,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
                 }
                 return .object(["effect": .string("confirmed")])
             })
-        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42,
+        let result = try await loop.drive(DriveTask(goal: "press cmd+n for a new document", pid: 7, windowID: 42,
                                                   foreground: true))
         XCTAssertEqual(result.status, .done)
         let hotkeys = calls.value.filter { $0.0 == "hotkey" }
@@ -425,7 +432,7 @@ final class CuaAgentLoopDriveTests: XCTestCase {
                 }
                 return .object(["effect": .string("confirmed")])
             })
-        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42))
+        let result = try await loop.drive(DriveTask(goal: "press cmd+n for a new document", pid: 7, windowID: 42))
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(calls.value.filter { $0.0 == "bring_to_front" }.count, 0,
                        "A background task must never raise its target window")
@@ -449,10 +456,51 @@ final class CuaAgentLoopDriveTests: XCTestCase {
                 }
                 return .object(["effect": .string("confirmed")])
             })
-        let result = try await loop.drive(DriveTask(goal: "new document", pid: 7, windowID: 42,
+        let result = try await loop.drive(DriveTask(goal: "press cmd+n for a new document", pid: 7, windowID: 42,
                                                   foreground: true))
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(calls.value.filter { $0.0 == "hotkey" }.count, 1,
                        "The only hotkey call is the refused one — no blind retry")
+    }
+
+    /// A dispatched browser_navigate whose immediate verify read misses
+    /// defers to the NEXT ordinary browser read — the observed url is the
+    /// proof, never the dispatch's own success report.
+    func testDeferredNavigationVerifiesOnNextBrowserRead() async throws {
+        let tab = JSONValue.object(["tab_id": .string("tab1"), "active": .bool(true),
+                                    "url": .string(""), "title": .string("")])
+        var browserReads: [JSONValue] = [
+            // 1. step-0 binding read — target + tab, no page url yet.
+            .object(["target_id": .string("t1"), "tab_id": .string("tab1"),
+                     "tabs": .array([tab])]),
+            // 2. the dispatch's own verify read — destination not visible.
+            .object(["url": .string("about:blank")]),
+            // 3. the step-1 ordinary read — the deferred proof lands here.
+            .object(["target_id": .string("t1"), "tab_id": .string("tab1"),
+                     "url": .string("https://apple.com"), "tabs": .array([tab])])]
+        let (loop, calls, _) = harness(
+            states: [window([element(0, role: "AXButton", label: "Reload")])],
+            steps: { step in step == 0
+                ? self.answers(next: "navigate")
+                : self.answers(next: "done") },
+            listWindows: { _ in .object(["windows": .array([
+                .object(["window_id": .number(42), "title": .string("Tab"),
+                         "is_on_screen": .bool(true)])])]) },
+            apps: [.object(["pid": .number(7), "name": .string("Chrome"),
+                            "bundle_id": .string("com.google.Chrome"),
+                            "running": .bool(true)])],
+            dispatch: { name, _ in
+                if name == "get_browser_state" {
+                    return browserReads.count > 1 ? browserReads.removeFirst() : browserReads[0]
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "go to apple.com",
+                                                    application: "com.google.Chrome"))
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.value.filter { $0.0 == "browser_navigate" }.count, 1)
+        XCTAssertTrue(loop.observedPostconditions.contains {
+            $0.evidence.contains("navigated to apple.com")
+        }, "the deferred read proves the navigation — the dispatch's own report does not")
     }
 }

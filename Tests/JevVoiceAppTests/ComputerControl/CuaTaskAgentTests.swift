@@ -60,7 +60,7 @@ final class CuaTaskAgentTests: XCTestCase {
         let sut = CuaTaskAgent(call: { tool, args in
             switch tool {
             case "scroll": dispatched = args
-            case "get_accessibility_tree":
+            case "get_accessibility_tree", "list_apps":
                 return .object(["apps": .array([self.app("Fixture", bundle: "test.fixture",
                                                          running: true, pid: 42)])])
             case "list_windows":
@@ -86,7 +86,7 @@ final class CuaTaskAgentTests: XCTestCase {
         var hotkeyCalls = 0
         let sut = CuaTaskAgent(call: { tool, _ in
             if tool == "hotkey" { hotkeyCalls += 1 }
-            if tool == "get_accessibility_tree" {
+            if tool == "get_accessibility_tree" || tool == "list_apps" {
                 return .object(["apps": .array([self.app("Fixture", bundle: "test.fixture",
                                                          running: true, pid: 42)])])
             }
@@ -145,7 +145,7 @@ final class CuaTaskAgentTests: XCTestCase {
         var launchCalls = 0
         let sut = CuaTaskAgent(call: { tool, _ in
             if tool == "launch_app" { launchCalls += 1 }
-            if tool == "get_accessibility_tree" {
+            if tool == "get_accessibility_tree" || tool == "list_apps" {
                 return .object(["apps": .array([self.app("Fixture", bundle: "test.fixture")])])
             }
             return .object([:])
