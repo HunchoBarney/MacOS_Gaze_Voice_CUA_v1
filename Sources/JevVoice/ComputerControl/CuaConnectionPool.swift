@@ -71,8 +71,16 @@ final class CuaEmbeddedDaemon {
         self.liveness = liveness.fileHandleForWriting
         self.socketPath = socket
         let deadline = Date().addingTimeInterval(10)
-        while daemon.isRunning && !FileManager.default.fileExists(atPath: socket) && Date() < deadline {
-            try await Task.sleep(for: .milliseconds(50))
+        do {
+            while daemon.isRunning && !FileManager.default.fileExists(atPath: socket) && Date() < deadline {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        } catch {
+            // A cancelled readiness wait must not strand the spawned
+            // daemon — without stop() it outlives the dropped wrapper
+            // until liveness-stdin EOF and leaks the socket file.
+            stop()
+            throw error
         }
         guard daemon.isRunning, FileManager.default.fileExists(atPath: socket) else {
             stop()
@@ -150,7 +158,13 @@ final class CuaConnectionPool {
                 await existing.close()
                 self.connections[label] = nil
             }
-            let connection = CuaConnection(executable: self.executable)
+            // The fault token is the socket the proxy binds to — a stale
+            // storm report against an already-recycled daemon no-ops in
+            // invalidateDaemon(matching:).
+            let connection = CuaConnection(executable: self.executable,
+                                           onDaemonSocketFault: { socket in
+                                               Task { await self.invalidateDaemon(matching: socket) }
+                                           })
             try await connection.connect(proxyOnlyOn: socket)
             self.connections[label] = connection
             return connection
@@ -166,11 +180,35 @@ final class CuaConnectionPool {
     /// on `tool_invocation_failed`: stop the daemon and drop every proxy
     /// bound to its socket so the next sharedSocket() mints a fresh one.
     func invalidateDaemon() async {
+        await invalidateDaemon(matching: nil)
+    }
+
+    /// Token-scoped invalidation — `socket` is the daemon socket the faulting
+    /// transport was bound to, delivered through `onDaemonHealthFault`. Two
+    /// lanes storming on generation N queue two faults; if a re-mint lands
+    /// between them the second must not stop the healthy generation N+1, so a
+    /// mismatched token no-ops. nil = unscoped, every proxy is recycled.
+    func invalidateDaemon(matching socket: String?) async {
+        guard let victim = daemon, socket == nil || victim.socketPath == socket else { return }
+        // Detach before the first suspension — a sharedSocket() entering
+        // mid-drain must mint a fresh daemon, never fast-path onto the
+        // doomed socket.
+        daemon = nil
+        // In-flight mints must land before the snapshot: one resolving on
+        // the doomed socket would otherwise store a zombie proxy onto a
+        // dead daemon after the drain and hand it to a caller.
+        for task in connectionTasks.values { _ = try? await task.value }
         let stale = connections
         connections = [:]
-        for connection in stale.values { await connection.close() }
-        daemon?.stop()
-        daemon = nil
+        for (label, connection) in stale {
+            // A proxy minted on a fresh daemon during the drain stays live.
+            if let socket, await connection.boundSocket != socket {
+                if connections[label] == nil { connections[label] = connection }
+                continue
+            }
+            await connection.close()
+        }
+        victim.stop()
     }
 
     /// Ends every label's session and tears down the shared daemon. Not a

@@ -1,0 +1,97 @@
+{
+  "archive": {
+    "path": "source/cua-perception-source.tar.gz",
+    "sha256": "60043c33174f3f6431fe79651c56e09fbb10996db710b574d6cba54d24e2fce9",
+    "size": 498837
+  },
+  "bundled_upstream_sources": [
+    {
+      "component": "model-source-input",
+      "path": "source/upstream/omniparser-icon-detect-model.pt",
+      "revision": "6600256cb0f1b07651e3bc86166196307bad7e2d",
+      "sha256": "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57",
+      "size": 40623819,
+      "url": "https://huggingface.co/microsoft/OmniParser-v2.0/resolve/6600256cb0f1b07651e3bc86166196307bad7e2d/icon_detect/model.pt"
+    },
+    {
+      "component": "exporter-source",
+      "path": "source/exporter/ultralytics-8f7fe171f0db13e5c2eff55eee3443f8903e5068.tar.gz",
+      "revision": "8f7fe171f0db13e5c2eff55eee3443f8903e5068",
+      "sha256": "6c289215a5ce593a872111b87e58ffff6949d235c2af720e8f01704375f7bf44",
+      "size": 1872606,
+      "url": "https://codeload.github.com/ultralytics/ultralytics/tar.gz/8f7fe171f0db13e5c2eff55eee3443f8903e5068"
+    },
+    {
+      "component": "exporter-source",
+      "path": "source/exporter/pytorch-ba56102387ef21a3b04b357e5b183d48f0afefc7.tar.gz",
+      "revision": "ba56102387ef21a3b04b357e5b183d48f0afefc7",
+      "sha256": "a9623012b046e9cc87c919f178782860bcee9fbf014ad5c24a2655b517d0881b",
+      "size": 56595340,
+      "url": "https://codeload.github.com/pytorch/pytorch/tar.gz/ba56102387ef21a3b04b357e5b183d48f0afefc7"
+    },
+    {
+      "component": "exporter-source",
+      "path": "source/exporter/torchvision-824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8.tar.gz",
+      "revision": "824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8",
+      "sha256": "8e44b7705c901b9af76113393fe675b02ceeb43b1c688db50e0d8ff8a9dcef03",
+      "size": 14499056,
+      "url": "https://codeload.github.com/pytorch/vision/tar.gz/824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8"
+    },
+    {
+      "component": "exporter-source",
+      "path": "source/exporter/onnx-57b9c6a4f6eebb09ae1b34cfb632078518f72832.tar.gz",
+      "revision": "57b9c6a4f6eebb09ae1b34cfb632078518f72832",
+      "sha256": "a1a9c44e20ea1f9cf0c094e0f82001113b36e0867e04c06966475c46e3c75739",
+      "size": 13109973,
+      "url": "https://codeload.github.com/onnx/onnx/tar.gz/57b9c6a4f6eebb09ae1b34cfb632078518f72832"
+    },
+    {
+      "component": "exporter-source",
+      "path": "source/exporter/onnxslim-0.1.68.tar.gz",
+      "revision": "0.1.68",
+      "sha256": "ff1ec2bf61ff10b75e33990b2046c446dec522ba7f0a12b2f984547ff43f9138",
+      "size": 141502,
+      "url": "https://files.pythonhosted.org/packages/f3/03/7eecb5b187b7b3e11d066f19211b1850a8b4e5cc79f5e3c78875a676a1c8/onnxslim-0.1.68.tar.gz"
+    }
+  ],
+  "component": "cua-perception",
+  "immutable_external_coordinates": [
+    {
+      "component": "ocr-detect",
+      "revision": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
+      "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+      "size": 4826518,
+      "url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx"
+    },
+    {
+      "component": "ocr-recognize",
+      "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b",
+      "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
+      "size": 7848423,
+      "url": "https://huggingface.co/PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx/resolve/3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b/inference.onnx"
+    },
+    {
+      "component": "ocr-dictionary",
+      "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b",
+      "sha256": "27e91d0582f40168aa218303c76e184bc78fa7a5d105aad0cfbad8458b441067",
+      "size": 3964,
+      "url": "https://huggingface.co/PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx/resolve/3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b/inference.yml"
+    },
+    {
+      "component": "onnx-runtime-cpu-archive",
+      "sha256": "7a1280bbb1701ea514f71828765237e7896e0f2e1cd332f1f70dbd5c3e33aca3",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.26.0/onnxruntime-osx-arm64-1.26.0.tgz"
+    }
+  ],
+  "included_paths": [
+    "LICENSE.md",
+    "libs/cua-driver/rust/Cargo.lock",
+    "libs/cua-driver/rust/Cargo.toml",
+    "libs/cua-driver/rust/crates/cua-perception"
+  ],
+  "repository": "https://github.com/trycua/cua",
+  "review_status": "license-review-required",
+  "revision": "fc83a85c46ca4de1fb9eccf79331611f986bcb30",
+  "schema_version": 1,
+  "source_offer": "SOURCE_OFFER.md"
+}

@@ -1,0 +1,43 @@
+{
+ "schemaVersion": 1,
+ "target": "aarch64-apple-darwin",
+ "protocolVersion": 1,
+ "worker": {
+  "name": "cua-perception",
+  "sha256": "33d0453c245081ae6ac540518426bb6f4117dff381393572d522de9813868c5c",
+  "role": "worker"
+ },
+ "runtime": {
+  "name": "libonnxruntime.dylib",
+  "sha256": "cb0462c3fd35ad722e8772313030a33c182f3d4c6b33f4e5e1fcb2ce3199b86c",
+  "role": "runtime"
+ },
+ "modelManifest": {
+  "name": "model-manifest.json",
+  "sha256": "8736073e5360973e49b7a7de72400ae28588e251a55e50af36fabdcda3fff4a2",
+  "role": "model-manifest"
+ },
+ "models": [
+  {
+   "name": "omniparser-icon-detect-1280-opset17.onnx",
+   "sha256": "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac",
+   "role": "icon-detect"
+  },
+  {
+   "name": "ppocrv5-mobile-det.onnx",
+   "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+   "role": "ocr-detect"
+  },
+  {
+   "name": "ppocrv5-mobile-rec-en.onnx",
+   "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
+   "role": "ocr-recognize"
+  }
+ ],
+ "dictionary": {
+  "name": "ppocrv5-mobile-rec-en-inference.yml",
+  "sha256": "27e91d0582f40168aa218303c76e184bc78fa7a5d105aad0cfbad8458b441067",
+  "role": "ocr-dictionary"
+ },
+ "rejectMismatch": true
+}

@@ -297,9 +297,6 @@ struct ActivityView: View {
                         Text("Selected task: \(task.label)").fontWeight(.medium)
                         ForEach(controller.taskDiagnostics(task), id: \.self) { Text($0) }
                         Text("Task elapsed: \(Int(task.elapsedMs)) ms")
-                        ForEach(task.timings.keys.sorted(), id: \.self) { key in
-                            Text("\(key): \(Int(task.timings[key] ?? 0)) ms")
-                        }
                     }
                     Text("Dispatch results reflect OS/API responses, not independent verification inside every app.")
                 }.font(.caption).foregroundStyle(.secondary).padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)

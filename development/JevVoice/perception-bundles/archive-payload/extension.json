@@ -1,0 +1,237 @@
+{
+ "schema_version": 1,
+ "id": "cua-perception",
+ "version": "0.1.0",
+ "driver_version": ">=0.32.0",
+ "protocol_version": 1,
+ "target": "aarch64-apple-darwin",
+ "entrypoint": "bin/cua-perception",
+ "files": [
+  {
+   "path": "LICENSES/AGPL-3.0-only.txt",
+   "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+  },
+  {
+   "path": "LICENSES/Apache-2.0.txt",
+   "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+  },
+  {
+   "path": "LICENSES/MIT.txt",
+   "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+  },
+  {
+   "path": "LICENSES/NOTICE.txt",
+   "sha256": "e610dd5abf299be40c540b2c7d8e7105ec55f1204f1e96af02c290433edffb4e"
+  },
+  {
+   "path": "LICENSES/THIRD_PARTY_NOTICES.md",
+   "sha256": "e610dd5abf299be40c540b2c7d8e7105ec55f1204f1e96af02c290433edffb4e"
+  },
+  {
+   "path": "SOURCE/cua-perception-source.tar.gz",
+   "sha256": "60043c33174f3f6431fe79651c56e09fbb10996db710b574d6cba54d24e2fce9"
+  },
+  {
+   "path": "SOURCE/exporter/onnx-57b9c6a4f6eebb09ae1b34cfb632078518f72832.tar.gz",
+   "sha256": "a1a9c44e20ea1f9cf0c094e0f82001113b36e0867e04c06966475c46e3c75739"
+  },
+  {
+   "path": "SOURCE/exporter/onnxslim-0.1.68.tar.gz",
+   "sha256": "ff1ec2bf61ff10b75e33990b2046c446dec522ba7f0a12b2f984547ff43f9138"
+  },
+  {
+   "path": "SOURCE/exporter/pytorch-ba56102387ef21a3b04b357e5b183d48f0afefc7.tar.gz",
+   "sha256": "a9623012b046e9cc87c919f178782860bcee9fbf014ad5c24a2655b517d0881b"
+  },
+  {
+   "path": "SOURCE/exporter/torchvision-824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8.tar.gz",
+   "sha256": "8e44b7705c901b9af76113393fe675b02ceeb43b1c688db50e0d8ff8a9dcef03"
+  },
+  {
+   "path": "SOURCE/exporter/ultralytics-8f7fe171f0db13e5c2eff55eee3443f8903e5068.tar.gz",
+   "sha256": "6c289215a5ce593a872111b87e58ffff6949d235c2af720e8f01704375f7bf44"
+  },
+  {
+   "path": "SOURCE/upstream/omniparser-icon-detect-model.pt",
+   "sha256": "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57"
+  },
+  {
+   "path": "SOURCE_OFFER.md",
+   "sha256": "b4b9374057349ff5345cd9aa686b8aff2925663417c17bc745d2d16042ed05c9"
+  },
+  {
+   "path": "bin/cua-perception",
+   "sha256": "33d0453c245081ae6ac540518426bb6f4117dff381393572d522de9813868c5c",
+   "executable": true
+  },
+  {
+   "path": "metadata/artifact-manifest.json",
+   "sha256": "481bb308778b02b25ff62d323bd1726ec4a59b00177864a05ce76541349ed819"
+  },
+  {
+   "path": "metadata/executed-verification.json",
+   "sha256": "68046897f5ee545741bac9f47758d9520c098953287907f11ea466b8a6a9a689"
+  },
+  {
+   "path": "metadata/runtime-contract.json",
+   "sha256": "3deb556d3e78b7f2e50ebe57ed5dcd6e53908f8651ee8644ee040c0f9f4e3bf0"
+  },
+  {
+   "path": "metadata/source-inventory.json",
+   "sha256": "02d9fc8951313c0401d7f534028f7febfa2be5373836f51ea0d270ec7bfcbdd0"
+  },
+  {
+   "path": "metadata/source-ledger.json",
+   "sha256": "cf09dd6ab98fa9c6a775fb4b3f5cda8f7d0cd18717fb59f4c86bddc4be52bdce"
+  },
+  {
+   "path": "metadata/verification/health.json",
+   "sha256": "fac6862e02d266225767e06531517478c9c40c1a8bbe5afb57ca6390d323424c"
+  },
+  {
+   "path": "metadata/verification/known-answer.png",
+   "sha256": "aae53a52819f1470221ed60ad434649cb52c9ed5fe3cf2d9e08a6f2429f1b7c8"
+  },
+  {
+   "path": "metadata/verification/real-parse.json",
+   "sha256": "68046897f5ee545741bac9f47758d9520c098953287907f11ea466b8a6a9a689"
+  },
+  {
+   "path": "metadata/verification/self-test.json",
+   "sha256": "41b62892d17b819d35f8d2d1cebb2e013c9ccd5725c57903f6756005bae3bfa6"
+  },
+  {
+   "path": "model-manifest.json",
+   "sha256": "8736073e5360973e49b7a7de72400ae28588e251a55e50af36fabdcda3fff4a2"
+  },
+  {
+   "path": "modelLedger.json",
+   "sha256": "0caeaae88e40b0876d7f8698b29c635a27bc3722e200a8d3624b723f12a2cb46"
+  },
+  {
+   "path": "models/omniparser-icon-detect-1280-opset17.onnx",
+   "sha256": "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac"
+  },
+  {
+   "path": "models/ppocrv5-mobile-det.onnx",
+   "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d"
+  },
+  {
+   "path": "models/ppocrv5-mobile-rec-en-inference.yml",
+   "sha256": "27e91d0582f40168aa218303c76e184bc78fa7a5d105aad0cfbad8458b441067"
+  },
+  {
+   "path": "models/ppocrv5-mobile-rec-en.onnx",
+   "sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f"
+  },
+  {
+   "path": "runtime/libonnxruntime.dylib",
+   "sha256": "cb0462c3fd35ad722e8772313030a33c182f3d4c6b33f4e5e1fcb2ce3199b86c"
+  }
+ ],
+ "models": [
+  {
+   "path": "models/omniparser-icon-detect-1280-opset17.onnx",
+   "revision": "6600256cb0f1b07651e3bc86166196307bad7e2d",
+   "original_sha256": "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57",
+   "conversion_sha256": "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac",
+   "license_file": {
+    "path": "LICENSES/AGPL-3.0-only.txt",
+    "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+   }
+  },
+  {
+   "path": "models/ppocrv5-mobile-det.onnx",
+   "revision": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
+   "original_sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+   "conversion_sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+   "license_file": {
+    "path": "LICENSES/Apache-2.0.txt",
+    "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+   }
+  },
+  {
+   "path": "models/ppocrv5-mobile-rec-en.onnx",
+   "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b",
+   "original_sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
+   "conversion_sha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
+   "license_file": {
+    "path": "LICENSES/Apache-2.0.txt",
+    "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+   }
+  }
+ ],
+ "components": [
+  {
+   "name": "cua-perception",
+   "version": "0.1.0",
+   "license": "MIT",
+   "notice": "Copyright (c) 2025 Cua AI, Inc.",
+   "source_uri": "https://github.com/trycua/cua",
+   "source_revision": "fc83a85c46ca4de1fb9eccf79331611f986bcb30",
+   "notice_file": {
+    "path": "LICENSES/NOTICE.txt",
+    "sha256": "e610dd5abf299be40c540b2c7d8e7105ec55f1204f1e96af02c290433edffb4e"
+   }
+  },
+  {
+   "name": "onnxruntime",
+   "version": "1.26.0",
+   "license": "MIT",
+   "notice": "Copyright Microsoft Corporation.",
+   "source_uri": "https://github.com/microsoft/onnxruntime",
+   "source_revision": "v1.26.0",
+   "notice_file": {
+    "path": "LICENSES/MIT.txt",
+    "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+   }
+  },
+  {
+   "name": "omniparser-icon-detect",
+   "version": "2.0",
+   "license": "AGPL-3.0-only",
+   "notice": "Converted from microsoft/OmniParser-v2.0 icon_detect.",
+   "source_uri": "https://huggingface.co/microsoft/OmniParser-v2.0",
+   "source_revision": "6600256cb0f1b07651e3bc86166196307bad7e2d",
+   "notice_file": {
+    "path": "LICENSES/AGPL-3.0-only.txt",
+    "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+   }
+  },
+  {
+   "name": "ppocrv5-mobile",
+   "version": "5",
+   "license": "Apache-2.0",
+   "notice": "PaddlePaddle PP-OCRv5 mobile detection and recognition.",
+   "source_uri": "https://huggingface.co/PaddlePaddle",
+   "source_revision": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
+   "notice_file": {
+    "path": "LICENSES/Apache-2.0.txt",
+    "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+   }
+  }
+ ],
+ "corresponding_source_file": {
+  "path": "SOURCE/cua-perception-source.tar.gz",
+  "sha256": "60043c33174f3f6431fe79651c56e09fbb10996db710b574d6cba54d24e2fce9"
+ },
+ "license": "AGPL-3.0-only",
+ "source": "https://github.com/trycua/cua",
+ "corresponding_source_uri": "https://github.com/trycua/cua",
+ "corresponding_source_revision": "fc83a85c46ca4de1fb9eccf79331611f986bcb30",
+ "provenance": "developer-local assembly of vendored cua-source snapshot (base b703a8d17fb513c6288f247f710d30643abd068d + local patch f513c985af5dbf06403d9ccf0eea51c9ca1bc439380830f88f5987c339016052); unsigned local install, review-only per MODEL_LEDGER",
+ "health_args": [
+  "--health",
+  "--extension-id",
+  "cua-perception",
+  "--extension-version",
+  "0.1.0"
+ ],
+ "self_test_args": [
+  "--self-test",
+  "--extension-id",
+  "cua-perception",
+  "--extension-version",
+  "0.1.0"
+ ]
+}

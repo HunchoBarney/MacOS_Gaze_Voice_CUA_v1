@@ -93,9 +93,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         agentRuntime?.onAgentReply = { [weak self] _, text in
-            // Agent replies are documents — speak a bounded lead, not the whole thing.
+            // Agent replies are documents — speak a bounded lead, not the whole
+            // thing. Push as a task_outcome so the lane voices `say` verbatim
+            // instead of answering bare text as if it were a question.
             let lead = String((text.split(separator: ".").first.map(String.init) ?? text).prefix(200))
-            if self?.controller.voiceAgentEvent("[agent reply] \(lead)") != true {
+            let say = VoiceToolResult.spoken(lead, words: 30)
+            let payload = VoiceToolResult(
+                kind: VoiceToolResult.Kind.taskOutcome,
+                status: VoiceToolResult.Status.ok,
+                say: say.isEmpty ? "The agent replied." : say).encoded()
+            if self?.controller.voiceAgentEvent(payload) != true {
                 self?.speechOutput.speak(lead)
             }
         }
@@ -263,6 +270,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let runtime = AgentRuntime(store: store, bridge: bridge,
                                    makeConnection: { CuaConnection(socketProvider: {
                                        try await CuaConnectionPool.shared.socket()
+                                   }, onDaemonSocketFault: { socket in
+                                       // A refusal storm means the shared daemon
+                                       // itself is sick — recycle the generation
+                                       // this lane was bound to.
+                                       Task { await CuaConnectionPool.shared.invalidateDaemon(matching: socket) }
                                    }) }, apiKey: { jevKey },
                                    cursorEnabled: { Config.shared.agentCursorEnabled })
         return runtime

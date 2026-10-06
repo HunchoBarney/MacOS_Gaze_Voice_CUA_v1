@@ -22,8 +22,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// Runs a spoken instruction through the runtime. Wired by VoiceController
     /// — returns the moment the work is *accepted* ("STARTED — …"); the real
     /// outcome arrives later via `pushTaskEvent`. The UUID is the hold's
-    /// capture id so the work binds to this interaction.
-    var commandHandler: (String, String?, String?, UUID) async -> String = { _, _, _, _ in
+    /// capture id so the work binds to this interaction. The transcript is
+    /// this turn's COMPLETED speech transcript (nil for typed turns) — the
+    /// runtime's heard-vs-called check wants the user's final words.
+    /// `steps` carries the model's inline plan for multi-part requests.
+    var commandHandler: (String, String?, String?, String?, [String], UUID) async -> String = { _, _, _, _, _, _ in
         #"{"status":"refused","say":"Computer control is unavailable."}"#
     }
     /// Answers a parked ask — yes/no consent or a free-text task question.
@@ -82,11 +85,29 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// Function calls dispatched this turn — a turn only ends when the model
     /// has answered after every tool result it asked for.
     private var pendingCalls: Set<String> = []
+    /// Dedupes tool calls for the SOCKET's lifetime — call_ids are unique
+    /// per session, so this clears where the connection rebuilds, not per
+    /// hold. Clearing it per hold let a cancelled response's response.done
+    /// re-dispatch its calls, running the command twice under the new hold.
     private var handledCalls: Set<String> = []
     private var assistantText = ""
     /// gpt-4o-transcribe deltas are incremental — accumulate them into the
     /// full in-flight transcript so the overlay doesn't show fragments.
     private var transcriptInFlight = ""
+    /// This turn's completed input transcript — stored at .transcriptDone so
+    /// a computer_command that outraced it still carries the final heard
+    /// text, never a mid-turn partial. Internal for tests.
+    var turnTranscript: String?
+    /// This turn's audio commit went out and no .transcriptDone/.transcriptFailed
+    /// has settled it — a completion is owed, so a command dispatch waits
+    /// briefly for it rather than guessing at args. Armed at commit; typed
+    /// turns never arm it, so they never wait. Also the provenance gate: a
+    /// completion arriving before this turn's commit belongs to a dead turn.
+    /// Internal for tests.
+    var transcriptPending = false
+    /// The committed audio item's id — a completion carrying a different
+    /// item_id belongs to a dead turn. Internal for tests.
+    var turnAudioItemID: String?
     /// True while the user holds Fn — pushed outcomes wait as context until
     /// release rather than talking over them.
     private var holding = false {
@@ -94,10 +115,12 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
     /// response.create serialisation — the API rejects a second response
     /// while one is generating, so turns and pushed outcomes queue here.
-    private var responseInFlight = false
+    /// Internal for tests — scripted turns mark the gate without a socket.
+    var responseInFlight = false
     private var wantResponse = false
     /// `[task outcome]` pushes waiting for a free response slot.
-    private var speakQueue: [String] = []
+    /// Internal for tests — the queue is scripted directly, no socket.
+    var speakQueue: [String] = []
     /// Runaway tool-call breaker (Clicky's "tool-call cap" — short-circuits
     /// the turn and forces a spoken answer instead of looping tools).
     private var toolCallsThisTurn = 0
@@ -111,7 +134,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var screenshotTask: Task<Data?, Never>?
     /// Outcome pushes that hit a dead socket — re-sent oldest-first when
     /// the next session confirms, or verified results are silently lost.
-    private var retryOutcomePush = OutcomeRetryQueue()
+    /// Internal for tests — asserted after a .closed migrates speakQueue.
+    var retryOutcomePush = OutcomeRetryQueue()
     /// Last injected [context] note — each turn replaces it rather than
     /// stacking stale frontmost-app/time facts on top of each other.
     private var lastContextItemID: String?
@@ -120,14 +144,26 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var teardownTask: Task<Void, Never>?
     /// turnEnded belongs to the user's turn only — a pushed outcome's
     /// response.done must not close the interaction.
-    private var awaitingTurnEnd = false
+    /// Internal for tests — scripted turns arm it without a socket.
+    var awaitingTurnEnd = false
+    /// Set once THIS turn's response.create actually went out — a done
+    /// belonging to a cancelled or queued response arriving in between
+    /// must not satisfy awaitingTurnEnd.
+    /// Internal for tests — scripted turns set it without a socket.
+    var turnResponseOutstanding = false
+    /// A response.cancel is outstanding — the cancelled response's late
+    /// function_call_arguments.done (and the call list in its done) must
+    /// not dispatch under the next hold.
+    /// Internal for tests — scripted turns set it without a socket.
+    var cancelledResponsePending = false
     /// response.done lands before the speaker drains — the card would close
     /// mid-sentence. When set, the next player idle emits the held turnEnded.
     private var pendingTurnEndOnIdle = false
     private var drainDeadline: Task<Void, Never>?
     /// The identity turn events and tool calls bind to — the active capture's
     /// id while holding, or the controller's session id for a typed command.
-    private var turnID: UUID?
+    /// Internal for tests — scripted turns bind it without a hold.
+    var turnID: UUID?
 
     @MainActor
     private final class Session {
@@ -179,7 +215,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 guard let self, self.pendingTurnEndOnIdle else { return }
                 self.pendingTurnEndOnIdle = false
                 self.drainDeadline?.cancel()
-                if let id = self.turnID { self.onEvent?(id, .turnEnded) }
+                if let id = self.turnID {
+                    self.onEvent?(id, .turnEnded)
+                    self.turnID = nil
+                }
+                self.prepareNext()
             }
         }
     }
@@ -200,6 +240,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         client.teardown()
         lastSessionError = nil
+        // A rebuilt session resets the call_id namespace — the dedupe set's
+        // lifetime ends with the socket it belonged to.
+        handledCalls = []
         try await client.connect(apiKey: key)
     }
 
@@ -285,6 +328,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     func start(session id: UUID, inputUID: String?, transcribe: Bool) async throws -> String {
         cancel()
+        // Re-raise the hold gate before the first await — a cancelled
+        // response's trailing .responseDone lands in the prepare gap and
+        // its flushSpeech() would fire a queued outcome's response.create
+        // into the start of this hold.
+        holding = true
         let started = ProcessInfo.processInfo.systemUptime
         var session: Session!
         if transcribe {
@@ -297,7 +345,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
             guard let next = prepared else { throw VoiceError("Speech input is not ready yet.") }
             session = next
             prepared = nil
-            pendingCalls = []; handledCalls = []; assistantText = ""; transcriptInFlight = ""
+            pendingCalls = []; assistantText = ""; transcriptInFlight = ""
+            turnTranscript = nil; transcriptPending = false; turnAudioItemID = nil
             pendingTurnEndOnIdle = false
             toolCallsThisTurn = 0
             holding = true
@@ -319,6 +368,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // would start talking over this hold.
             let interrupted = player.interrupt(untilResponseDone: responseInFlight)
             if interrupted.itemID != nil || responseInFlight {
+                // The cancelled response keeps emitting until its done —
+                // its function calls must not dispatch under this hold.
+                if responseInFlight { cancelledResponsePending = true }
                 do { try await client.cancelResponse() }
                 catch {
                     // A cancel that never lands must not wedge the response
@@ -353,7 +405,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
                               sendsAudio: false)
             holding = true
             active = (id, session)
-            turnID = id
+            // Metering binds no turn — an unrelated socket death must not
+            // fault an input test that never used the socket.
             input.gate.open(session.feed)
         }
         var reportedFirst = false
@@ -394,7 +447,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     // MARK: - Server events
 
-    private func handle(_ event: RealtimeVoiceClient.Event) {
+    /// Internal for tests — injects a decoded socket event directly; in
+    /// production the client's receive loop hops here via Task.
+    func handle(_ event: RealtimeVoiceClient.Event) {
         // Response bookkeeping is session-independent — pushed outcomes land
         // their response.done between holds with no active capture, and the
         // gate still has to free up.
@@ -405,10 +460,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
             player.responseDidFinish()
             responseInFlight = false
             responseWatchdog?.cancel()
-            if let id = turnID, awaitingTurnEnd, pendingCalls.isEmpty {
+            cancelledResponsePending = false
+            // The done must belong to THIS turn's response.create — one
+            // carried by a cancelled response (barge-in) or a queued push
+            // that outraced release must not close the interaction.
+            if turnResponseOutstanding, let id = turnID, awaitingTurnEnd, pendingCalls.isEmpty {
                 awaitingTurnEnd = false
                 if player.playbackIdle {
                     onEvent?(id, .turnEnded)
+                    turnID = nil
                 } else {
                     // The reply is still playing — hold the interaction open
                     // until the last buffer drains so the UI doesn't vanish
@@ -416,7 +476,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
                     deferTurnEndOnDrain(turn: id)
                 }
             }
+            turnResponseOutstanding = false
             flushSpeech()
+            prepareNext()
             if turnID == nil { return }
         case .outputAudio:
             // Playback was already enqueued off-actor in client.onEvent —
@@ -426,6 +488,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
             responseInFlight = false
             responseWatchdog?.cancel()
             awaitingTurnEnd = false
+            turnResponseOutstanding = false
+            cancelledResponsePending = false
         case .warning(let detail):
             // A rejected request on a live socket (bad item.id, deleting an
             // already-gone item) — the turn keeps streaming. The watchdog
@@ -436,10 +500,19 @@ final class RealtimeVoiceLane: SpeechCapturing {
             player.responseDidFinish()
             responseInFlight = false
             responseWatchdog?.cancel()
+            // A queued speak whose text landed but whose response.create
+            // never went out dies with the socket — replay it like a send
+            // failure rather than dropping the outcome silently.
+            for queued in speakQueue { retryOutcomePush.push(queued) }
             speakQueue = []; wantResponse = false
             awaitingTurnEnd = false
+            turnResponseOutstanding = false
+            cancelledResponsePending = false
             pendingTurnEndOnIdle = false
             pendingCalls = []
+            // A dead socket produces no transcript — release any command
+            // dispatch parked on it instead of burning the wait bound.
+            transcriptPending = false
             // A dead socket invalidates the warm session AND the tracked
             // screenshot — reprepare must not be blocked by either. The
             // turn-scoped branch emits the user-visible .failure.
@@ -453,6 +526,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // Serial awaits: concurrent pushes would reorder on the wire.
             // A rebuilt session also retires any stale barge-in drop rules.
             player.responseDidFinish()
+            cancelledResponsePending = false
+            turnResponseOutstanding = false
             let retries = retryOutcomePush.drain()
             Task { [weak self] in
                 for retry in retries { await self?.deliverPush(retry, speak: true) }
@@ -503,13 +578,34 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // snapshots — accumulate so the overlay shows the whole sentence.
             transcriptInFlight += delta
             onEvent?(id, .partial(transcriptInFlight))
-        case .transcriptFailed(let detail):
-            // The model still heard the audio — the turn can succeed
-            // display-less. Log it; never kill the capture over a caption.
+        case .transcriptFailed(let detail, let itemID):
             Self.log.notice("realtime_transcription_failed \(detail, privacy: .public)")
-        case .transcriptDone(let text, _):
+            // A completion before this turn's own commit, or carrying a
+            // foreign item id, belongs to a dead turn — never let it
+            // settle (or end) this one.
+            guard transcriptPending,
+                  turnAudioItemID == nil || itemID.isEmpty || turnAudioItemID == itemID else { break }
+            transcriptPending = false
+            if !respondOnCommit {
+                // Dictation committed for the transcript alone — a failed
+                // transcription IS the turn's result; without this the card
+                // wedges in .finishing until the realtime deadline. The
+                // model never hears the audio (no response.create went
+                // out), so end the turn with an honest failure.
+                onEvent?(id, .failure(detail))
+                turnID = nil
+            }
+            // Command mode keeps going: the model still heard the audio —
+            // never kill the capture over a lost caption.
+        case .transcriptDone(let text, _, let itemID):
+            // Same provenance rule as .transcriptFailed — a stale
+            // completion must not become this turn's transcript.
+            guard transcriptPending,
+                  turnAudioItemID == nil || itemID.isEmpty || turnAudioItemID == itemID else { break }
+            transcriptPending = false
             transcriptInFlight = ""
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            turnTranscript = trimmed
             // The heard-vs-called pair: when a command goes to the wrong app
             // this line is the evidence of whether transcription or the
             // model's ear is at fault. Command mode only — dictation text
@@ -523,8 +619,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 if !trimmed.isEmpty { onEvent?(id, .heardFinal(trimmed)) }
             } else {
                 // Dictation — commit was transcript-only; `.final` drives the
-                // controller's literal delivery path.
+                // controller's literal delivery path. The turn is over, so
+                // release turnID: a later idle socket death must not fault
+                // the finished capture.
                 onEvent?(id, .final(trimmed))
+                turnID = nil
             }
         case .assistantDelta(let delta):
             onEvent?(id, .assistantDelta(delta))
@@ -532,7 +631,12 @@ final class RealtimeVoiceLane: SpeechCapturing {
             assistantText = text
             onEvent?(id, .assistant(text))
         case .functionCall(let callID, let name, let arguments):
-            dispatchTool(callID: callID, name: name, arguments: arguments, session: id)
+            // The cancelled response's trailing calls — a late arguments.done
+            // or the call list in its response.done — must not execute under
+            // the new hold.
+            if !cancelledResponsePending {
+                dispatchTool(callID: callID, name: name, arguments: arguments, session: id)
+            }
         case .failure(let detail):
             if Self.isFatalSessionError(detail) { lastSessionError = detail }
             // A benign race must not kill a healthy capture — the hold is
@@ -543,11 +647,34 @@ final class RealtimeVoiceLane: SpeechCapturing {
             break // logged in the session-level switch above
         case .closed:
             onEvent?(id, .failure("The voice session closed."))
-        case .sessionStarted, .inputCommitted, .speechStarted,
+        case .inputCommitted(let itemID):
+            // The transcription.completed that follows carries this
+            // item_id — recorded so a stale one can't pose as this turn's.
+            turnAudioItemID = itemID
+        case .sessionStarted, .speechStarted,
              .speechStopped, .outputAudio, .outputAudioDone, .responseDone,
              .itemCreated, .sessionUpdated:
             break
         }
+    }
+
+    /// The completed input transcript for THIS turn — computer_command's
+    /// heard-vs-called check wants the user's final words, but a function
+    /// call can outrun input_audio_transcription.completed. Waits up to
+    /// ~600ms when this turn had speech input; typed turns (no transcript
+    /// exists) and already-settled transcripts return immediately. Runs
+    /// inside dispatchTool's task — the event loop never blocks.
+    private func settledTranscript() async -> String? {
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.6
+        while transcriptPending, turnTranscript == nil, !Task.isCancelled,
+              ProcessInfo.processInfo.systemUptime < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        if transcriptPending, turnTranscript == nil {
+            Self.log.notice("transcript_wait_timeout session=\(self.turnID?.uuidString ?? "none", privacy: .public) — dispatching without the final transcript")
+        }
+        let text = turnTranscript ?? ""
+        return text.isEmpty ? nil : text
     }
 
     private func dispatchTool(callID: String, name: String, arguments: String, session id: UUID) {
@@ -580,10 +707,22 @@ final class RealtimeVoiceLane: SpeechCapturing {
             switch name {
             case "computer_command":
                 let instruction = (args["instruction"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                output = instruction.isEmpty ? #"{"status":"refused","say":"No instruction was provided."}"#
-                    : await self.commandHandler(instruction,
-                                                args["app"] as? String,
-                                                args["literal_text"] as? String, id)
+                if instruction.isEmpty {
+                    output = #"{"status":"refused","say":"No instruction was provided."}"#
+                } else {
+                    // The call can outrun the transcript's .completed — a
+                    // partial sampled here is exactly how "open calculator"
+                    // once became app:"Calendar". Wait briefly for the
+                    // turn's final text; typed turns return immediately.
+                    let transcript = await self.settledTranscript()
+                    let steps = (args["steps"] as? [String] ?? [])
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                    output = await self.commandHandler(instruction,
+                                                       args["app"] as? String,
+                                                       args["literal_text"] as? String,
+                                                       transcript, steps, id)
+                }
             case "respond_to_task":
                 let answer = (args["answer"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 output = answer.isEmpty ? #"{"status":"refused","say":"No answer was provided."}"#
@@ -633,7 +772,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
             if name == "computer_command", acceptedTask {
                 if self.pendingCalls.isEmpty {
                     self.awaitingTurnEnd = false
-                    if self.player.playbackIdle { self.onEvent?(id, .turnEnded) }
+                    if self.player.playbackIdle {
+                        self.onEvent?(id, .turnEnded)
+                        self.turnID = nil
+                        self.prepareNext()
+                    }
                     else { self.deferTurnEndOnDrain(turn: id) }
                 }
                 return
@@ -676,8 +819,12 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// `.turnEnded` and tool calls flow exactly like a spoken turn.
     func submitTyped(_ text: String, sessionID: UUID) async throws {
         turnID = sessionID
-        pendingCalls = []; handledCalls = []; toolCallsThisTurn = 0
+        pendingCalls = []; toolCallsThisTurn = 0
+        // Typed turns produce no input transcript — a stale pending flag
+        // from a spoken hold must not stall this turn's dispatch.
+        turnTranscript = nil; transcriptPending = false; turnAudioItemID = nil
         pendingTurnEndOnIdle = false
+        turnResponseOutstanding = false
         async let contextNote: () = injectTurnContext()
         try await client.sendText(text)
         if let jpeg = await screenShotProvider?() {
@@ -710,6 +857,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
             self.pendingTurnEndOnIdle = false
             Self.log.notice("playback_drain_deadline — ending turn without drain")
             self.onEvent?(id, .turnEnded)
+            if self.turnID == id { self.turnID = nil }
+            self.prepareNext()
         }
     }
 
@@ -719,12 +868,17 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private func requestResponseWhenFree() {
         guard !responseInFlight, !holding else { wantResponse = true; return }
         responseInFlight = true
+        // This response.create is what awaitingTurnEnd waits on — a done
+        // that lands while it was still queued (or belonged to a cancelled
+        // or pushed response) must not end the turn.
+        turnResponseOutstanding = awaitingTurnEnd
         armResponseWatchdog()
         Task { [weak self] in
             do { try await self?.client.requestResponse() }
             catch {
                 self?.responseInFlight = false
                 self?.awaitingTurnEnd = false
+                self?.turnResponseOutstanding = false
                 self?.flushSpeech()
             }
         }
@@ -741,6 +895,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
             Self.log.notice("response_watchdog_fired no response.done in 30s — rebuilding session")
             self.responseInFlight = false
             self.wantResponse = false
+            self.turnResponseOutstanding = false
+            self.cancelledResponsePending = false
             self.onEvent?(self.active?.id ?? self.turnID ?? UUID(),
                           .failure("The voice server stopped responding. Press Fn to reconnect."))
             // teardown() cancels the receiver first — no .closed event
@@ -842,6 +998,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 screenshotTask.cancel()
                 self.holding = false
                 self.flushSpeech()
+                // The tap ended no turn — release turnID so a later idle
+                // socket death doesn't fault this closed capture.
+                self.turnID = nil
+                self.prepareNext()
                 self.onEvent?(active.id, .final(""))
                 return
             }
@@ -853,6 +1013,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 // streamed, attach a screenshot, and arm awaitingTurnEnd
                 // on a turn that isn't its own.
                 guard !Task.isCancelled, self.active?.id == active.id else { return }
+                // This turn's audio item now exists server-side — a
+                // transcription completion is owed, and only now can one
+                // legitimately land.
+                self.transcriptPending = true
                 if self.respondOnCommit {
                     // The [context] note rides alongside the screenshot —
                     // both must land before response.create, and neither
@@ -871,6 +1035,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 } else {
                     self.holding = false
                     self.flushSpeech()
+                    // No response is coming for this commit — a deferred
+                    // stale-socket reprepare has no .responseDone to retry on.
+                    self.prepareNext()
                 }
                 self.onEvent?(active.id, .timing("Release to turn committed",
                                                  milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000))
@@ -893,13 +1060,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
         turnID = nil
         holding = false
         awaitingTurnEnd = false
+        turnResponseOutstanding = false
         pendingTurnEndOnIdle = false
         drainDeadline?.cancel()
         input.gate.close()?.finish()
         meterTimer?.invalidate(); meterTimer = nil
         finishTask?.cancel(); finishTask = nil
         screenshotTask?.cancel(); screenshotTask = nil
-        pendingCalls = []; handledCalls = []; transcriptInFlight = ""
+        pendingCalls = []; transcriptInFlight = ""
+        turnTranscript = nil; transcriptPending = false; turnAudioItemID = nil
         // The dead turn's queued response-create must not fire on release —
         // a cancelled typed turn would still answer after the user bailed.
         wantResponse = false
@@ -907,6 +1076,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // `prior == nil` is the typed-turn path — its response still has
         // to die with the cancel, and playback still has to stop.
         if prior != nil || needsCancel {
+            // The cancelled response keeps emitting until its done — a
+            // trailing arguments.done or the call list in that done must
+            // not dispatch under the next hold.
+            if responseInFlight { cancelledResponsePending = true }
             // Captured so the next start() can await it — a clearAudio
             // landing after the new hold streams would wipe it. Awaiting
             // the dead sender first closes the straggler hole: an append
@@ -923,6 +1096,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private func prepareNext() {
         guard enabled, prepared == nil, preparation == nil else { return }
+        // A stale-socket reprepare while a reply is live would teardown()
+        // the very connection it's arriving on — the create was already
+        // armed and its done would never come. Defer to the next
+        // .responseDone/.turnEnded, which re-runs this.
+        if client.isReady,
+           client.connectedAt.map({ Date().timeIntervalSince($0) > 50 * 60 }) == true,
+           responseInFlight || awaitingTurnEnd || pendingTurnEndOnIdle || wantResponse || holding {
+            return
+        }
         let attempt = reconnectAttempts
         reconnectAttempts += 1
         // 0.25s → 8s exponential cap — a dead socket must not storm.
@@ -943,6 +1125,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         cancel()
         prepared = nil
         speakQueue = []; wantResponse = false; responseInFlight = false
+        turnResponseOutstanding = false; cancelledResponsePending = false
         player.stop()
         await input.stop()
         client.teardown()

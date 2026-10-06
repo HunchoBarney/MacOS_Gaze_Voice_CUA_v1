@@ -54,6 +54,14 @@ actor CuaConnection {
     /// refusing every tool. Fired once per storm so the pool can re-mint
     /// the daemon; a live-but-refusing daemon never heals on its own.
     private let onDaemonHealthFault: (@Sendable () -> Void)?
+    /// Scoped variant of the same fault — carries the daemon socket this
+    /// transport was bound to so the pool can no-op a stale fault aimed
+    /// at a daemon generation it already recycled.
+    private let onDaemonSocketFault: (@Sendable (String) -> Void)?
+    /// The daemon socket this transport's proxy was bound to — the token
+    /// handed to `onDaemonSocketFault`, and the pool's key for closing
+    /// only proxies bound to a recycled daemon.
+    private(set) var boundSocket: String?
     /// A wedged daemon can hold the socket open and never answer — two
     /// consecutive request timeouts mark the transport dead rather than
     /// letting every later call burn a full timeout forever.
@@ -87,7 +95,8 @@ actor CuaConnection {
          arguments: [String] = ["mcp"],
          onToolCall: (@Sendable (String, Int?) -> Void)? = nil,
          socketProvider: (@Sendable () async throws -> String)? = nil,
-         onDaemonHealthFault: (@Sendable () -> Void)? = nil) {
+         onDaemonHealthFault: (@Sendable () -> Void)? = nil,
+         onDaemonSocketFault: (@Sendable (String) -> Void)? = nil) {
         // A write to a just-dead proxy raises SIGPIPE, whose default
         // disposition kills the process — ignore it once so EPIPE surfaces
         // as a thrown error instead of an app crash.
@@ -97,6 +106,7 @@ actor CuaConnection {
         self.onToolCall = onToolCall
         self.socketProvider = socketProvider
         self.onDaemonHealthFault = onDaemonHealthFault
+        self.onDaemonSocketFault = onDaemonSocketFault
     }
 
     deinit {
@@ -127,6 +137,7 @@ actor CuaConnection {
                 try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
             }
             let socket = try await socketProvider()
+            boundSocket = socket
             try await startProxy(launchArguments: ["mcp", "--embedded", "--socket", socket,
                                                    "--host-bundle-id", CuaDependency.hostBundleID])
             return
@@ -135,14 +146,11 @@ actor CuaConnection {
         if let bundled = CuaDependency.bundledExecutable, executable == bundled {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
             try await startEmbeddedDaemon()
+            boundSocket = embeddedDaemon?.socketPath
             launchArguments = ["mcp", "--embedded", "--socket", embeddedDaemon?.socketPath ?? "",
                                "--host-bundle-id", CuaDependency.hostBundleID]
         } else if executable == CuaDependency.installedExecutable {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
-            // The daemon's existing-profile browser grant is a launch-time
-            // property; reconcile before this process's first connection so a
-            // later consent request never finds a grantless daemon.
-            await CuaDaemonControl.ensureExistingProfileGrant()
         }
         try await startProxy(launchArguments: launchArguments)
     }
@@ -164,6 +172,7 @@ actor CuaConnection {
         } else if executable == CuaDependency.installedExecutable {
             try CuaDependency.verify(executable, expectedSHA256: CuaDependency.executableSHA256)
         }
+        boundSocket = socket
         try await startProxy(launchArguments: ["mcp", "--embedded", "--socket", socket,
                                                "--host-bundle-id", CuaDependency.hostBundleID])
     }
@@ -176,6 +185,7 @@ actor CuaConnection {
         let token = UUID()
         generation = token
         frames = MCPFrames()
+        consecutiveTimeouts = 0
         process.executableURL = executable
         process.arguments = launchArguments
         process.standardInput = stdin
@@ -282,7 +292,7 @@ actor CuaConnection {
     /// Mutations inside an already-bound window pay a post-action
     /// observation window in the driver. The daemon-level tail is sized by
     /// `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS`/`CUA_DRIVER_WINDOW_CHANGE_POLL_MS`
-    /// on the embedded spawn (see CuaDaemonControl) — per-call arguments are
+    /// on the embedded spawn (see CuaConnectionPool) — per-call arguments are
     /// NOT a safe channel: tool schemas are `additionalProperties:false`, so
     /// an extra arg fails validation as `invalid_arguments` before the typed
     /// projection can drop it.
@@ -309,11 +319,19 @@ actor CuaConnection {
                     // identically. Kill this transport so the next call
                     // re-mints it, and tell the pool's owner to recycle the
                     // daemon itself. A single refusal on a mutation is a
-                    // real tool error, never a storm.
+                    // real tool error, never a storm. Only refusals count:
+                    // a wedged local proxy or a slow daemon exhausts on
+                    // .timedOut/.closed — noteTimeout already tore the
+                    // transport down and the caller re-mints; recycling the
+                    // shared daemon for that would kill every other lane's
+                    // healthy proxies.
                     if Self.isReadOnly(name, arguments: arguments),
-                       Self.transientReadFault(error) {
+                       case .toolRefused(_, let code, _) = error,
+                       code == "tool_invocation_failed" {
+                        let socket = boundSocket
                         disconnect(DriverConnectionError.closed)
                         onDaemonHealthFault?()
+                        onDaemonSocketFault?(socket ?? "")
                     }
                     throw error
                 }
@@ -553,6 +571,7 @@ actor CuaConnection {
         // Closing a FileHandle while another thread reads it can raise an ObjC exception.
         // Child exit closes the write side, unblocking the reader which owns its handle.
         output = nil
+        boundSocket = nil
         stopEmbeddedDaemon()
     }
 }

@@ -111,9 +111,7 @@ for line in sys.stdin:
                                             onToolCall: { name, _ in calls?.record(name) }) },
             judge: judge,
             fastLaneResolver: fastLaneResolver,
-            screenLocked: { false },
-            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
+            screenLocked: { false })
     }
 
     private func makeConfig() -> Config {
@@ -237,7 +235,7 @@ for line in sys.stdin:
         _ = await runtime.beginVoiceTask("insert the reply in Fixture", app: "Fixture")
         let first = try XCTUnwrap(runtime.tasks.first)
         try await until { !first.active }
-        XCTAssertEqual(first.status, "Failed", first.message)
+        XCTAssertEqual(first.status, "Waiting", first.message)
         let pending = controller.pendingQuestions
         XCTAssertEqual(pending.count, 1)
         XCTAssertTrue(pending[0].prompt.contains("Body"), pending[0].prompt)
@@ -317,14 +315,22 @@ for line in sys.stdin:
         let config = makeConfig()
         let script = try driverScript(
             apps: "[{'name':'Fixture','bundle_id':'test.fixture','pid':4242,'running':True}]",
-            windows: "[{'window_id':7,'title':'Fixture','is_on_screen':True}]")
+            windows: "[{'window_id':7,'title':'Fixture','is_on_screen':True}]",
+            elements: "[{'element_index':0,'element_token':'save0','role':'AXButton','label':'Save','enabled':True}]")
         let judgeCalls = Counter()
-        let runtime = makeRuntime(config: config, script: script, judge: { _, _ in
+        let clicked = Flag()
+        let runtime = makeRuntime(config: config, script: script, judge: { _, questions in
             judgeCalls.bump()
             // The drive retries a transient thrown judge call once — both
             // calls must fail for the work itself to fail. Only JevError
             // faults earn that retry, so the stub throws one.
             if judgeCalls.value <= 2 { throw JevError.transport(URLError(.timedOut)) }
+            // A bare "done" with no dispatch this run is blocked — the
+            // retried attempt clicks once before claiming done.
+            if !clicked.value, let id = self.nextLaneID(questions, containing: "Save") {
+                clicked.value = true
+                return self.answers(next: id)
+            }
             return self.answers(next: "done")
         })
         let controller = VoiceController(config: config, speech: Capture(),
@@ -476,9 +482,6 @@ for line in sys.stdin:
         let lines = controller.taskDiagnostics(work)
         XCTAssertTrue(lines.contains { $0.hasPrefix("intent ") && $0.contains("attempt") }, lines.joined(separator: " | "))
         XCTAssertTrue(lines.contains { $0.contains("verified") }, lines.joined(separator: " | "))
-        XCTAssertNotNil(work.timings["Transcript to submission"])
-        XCTAssertNotNil(work.timings["Jev execution"])
-        XCTAssertNotNil(work.timings["Transcript to observed result"])
         await controller.shutdown()
     }
 

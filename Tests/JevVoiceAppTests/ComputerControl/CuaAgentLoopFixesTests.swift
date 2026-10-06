@@ -61,7 +61,7 @@ final class CuaAgentLoopFixesTests: XCTestCase {
                          approve: ((String) async throws -> Bool)? = nil,
                          leases: (any CuaLaneLeasing)? = nil,
                          timedCall: CuaAgentLoop.TimedCall? = nil,
-                         stepTiming: ((Int, [String: Double]) -> Void)? = nil,
+                         windowRows: [JSONValue] = [],
                          dispatch: @escaping (String, [String: JSONValue]) throws -> JSONValue = { _, _ in
                              .object(["effect": .string("confirmed")])
                          })
@@ -75,7 +75,7 @@ final class CuaAgentLoopFixesTests: XCTestCase {
                 return snapshots.count > 1 ? snapshots.removeFirst() : (snapshots.first ?? .object([:]))
             }
             if name == "list_apps" { return .object(["apps": .array([])]) }
-            if name == "list_windows" { return .object(["windows": .array([])]) }
+            if name == "list_windows" { return .object(["windows": .array(windowRows)]) }
             if name == "bring_to_front" { return .object(["activated": .bool(true)]) }
             return try dispatch(name, args)
         }
@@ -85,8 +85,7 @@ final class CuaAgentLoopFixesTests: XCTestCase {
         }
         return (CuaAgentLoop(call: call, judge: judge, approve: approve,
                              isFrontmostApp: { _ in frontmost },
-                             timedCall: timedCall, lanes: leases,
-                             stepTiming: stepTiming), calls, asked)
+                             timedCall: timedCall, lanes: leases), calls, asked)
     }
 
     private func criteria(_ questions: [String: Question]) -> Set<String> {
@@ -106,7 +105,11 @@ final class CuaAgentLoopFixesTests: XCTestCase {
         let (loop, _, asked) = harness(states: [proven], steps: { _ in self.answers(next: "click_1") })
         let result = try await loop.drive(DriveTask(goal: "send", pid: 7, windowID: 42,
                                                     successContains: ["sent"]))
-        XCTAssertEqual(result.status, .done)
+        // The corpus already proves the goal before any dispatch — the
+        // pre-judge settle reports alreadySatisfied, not done.
+        guard case .alreadySatisfied = result.status else {
+            return XCTFail("expected alreadySatisfied, got \(result.status)")
+        }
         XCTAssertTrue(asked.value.isEmpty, "the corpus match must finish before the judge is asked")
     }
 
@@ -174,28 +177,32 @@ final class CuaAgentLoopFixesTests: XCTestCase {
                 return .object(["effect": .string("confirmed")])
             })
         let result = try await loop.drive(DriveTask(goal: "scroll the list", pid: 7, windowID: 42))
-        guard case .blocked = result.status else {
-            return XCTFail("expected blocked, got \(result.status)")
-        }
-        XCTAssertEqual(scrolls, 2, "two uncertain outcomes on the identical dispatch, then honest blocked")
+        // Two uncertain dispatches of the identical pick, then the re-pick
+        // bound retires the lane — a judge that insists on it hands back
+        // untrusted instead of burning the step budget.
+        XCTAssertEqual(result.status, .handedBack(.untrustedAnswer))
+        XCTAssertEqual(scrolls, 2, "two uncertain outcomes on the identical dispatch, then honest stop")
     }
 
     /// Four uncertain outcomes across DIFFERENT dispatches also block —
-    /// the per-key bound doesn't let a run spend unlimited uncertain passes.
+    /// the run-wide uncertain bound caps the passes a run can spend.
     func testUncertainOutcomeTotalBoundAcrossLanes() async throws {
         var dispatches = 0
         let (loop, _, _) = harness(
             states: [window([element(0, role: "AXButton", label: "Go")])],
             steps: { step in
-                // scroll_up lexically sorts last — the 30-lane cap drops
-                // it, so the fourth distinct dispatch is a key lane.
-                self.answers(next: ["scroll_down", "scroll_left", "click_0", "key_return"][min(step, 3)])
+                // Four distinct scroll lanes — all offered for a scroll
+                // goal — so each uncertain outcome lands on a different
+                // dispatch key.
+                self.answers(next: ["scroll_down", "scroll_left", "scroll_up", "scroll_right"][min(step, 3)])
             },
             dispatch: { _, _ in
                 dispatches += 1
                 throw CuaUncertainOutcome(tool: "any", result: .object([:]))
             })
-        let result = try await loop.drive(DriveTask(goal: "scroll then press return",
+        // A purely scroll-shaped goal keeps the 30-lane shortlist off the
+        // keyboard lanes, so all four scroll directions stay offered.
+        let result = try await loop.drive(DriveTask(goal: "scroll the list",
                                                     pid: 7, windowID: 42))
         guard case .blocked = result.status else {
             return XCTFail("expected blocked, got \(result.status)")
@@ -268,7 +275,9 @@ final class CuaAgentLoopFixesTests: XCTestCase {
     }
 
     /// The same fill/submit dispatch skipped twice leaves the offered
-    /// set — the model must pick something else or honestly stop.
+    /// set — the model must pick something else or honestly stop. A judge
+    /// that insists on the banned lane hands back untrusted: the lane was
+    /// never offered again, so the pick cannot be honored.
     func testRepickBoundRemovesLaneFromOfferedSet() async throws {
         let (loop, calls, asked) = harness(
             states: [window([element(0, role: "AXTextField", label: "Name")])],
@@ -278,11 +287,12 @@ final class CuaAgentLoopFixesTests: XCTestCase {
         let result = try await loop.drive(DriveTask(goal: "press the return key",
                                                     pid: 7, windowID: 42,
                                                     values: ["field": "x"]))
-        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(result.status, .handedBack(.untrustedAnswer))
         XCTAssertEqual(calls.value.filter { $0.0 == "press_key" }.count, 1,
                        "the identical submit key is never re-dispatched")
-        XCTAssertFalse(criteria(asked.value[3]).contains("key_return"),
-                       "the twice-skipped lane leaves the offered set")
+        let lastAsk = asked.value.last ?? [:]
+        XCTAssertFalse(criteria(lastAsk).contains("key_return"),
+                       "the skipped-then-banned lane leaves the offered set")
     }
 
     /// Synthesized typing runs ~38ms/char — type_text gets a text-scaled
@@ -306,27 +316,6 @@ final class CuaAgentLoopFixesTests: XCTestCase {
         XCTAssertEqual(timeouts.value, [30 + 7 * 0.05])
     }
 
-    /// The step-timing seam fires once per iteration with the phase map —
-    /// early exits included.
-    func testStepTimingFiresPhasesPerIteration() async throws {
-        let timings = Box<[(Int, [String: Double])]>([])
-        let (loop, _, _) = harness(
-            states: [window([element(0, role: "AXButton", label: "Go"),
-                             element(1, role: "AXButton", label: "Stop")])],
-            steps: { step in step == 0
-                ? self.answers(next: "click_0")
-                : self.answers(next: "done") },
-            stepTiming: { step, phases in timings.value.append((step, phases)) })
-        let result = try await loop.drive(DriveTask(goal: "go", pid: 7, windowID: 42))
-        XCTAssertEqual(result.status, .done)
-        XCTAssertEqual(timings.value.count, 2)
-        for key in ["observe_ms", "judge_ms", "dispatch_ms", "post_ms"] {
-            XCTAssertNotNil(timings.value[0].1[key], "step 0 is missing \(key)")
-        }
-        XCTAssertNotNil(timings.value[1].1["observe_ms"])
-        XCTAssertNotNil(timings.value[1].1["judge_ms"])
-    }
-
     /// The click lane gets the same re-pick bound as fills and submits:
     /// two identical dispatches into a window whose observation never
     /// changes, then the lane leaves the offered set — a third blind
@@ -343,13 +332,18 @@ final class CuaAgentLoopFixesTests: XCTestCase {
                 ? self.answers(next: "click_0")
                 : self.answers(next: "done") })
         let result = try await loop.drive(DriveTask(goal: "open search", pid: 7, windowID: 42))
-        XCTAssertEqual(result.status, .done)
+        // Two consecutive identical picks ban the lane from the next offer —
+        // the scripted third click_0 answer is then untrusted, and the loop
+        // never dispatched it either way.
         XCTAssertEqual(calls.value.filter { $0.0 == "click" }.count, 2,
                        "the third identical blind click is never dispatched")
-        XCTAssertFalse(criteria(asked.value[3]).contains("click_0"),
-                       "the suppressed lane leaves the offered set")
-        XCTAssertTrue(criteria(asked.value[3]).contains("click_1"),
+        XCTAssertGreaterThanOrEqual(asked.value.count, 3)
+        XCTAssertFalse(criteria(asked.value[2]).contains("click_0"),
+                       "the banned lane leaves the offered set")
+        XCTAssertTrue(criteria(asked.value[2]).contains("click_1"),
                       "other lanes stay offered")
+        if case .done = result.status { } else if case .handedBack = result.status { }
+        else { XCTFail("expected done or handedBack, got \(result.status)") }
     }
 
     /// A re-snapshot that rotates element_token AND element_index must not
@@ -378,12 +372,16 @@ final class CuaAgentLoopFixesTests: XCTestCase {
                 self.answers(next: ["click_0", "click_3", "click_5", "done"][min(step, 3)])
             })
         let result = try await loop.drive(DriveTask(goal: "open search", pid: 7, windowID: 42))
-        XCTAssertEqual(result.status, .done)
+        // The scripted third pick targets the banned control at its new
+        // index — an unoffered answer hands back untrusted rather than
+        // dispatching blind. The ban itself is what the asks prove.
+        XCTAssertEqual(result.status, .handedBack(.untrustedAnswer))
         XCTAssertEqual(calls.value.filter { $0.0 == "click" }.count, 2,
                        "the same control is retried at most once across re-snapshots")
-        XCTAssertFalse(criteria(asked.value[3]).contains("click_2"),
+        let lastAsk = asked.value.last ?? [:]
+        XCTAssertFalse(criteria(lastAsk).contains("click_5"),
                        "the ban holds at the element's new index and token")
-        XCTAssertTrue(criteria(asked.value[3]).contains("click_9"),
+        XCTAssertTrue(criteria(lastAsk).contains("click_9"),
                       "a different control at a stable slot is not collateral")
     }
 
@@ -568,6 +566,74 @@ final class CuaAgentLoopFixesTests: XCTestCase {
         XCTAssertEqual(click["capture_id"], .string("cap1"))
     }
 
+    /// The "Yanky" trap: the judge alternates an element lane and a visual
+    /// lane at the SAME on-screen target — distinct lane ids, so the
+    /// consecutive-pick rule never fires. The per-target strike bound must
+    /// remove every lane aiming there after a bounded number of
+    /// state-changing-less dispatches, whichever identity the pick wore.
+    func testAlternatingLanesOnOneTargetHitTheStrikeBound() async throws {
+        let stuck = window([element(0, role: "AXButton", label: "Yanky")],
+                           extra: ["capture_id": .string("cap1")])
+        let parses = Box(0)
+        let (loop, calls, asked) = harness(
+            states: [stuck],
+            steps: { step in
+                switch step {
+                case 0: return self.answers(next: "vclick_r1")
+                case 1: return self.answers(next: "click_0")
+                case 2: return self.answers(next: "vclick_r3")
+                case 3: return self.answers(next: "vclick_r4")
+                default: return self.answers(next: "stuck")
+                }
+            },
+            dispatch: { name, _ in
+                if name == "parse_visual_regions" {
+                    // Fresh parse, fresh region ids — the live failure the
+                    // bound exists for: every pick carries a new id|text
+                    // pair the consecutive re-pick rule cannot see.
+                    parses.value += 1
+                    return .object(["regions": .array([
+                        .object(["id": .string("r\(parses.value)"), "kind": .string("text"),
+                                 "bounds": .object(["x": .number(10), "y": .number(20),
+                                                    "width": .number(40), "height": .number(20)]),
+                                 "text": .string("Yanky"), "confidence": .number(0.9),
+                                 "interactive": .bool(true)])])])
+                }
+                return .object(["effect": .string("confirmed")])
+            })
+        let result = try await loop.drive(DriveTask(goal: "click yanky",
+                                                    pid: 7, windowID: 42))
+        guard case .blocked = result.status else {
+            return XCTFail("expected blocked once the dead target is banned, got \(result.status)")
+        }
+        XCTAssertEqual(calls.value.filter { $0.0 == "click" }.count, 4,
+                       "bounded strikes — no twelve-step hammering of one dead target")
+        let finalCriteria = criteria(asked.value[asked.value.count - 1])
+        XCTAssertFalse(finalCriteria.contains("vclick_r1"),
+                       "the visual lane at the dead target leaves the offer set")
+        XCTAssertFalse(finalCriteria.contains("click_0"),
+                       "the element lane at the dead target leaves the offer set")
+    }
+
+    /// "click X" with no app means the thing on screen: the loop binds the
+    /// frontmost app's window instead of refusing the goal for want of a
+    /// named target. The test host IS the frontmost app here, so a nil-app
+    /// task that reaches the observe/judge loop proves the binding.
+    func testAppLessGoalBindsTheFrontmostWindow() async throws {
+        let surface = window([element(0, role: "AXButton", label: "Yanky")])
+        let (loop, calls, _) = harness(
+            states: [surface],
+            steps: { step in step == 0
+                ? self.answers(next: "click_0")
+                : self.answers(next: "done") },
+            windowRows: [.object(["window_id": .number(9),
+                                  "is_on_screen": .bool(true)])])
+        let result = try await loop.drive(DriveTask(goal: "click yanky"))
+        XCTAssertTrue(calls.value.contains { $0.0 == "get_window_state" },
+                      "an app-less goal must reach the observe/judge loop, not refuse")
+        XCTAssertEqual(result.status, .done)
+    }
+
     /// The converse invariant: an adequate AX pool — at least the element
     /// floor plus a goal-matched lane — must not grow the judge's option
     /// space with pixels. No screenshot read, no parse, ever.
@@ -576,7 +642,9 @@ final class CuaAgentLoopFixesTests: XCTestCase {
             + [element(9, role: "AXButton", label: "Save File")]
         let (loop, calls, _) = harness(
             states: [window(elements)],
-            steps: { _ in self.answers(next: "done") })
+            steps: { step in step == 0
+                ? self.answers(next: "click_9")
+                : self.answers(next: "done") })
         let result = try await loop.drive(DriveTask(goal: "save the file", pid: 7, windowID: 42))
         XCTAssertEqual(result.status, .done)
         XCTAssertFalse(calls.value.contains { $0.0 == "parse_visual_regions" },

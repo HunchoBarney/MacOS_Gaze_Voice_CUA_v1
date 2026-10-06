@@ -1,0 +1,47 @@
+{
+  "models": [
+    {
+      "artifact": "omniparser-icon-detect-1280-opset17.onnx",
+      "artifactSha256": "09f8f253bd8c3ad1d23e01ff6d48304db7c5643229324baa918f9b7b5d9ed2ac",
+      "artifactSize": 80906060,
+      "exportSource": "source/cua-perception-source.tar.gz contains models/conversion-recipe.json and models/export_omniparser_detector.py; principal exporter sources are bundled under source/exporter/",
+      "license": "AGPL-3.0-only",
+      "origin": "https://huggingface.co/microsoft/OmniParser-v2.0",
+      "redistributionAllowed": true,
+      "revision": "6600256cb0f1b07651e3bc86166196307bad7e2d",
+      "sourceArtifact": {
+        "artifact": "omniparser-icon-detect-model.pt",
+        "path": "source/upstream/omniparser-icon-detect-model.pt",
+        "sha256": "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57",
+        "size": 40623819
+      },
+      "usageRestrictions": [
+        "Do not publish until AGPL release review is complete"
+      ],
+      "verificationStatus": "local-macos-reproduced-twice; ONNX checker; PyTorch parity fixtures"
+    },
+    {
+      "artifact": "ppocrv5-mobile-det.onnx",
+      "artifactSha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+      "artifactSize": 4826518,
+      "exportSource": "source/cua-perception-source.tar.gz contains models/conversion-recipe.json and models/export_omniparser_detector.py; principal exporter sources are bundled under source/exporter/",
+      "license": "Apache-2.0",
+      "origin": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx",
+      "redistributionAllowed": true,
+      "revision": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
+      "verificationStatus": "release-verified"
+    },
+    {
+      "artifact": "ppocrv5-mobile-rec-en.onnx",
+      "artifactSha256": "b5f833dfc5d0eb71da397b4efa06ebeee9b431b690a47d6af40d77d8eabc557f",
+      "artifactSize": 7848423,
+      "exportSource": "source/cua-perception-source.tar.gz contains models/conversion-recipe.json and models/export_omniparser_detector.py; principal exporter sources are bundled under source/exporter/",
+      "license": "Apache-2.0",
+      "origin": "https://huggingface.co/PaddlePaddle/en_PP-OCRv5_mobile_rec_onnx",
+      "redistributionAllowed": true,
+      "revision": "3fafbc3b5dcf93dd72add9f48368be8a3a2cd33b",
+      "verificationStatus": "release-verified"
+    }
+  ],
+  "schemaVersion": 1
+}

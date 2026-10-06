@@ -132,6 +132,64 @@ struct CodexFrames {
     }
 }
 
+/// Broadcasts the transport's notification stream to per-reader streams.
+/// A cancelled AsyncStream next() finishes the shared storage for EVERY
+/// iterator — the raw stream can never be handed out directly, or one
+/// timed-out/cancelled reader would end events for the whole session. A
+/// single pump drains it; each subscriber gets a private stream whose
+/// abandonment only drops its own copy. Events that land while no
+/// subscriber is attached are dropped, not replayed — subscribe early.
+private final class CodexEventBus: @unchecked Sendable {
+    private let lock = NSLock()
+    private var subscribers: [UUID: AsyncStream<CodexEvent>.Continuation] = [:]
+    private var terminated = false
+    private var pump: Task<Void, Never>?
+
+    init(raw: AsyncStream<CodexEvent>) {
+        pump = Task { [weak self] in
+            for await event in raw { self?.broadcast(event) }
+            self?.finishAll()
+        }
+    }
+
+    deinit { pump?.cancel() }
+
+    func stream() -> AsyncStream<CodexEvent> {
+        let id = UUID()
+        var continuation: AsyncStream<CodexEvent>.Continuation!
+        let stream = AsyncStream<CodexEvent> { continuation = $0 }
+        continuation.onTermination = { [weak self] _ in self?.remove(id) }
+        lock.lock()
+        let dead = terminated
+        if !dead { subscribers[id] = continuation }
+        lock.unlock()
+        if dead { continuation.finish() }
+        return stream
+    }
+
+    private func broadcast(_ event: CodexEvent) {
+        lock.lock()
+        let targets = subscribers.values
+        lock.unlock()
+        for target in targets { target.yield(event) }
+    }
+
+    private func finishAll() {
+        lock.lock()
+        terminated = true
+        let targets = subscribers.values
+        subscribers.removeAll()
+        lock.unlock()
+        for target in targets { target.finish() }
+    }
+
+    private func remove(_ id: UUID) {
+        lock.lock()
+        subscribers.removeValue(forKey: id)
+        lock.unlock()
+    }
+}
+
 /// One stdio JSON-RPC session against `codex app-server`. Covers the observed
 /// v2 surface: initialize → thread/start | thread/resume → turn/start →
 /// notification stream → turn/interrupt. Server→client requests are always
@@ -161,7 +219,10 @@ public actor CodexProtocolClient {
     private var closed = false
     /// Absolute CODEX_HOME the server reported at initialize.
     public private(set) var codexHome: String?
-    public nonisolated let events: AsyncStream<CodexEvent>
+    /// Each access returns an independent subscriber stream — a reader that
+    /// is cancelled or abandoned finishes only its own copy.
+    public nonisolated var events: AsyncStream<CodexEvent> { eventBus.stream() }
+    private let eventBus: CodexEventBus
     private let eventContinuation: AsyncStream<CodexEvent>.Continuation
     /// A client that completed `initialize` and whose process is still alive.
     public var connected: Bool { initialized && process?.isRunning == true }
@@ -177,8 +238,9 @@ public actor CodexProtocolClient {
         self.clientVersion = clientVersion
         self.onStderrLine = onStderrLine
         var continuation: AsyncStream<CodexEvent>.Continuation!
-        events = AsyncStream { continuation = $0 }
+        let raw = AsyncStream<CodexEvent> { continuation = $0 }
         eventContinuation = continuation
+        eventBus = CodexEventBus(raw: raw)
     }
 
     deinit {
@@ -186,6 +248,7 @@ public actor CodexProtocolClient {
         stderrReader?.cancel()
         try? input?.close()
         if process?.isRunning == true { process?.terminate() }
+        eventContinuation.finish()
     }
 
     public func start() async throws {
@@ -284,14 +347,18 @@ public actor CodexProtocolClient {
     }
 
     /// New persistent thread rooted at `cwd` (the agent's workspace).
+    /// `sandbox` pins the thread's sandbox policy — agents keep
+    /// "workspace-write"; the read-only planner passes "read-only" so the
+    /// request can't silently widen what its config.toml promised.
     @discardableResult
     public func startThread(cwd: String, model: String? = nil,
                             developerInstructions: String? = nil,
-                            ephemeral: Bool = false) async throws -> String {
+                            ephemeral: Bool = false,
+                            sandbox: String = "workspace-write") async throws -> String {
         var params: [String: JSONValue] = [
             "cwd": .string(cwd),
             "approvalPolicy": .string("never"),
-            "sandbox": .string("workspace-write"),
+            "sandbox": .string(sandbox),
             "ephemeral": .bool(ephemeral)
         ]
         if let model { params["model"] = .string(model) }

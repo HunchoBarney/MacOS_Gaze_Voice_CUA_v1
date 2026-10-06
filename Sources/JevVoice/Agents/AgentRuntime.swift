@@ -213,6 +213,13 @@ final class AgentRuntime: ObservableObject {
     /// Endpoint materialization is per-slug deduped — a prewarm racing a
     /// delegation must not mint twin loopback servers for one agent.
     private var endpointTasks: [String: Task<Void, Error>] = [:]
+    /// Background cold starts per slug — tracked so removal/quit can cancel
+    /// and drain them; a warm suspended at hooks would otherwise spawn an
+    /// app-server after teardown already walked past.
+    private var warmTasks: [String: Task<Void, Never>] = [:]
+    /// Set by stopAll — a late send/warm suspended past the task drain must
+    /// fail fast instead of re-registering fresh tasks mid-teardown.
+    private var stopped = false
     /// Pending asks already announced — the diff that turns a gate-minted
     /// ask into a spoken/pushed one exactly once.
     private var knownPendingIDs: Set<String> = []
@@ -308,6 +315,12 @@ final class AgentRuntime: ObservableObject {
         // must not mint endpoints for a dead agent after teardown.
         endpointTasks[agent.slug]?.cancel()
         connectTasks[agent.slug]?.cancel()
+        // Cancellation is advisory, not a halt — drain the warm before
+        // teardown so a spawn it already joined can't register after
+        // bridge.stop walked the session registry.
+        let warm = warmTasks.removeValue(forKey: agent.slug)
+        warm?.cancel()
+        await warm?.value
         await bridge.stop(slug: agent.slug)
         try await store.remove(slug: agent.slug)
         // The agent's loopback servers die with it too — a listener left
@@ -352,11 +365,19 @@ final class AgentRuntime: ObservableObject {
     /// awaited before thread bind — spawn writes config.toml from
     /// mcpServersFor, which must exist first.
     private func warm(_ agent: CompanionAgent) {
-        Task { @MainActor [weak self] in
+        guard !stopped else { return }
+        warmTasks[agent.slug]?.cancel()
+        warmTasks[agent.slug] = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await self.ensureEndpoints(for: agent)
                 await self.hooksTask?.value
+                // The agent may have been removed while the endpoints/hooks
+                // were in flight — spawning now would orphan an app-server.
+                // Cancellation is checked too: a cancelled warm (removal,
+                // quit) must not spawn past it.
+                guard !Task.isCancelled,
+                      await self.store.agent(slug: agent.slug) != nil else { return }
                 _ = try await self.bridge.threadID(for: agent)
             } catch {
                 Self.log.notice("prewarm \(agent.slug, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
@@ -370,6 +391,9 @@ final class AgentRuntime: ObservableObject {
     func send(_ text: String, to agent: CompanionAgent) async throws -> String {
         await hooksTask?.value
         try await ensureEndpoints(for: agent)
+        // An in-flight send resuming past stopAll's drain must not spawn a
+        // session the bridge teardown already walked past.
+        guard !stopped else { throw CancellationError() }
         let turnID = try await bridge.send(to: agent, message: text)
         // Persist the bound thread so a respawn RESUMES the agent's chat
         // instead of starting a fresh one — the agent's memory is its thread.
@@ -385,6 +409,7 @@ final class AgentRuntime: ObservableObject {
     /// workspace repairs it. Serialized per slug: a prewarm racing a send
     /// must share one materialization, not mint twin daemons + endpoints.
     private func ensureEndpoints(for agent: CompanionAgent) async throws {
+        guard !stopped else { throw CancellationError() }
         if let inFlight = endpointTasks[agent.slug] { return try await inFlight.value }
         let task = Task { @MainActor [weak self] in
             guard let self else { throw CancellationError() }
@@ -710,9 +735,25 @@ final class AgentRuntime: ObservableObject {
     /// `terminate` while `codex app-server` children were still spawning,
     /// leaving orphaned processes holding CODEX_HOME and loopback ports.
     func stopAll() async {
+        stopped = true
         eventTask?.cancel()
-        await bridge.stopAll()
+        // Stop routine fires first so no new sends arrive mid-teardown.
         await scheduler.stopAll()
+        hooksTask?.cancel()
+        // Cancellation is advisory, not a halt — a suspended endpoint/
+        // connect/warm task resumes past teardown and mints listeners,
+        // driver connections and codex sessions the cleanup below already
+        // walked past. Cancel then drain every tracked task first.
+        for task in warmTasks.values { task.cancel() }
+        for task in endpointTasks.values { task.cancel() }
+        for task in connectTasks.values { task.cancel() }
+        for task in warmTasks.values { await task.value }
+        for task in endpointTasks.values { _ = try? await task.value }
+        for task in connectTasks.values { _ = try? await task.value }
+        warmTasks.removeAll()
+        endpointTasks.removeAll()
+        connectTasks.removeAll()
+        await bridge.stopAll()
         for endpoint in endpoints.values {
             await endpoint.cu.stop()
             await endpoint.jev.stop()

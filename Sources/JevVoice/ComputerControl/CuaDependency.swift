@@ -22,13 +22,14 @@ enum CuaDependency {
         Bundle.main.object(forInfoDictionaryKey: "JevCuaDriverSHA256") as? String
     }
 
-    /// A passing full hash is remembered per path — in memory because every
-    /// connect() and pool proxy verifies, and in UserDefaults so a cold app
-    /// start also skips the ~72MB read. The record is bound to the pin, so a
-    /// new expectedSHA256 always rehashes.
+    /// A passing full hash is remembered per path for the process lifetime —
+    /// every connect() and pool proxy verifies, so the stat shortcut skips
+    /// repeat ~72MB reads. Nothing persists: a UserDefaults record is
+    /// forgeable by any same-UID process that can stat() the file, so each
+    /// cold start pays one honest hash. The record is bound to the pin, so
+    /// a new expectedSHA256 always rehashes.
     private static var memoryVerified: [String: (sha: String, fingerprint: String)] = [:]
     private static let memoryVerifiedLock = NSLock()
-    private static let verifiedDefaultsKey = "cuaDependencyVerifiedStat"
 
     /// `stat` identity of the file a hash covered: dev, ino, size and both
     /// timestamps. The record is taken BEFORE the read, so a mid-read swap
@@ -46,35 +47,20 @@ enum CuaDependency {
         memoryVerifiedLock.lock()
         let hit = memoryVerified[path]
         memoryVerifiedLock.unlock()
-        if let hit { return hit.sha == sha ? hit.fingerprint : nil }
-        guard let entry = UserDefaults.standard.dictionary(forKey: verifiedDefaultsKey)?[path] as? [String: String],
-              entry["sha"] == sha, let fingerprint = entry["fp"] else { return nil }
-        memoryVerifiedLock.lock()
-        memoryVerified[path] = (sha: sha, fingerprint: fingerprint)
-        memoryVerifiedLock.unlock()
-        return fingerprint
+        guard let hit, hit.sha == sha else { return nil }
+        return hit.fingerprint
     }
 
     private static func recordVerified(path: String, sha: String, fingerprint: String) {
         memoryVerifiedLock.lock()
         memoryVerified[path] = (sha: sha, fingerprint: fingerprint)
         memoryVerifiedLock.unlock()
-        var all = UserDefaults.standard.dictionary(forKey: verifiedDefaultsKey) ?? [:]
-        // Verified targets are the two executable paths plus test fixtures —
-        // cap the record so throwaway paths cannot grow it without bound.
-        if all.count >= 8, all[path] == nil { all.removeAll(keepingCapacity: true) }
-        all[path] = ["sha": sha, "fp": fingerprint]
-        UserDefaults.standard.set(all, forKey: verifiedDefaultsKey)
     }
 
     private static func forgetVerified(path: String) {
         memoryVerifiedLock.lock()
         memoryVerified.removeValue(forKey: path)
         memoryVerifiedLock.unlock()
-        if var all = UserDefaults.standard.dictionary(forKey: verifiedDefaultsKey),
-           all.removeValue(forKey: path) != nil {
-            UserDefaults.standard.set(all, forKey: verifiedDefaultsKey)
-        }
     }
 
     static func verify(_ file: URL, expectedSHA256: String) throws {

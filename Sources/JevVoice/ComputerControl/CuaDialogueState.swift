@@ -58,29 +58,13 @@ struct CuaDialogueState {
         }
     }
 
-    /// Describes a new intent only. Answers and retries resume the referenced entry in
-    /// place via answer() and revise(); they are never relationships. No caller adds
-    /// non-independent intents — the cases persist because VoiceController's task
-    /// diagnostics still switch on the recorded value.
-    enum Relationship: Equatable {
-        case independent
-        case refinement(of: UUID)
-        case continuation(of: UUID)
-        case correction(of: UUID)
-    }
-
-    /// An execution-blocking edge between intents. Nothing creates these anymore —
-    /// the type survives on Entry only because the task diagnostics in
-    /// VoiceController and the settle path in CuaVoiceRuntime still read it.
-    struct Prerequisite: Equatable {
-        let intentID: UUID
-        let requiresIntentID: UUID
-        let requiredFact: FactKind
-    }
-
     enum FactKind: Equatable {
         case targetObserved
         case resultObserved
+        /// A driver-confirmed effect — the loop's `.result` postcondition.
+        /// Distinct from `resultObserved`, which can carry the model's own
+        /// done-verdict; only driver-grounded kinds count as settle evidence.
+        case result
     }
 
     /// A verified readback bound to the producing attempt — recorded evidence,
@@ -214,8 +198,6 @@ struct CuaDialogueState {
 
     struct Entry: Equatable {
         let intent: Intent
-        let relationship: Relationship
-        let prerequisite: Prerequisite?
         fileprivate(set) var status: Status = .pending
         fileprivate(set) var attempts: [Attempt] = []
         fileprivate(set) var question: Question?
@@ -227,8 +209,6 @@ struct CuaDialogueState {
     enum TransitionError: Error, Equatable {
         case duplicateIntent
         case unknownIntent
-        case unknownRelatedIntent
-        case invalidPrerequisite
         case invalidTransition
         case invalidAttempt
         case invalidQuestion
@@ -253,21 +233,9 @@ struct CuaDialogueState {
 
     func entry(for id: UUID) -> Entry? { entries.first { $0.intent.id == id } }
 
-    /// Whether the intent may begin an attempt: pending, with its prerequisite
-    /// (when present) discharged by a verified fact of the required kind on the
-    /// required intent — and only while that fact is revision-current. Answer,
-    /// revise and cancel all bump the required intent's revision, and every
-    /// path that re-opens an intent after a fact-recording finish goes through
-    /// one of them, so evidence an earlier context produced can never satisfy
-    /// a later attempt or a cancelled intent silently. A plain `verified`
-    /// finish records no fact and can never satisfy a fact-bound prerequisite.
+    /// Whether the intent may begin an attempt: it exists and is pending.
     func canExecute(_ id: UUID) -> Bool {
-        guard let candidate = entry(for: id), candidate.status == .pending else { return false }
-        guard let prerequisite = candidate.prerequisite else { return true }
-        guard let required = entry(for: prerequisite.requiresIntentID) else { return false }
-        return required.verifiedFacts.contains {
-            $0.kind == prerequisite.requiredFact && $0.revision == required.revision
-        }
+        entry(for: id)?.status == .pending
     }
 
     /// The intent currently waiting on a user answer — the newest pending
@@ -296,8 +264,7 @@ struct CuaDialogueState {
         }.sorted { ($0.question?.sequence ?? 0) < ($1.question?.sequence ?? 0) }
     }
 
-    mutating func add(_ intent: Intent, relationship: Relationship = .independent,
-                      prerequisite: Prerequisite? = nil) throws {
+    mutating func add(_ intent: Intent) throws {
         guard !knownIntentIDs.contains(intent.id) else { throw TransitionError.duplicateIntent }
         guard entries.filter({ !$0.status.isResolved }).count < unresolvedLimit else {
             throw TransitionError.unresolvedCapacity
@@ -306,21 +273,7 @@ struct CuaDialogueState {
               !intent.source.transcriptRanges.isEmpty else {
             throw TransitionError.invalidProvenance
         }
-        switch relationship {
-        case .independent:
-            break
-        case .refinement(let id), .continuation(let id), .correction(let id):
-            guard entry(for: id) != nil else { throw TransitionError.unknownRelatedIntent }
-        }
-        if let prerequisite {
-            guard prerequisite.intentID == intent.id,
-                  prerequisite.requiresIntentID != intent.id,
-                  entry(for: prerequisite.requiresIntentID) != nil else {
-                throw TransitionError.invalidPrerequisite
-            }
-        }
-        entries.append(Entry(intent: intent, relationship: relationship,
-                             prerequisite: prerequisite))
+        entries.append(Entry(intent: intent))
         knownIntentIDs.insert(intent.id)
         trimResolvedHistory()
     }
@@ -362,9 +315,7 @@ struct CuaDialogueState {
         entries[index].status = .pending
     }
 
-    /// Begin a fresh attempt on a pending intent. Prerequisite edges are
-    /// recorded metadata only — nothing in the current runtime creates them —
-    /// so a pending status alone admits the attempt.
+    /// Begin a fresh attempt on a pending intent.
     mutating func begin(_ attempt: Attempt) throws {
         guard let index = entries.firstIndex(where: { $0.intent.id == attempt.intentID }) else {
             throw TransitionError.unknownIntent
@@ -461,8 +412,7 @@ struct CuaDialogueState {
 
     /// An uncertain attempt may be retried in place: the intent re-opens
     /// pending with the SAME revision — a retry is another attempt, not a
-    /// revision. Recorded verified facts remain as history; prerequisite
-    /// satisfaction still requires a revision-current fact.
+    /// revision. Recorded verified facts remain as history.
     mutating func retryUncertain(intentID: UUID) throws {
         guard let index = entries.firstIndex(where: { $0.intent.id == intentID }) else {
             throw TransitionError.unknownIntent
@@ -488,20 +438,8 @@ struct CuaDialogueState {
     }
 
     private mutating func trimResolvedHistory() {
-        // Preserve the entire ancestor closure of unresolved work.
-        var protected = Set(entries.filter { !$0.status.isResolved }.map { $0.intent.id })
-        var frontier = Array(protected)
-        while let id = frontier.popLast() {
-            guard let entry = entry(for: id) else { continue }
-            var parents: [UUID] = []
-            if let parent = entry.prerequisite?.requiresIntentID { parents.append(parent) }
-            switch entry.relationship {
-            case .independent: break
-            case .refinement(let parent), .continuation(let parent), .correction(let parent):
-                parents.append(parent)
-            }
-            for parent in parents where protected.insert(parent).inserted { frontier.append(parent) }
-        }
+        // Unresolved work is never pruned; resolved entries bound out oldest-first.
+        let protected = Set(entries.filter { !$0.status.isResolved }.map { $0.intent.id })
         var resolved = entries.filter { $0.status.isResolved }.count
         while resolved > resolvedHistoryLimit,
               let oldest = entries.firstIndex(where: { $0.status.isResolved && !protected.contains($0.intent.id) }) {

@@ -94,6 +94,11 @@ public actor CodexRuntimeBridge {
         var client: CodexProtocolClient
         var threadID: String
         var activeTurnID: String?
+        /// Recently finished turn ids — `turn/completed` can land before
+        /// `send` writes activeTurnID back, so a nil-match alone can't
+        /// catch the finish and the id would latch as "active" forever.
+        /// Bounded: oldest entries fall out.
+        var completedTurns: [String] = []
         var forwarder: Task<Void, Never>
     }
 
@@ -150,8 +155,16 @@ public actor CodexRuntimeBridge {
         let turnID = try await session.client.startTurn(threadID: session.threadID, text: message)
         session.activeTurnID = turnID
         // Write back only while this is still the registered session — a
-        // concurrent sessionEnded/stop must not be resurrected.
+        // concurrent sessionEnded/stop must not be resurrected. Merge the
+        // registered session's completed-turn ledger too: turn/completed
+        // landing between startTurn and this write-back means the turn is
+        // already done — latching it active would let a later interrupt
+        // fire at a dead turn.
         if sessions[agent.slug]?.client === session.client {
+            session.completedTurns = sessions[agent.slug]?.completedTurns ?? []
+            if session.completedTurns.contains(turnID) {
+                session.activeTurnID = nil
+            }
             sessions[agent.slug] = session
         }
         return turnID
@@ -173,7 +186,9 @@ public actor CodexRuntimeBridge {
     /// requested while a cold start is in flight cancels the spawn — the
     /// late session never registers and its process is closed.
     public func stop(slug: String) {
-        starting[slug]?.cancel()
+        // Remove, not just cancel — a later send must respawn rather than
+        // await the dead task's CancellationError.
+        starting.removeValue(forKey: slug)?.cancel()
         guard let session = sessions.removeValue(forKey: slug) else { return }
         teardown(session)
     }
@@ -219,8 +234,12 @@ public actor CodexRuntimeBridge {
                                        onStderrLine: configuration.onStderrLine)
         let slug = agent.slug
         let continuation = eventContinuation
+        // Subscribe before start() — the client's event bus drops events
+        // with no attached reader, and the Task body's first iteration
+        // races the server's earliest notifications.
+        let events = client.events
         let forwarder = Task { [weak self] in
-            for await event in client.events {
+            for await event in events {
                 if case .turnCompleted(_, let turn) = event {
                     await self?.turnEnded(slug: slug, client: client, turnID: turn.id)
                 }
@@ -238,11 +257,13 @@ public actor CodexRuntimeBridge {
                                                            model: model)
                 } catch {
                     threadID = try await client.startThread(cwd: agent.workspacePath,
-                                                          model: model)
+                                                          model: model,
+                                                          sandbox: "workspace-write")
                 }
             } else {
                 threadID = try await client.startThread(cwd: agent.workspacePath,
-                                                        model: model)
+                                                        model: model,
+                                                        sandbox: "workspace-write")
             }
             let session = Session(client: client, threadID: threadID,
                                   activeTurnID: nil, forwarder: forwarder)
@@ -256,11 +277,19 @@ public actor CodexRuntimeBridge {
         }
     }
 
-    /// Clears the completed turn so a later interrupt() can't hit a stale id.
+    /// Records the finished turn and clears it when it was the active one.
+    /// The ledger matters because turn/completed can land BEFORE send's
+    /// write-back — without it the id would latch active and a later
+    /// interrupt() would fire turn/interrupt at a dead turn.
     private func turnEnded(slug: String, client: CodexProtocolClient, turnID: String) {
-        guard sessions[slug]?.client === client,
-              sessions[slug]?.activeTurnID == turnID else { return }
-        sessions[slug]?.activeTurnID = nil
+        guard sessions[slug]?.client === client else { return }
+        if sessions[slug]?.activeTurnID == turnID {
+            sessions[slug]?.activeTurnID = nil
+        }
+        sessions[slug]?.completedTurns.append(turnID)
+        if let turns = sessions[slug]?.completedTurns, turns.count > 16 {
+            sessions[slug]?.completedTurns = Array(turns.suffix(16))
+        }
     }
 
     /// Only clears the registry when the finished stream belongs to the
@@ -289,7 +318,12 @@ public actor CodexRuntimeBridge {
                 .appendingPathComponent(".codex/auth.json")
             let dest = home.appendingPathComponent("auth.json")
             try? FileManager.default.removeItem(at: dest)
-            try? FileManager.default.copyItem(at: source, to: dest)
+            // Missing auth.json still spawns (the existing contract); a
+            // copy that EXISTS but fails is fatal — otherwise the session
+            // connects unauthenticated and every turn dies silently.
+            if FileManager.default.fileExists(atPath: source.path) {
+                try FileManager.default.copyItem(at: source, to: dest)
+            }
         }
     }
 

@@ -6,9 +6,9 @@ import Foundation
 /// to the bundle id — while the global focus and pasteboard lanes serialize
 /// activations and clipboard chords between parallel tasks.
 ///
-/// Same lease contract as CuaWorkQueue (which the runtime still drives until
-/// it consumes this registry): bounded concurrent app leases, FIFO waiters,
-/// re-entrancy by work id, and cancellation that never consumes a slot.
+/// The canonical lease contract: bounded concurrent app leases, FIFO
+/// waiters, re-entrancy by work id, and cancellation that never consumes
+/// a slot.
 actor CuaLaneRegistry {
     static let shared = CuaLaneRegistry()
 
@@ -46,7 +46,7 @@ actor CuaLaneRegistry {
     /// pid shares the lease.
     func acquire(app: String, pid: Int?, workID: String) async throws {
         // One app lease per work: re-acquiring while held is a no-op, so the
-        // re-entrant path skips the resolver hop too (CuaWorkQueue semantics).
+        // re-entrant path skips the resolver hop too.
         if heldLanes[workID]?.contains(where: isAppLane) == true { return }
         guard let lane = await appLane(app: app, pid: pid) else { return }
         try await acquire(lane, workID: workID)

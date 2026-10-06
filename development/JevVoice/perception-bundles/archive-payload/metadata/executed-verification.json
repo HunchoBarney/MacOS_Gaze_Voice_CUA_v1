@@ -1,0 +1,14 @@
+{
+  "evidenceKind": "supplied",
+  "extensionId": "cua-perception",
+  "extensionVersion": "0.1.0",
+  "fixtureSha256": "aae53a52819f1470221ed60ad434649cb52c9ed5fe3cf2d9e08a6f2429f1b7c8",
+  "gate": "real-parse",
+  "observations": 298,
+  "protocolVersion": 1,
+  "runtimeSha256": "cb0462c3fd35ad722e8772313030a33c182f3d4c6b33f4e5e1fcb2ce3199b86c",
+  "schemaVersion": 1,
+  "status": "passed",
+  "target": "aarch64-apple-darwin",
+  "workerSha256": "33d0453c245081ae6ac540518426bb6f4117dff381393572d522de9813868c5c"
+}

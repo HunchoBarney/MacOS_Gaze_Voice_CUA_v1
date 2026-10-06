@@ -283,7 +283,7 @@ private struct PlannerCard: View {
                     Text("Finish signing in in the Terminal window that opened; this updates when it completes.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Plans voice turns through your own ChatGPT account using codex sign-in — no API key needed.")
+                Text("Signs in Codex for delegated agents. Multi-step voice requests plan through your text provider or OpenAI key — no sign-in needed.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Planner", isOn: $config.plannerEnabled)
                 Text("When off, turns skip the planning step and act directly.")

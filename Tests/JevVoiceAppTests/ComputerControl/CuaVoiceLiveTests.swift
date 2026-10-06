@@ -52,9 +52,7 @@ final class CuaVoiceLiveTests: XCTestCase {
             judge: { _, _ in
                 throw DriverConnectionError.refused("judge must not run on the fast lane")
             },
-            screenLocked: { false },
-            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
+            screenLocked: { false })
         defer { Task { await runtime.shutdown() } }
         let capture = Capture()
         let controller = VoiceController(config: config, speech: capture,
@@ -77,7 +75,6 @@ final class CuaVoiceLiveTests: XCTestCase {
             }
             let task = try XCTUnwrap(controller.cuaTasks.last)
             print("Voice route outcome:", task.status, task.message)
-            print("Stage timings ms:", task.timings)
             XCTAssertEqual(task.status, "Completed", "\(request): \(task.message)")
         }
         XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
@@ -154,9 +151,8 @@ final class CuaVoiceLiveTests: XCTestCase {
             }
             let task = try XCTUnwrap(controller.cuaTasks.last)
             print("Voice route outcome:", task.status, task.message, "transcript-to-result:", start.duration(to: .now))
-            print("Stage timings ms:", task.timings)
             if let metricsPath = ProcessInfo.processInfo.environment["JARVIS_VOICE_METRICS"] {
-                let record: JSONValue = .object(["status": .string(task.status), "timings_ms": .object(task.timings.mapValues(JSONValue.number))])
+                let record: JSONValue = .object(["status": .string(task.status), "elapsed_ms": .number(task.elapsedMs)])
                 var data = try JSONEncoder().encode(record); data.append(10)
                 if !FileManager.default.fileExists(atPath: metricsPath) { FileManager.default.createFile(atPath: metricsPath, contents: nil) }
                 let file = try FileHandle(forWritingTo: URL(fileURLWithPath: metricsPath))

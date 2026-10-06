@@ -56,7 +56,7 @@ final class CuaSetup: ObservableObject {
                 }
                 try Task.checkCancellation()
                 if browser { try await verifyBrowser(connection, label: label, apiKey: apiKey) }
-                else { try await verifyDocument(connection, label: label, apiKey: apiKey) }
+                else { try await verifyControlPlane(connection) }
             } catch is CancellationError {
                 message = "Setup check cancelled. Already dispatched effects may have finished."
             } catch {
@@ -87,130 +87,21 @@ final class CuaSetup: ObservableObject {
         return "Missing \(missing.joined(separator: " and ")) access for \(owner). Enable it in System Settings › Privacy & Security, then retry."
     }
 
-    private func verifyDocument(_ connection: CuaConnection, label: String, apiKey: String) async throws {
-        let fixture = CuaSetupFixture.documentURL()
-        let requestingForegroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        try "".write(to: fixture, atomically: true, encoding: .utf8)
-        // The fixture is disposable — drop the on-disk copy when the check
-        // ends either way; TextEdit keeps its open window.
-        defer { try? FileManager.default.removeItem(at: fixture) }
-        message = "Opening a disposable TextEdit document…"
-        // `launch_app` has no session field in the installed schema. Keep the
-        // lifecycle label on later calls that actually accept it.
-        let opened = try await connection.call("launch_app", arguments: [
-            "bundle_id": .string("com.apple.TextEdit"), "urls": .array([.string(fixture.path)])
-        ])
-        guard let pid = opened["pid"]?.integer else { throw DriverConnectionError.malformed }
-        var matches: [JSONValue] = []
-        for _ in 0..<50 {
-            let windows = try await connection.call("list_windows", arguments: ["pid": .number(Double(pid)), "session": .string(label)])
-            matches = (windows["windows"]?.array ?? []).filter { $0["title"]?.string?.contains(fixture.lastPathComponent) == true }
-            if !matches.isEmpty { break }
-            try Task.checkCancellation()
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        guard matches.count == 1, let wid = matches[0]["window_id"]?.integer else {
-            throw DriverConnectionError.refused("Cua could not identify the disposable document. Nothing was typed.")
-        }
-        let target: [String: JSONValue] = ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-            "session": .string(label), "include_screenshot": .bool(false), "max_elements": .number(150)]
-        // The installed Driver restores the previous foreground for eight seconds
-        // after launch_app opens a URL, so the first explicit foreground request
-        // must wait out that watchdog — an uncertain activation cannot be safely
-        // repeated. The wait is fixed, but the field observation and the Jev
-        // choice need no foreground: they run inside it instead of after it.
-        async let watchdog: Void = Task.sleep(for: .seconds(9))
-        var fields: [JSONValue] = []
-        // TextEdit may create the URL-backed window before its editable AX body
-        // is ready. Reobserve for a bounded settling window; never infer a target.
-        for _ in 0..<150 {
-            let snapshot = try await connection.call("get_window_state", arguments: target)
-            fields = (snapshot["elements"]?.array ?? []).filter { ["AXTextArea", "AXTextField"].contains($0["role"]?.string ?? "") }
-            if !fields.isEmpty { break }
-            try Task.checkCancellation()
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        guard !fields.isEmpty else {
-            throw DriverConnectionError.refused("Cua did not expose an editable document body. Nothing was typed.")
-        }
-        var candidates: [String: JSONValue] = [:]
-        var criteria: [String: String?] = ["abstain": "No editable document body is observed."]
-        for (index, field) in fields.enumerated() {
-            let id = "field_\(index)"
-            candidates[id] = field
-            criteria[id] = String(data: try JSONEncoder().encode(field), encoding: .utf8)
-        }
-        message = "Jev is choosing the observed document field…"
+    /// The ~1s control-plane proof: the permission read and session mint
+    /// already answered above; a list_apps round-trip proves the daemon
+    /// serves real requests. No disposable app, no model call — the
+    /// driver's own status is the report.
+    private func verifyControlPlane(_ connection: CuaConnection) async throws {
+        message = "Probing the driver control plane…"
         let started = ContinuousClock.now
-        let state: JSONValue = .object([
-            "goal": .string("Insert setup text into the newly created document body."),
-            "document_is_new_empty_fixture": .bool(true), "observed_fields": .array(fields)
-        ])
-        let chosen = try await JevClient(apiKey: apiKey).systemOne(state: state, questions: [
-            "field": .choice(instructions: "Select the editable document body for the requested insertion. Abstain if absent or ambiguous.", criteria: criteria)
-        ])
-        guard case let .choice(id, confidence, probabilities) = chosen.response.answers["field"],
-              confidence.isFinite, (0...1).contains(confidence),
-              probabilities.keys.allSatisfy({ criteria.keys.contains($0) }),
-              probabilities.values.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else {
-            throw DriverConnectionError.malformed
-        }
-        guard id != "abstain" else {
-            throw DriverConnectionError.refused("Jev abstained from choosing among \(candidates.count) observed text fields. Nothing was typed.")
-        }
-        guard let field = candidates[id], field["element_token"]?.string != nil else {
-            throw DriverConnectionError.malformed
-        }
-        guard (field["value"]?.string ?? "").isEmpty else {
-            throw DriverConnectionError.refused("The selected field is not blank. Nothing was typed.")
-        }
-        // The launch watchdog's restore window must be fully elapsed before
-        // any activation — the observation and decision work above already
-        // ran inside it; this awaits only the remainder.
-        try await watchdog
+        // list_apps takes no arguments — the empty input contract rejects
+        // a session field.
+        let inventory = try await connection.call("list_apps", arguments: [:])
         try Task.checkCancellation()
-        guard let requestingForegroundPID,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == requestingForegroundPID else {
-            throw DriverConnectionError.refused("Another app took focus while the disposable document opened. Nothing was typed.")
-        }
-        // Recheck the exact window after the wait.
-        let settled = try await connection.call("list_windows", arguments: [
-            "pid": .number(Double(pid)), "session": .string(label)
-        ])
-        guard (settled["windows"]?.array ?? []).filter({ $0["window_id"]?.integer == wid &&
-            $0["title"]?.string?.contains(fixture.lastPathComponent) == true }).count == 1 else {
-            throw DriverConnectionError.refused("The disposable document changed during launch. Nothing was typed.")
-        }
-        let foreground = try await connection.call("bring_to_front", arguments: [
-            "pid": .number(Double(pid)), "window_id": .number(Double(wid)), "session": .string(label)
-        ])
-        guard foreground["activated"] == .bool(true), foreground["exact_window_effect"]?["verified"] == .bool(true) else {
-            throw DriverConnectionError.refused("Cua could not verify the disposable document in front. Nothing was typed.")
-        }
-        try Task.checkCancellation()
-        // A model request creates a race with user edits. Reobserve before insertion.
-        let fresh = try await connection.call("get_window_state", arguments: target)
-        let freshFields = (fresh["elements"]?.array ?? []).filter {
-            $0["role"] == field["role"] && $0["label"] == field["label"] &&
-            ($0["value"]?.string ?? "").isEmpty
-        }
-        guard freshFields.count == 1, let freshToken = freshFields[0]["element_token"]?.string else {
-            throw DriverConnectionError.refused("The disposable field changed while Jev was deciding. Nothing was typed.")
-        }
-        try Task.checkCancellation()
-        let text = "Jarvis connected through Cua and Jev."
-        message = "Writing and checking the disposable document…"
-        _ = try await connection.call("type_text", arguments: ["pid": .number(Double(pid)),
-            "window_id": .number(Double(wid)), "element_token": .string(freshToken), "text": .string(text),
-            "delivery_mode": .string("background"), "session": .string(label)])
-        let result = try await connection.call("get_window_state", arguments: target)
-        guard (result["elements"]?.array ?? []).contains(where: { $0["value"]?.string == text }) else {
-            throw DriverConnectionError.refused("The document did not match the expected text. The action will not be repeated.")
-        }
-        try Task.checkCancellation()
+        let apps = inventory["apps"]?.array ?? []
+        let running = apps.filter { ($0["pid"]?.integer ?? 0) > 0 }.count
         verified = true
-        let elapsed = started.duration(to: .now)
-        message = "Verified: Jev selected a field, Cua wrote the setup text, and fresh readback matched. Decision + write + readback: \(elapsed)."
+        message = "Verified: Cua answered permissions, minted a session, and listed \(running) running app(s) out of \(apps.count) in \(started.duration(to: .now))."
     }
 
     private func verifyBrowser(_ connection: CuaConnection, label: String, apiKey: String) async throws {

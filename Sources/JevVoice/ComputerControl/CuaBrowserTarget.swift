@@ -42,8 +42,13 @@ enum CuaBrowserTarget {
             // refuse rather than navigate whatever happens to be active.
             guard let baseline else { return nil }
             let (added, removed) = tabSignatureDelta(from: baseline, to: tabs.map(tabSignature))
-            guard removed.isEmpty, added.count == 1, let sig = added.first,
-                  isBlankTabURL(tabSignatureURL(sig)) else { return nil }
+            // Only a blank signature names the fresh tab — a baseline tab
+            // whose signature changed since the baseline was captured (the
+            // task's own earlier navigate landed in it) also reads as
+            // "added" in the multiset delta and must not make the pick
+            // ambiguous.
+            let blanks = added.filter { isBlankTabURL(tabSignatureURL($0)) }
+            guard removed.isEmpty, blanks.count == 1, let sig = blanks.first else { return nil }
             // A matching signature can still be ambiguous — the user may
             // already hold an identical blank tab. The freshly opened tab
             // is the active one; without a unique pick, refuse.

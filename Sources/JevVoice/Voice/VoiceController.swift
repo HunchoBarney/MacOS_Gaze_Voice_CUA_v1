@@ -257,23 +257,11 @@ final class VoiceController: ObservableObject {
     func shortID(_ id: UUID) -> String { String(id.uuidString.prefix(8)) }
 
     /// In-memory, content-minimized diagnostics for one attempt: identities,
-    /// relation/prerequisite reason, target resolution, context (intent)
-    /// revision and effect certainty. Never dumps a literal payload.
+    /// target resolution, context (intent) revision and effect certainty.
+    /// Never dumps a literal payload.
     func taskDiagnostics(_ task: CuaVoiceRuntime.Work) -> [String] {
         var lines = ["intent \(shortID(task.intentID)) · attempt \(shortID(task.attemptID))"]
         let entry = cua.dialogue.entry(for: task.intentID)
-        var relation: [String] = []
-        switch entry?.relationship {
-        case .refinement(let id): relation.append("refines \(relatedLabel(id))")
-        case .continuation(let id): relation.append("continues \(relatedLabel(id))")
-        case .correction(let id): relation.append("corrects \(relatedLabel(id))")
-        case .independent, nil: break
-        }
-        if let prerequisite = entry?.prerequisite {
-            let fact = prerequisite.requiredFact == .targetObserved ? "verified target" : "verified result"
-            relation.append("requires \(fact) from \(relatedLabel(prerequisite.requiresIntentID))")
-        }
-        if !relation.isEmpty { lines.append(relation.joined(separator: " · ")) }
         let app = task.bundle ?? entry?.intent.target?.application
         let window = entry?.intent.target?.window
         if app != nil || window != nil || task.window != nil {
@@ -304,9 +292,6 @@ final class VoiceController: ObservableObject {
         return lines
     }
 
-    private func relatedLabel(_ intentID: UUID) -> String {
-        cua.tasks.last { $0.intentID == intentID }?.label ?? "intent \(shortID(intentID))"
-    }
     private var speech: SpeechCapturing
     private let dictation: DictationDelivering
     /// Spoken replies seam — nil or Config.ttsEnabled=false stays silent.
@@ -411,13 +396,17 @@ final class VoiceController: ObservableObject {
         // through taskEventSink as a spoken `[task outcome]`.
         if let lane = self.speech as? RealtimeVoiceLane {
             lane.audioRepliesEnabled = config.ttsEnabled
-            lane.commandHandler = { [weak self] instruction, app, literalText, captureID in
+            lane.commandHandler = { [weak self] instruction, app, literalText, transcript, steps, captureID in
                 guard let self else { return #"{"status":"refused","say":"Jev is not available right now."}"# }
+                // transcript is the turn's completed speech transcript —
+                // the lane held dispatch until it landed (typed turns pass
+                // nil), so the runtime's heard-vs-called check compares
+                // against the user's final words, not a display partial.
                 return await self.cua.beginVoiceTask(
                     instruction, app: app,
                     frontmostHint: self.commandFrontmostApp ?? self.lastExternalApp,
                     literalText: literalText,
-                    transcriptHint: self.transcript, captureID: captureID)
+                    transcriptHint: transcript, steps: steps, captureID: captureID)
             }
             lane.taskResponseHandler = { [weak self] answer, task, captureID in
                 guard let self else { return "Nothing is waiting for an answer." }
@@ -582,12 +571,12 @@ final class VoiceController: ObservableObject {
         trace("fn_down")
         let selectedUID = config.microphoneUID
         startupTask = Task { [weak self] in
-            await priorStart?.value
-            await self?.microphoneTask?.value
+            await Self.awaitUnlessCancelled(priorStart)
+            await Self.awaitUnlessCancelled(self?.microphoneTask)
             guard let self, self.sessionID == id, !Task.isCancelled else { return }
             defer { if self.sessionID == id { self.startupTask = nil } }
             let permissionStart = ProcessInfo.processInfo.systemUptime
-            let granted = await self.authorize()
+            let granted = await self.authorizeUnlessCancelled()
             self.refreshPermissions()
             guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
             self.measurements["Permission check"] = (ProcessInfo.processInfo.systemUptime - permissionStart) * 1000
@@ -731,7 +720,7 @@ final class VoiceController: ObservableObject {
         startupTask = Task { [weak self] in
             guard let self else { return }
             defer { if self.sessionID == id { self.startupTask = nil } }
-            if !Permission.microphone.isGranted { await Permission.microphone.request() }
+            if !Permission.microphone.isGranted { await Self.requestMicrophoneUnlessCancelled() }
             self.refreshPermissions()
             guard self.sessionID == id, !Task.isCancelled else { return }
             guard Permission.microphone.isGranted else { self.fail("Microphone access is needed for the input test."); return }
@@ -1046,6 +1035,56 @@ final class VoiceController: ObservableObject {
         audioLevel = 0; held = false; dictating = false; latched = false; isMicrophoneTest = false
         deadlineTask?.cancel(); durationTask?.cancel()
         status = .error(message)
+    }
+
+    /// First finisher wins — the raced work's value, or `fallback` the
+    /// moment this task is cancelled. `authorize()`, a predecessor startup
+    /// and the permission prompt can all park forever on a dead wait (an
+    /// ignored system prompt); a cancelled startup must still unwind so
+    /// `cleanupTask` completes — `canBegin` requires cleanupTask == nil.
+    private final class CancellationRace<Result: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Result, Never>?
+        private var outcome: Result?
+        private var settled = false
+        func finish(_ value: Result) {
+            lock.lock()
+            if settled { lock.unlock(); return }
+            settled = true; outcome = value
+            let pending = continuation; continuation = nil
+            lock.unlock()
+            pending?.resume(returning: value)
+        }
+        func result(fallback: Result) async -> Result {
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { (c: CheckedContinuation<Result, Never>) in
+                    lock.lock()
+                    if settled, let outcome { lock.unlock(); c.resume(returning: outcome) }
+                    else { continuation = c; lock.unlock() }
+                }
+            } onCancel: { finish(fallback) }
+        }
+    }
+
+    /// Awaits a task's completion unless this task is cancelled first — a
+    /// predecessor parked on a non-cancellable wait must not chain the stall.
+    private static func awaitUnlessCancelled(_ task: Task<Void, Never>?) async {
+        guard let task else { return }
+        let race = CancellationRace<Void>()
+        Task { race.finish(await task.value) }
+        await race.result(fallback: ())
+    }
+
+    private func authorizeUnlessCancelled() async -> Bool {
+        let race = CancellationRace<Bool>()
+        Task { [authorize] in race.finish(await authorize()) }
+        return await race.result(fallback: false)
+    }
+
+    private static func requestMicrophoneUnlessCancelled() async {
+        let race = CancellationRace<Void>()
+        Task { await Permission.microphone.request(); race.finish(()) }
+        await race.result(fallback: ())
     }
 
     private func scheduleDuration(_ id: UUID) {

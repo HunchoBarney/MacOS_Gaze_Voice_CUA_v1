@@ -101,9 +101,7 @@ for line in sys.stdin:
                                             onToolCall: { name, _ in calls?.record(name) }) },
             judge: judge,
             fastLaneResolver: fastLaneResolver,
-            screenLocked: { false },
-            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
+            screenLocked: { false })
     }
 
     private nonisolated func pick(_ choice: String) -> Answer {
@@ -260,10 +258,18 @@ for line in sys.stdin:
     func testOutcomeSettlesThroughTaskEventSinkWithCaptureID() async throws {
         let script = try driverScript(
             apps: "[{'name':'Fixture','bundle_id':'test.fixture','pid':4242,'running':True}]",
-            windows: "[{'window_id':7,'title':'Fixture','is_on_screen':True}]")
+            windows: "[{'window_id':7,'title':'Fixture','is_on_screen':True}]",
+            elements: "[{'element_index':0,'element_token':'save0','role':'AXButton','label':'Save','enabled':True}]")
         var events: [(UUID, String, Bool)] = []
-        let runtime = makeRuntime(script: script, judge: { _, _ in
-            self.answers(next: "done")
+        // A bare "done" verdict with no dispatch is blocked now — click
+        // once, then report done so the settle path sees a real effect.
+        let clicked = Flag()
+        let runtime = makeRuntime(script: script, judge: { _, questions in
+            if !clicked.value, let id = self.nextLaneID(questions, containing: "Save") {
+                clicked.value = true
+                return self.answers(next: id)
+            }
+            return self.answers(next: "done")
         })
         let captureID = UUID()
         runtime.taskEventSink = { id, text, speak in events.append((id, text, speak)) }

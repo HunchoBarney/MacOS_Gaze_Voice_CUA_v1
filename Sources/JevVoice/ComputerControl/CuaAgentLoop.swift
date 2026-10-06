@@ -50,8 +50,6 @@ final class CuaAgentLoop {
     /// Identity this drive holds leases under — the work-item id when the
     /// caller has one.
     private let workID: String
-    /// Per-step phase timings, fired once per loop iteration.
-    private let stepTiming: ((Int, [String: Double]) -> Void)?
 
     private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice", category: "agent-loop")
     private static let maximumUnprovenDone = 2
@@ -65,11 +63,14 @@ final class CuaAgentLoop {
     /// When nothing matches the goal lexically, still offer this many
     /// element lanes by role priority.
     private static let elementLaneFloor = 8
-    /// Uncertain outcomes allowed per identical dispatch before a block —
-    /// the true replay risk — and across different lanes per run, where the
-    /// re-observe between them is itself the recovery.
-    private static let maximumUncertainPerDispatch = 2
+    /// Uncertain driver outcomes allowed across the whole run — an
+    /// identical re-pick is the one replay rule's job.
     private static let maximumUncertainTotal = 4
+    /// Dispatches at one named target allowed while the observation never
+    /// changes — alternating lane kinds (a pixel click, then an AX click)
+    /// on the same control sidestep the identical-pick bound, so the
+    /// bound rides the target's text and retires every lane aiming at it.
+    private static let maximumSameTargetStrikes = 3
 
     private(set) var observedPostconditions: [CuaObservedPostcondition] = []
     /// The window the loop is pinned to — repinned to a task-produced window
@@ -89,11 +90,10 @@ final class CuaAgentLoop {
          isFrontmostApp: ((Int) -> Bool)? = nil,
          timedCall: TimedCall? = nil,
          lanes: (any CuaLaneLeasing)? = nil,
-         workID: String = "",
-         stepTiming: ((Int, [String: Double]) -> Void)? = nil) {
+         workID: String = "") {
         self.call = call; self.timedCall = timedCall; self.judge = judge
         self.approve = approve; self.progress = progress
-        self.lanes = lanes; self.workID = workID; self.stepTiming = stepTiming
+        self.lanes = lanes; self.workID = workID
         self.isFrontmostApp = isFrontmostApp ?? { pid in
             NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(pid)
         }
@@ -173,11 +173,19 @@ final class CuaAgentLoop {
     /// re-matching; a stale token is the driver's to refuse.
     private enum Lane {
         case clickElement(token: String, index: Int)
+        case doubleClickElement(token: String, index: Int)
+        case rightClickElement(token: String, index: Int)
         case typeIntoElement(token: String, index: Int)
         case typeIntoWindow
         case setValue(token: String, index: Int)
         case pixelClick(token: String, index: Int, x: Double, y: Double)
         case visualClick(captureID: String, regionID: String, x: Double, y: Double)
+        case doubleClickVisual(captureID: String, regionID: String, x: Double, y: Double)
+        case rightClickVisual(captureID: String, regionID: String, x: Double, y: Double)
+        case dragElements(fromToken: String, fromIndex: Int, toToken: String, toIndex: Int,
+                          x1: Double, y1: Double, x2: Double, y2: Double)
+        case dragVisual(captureID: String, fromID: String, toID: String,
+                        x1: Double, y1: Double, x2: Double, y2: Double)
         case invokeMenu(path: [String], index: Int)
         case browserDialog(accept: Bool)
         case launchApp(String)
@@ -188,16 +196,22 @@ final class CuaAgentLoop {
         case navigate(String)
         case browserClick(ref: String)
         case browserType(ref: String)
-        case done, stuck
+        case done, satisfied, stuck
 
         var id: String {
             switch self {
             case .clickElement(_, let i): return "click_\(i)"
+            case .doubleClickElement(_, let i): return "dclick_\(i)"
+            case .rightClickElement(_, let i): return "rclick_\(i)"
             case .typeIntoElement(_, let i): return "typeinto_\(i)"
             case .typeIntoWindow: return "type_window"
             case .setValue(_, let i): return "setvalue_\(i)"
             case .pixelClick(_, let i, _, _): return "pixel_\(i)"
             case .visualClick(_, let regionID, _, _): return "vclick_\(regionID)"
+            case .doubleClickVisual(_, let regionID, _, _): return "vdclick_\(regionID)"
+            case .rightClickVisual(_, let regionID, _, _): return "vrclick_\(regionID)"
+            case .dragElements(_, let i, _, let j, _, _, _, _): return "drag_\(i)_to_\(j)"
+            case .dragVisual(_, let r1, let r2, _, _, _, _): return "vdrag_\(r1)_to_\(r2)"
             case .invokeMenu(_, let i): return "menu_\(i)"
             case .browserDialog(let accept): return accept ? "bdialog_accept" : "bdialog_dismiss"
             case .launchApp: return "launch_app"
@@ -209,6 +223,7 @@ final class CuaAgentLoop {
             case .browserClick(let r): return "bclick_\(r)"
             case .browserType(let r): return "btype_\(r)"
             case .done: return "done"
+            case .satisfied: return "satisfied"
             case .stuck: return "stuck"
             }
         }
@@ -227,7 +242,9 @@ final class CuaAgentLoop {
         var elementToken: String? {
             switch self {
             case .clickElement(let t, _), .typeIntoElement(let t, _),
-                 .setValue(let t, _), .pixelClick(let t, _, _, _):
+                 .doubleClickElement(let t, _), .rightClickElement(let t, _),
+                 .setValue(let t, _), .pixelClick(let t, _, _, _),
+                 .dragElements(let t, _, _, _, _, _, _, _):
                 return t
             default:
                 return nil
@@ -237,9 +254,10 @@ final class CuaAgentLoop {
         var elementIndex: Int? {
             switch self {
             case .clickElement(_, let i), .typeIntoElement(_, let i),
+                 .doubleClickElement(_, let i), .rightClickElement(_, let i),
                  .setValue(_, let i), .invokeMenu(_, let i):
                 return i
-            case .pixelClick(_, let i, _, _):
+            case .pixelClick(_, let i, _, _), .dragElements(_, let i, _, _, _, _, _, _):
                 return i
             default:
                 return nil
@@ -254,7 +272,7 @@ final class CuaAgentLoop {
                 return .type
             case .scroll:
                 return .scroll
-            case .done, .stuck:
+            case .done, .satisfied, .stuck:
                 return .none
             default:
                 return .press
@@ -266,12 +284,27 @@ final class CuaAgentLoop {
         /// them is ~0.8s + 3 RTTs of pure per-step latency.
         var mayProduceWindow: Bool {
             switch self {
-            case .clickElement, .invokeMenu, .newTab, .navigate,
-                 .pixelClick, .visualClick, .browserClick, .launchApp:
+            case .clickElement, .doubleClickElement, .rightClickElement,
+                 .invokeMenu, .newTab, .navigate,
+                 .pixelClick, .visualClick, .doubleClickVisual, .rightClickVisual,
+                 .dragElements, .dragVisual, .browserClick, .launchApp:
                 return true
             case .hotkey(let keys):
                 let set = Set(keys.map { $0.lowercased() })
                 return set.contains("cmd") && !set.isDisjoint(with: ["n", "t", "o"])
+            default:
+                return false
+            }
+        }
+
+        /// Vision-detected region lanes — the hybrid pool's element
+        /// candidates: they stand for things on screen exactly like AX
+        /// elements do, so the shortlist must goal-match and cap them
+        /// the same way instead of flooding the offer set alphabetically.
+        var isVisualLane: Bool {
+            switch self {
+            case .visualClick, .doubleClickVisual, .rightClickVisual, .dragVisual:
+                return true
             default:
                 return false
             }
@@ -334,9 +367,24 @@ final class CuaAgentLoop {
         var appName = ""
         var bundleID = ""
         var ledger: [String] = []
+        /// Confirmed-effect dispatches this run — the only honest base for
+        /// a `.done` settle: `done` means "an action I dispatched completed
+        /// the request", so zero effects can never satisfy it. The driver's
+        /// `effect: confirmed` (and a successful launch, whose own success
+        /// report is its confirmation) counts; observations never do.
+        var dispatchedEffect = false
+        /// Why a `.blocked` settle happened — the judge's stated reason
+        /// when it gave one, else the failing mechanism (a vision failure,
+        /// a vanished window, a refused dispatch). Rides
+        /// `DriveResult.blockedReason` so callers can say it.
+        var blockedReason: String?
         func finish(_ status: DriveStatus) -> DriveResult {
-            DriveResult(status: status, history: ledger, pid: pid, windowID: windowID,
-                        bundleID: bundleID.isEmpty ? nil : bundleID)
+            if case .blocked(let message) = status, blockedReason == nil {
+                blockedReason = message
+            }
+            return DriveResult(status: status, history: ledger, pid: pid, windowID: windowID,
+                               bundleID: bundleID.isEmpty ? nil : bundleID,
+                               dispatchedEffect: dispatchedEffect, blockedReason: blockedReason)
         }
 
     /// Best-effort window listing: ordinary failures degrade to nil, but a
@@ -357,9 +405,20 @@ final class CuaAgentLoop {
 
     /// The target window (or app) is gone — `window_id_not_found` and kin.
     /// This is the success signature of a close/quit goal, not a fault.
+    /// `outcome` (not `finish`) builds terminal results: the inout
+    /// accesses on ledger/windowID outlive the call, so `finish`'s
+    /// captured read of the same variables is an exclusivity conflict.
     func vanishedWindowOutcome(pid: Int, goal: String, appName: String,
                                ledger: inout [String],
                                windowID: inout Int?) async throws -> DriveResult? {
+        func outcome(_ status: DriveStatus) -> DriveResult {
+            if case .blocked(let message) = status, blockedReason == nil {
+                blockedReason = message
+            }
+            return DriveResult(status: status, history: ledger, pid: pid, windowID: windowID,
+                               bundleID: bundleID.isEmpty ? nil : bundleID,
+                               dispatchedEffect: dispatchedEffect, blockedReason: blockedReason)
+        }
         let closeGoal = goal.range(of: #"\b(close|quit|exit|shut)\b"#,
                                    options: [.regularExpression, .caseInsensitive]) != nil
         let apps: [JSONValue]
@@ -369,7 +428,7 @@ final class CuaAgentLoop {
             // A failed liveness read is not evidence of a quit — only a
             // successful observation may prove the app is gone. Transport
             // faults propagate; other failures report honestly.
-            return finish(.blocked("Could not verify whether \(appName) is still running. Inspect the app before assuming the close landed."))
+            return outcome(.blocked("Could not verify whether \(appName) is still running. Inspect the app before assuming the close landed."))
         }
         let alive = apps.contains {
             $0["pid"]?.integer == pid && $0["running"] != .bool(false)
@@ -379,23 +438,28 @@ final class CuaAgentLoop {
                 ledger.append("\(appName) is no longer running — the close request is satisfied.")
                 recordPostcondition(.resultObserved, "Observed \(appName) no longer running.",
                                     appName: appName, bundleID: bundleID, processID: pid)
-                return finish(.done)
+                // The gone app is observed evidence: `.done` when a
+                // dispatched effect this run put it there,
+                // `.alreadySatisfied` when it was gone on its own.
+                return outcome(dispatchedEffect ? .done
+                    : .alreadySatisfied(reason: "\(appName) was already gone — the close needed no action."))
             }
-            return finish(.blocked("\(appName) quit while the task was in progress. The remaining steps did not run."))
+            return outcome(.blocked("\(appName) quit while the task was in progress. The remaining steps did not run."))
         }
         let windowsValue = try await listWindows(pid: pid)
         guard let rows = windowsValue?["windows"]?.array else {
             // The window list itself was unreadable — not proof of no windows.
-            return finish(.blocked("Could not verify \(appName)'s remaining windows. Inspect the app before assuming the close landed."))
+            return outcome(.blocked("Could not verify \(appName)'s remaining windows. Inspect the app before assuming the close landed."))
         }
         if rows.isEmpty {
             if closeGoal {
                 ledger.append("\(appName) has no windows left — the close request is satisfied.")
                 recordPostcondition(.resultObserved, "Observed \(appName) with no remaining windows.",
                                     appName: appName, bundleID: bundleID, processID: pid)
-                return finish(.done)
+                return outcome(dispatchedEffect ? .done
+                    : .alreadySatisfied(reason: "\(appName) already had no windows — the close needed no action."))
             }
-            return finish(.blocked("The \(appName) window the task was driving closed before the request finished."))
+            return outcome(.blocked("The \(appName) window the task was driving closed before the request finished."))
         }
         // The driven window is gone but the app lives — re-pin to a remaining
         // window and keep driving (close-tab flows land here legitimately).
@@ -404,7 +468,7 @@ final class CuaAgentLoop {
             windowID = newID
             return nil
         }
-        return finish(.blocked("The \(appName) window the task was driving closed before the request finished."))
+        return outcome(.blocked("The \(appName) window the task was driving closed before the request finished."))
     }
 
         // ── Target: a caller pid, a running app matched by name/bundle, or a
@@ -431,6 +495,10 @@ final class CuaAgentLoop {
                     return finish(.blocked("\(application) could not be launched. Nothing was dispatched."))
                 }
                 taskLaunchedApp = true
+                // The launch is this run's own dispatched effect — its
+                // structured success (pid, windows, launch_state) is the
+                // confirmation a `.done` settle may honestly claim.
+                dispatchedEffect = true
                 pid = launched["pid"]?.integer
                 appName = launched["name"]?.string ?? appName
                 bundleID = launched["bundle_id"]?.string ?? bundleID
@@ -444,6 +512,19 @@ final class CuaAgentLoop {
                 bundleID = match["bundle_id"]?.string ?? bundleID
             }
             if appName.isEmpty { appName = application }
+        }
+        // No named target at all: "click X" / "scroll down" mean the thing
+        // on screen — bind the frontmost app's window instead of refusing
+        // the goal for want of an app name.
+        if (task.application ?? "").isEmpty, pid == nil,
+           let front = NSWorkspace.shared.frontmostApplication {
+            pid = Int(front.processIdentifier)
+            appName = front.localizedName ?? appName
+            bundleID = front.bundleIdentifier ?? bundleID
+            if windowID == nil,
+               let rows = try? await listWindows(pid: pid ?? 0) {
+                windowID = Self.preferredWindow(in: rows["windows"]?.array ?? [])
+            }
         }
         // Pid-only target: still resolve name/bundleID or every
         // bundle-keyed lane (browser isolation) silently disables.
@@ -478,7 +559,10 @@ final class CuaAgentLoop {
             ledger.append("\(appName) is running — the open request is satisfied.")
             recordPostcondition(.resultObserved, "Observed \(appName) running.",
                                 appName: appName, bundleID: bundleID, processID: resolvedPID)
-            return finish(.done)
+            // `.done` only when this run's own launch produced the running
+            // app; an app that was already up needed nothing done to it.
+            return finish(dispatchedEffect ? .done
+                : .alreadySatisfied(reason: "\(appName) was already running — nothing needed launching."))
         }
 
         /// The window set observed before any task effect — a create-scope
@@ -498,6 +582,17 @@ final class CuaAgentLoop {
             if let wanted = task.windowName, !wanted.isEmpty {
                 matches = matches.filter {
                     ($0["title"]?.string ?? "").localizedCaseInsensitiveContains(wanted)
+                }
+                // A named window matching nothing is gone — falling through
+                // to the unfiltered bind would silently drive (or type
+                // into) the app's top window. Hand the pick back with the
+                // windows that actually exist.
+                guard !matches.isEmpty else {
+                    let remaining = (listing["windows"]?.array ?? []).filter {
+                        $0["is_on_screen"] != .bool(false) && !($0["title"]?.string ?? "").isEmpty
+                    }
+                    return finish(.needsWindow(candidates:
+                        remaining.compactMap { $0["title"]?.string ?? $0["window_id"]?.integer.map(String.init) }))
                 }
             }
             // Apps expose phantom untitled offscreen windows — they can never
@@ -595,29 +690,31 @@ final class CuaAgentLoop {
 
         var newTabRequested = false
         var dispatchFailures = 0
-        /// Driver-reported partial/uncertain outcomes, keyed by the exact
-        /// dispatch that produced them — the true replay risk is the SAME
-        /// action going uncertain twice. A smaller total bound covers
-        /// different lanes, where the re-observe between them is itself
-        /// the recovery.
-        var uncertainPerDispatchKey: [String: Int] = [:]
+        /// Driver-reported uncertain outcomes across the run — a total
+        /// bound, not a per-key ledger: an identical re-pick is the one
+        /// replay rule's job, and the re-observe between different lanes
+        /// is itself the recovery.
         var uncertainTotal = 0
-        /// Identical fill/submit repeats are effects replayed, never intent —
-        /// tracked so a second run of the same payload can't double-type.
-        var lastDispatchKey: String?
-        /// Consecutive dispatches of the identical action — with the
-        /// post-dispatch observation revisiting an already-seen state, a
-        /// third blind repeat is suppressed rather than re-fired.
-        var identicalStreak = 0
-        /// Content fingerprints of every observation this run — a
-        /// re-picked action landing in a state the loop already saw is
-        /// repetition, not progress.
-        var seenFingerprints: Set<String> = []
-        /// Consecutive skips of the identical dispatch: a lane the model
-        /// keeps re-picking after its effect already ran is removed from
-        /// the offered set rather than skipped forever.
-        var rePickSkips: [String: Int] = [:]
+        /// The previous step's committed pick identity — element signature
+        /// plus fill text. The one replay rule: the identical pick twice
+        /// in a row drops the lane from the next offer. Re-observation
+        /// self-corrects everything else.
+        var lastPickKey: String?
+        /// Lanes an identical re-pick retired — matched on the element
+        /// signature (survives token/index rotation) and on the lane
+        /// id + text pair (survives frame jitter while the slot stays
+        /// put), so a re-snapshotted control cannot slip the ban and a
+        /// stranger landing on the slot cannot inherit it.
         var rePickBanned: Set<String> = []
+        /// Consecutive dispatches at the same named target with no
+        /// observation change between them — the cross-lane replay bound
+        /// the identical-pick rule can't express.
+        var targetStrikes = 0
+        var lastTargetKey = ""
+        var bannedTargets: Set<String> = []
+        /// The observation fingerprint the last dispatch fired on — equal
+        /// on the next step means the dispatch produced no visible change.
+        var fingerprintAtLastDispatch: String?
         /// Consecutive sub-0.5-confidence picks: one re-observe pass, then
         /// an honest needsChoice handback carrying the top candidates.
         var lowConfidenceStreak = 0
@@ -669,13 +766,18 @@ final class CuaAgentLoop {
         /// carry a stale capture and are dropped, never offered.
         var lastVisualScanSignature: String?
         var visualStuckTried = false
+        /// Why the last visual read failed — an error kind like
+        /// `not_installed` or `refused` — so a blocked settle can say
+        /// "vision failed", never mistake it for "no regions". A
+        /// successful parse clears it.
+        var lastVisionError: String?
+        /// A visual parse ran and saw nothing matching the goal —
+        /// distinguishes "no on-screen text matched" from a parse
+        /// failure when a blocked reason is written.
+        var visualGoalMiss = false
         var modelHistory: [JSONValue] = []
 
         for stepIndex in 0..<max(task.maxSteps, 1) {
-            /// Per-phase timings fire on every exit — early `continue`s
-            /// and terminal `return`s alike.
-            var phases: [String: Double] = [:]
-            defer { stepTiming?(stepIndex, phases) }
             try Task.checkCancellation()
             // Armed pixel lanes expire: three loop steps, or two reads
             // where the element no longer matches (handled at offer time).
@@ -692,7 +794,6 @@ final class CuaAgentLoop {
             // coordinate space it defines. A re-pin settle probe younger
             // than two seconds stands in for a fresh read — it IS a fresh
             // observation of the same window, already paid for.
-            let observeStart = Date()
             var snapshot: JSONValue?
             if let seeded = seededObservation, seeded.wid == wid,
                Date().timeIntervalSince(seeded.at) < 2 {
@@ -718,7 +819,6 @@ final class CuaAgentLoop {
                     continue
                 }
             }
-            phases["observe_ms"] = Date().timeIntervalSince(observeStart) * 1000
             guard let snapshot else { continue }  // unreachable — observe always sets or continues
             let elements = snapshot["elements"]?.array ?? []
             let windowTitle = snapshot["window"]?["title"]?.string
@@ -765,7 +865,8 @@ final class CuaAgentLoop {
                     // visual read proves the landing before the model may
                     // retype the payload into the same place.
                     visualParseTried = true
-                    let texts = await readVisualTexts(pid: resolvedPID, wid: wid)
+                    let texts = await readVisualTexts(pid: resolvedPID, wid: wid,
+                                                      visionError: &lastVisionError)
                     if !texts.isEmpty { visualTexts = texts }
                     let needle = String(proof.text.prefix(24))
                     if texts.contains(where: {
@@ -785,7 +886,6 @@ final class CuaAgentLoop {
             var pageRefs: [JSONValue] = []
             var browserPage: JSONValue = .null
             if isBrowser {
-                let browserStart = Date()
                 let page = try await boundBrowser(pid: &resolvedPID, wid: &wid,
                                                   target: &browserTarget, shownTab: &browserShownTab,
                                                   bindingUpgradeTried: &bindingUpgradeTried)
@@ -797,7 +897,7 @@ final class CuaAgentLoop {
                 // honestly missed) by THIS read instead of a poll loop.
                 if let pending = pendingNavigation {
                     if let pageURL = Self.browserPageURL(browserPage) {
-                        if pageURL.localizedCaseInsensitiveContains(pending.needle) {
+                        if CuaTaskAgent.urlHostMatches(pageURL, wanted: pending.needle) {
                             pendingNavigation = nil
                             pendingNavigationMisses = 0
                             recordPostcondition(.resultObserved,
@@ -818,18 +918,16 @@ final class CuaAgentLoop {
                     // No readable url this step (transitional/unbound):
                     // keep armed; the next read resolves it.
                 }
-                phases["browser_ms"] = Date().timeIntervalSince(browserStart) * 1000
             }
 
-            // The observation's content fingerprint marks states the run
-            // has already seen: a re-picked identical action landing in a
-            // seen state is repetition, not progress — the difference
-            // between a click the window ignored and one it answered.
+            // The observation's content fingerprint stamps the visual
+            // parse signature: identical consecutive reads never re-pay a
+            // parse, and a dispatched mutation clears it so the next read
+            // re-arms fresh pixels.
             let fingerprint = Self.observationFingerprint(
                 elements: elements, title: windowTitle, tabs: tabs,
                 refs: pageRefs, browserURL: Self.browserPageURL(browserPage),
                 staticText: windowTextDigest)
-            let revisitedState = !seenFingerprints.insert(fingerprint).inserted
 
             // ── Candidates: flat, from this observation only. deny[] pass 1:
             // a denied label never becomes an offered candidate.
@@ -903,12 +1001,21 @@ final class CuaAgentLoop {
                     // Anonymous controls (icon-only buttons, drawn glyphs)
                     // carry no label the judge can match — describe them by
                     // role + ordinal so they're still reachable, not noise.
+                    // The gesture lanes ride the same text so a goal naming
+                    // "double-click" or "right-click" finds its own verb.
+                    let elementFullText = Self.elementText(element)
                     offer(.clickElement(token: token, index: index),
-                          "Click the \(controlName)", text: Self.elementText(element),
+                          "Click the \(controlName)", text: elementFullText,
+                          element: element)
+                    offer(.doubleClickElement(token: token, index: index),
+                          "Double-click the \(controlName)", text: elementFullText,
+                          element: element)
+                    offer(.rightClickElement(token: token, index: index),
+                          "Right-click (context menu) the \(controlName)", text: elementFullText,
                           element: element)
                     if Self.valueRoles.contains(role) {
                         offer(.setValue(token: token, index: index),
-                              "Set the value of \(controlName)", text: Self.elementText(element),
+                              "Set the value of \(controlName)", text: elementFullText,
                               element: element)
                     }
                 }
@@ -947,6 +1054,7 @@ final class CuaAgentLoop {
                 visualCandidates = nil  // armed under an older capture — stale
             }
             let goalWords = Self.contentWords(task.goal)
+            let goalMatchWords = Self.goalRegionWords(task.goal)
             var elementGoalMatched = false
             for (id, lane) in lanes where lane.elementIndex != nil {
                 let text = ((criteria[id] ?? nil) ?? "") + " " + (laneText[id] ?? "")
@@ -959,15 +1067,24 @@ final class CuaAgentLoop {
                lastVisualScanSignature != visualSignature {
                 lastVisualScanSignature = visualSignature
                 if let found = await readVisualRegions(pid: resolvedPID, wid: wid,
-                                                       snapshot: snapshot),
+                                                       snapshot: snapshot, goal: task.goal,
+                                                       visionError: &lastVisionError),
                    !found.regions.isEmpty {
                     visualCandidates = found
+                    visualGoalMiss = !found.regions.contains {
+                        Self.regionMatchesGoal($0.label, words: goalMatchWords) }
                     for label in found.regions.map(\.label) where !visualTexts.contains(label) {
                         visualTexts.append(label)
                     }
                     modelHistory.append(.object(["observation": .string(
                         "The accessibility tree exposed too few candidates. A visual pass sees these on-screen items: \(found.regions.map(\.label).prefix(12).joined(separator: "; ")). If one matches the goal, pick its visual click lane.")]))
                     ledger.append("thin accessibility — armed \(found.regions.count) visual candidates")
+                } else {
+                    visualGoalMiss = lastVisionError == nil
+                    if let visionError = lastVisionError {
+                        modelHistory.append(.object(["observation": .string(
+                            "vision_failed: \(visionError) — the visual pass could not read this window.")]))
+                    }
                 }
             }
             // Visual candidates carry the region's own pixel center + the
@@ -977,10 +1094,63 @@ final class CuaAgentLoop {
             if let visual = visualCandidates {
                 for region in visual.regions {
                     guard !Self.isDenied(region.label, deny: task.deny) else { continue }
+                    let what = "\(region.kind == "icon" ? "icon" : "text") \"\(region.label)\" seen on screen"
                     offer(.visualClick(captureID: visual.captureID, regionID: region.id,
                                        x: region.x, y: region.y),
-                          "Click the \(region.kind == "icon" ? "icon" : "text") \"\(region.label)\" seen on screen",
-                          text: region.label)
+                          "Click the \(what)", text: region.label)
+                    offer(.doubleClickVisual(captureID: visual.captureID, regionID: region.id,
+                                             x: region.x, y: region.y),
+                          "Double-click the \(what)", text: region.label)
+                    offer(.rightClickVisual(captureID: visual.captureID, regionID: region.id,
+                                            x: region.x, y: region.y),
+                          "Right-click (context menu) the \(what)", text: region.label)
+                }
+                // Visual drags exist only between regions the goal names —
+                // "drag X onto Y" lexically names both endpoints; anything
+                // else is noise in the candidate list.
+                let vdragEnds = visual.regions.filter {
+                    !Self.isDenied($0.label, deny: task.deny)
+                        && Self.regionMatchesGoal($0.label, words: goalMatchWords)
+                }.prefix(4)
+                for source in vdragEnds {
+                    for target in vdragEnds where source.id != target.id {
+                        offer(.dragVisual(captureID: visual.captureID,
+                                          fromID: source.id, toID: target.id,
+                                          x1: source.x, y1: source.y,
+                                          x2: target.x, y2: target.y),
+                              "Drag \"\(source.label)\" onto \"\(target.label)\" seen on screen",
+                              text: "\(source.label) \(target.label)")
+                    }
+                }
+            }
+            // Element drags likewise pair only goal-matched controls; the
+            // coordinates resolve in the observation's screenshot space,
+            // so a read without pixel dims offers none.
+            var dragEnds: [(element: JSONValue, index: Int, token: String,
+                            label: String, x: Double, y: Double)] = []
+            if !goalMatchWords.isEmpty {
+                for element in elements {
+                    guard let index = element["element_index"]?.integer,
+                          let token = element["element_token"]?.string,
+                          Self.clickRoles.contains(element["role"]?.string ?? ""),
+                          element["enabled"] != .bool(false) else { continue }
+                    let label = element["label"]?.string ?? element["title"]?.string ?? ""
+                    guard !label.isEmpty, !Self.isDenied(label, deny: task.deny),
+                          Self.regionMatchesGoal(label, words: goalMatchWords),
+                          let point = Self.pixelPoint(of: element, in: snapshot) else { continue }
+                    dragEnds.append((element, index, token, label, point.x, point.y))
+                }
+            }
+            var dragOffers = 0
+            for source in dragEnds {
+                for target in dragEnds where source.index != target.index && dragOffers < 8 {
+                    offer(.dragElements(fromToken: source.token, fromIndex: source.index,
+                                        toToken: target.token, toIndex: target.index,
+                                        x1: source.x, y1: source.y,
+                                        x2: target.x, y2: target.y),
+                          "Drag \"\(source.label)\" onto \"\(target.label)\"",
+                          text: "\(source.label) \(target.label)", element: source.element)
+                    dragOffers += 1
                 }
             }
             // Deny gates key names too — "delete" must not remain
@@ -1010,9 +1180,12 @@ final class CuaAgentLoop {
                 for chord in Self.hotkeyChords where !Self.isDenied(chord.joined(separator: "+"), deny: task.deny) {
                     offer(.hotkey(chord), "Press \(chord.joined(separator: "+"))")
                 }
-            }
-            for direction in ["up", "down", "left", "right"] where !Self.isDenied(direction, deny: task.deny) {
-                offer(.scroll(direction), "Scroll \(direction)")
+                // Scroll is window-level input too — a picked scroll takes
+                // the same raise→verify→foreground path a keystroke does,
+                // so it shares the background-posture gate with them.
+                for direction in ["up", "down", "left", "right"] where !Self.isDenied(direction, deny: task.deny) {
+                    offer(.scroll(direction), "Scroll \(direction)")
+                }
             }
             if isBrowser {
                 if windowInputAllowed, !Self.isDenied("new tab", deny: task.deny) { offer(.newTab, "Open a new browser tab") }
@@ -1030,7 +1203,8 @@ final class CuaAgentLoop {
                     offer(.browserDialog(accept: false), "Dismiss the open JavaScript dialog on this page")
                 }
             }
-            offer(.done, "The request is fully satisfied by the observed state")
+            offer(.done, "An action I dispatched this run completed the request")
+            offer(.satisfied, "The request is already satisfied by the observed state — nothing needs doing")
             offer(.stuck, "The request cannot be completed from here; stop honestly")
 
             // Lanes the model re-picked past the bound stay out of the
@@ -1041,7 +1215,8 @@ final class CuaAgentLoop {
             // landing on the slot cannot inherit it.
             for id in lanes.keys.sorted()
             where rePickBanned.contains(laneSig[id] ?? id)
-                || rePickBanned.contains(id + "|" + (laneText[id] ?? "")) {
+                || rePickBanned.contains(id + "|" + (laneText[id] ?? ""))
+                || bannedTargets.contains(Self.normalizedTarget(laneText[id] ?? "")) {
                 lanes.removeValue(forKey: id)
                 criteria.removeValue(forKey: id)
                 laneText.removeValue(forKey: id)
@@ -1071,11 +1246,21 @@ final class CuaAgentLoop {
                     return corpus.contains(lowered)
                         || (producedPin && Self.isProducedArtifactClaim(lowered)) }
             if claimsMatched, pendingNavigation == nil, !createVetoed {
-                recordPostcondition(.resultObserved, "Observed the requested outcome in \(appName).",
-                                    appName: appName, bundleID: bundleID,
-                                    processID: resolvedPID, windowID: windowID)
-                ledger.append("done — the requested outcome is visible in \(appName)")
-                return finish(.done)
+                // The corpus match is observed evidence — `.done` needs a
+                // dispatched effect behind it, otherwise the goal was
+                // already true and the honest settle is `.alreadySatisfied`.
+                let matchedClaim = task.successContains.first { claim in
+                    let lowered = claim.lowercased()
+                    return corpus.contains(lowered)
+                        || (producedPin && Self.isProducedArtifactClaim(lowered))
+                } ?? "the requested outcome"
+                if dispatchedEffect {
+                    ledger.append("done — the requested outcome is visible in \(appName)")
+                    return finish(.done)
+                }
+                ledger.append("already satisfied — \(matchedClaim) reads true in \(appName)")
+                return finish(.alreadySatisfied(
+                    reason: "\"\(matchedClaim)\" was already true in \(appName)'s observed state."))
             }
 
             // ── Shortlist: junk lanes sink typed-classifier confidence —
@@ -1085,7 +1270,8 @@ final class CuaAgentLoop {
             // never "the shortlist left one" — a trimmed-away lane must
             // not turn the loop into a judge-free dispatcher.
             let singleActionID: String? = {
-                let actionLanes = lanes.filter { $0.key != "done" && $0.key != "stuck" }
+                let actionLanes = lanes.filter {
+                    $0.key != "done" && $0.key != "stuck" && $0.key != "satisfied" }
                 return actionLanes.count == 1 ? actionLanes.keys.first : nil
             }()
             (lanes, criteria, laneText) = Self.shortlist(
@@ -1151,6 +1337,7 @@ final class CuaAgentLoop {
                 "selected_window_id": .number(Double(wid)),
                 "values_available": .array(task.values.keys.sorted().map { .string($0) }),
                 "success_contains": .array(task.successContains.map { .string($0) }),
+                "dispatched_effects": .bool(dispatchedEffect),
                 "verified_facts": .array(observedPostconditions.suffix(8).map { .string($0.evidence) }),
                 "elements": .array(elements.prefix(80).map { Self.compactElement($0, deny: task.deny) }),
                 "tabs": .array(tabs.map(CuaBrowserTarget.compactTab)),
@@ -1164,13 +1351,13 @@ final class CuaAgentLoop {
             }
             let questions: [String: Question] = [
                 "next": .choice(
-                    instructions: "Choose the single next action for this step. When the request supplies text and an action delivers it in one step, prefer that over sequences of small element actions — clicking each key or button one at a time is slower and error-prone. For a feature the request names (a search field, a button, a menu item), act on that element directly — a chorded shortcut means different things in different apps, so use one only when no element offers the feature. Pick done only when the observed state alone proves the exact request is satisfied. Pick stuck only when no action can progress. Action ids refer to the offered list; never invent one.",
+                    instructions: "Choose the single next action for this step. Lane ids: click_# acts on an accessibility element; vclick_<region> clicks on-screen text or an icon detected by vision — use it for names, labels and glyphs the accessibility tree cannot see; pixel_# clicks raw coordinates; dclick_#/vdclick_<region> double-click, rclick_#/vrclick_<region> right-click for a context menu, and drag_<i>_to_<j>/vdrag_<r1>_to_<r2> drag between named elements or regions. When the request supplies text and an action delivers it in one step, prefer that over sequences of small element actions — clicking each key or button one at a time is slower and error-prone. For a feature the request names (a search field, a button, a menu item), act on that element directly — a chorded shortcut means different things in different apps, so use one only when no element offers the feature. Pick done only when an action you dispatched THIS RUN completed the request — dispatched_effects says whether any ran. Pick satisfied when the observed state already fulfills the request and nothing needs doing. Pick stuck only when no action can progress. Action ids refer to the offered list; never invent one.",
                     criteria: criteria),
                 "fill": .choice(
                     instructions: "Answered only when `next` types or sets a field: which supplied value belongs in that field? Pick the matching value key, or unavailable when the field needs text the caller did not supply.",
                     criteria: fillChoices),
                 "doneEvidence": .choice(
-                    instructions: "Answered only when `next` is done: does the observed state (element values, tab urls/titles, window_text, verified_facts, visual_texts, success_contains) prove the exact requested outcome? A success_contains string appearing in the observed text IS proof — for a compute request, the expected result string is listed there. History proves steps ran, never that the request succeeded.",
+                    instructions: "Answered only when `next` is done or satisfied: does the observed state (element values, tab urls/titles, window_text, verified_facts, visual_texts, success_contains) prove the exact requested outcome? A success_contains string appearing in the observed text IS proof — for a compute request, the expected result string is listed there. History proves steps ran, never that the request succeeded.",
                     criteria: ["proven": "Readable evidence shows the exact requested outcome.",
                                "unproven": "Nothing readable proves it, or the state contradicts it."]),
                 "blockedReason": .choice(
@@ -1182,7 +1369,6 @@ final class CuaAgentLoop {
                 answers = synthesizedPick
                 nextID = singleActionID ?? ""
             } else {
-                let judgeStart = Date()
                 do {
                     answers = try await judge(.object(mergedState), questions)
                 } catch {
@@ -1195,7 +1381,6 @@ final class CuaAgentLoop {
                     try? await Task.sleep(for: .milliseconds(300))
                     answers = try await judge(.object(mergedState), questions)
                 }
-                phases["judge_ms"] = Date().timeIntervalSince(judgeStart) * 1000
                 do {
                     nextID = try JevSelection.read(answers["next"], allowed: Set(criteria.keys))
                 } catch {
@@ -1216,6 +1401,7 @@ final class CuaAgentLoop {
                     if case .choice(_, let confidence, _) = a { return confidence }
                     return nil }) ?? 0)
             if case .done = lane { judgment.done = true }
+            if case .satisfied = lane { judgment.done = true }
             if case .stuck = lane {
                 judgment.blocked = (try? JevSelection.read(answers["blockedReason"], allowed: Set(blockedChoices.keys))) ?? "other"
             }
@@ -1236,7 +1422,8 @@ final class CuaAgentLoop {
                 var optionIDs: [String] = []
                 if case .choice(_, _, let probabilities) = answers["next"] {
                     optionIDs = probabilities
-                        .filter { $0.key != "done" && $0.key != "stuck" && criteria[$0.key] != nil }
+                        .filter { $0.key != "done" && $0.key != "stuck"
+                                  && $0.key != "satisfied" && criteria[$0.key] != nil }
                         .sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
                         .map { $0.key }
                 }
@@ -1251,7 +1438,13 @@ final class CuaAgentLoop {
             }
             lowConfidenceStreak = 0
 
-            // ── done: gate on observed evidence, not on the claim. The
+            // ── Terminal picks, gated on observed evidence. `done` claims
+            // an action dispatched THIS RUN completed the request — it
+            // needs a confirmed effect behind it plus readable proof.
+            // `satisfied` is the zero-effect settle: the goal is already
+            // true and nothing needed doing. A `done` claim with no
+            // dispatched effect is a fabrication — blocked, never retried;
+            // the create-scope veto keeps its own bound either way. The
             // corpus, produced-pin and baseline veto are this step's own —
             // computed once above and shared with the every-step check.
             if judgment.done {
@@ -1261,6 +1454,11 @@ final class CuaAgentLoop {
                         let lowered = claim.lowercased()
                         return corpus.contains(lowered)
                             || (producedPin && Self.isProducedArtifactClaim(lowered)) }
+                if case .done = lane, !dispatchedEffect, !createVetoed {
+                    ledger.append("done claim rejected — no action was dispatched this run")
+                    blockedReason = "claimed done before acting"
+                    return finish(.blocked("The model claimed the request complete, but no action ran this run — claimed done before acting."))
+                }
                 if !evidence || postUnmet || createVetoed {
                     unprovenDone += 1
                     guard unprovenDone < Self.maximumUnprovenDone else {
@@ -1274,7 +1472,8 @@ final class CuaAgentLoop {
                     // only ever be unproven without this evidence.
                     if !visualParseTried {
                         visualParseTried = true
-                        let texts = await self.readVisualTexts(pid: resolvedPID, wid: wid)
+                        let texts = await self.readVisualTexts(pid: resolvedPID, wid: wid,
+                                                               visionError: &lastVisionError)
                         if !texts.isEmpty {
                             visualTexts = texts
                             modelHistory.append(.object(["observation": .string(
@@ -1286,9 +1485,11 @@ final class CuaAgentLoop {
                     ledger.append("done claim rejected — evidence not observable")
                     continue
                 }
-                recordPostcondition(.resultObserved, "Observed the requested outcome in \(appName).",
-                                    appName: appName, bundleID: bundleID,
-                                    processID: resolvedPID, windowID: windowID)
+                if case .satisfied = lane {
+                    ledger.append("already satisfied — the requested outcome is on screen in \(appName)")
+                    return finish(.alreadySatisfied(
+                        reason: "The request was already satisfied by \(appName)'s observed state — nothing needed dispatching."))
+                }
                 ledger.append("done — the requested outcome is visible in \(appName)")
                 return finish(.done)
             }
@@ -1308,16 +1509,35 @@ final class CuaAgentLoop {
                     visualStuckTried = true
                     lastVisualScanSignature = visualSignature
                     if let found = await readVisualRegions(pid: resolvedPID, wid: wid,
-                                                           snapshot: snapshot),
+                                                           snapshot: snapshot, goal: task.goal,
+                                                           visionError: &lastVisionError),
                        !found.regions.isEmpty {
                         visualCandidates = found
+                        visualGoalMiss = !found.regions.contains {
+                            Self.regionMatchesGoal($0.label, words: goalMatchWords) }
                         visualTexts = found.regions.map(\.label)
                         modelHistory.append(.object(["observation": .string(
                             "The accessibility tree did not expose the target. A visual pass sees these on-screen items: \(found.regions.map(\.label).prefix(12).joined(separator: "; ")). If one matches the goal, pick its visual click lane.")]))
                         ledger.append("stuck — armed \(found.regions.count) visual candidates")
                         continue
                     }
+                    visualGoalMiss = lastVisionError == nil
+                    if let visionError = lastVisionError {
+                        modelHistory.append(.object(["observation": .string(
+                            "vision_failed: \(visionError) — the visual pass could not read this window.")]))
+                    }
                 }
+                // The blockedReason field carries the judge's stated
+                // reason plus the mechanism that failed — vision errors
+                // and "nothing on screen matched" are different faults.
+                var detail = reason
+                if let visionError = lastVisionError {
+                    detail += "; visual perception failed: \(visionError)"
+                } else if visualGoalMiss {
+                    let words = goalMatchWords.sorted().joined(separator: " ")
+                    if !words.isEmpty { detail += "; no on-screen text matched \"\(words)\"" }
+                }
+                blockedReason = detail
                 return finish(.blocked("The task could not be completed from \(appName)'s current state (\(reason)). Nothing further was dispatched."))
             }
 
@@ -1361,44 +1581,56 @@ final class CuaAgentLoop {
             // A raise that cannot verify frontmost is a dispatch failure,
             // never a blind keystroke into the wrong app.
             let foregroundInput = windowInputAmbiguous && lane.usesWindowInput
-            // A fill or submit replayed verbatim is never intent — typing
-            // the same text twice appends it, Return pressed twice can skip
-            // past the result — so it is skipped, never re-dispatched. Any
-            // other lane earns one retry, but a third consecutive identical
-            // dispatch landing in an already-seen state is blind repetition:
-            // the lane leaves the offered set and the model must pick
-            // something else or honestly stop. Identity rides the element
-            // signature, so a re-snapshotted token or a reshuffled index
-            // cannot slip the same control past the bound.
+            // The one replay rule: the identical dispatch key picked on
+            // two consecutive observations. A fill or submit can never
+            // re-fire verbatim — a second type appends, a second Return
+            // skips past the result — so its re-pick is skipped outright.
+            // Any other lane may be a deliberate repeat on a re-observed
+            // state: it dispatches once more, then leaves the offered set
+            // so a third blind pick is impossible. Identity rides the
+            // element signature, so a re-snapshotted token or a reshuffled
+            // index cannot slip the same control past the bound.
             let dispatchKey = (laneSig[nextID] ?? lane.id) + "|" + (dispatchText ?? "")
-            if lastDispatchKey == dispatchKey {
+            if lastPickKey == dispatchKey {
                 let replayGuarded = lane.needsFillText || lane.isSubmitKey
-                if replayGuarded || (revisitedState && identicalStreak >= 2) {
-                    if replayGuarded { rePickSkips[dispatchKey, default: 0] += 1 }
-                    if !replayGuarded || (rePickSkips[dispatchKey] ?? 0) >= 2 {
-                        rePickBanned.insert(laneSig[nextID] ?? nextID)
-                        rePickBanned.insert(nextID + "|" + (laneText[nextID] ?? ""))
-                        lanes.removeValue(forKey: nextID)
-                        criteria.removeValue(forKey: nextID)
-                        laneText.removeValue(forKey: nextID)
-                        laneSig.removeValue(forKey: nextID)
-                        modelHistory.append(.object(["action": .string(description),
-                            "observation": .string(replayGuarded
-                                ? "The identical action was re-picked after its effect already ran — it is removed from the offered set. Choose a different action or report honestly."
-                                : "The identical action already ran twice and the window still shows a state this run already observed — it is removed from the offered set. Choose a different action or report honestly.")]))
-                        ledger.append("\(description) — removed: identical action re-picked")
-                    } else {
-                        modelHistory.append(.object(["action": .string(description),
-                            "observation": .string("The identical action already ran — its effect is in this observation. Do not repeat it.")]))
-                        ledger.append("\(description) — skipped: identical to the previous step")
-                    }
+                rePickBanned.insert(laneSig[nextID] ?? nextID)
+                rePickBanned.insert(nextID + "|" + (laneText[nextID] ?? ""))
+                modelHistory.append(.object(["action": .string(description),
+                    "observation": .string(replayGuarded
+                        ? "The identical action was re-picked after its effect already ran — it is removed from the offered set. Choose a different action or report honestly."
+                        : "The identical action already ran and its result was re-observed — it is now removed from the offered set. Choose a different action or report honestly.")]))
+                if replayGuarded {
+                    ledger.append("\(description) — skipped: identical action re-picked")
                     continue
                 }
+                ledger.append("\(description) — last dispatch: identical action re-picked")
             }
+            lastPickKey = dispatchKey
+            // Cross-lane target bound: the same named control dispatched
+            // while the observation never changed — a pixel lane and an
+            // element lane alternating on one button never trip the
+            // identical-pick rule, so strikes ride the target text and
+            // retire every lane aiming at it. A changed observation resets
+            // the streak — a click that landed earned its re-pick.
+            let targetKey = Self.normalizedTarget(laneText[nextID] ?? "")
+            if !targetKey.isEmpty {
+                if targetKey == lastTargetKey, fingerprintAtLastDispatch == fingerprint {
+                    targetStrikes += 1
+                    if targetStrikes >= Self.maximumSameTargetStrikes {
+                        bannedTargets.insert(targetKey)
+                        modelHistory.append(.object(["action": .string(description),
+                            "observation": .string("The screen did not change across \(Self.maximumSameTargetStrikes) dispatches at \"\(laneText[nextID] ?? targetKey)\" — every lane aiming there leaves the offered set. Choose a different action or report honestly.")]))
+                        ledger.append("\(description) — target unchanged across \(Self.maximumSameTargetStrikes) dispatches")
+                    }
+                } else {
+                    targetStrikes = 0
+                    lastTargetKey = targetKey
+                }
+            }
+            fingerprintAtLastDispatch = fingerprint
             let result: JSONValue
             do {
                 Self.log.notice("agent_step \"\(task.goal, privacy: .public)\" -> \(description, privacy: .public)")
-                let dispatchStart = Date()
                 // Foreground delivery holds the focus lease across the
                 // WHOLE raise→verify→dispatch sequence — the lease means
                 // nothing if the keystroke ships after another lane took
@@ -1419,7 +1651,6 @@ final class CuaAgentLoop {
                                                    newTabRequested: &newTabRequested,
                                                    foregroundInput: foregroundInput)
                 }
-                phases["dispatch_ms"] = Date().timeIntervalSince(dispatchStart) * 1000
                 guard let outcome else {
                     dispatchFailures += 1
                     modelHistory.append(.object(["action": .string(description),
@@ -1441,6 +1672,18 @@ final class CuaAgentLoop {
             } catch let error as DriverConnectionError {
                 if case .toolRefused(_, let code, _) = error, code.contains("consent") {
                     return finish(.blockedByConsent(code))
+                }
+                // The window can die between observe and dispatch ack (a
+                // closing ⌘W lands → the driver refuses not_found). Same
+                // vanished path the observe side runs — it must precede
+                // the .refused early-return, which shares the signal text.
+                if Self.windowVanished(error) {
+                    if let outcome = try await vanishedWindowOutcome(
+                        pid: resolvedPID, goal: task.goal, appName: appName,
+                        ledger: &ledger, windowID: &windowID) {
+                        return outcome
+                    }
+                    continue
                 }
                 if case .refused(let message) = error {
                     return finish(.blocked(message))
@@ -1467,11 +1710,20 @@ final class CuaAgentLoop {
                 if case .toolRefused(_, let code, _) = error,
                    code == "same_pid_keyboard_ambiguity", lane.usesWindowInput {
                     windowInputAmbiguous = true
+                    // The refusal is a dispatch failure like any other —
+                    // uncounted, a judge re-picking the same window-input
+                    // lane (still offered while the app is frontmost)
+                    // burns the whole step budget on identical refusals.
+                    dispatchFailures += 1
                     let explanation = task.foreground || isFrontmostApp(resolvedPID)
                         ? "App-level input could not be pinned to the window in the background; the next window-input action raises the bound window to the front and delivers it there instead."
                         : "App-level input could not be pinned to the window and this task must stay in the background; window-level key and focus-typing actions are no longer available — use element actions or report honestly."
                     modelHistory.append(.object(["action": .string(description),
                         "observation": .string(explanation)]))
+                    ledger.append("\(description) — not dispatched: the driver cannot pin window input")
+                    guard dispatchFailures < Self.maximumDispatchFailures else {
+                        return finish(.blocked("App-level input could not be pinned to the bound window. Nothing further was dispatched."))
+                    }
                     continue
                 }
                 failedLaneIDs.insert(laneSig[nextID] ?? lane.id)
@@ -1492,13 +1744,11 @@ final class CuaAgentLoop {
                 // typing went uncertain — the same failure memory a hard
                 // refusal builds.
                 failedLaneIDs.insert(laneSig[nextID] ?? lane.id)
-                uncertainPerDispatchKey[dispatchKey, default: 0] += 1
                 uncertainTotal += 1
                 modelHistory.append(.object(["action": .string(description),
                     "observation": .string("The driver reported an uncertain outcome — the effect may have landed. Verify against the fresh observation before repeating it.")]))
                 ledger.append("\(description) — uncertain outcome; verifying before retry")
-                guard (uncertainPerDispatchKey[dispatchKey] ?? 0) < Self.maximumUncertainPerDispatch,
-                      uncertainTotal < Self.maximumUncertainTotal else {
+                guard uncertainTotal < Self.maximumUncertainTotal else {
                     return finish(.blocked("\(outcome.localizedDescription) Inspect \(appName) before retrying."))
                 }
                 continue
@@ -1507,7 +1757,6 @@ final class CuaAgentLoop {
             // after this point would only decorate a dead run, and any
             // later mutation is forbidden outright.
             try Task.checkCancellation()
-            let postStart = Date()
             if case .typeIntoElement(_, let index) = lane {
                 pendingInsertProof = (index, dispatchText ?? "")
             }
@@ -1516,12 +1765,6 @@ final class CuaAgentLoop {
             }
             if case .typeIntoWindow = lane { pendingInsertProof = (nil, dispatchText ?? "") }
             if case .browserType = lane { pendingInsertProof = (nil, dispatchText ?? "") }
-            identicalStreak = dispatchKey == lastDispatchKey ? identicalStreak + 1 : 1
-            lastDispatchKey = dispatchKey
-            // A landing dispatch clears its own uncertain count and every
-            // stale re-pick skip — skips only bound CONSECUTIVE repeats.
-            uncertainPerDispatchKey.removeValue(forKey: dispatchKey)
-            rePickSkips.removeAll()
             let outcome = Self.effectSummary(result)
             modelHistory.append(.object(["action": .string(description),
                                          "observation": .string(outcome)]))
@@ -1575,11 +1818,12 @@ final class CuaAgentLoop {
                                     appName: appName, bundleID: bundleID,
                                     processID: resolvedPID, windowID: newID)
             }
-            // Driver honesty fields: a confirmed effect (or an explicit
-            // verified readback) is proof; a suspected noop or a pixel
-            // escalation arms the pixel rung for the next observation;
-            // anything weaker is reported, never claimed.
+            // Driver honesty fields: a confirmed effect is proof and the
+            // run's `done` base; a suspected noop or a pixel escalation
+            // arms the pixel rung for the next observation; anything
+            // weaker is reported, never claimed.
             if Self.isProven(result) {
+                dispatchedEffect = true
                 recordPostcondition(.resultObserved, "Driver confirmed: \(description)",
                                     appName: appName, bundleID: bundleID,
                                     processID: resolvedPID, windowID: wid)
@@ -1600,7 +1844,6 @@ final class CuaAgentLoop {
                 pixelArmed[index] = (label: element["label"]?.string ?? element["title"]?.string ?? "",
                                      step: stepIndex, misses: 0)
             }
-            phases["post_ms"] = Date().timeIntervalSince(postStart) * 1000
         }
         return finish(.maxSteps(history: ledger))
     }
@@ -1668,10 +1911,16 @@ final class CuaAgentLoop {
         }
         switch lane {
         case .clickElement: return "click|" + signature(element)
+        case .doubleClickElement: return "dclick|" + signature(element)
+        case .rightClickElement: return "rclick|" + signature(element)
         case .typeIntoElement: return "typeinto|" + signature(element)
         case .setValue: return "setvalue|" + signature(element)
         case .pixelClick: return "pixel|" + signature(element)
         case .visualClick(_, let regionID, _, _): return "vclick|" + regionID
+        case .doubleClickVisual(_, let regionID, _, _): return "vdclick|" + regionID
+        case .rightClickVisual(_, let regionID, _, _): return "vrclick|" + regionID
+        case .dragElements: return "drag|" + signature(element)
+        case .dragVisual(_, let r1, let r2, _, _, _, _): return "vdrag|" + r1 + "|" + r2
         case .invokeMenu(let path, _): return "menu|" + path.joined(separator: "\u{1F}")
         default: return lane.id
         }
@@ -1716,7 +1965,11 @@ final class CuaAgentLoop {
               let bh = Self.num(snapshot["window_bounds"]?["height"]), bh > 0,
               let sw = Self.num(snapshot["screenshot_width"]),
               let sh = Self.num(snapshot["screenshot_height"]) else { return nil }
-        return ((fx + fw / 2 - bx) / bw * sw, (fy + fh / 2 - by) / bh * sh)
+        // Pixels are integer-addressable — keep the scaled center clean of
+        // float dust (109.999… instead of 110) so driver payloads and lane
+        // signatures stay exact.
+        return (((fx + fw / 2 - bx) / bw * sw).rounded(),
+                ((fy + fh / 2 - by) / bh * sh).rounded())
     }
 
     private static func num(_ value: JSONValue?) -> Double? {
@@ -1840,6 +2093,14 @@ final class CuaAgentLoop {
 
     /// Non-stopword tokens of length ≥2 — the goal-match vocabulary the
     /// shortlist and the hybrid-perception trigger share.
+    /// One target identity across lane kinds — the element label the click
+    /// lane and the visual region both name — whitespace-normalized and
+    /// case-folded so the same control can't re-enter on a spelling wrinkle.
+    private static func normalizedTarget(_ text: String) -> String {
+        text.lowercased().components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     private static func contentWords(_ text: String) -> Set<String> {
         Set(text.lowercased()
             .split { !$0.isLetter && !$0.isNumber }
@@ -1853,7 +2114,10 @@ final class CuaAgentLoop {
     private static func elementTier(_ lane: Lane) -> Int {
         switch lane {
         case .typeIntoElement: return 0
-        case .clickElement, .pixelClick, .visualClick: return 1
+        case .clickElement, .pixelClick, .visualClick,
+             .doubleClickElement, .rightClickElement,
+             .doubleClickVisual, .rightClickVisual,
+             .dragElements, .dragVisual: return 1
         case .setValue: return 2
         case .invokeMenu: return 3
         default: return 9
@@ -1876,13 +2140,25 @@ final class CuaAgentLoop {
         var keyboardIDs: [String] = []
         var scrollIDs: [String] = []
         var keep: Set<String> = []
+        var visualClickIDs: [String] = []
         for (id, lane) in lanes {
-            if lane.elementIndex != nil { elementIDs.append(id); continue }
+            // Visual lanes are element candidates too, with one carve-out:
+            // the click lane is the perception pass's primary offer and
+            // keeps a small floor even without a goal match — a region
+            // labeled by a single letter or a glyph can never lexically
+            // match, and the read exists precisely because the AX pool
+            // could not carry the goal. Gesture variants stay goal-match-
+            // only so 70+ lanes don't flood the cap.
+            if lane.elementIndex != nil || lane.isVisualLane {
+                if case .visualClick = lane { visualClickIDs.append(id) }
+                else { elementIDs.append(id) }
+                continue
+            }
             switch lane {
             case .pressKey, .hotkey: keyboardIDs.append(id)
             case .scroll: scrollIDs.append(id)
-            // done/stuck, browser dialog/click/type, newTab, navigate,
-            // launchApp, typeIntoWindow — never trimmed.
+            // done/stuck/satisfied, browser dialog/click/type, newTab,
+            // navigate, launchApp, typeIntoWindow — never trimmed.
             default: keep.insert(id)
             }
         }
@@ -1905,6 +2181,16 @@ final class CuaAgentLoop {
             ? Array(ranked(elementIDs).prefix(elementLaneFloor))
             : Array(ranked(goalMatched).prefix(maximumElementLanes))
         keep.formUnion(keptElements)
+        // Every goal-matched visual click keeps its offer; unmatched ones
+        // keep a deterministic floor so the armed read is never trimmed
+        // back out of the judge's option space.
+        let visualMatched = visualClickIDs.filter { id in
+            let text = ((criteria[id] ?? nil) ?? "") + " " + (laneText[id] ?? "")
+            return !contentWords(text).isDisjoint(with: goalWords)
+        }
+        keep.formUnion(visualMatched)
+        keep.formUnion(visualClickIDs.filter { !visualMatched.contains($0) }
+            .sorted().prefix(6))
         // A caller-supplied payload makes every fill lane a candidate
         // delivery surface — a field labeled by its placeholder text
         // matches no goal word yet is the only lane that can land the
@@ -1926,12 +2212,12 @@ final class CuaAgentLoop {
             func rank(_ id: String) -> (Int, String) {
                 switch lanes[id] ?? .done {
                 case .done: return (0, id)
-                case .stuck: return (1, id)
+                case .satisfied, .stuck: return (1, id)
                 case .browserDialog, .browserClick, .browserType,
                      .newTab, .navigate, .launchApp, .typeIntoWindow:
                     return (2, id)
-                case .pressKey, .hotkey: return (7, id)
-                case .scroll: return (8, id)
+                case .scroll: return (scrollWanted ? 3 : 8, id)
+                case .pressKey, .hotkey: return (keyboardWanted ? 5 : 7, id)
                 default: return (3 + elementTier(lanes[id] ?? .done), id)
                 }
             }
@@ -1965,16 +2251,28 @@ final class CuaAgentLoop {
     /// One bounded visual read: a fresh window capture feeds the driver's
     /// `parse_visual_regions`; the region text is observed evidence for
     /// surfaces whose content exists only as pixels. Read-only — it never
-    /// counts as a dispatch and never repeats.
-    private func readVisualTexts(pid: Int, wid: Int) async -> [String] {
-        guard let capture = try? await call("get_window_state",
-            ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-             "include_screenshot": .bool(true), "include_accessibility_tree": .bool(false)]),
-              let captureID = capture["capture_id"]?.string,
-              let parsed = try? await call("parse_visual_regions",
-                  ["capture_id": .string(captureID)]) else { return [] }
-        return (parsed["regions"]?.array ?? [])
-            .compactMap { $0["text"]?.string ?? $0["label"]?.string }
+    /// counts as a dispatch and never repeats. A failed read is not the
+    /// same as a read that saw nothing: the error kind lands in
+    /// `visionError` so a blocked settle can say vision_failed.
+    private func readVisualTexts(pid: Int, wid: Int, visionError: inout String?) async -> [String] {
+        visionError = nil
+        do {
+            let capture = try await call("get_window_state",
+                ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                 "include_screenshot": .bool(true), "include_accessibility_tree": .bool(false)])
+            guard let captureID = capture["capture_id"]?.string else {
+                visionError = "vision parsing failed: no capture id"
+                return []
+            }
+            let parsed = try await call("parse_visual_regions",
+                ["capture_id": .string(captureID)])
+            return (parsed["regions"]?.array ?? [])
+                .compactMap { $0["text"]?.string ?? $0["label"]?.string }
+        } catch {
+            visionError = error is DriverConnectionError
+                ? String(describing: error) : "vision parsing failed"
+            return []
+        }
     }
 
     /// The hybrid read a thin AX pool buys: one window capture parsed
@@ -1985,30 +2283,50 @@ final class CuaAgentLoop {
     /// transform and atomically refuses a stale capture. When the
     /// observation's own read already paid for a screenshot (pixel lanes
     /// armed), its `capture_id` is reused — never a second capture of
-    /// the same pixels. Interactive regions sort first, then parser
-    /// confidence; capped so the candidate list stays a judgment, not a
-    /// dump.
+    /// the same pixels. Ranking is goal-first: a text-only region whose
+    /// label names the goal (a sidebar "Yanky" AX never exposes) is the
+    /// whole point of the read, so it outranks every interactive
+    /// region; interactive regions rank next; the rest last. Capped so
+    /// the candidate list stays a judgment, not a dump. A failed read
+    /// lands its error kind in `visionError` — never silently the same
+    /// as an empty one.
     private func readVisualRegions(pid: Int, wid: Int,
-                                   snapshot: JSONValue? = nil) async
+                                   snapshot: JSONValue? = nil, goal: String,
+                                   visionError: inout String?) async
         -> (captureID: String,
             regions: [(id: String, kind: String, label: String, x: Double, y: Double)])? {
-        var captureID = snapshot?["capture_id"]?.string
-        if captureID == nil {
-            captureID = (try? await call("get_window_state",
-                ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-                 "include_screenshot": .bool(true),
-                 "include_accessibility_tree": .bool(false)]))?["capture_id"]?.string
+        visionError = nil
+        let parsed: JSONValue
+        let captureID: String
+        do {
+            if let existing = snapshot?["capture_id"]?.string {
+                captureID = existing
+            } else {
+                guard let fresh = try await call("get_window_state",
+                    ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                     "include_screenshot": .bool(true),
+                     "include_accessibility_tree": .bool(false)])["capture_id"]?.string else {
+                    visionError = "vision parsing failed: no capture id"
+                    return nil
+                }
+                captureID = fresh
+            }
+            parsed = try await call("parse_visual_regions",
+                ["capture_id": .string(captureID)])
+        } catch {
+            visionError = error is DriverConnectionError
+                ? String(describing: error) : "vision parsing failed"
+            return nil
         }
-        guard let captureID,
-              let parsed = try? await call("parse_visual_regions",
-                  ["capture_id": .string(captureID)]) else { return nil }
         func num(_ value: JSONValue?) -> Double? {
             guard case .number(let n)? = value, n.isFinite else { return nil }
             return n
         }
+        let goalWords = Self.goalRegionWords(goal)
         let scored = (parsed["regions"]?.array ?? []).compactMap {
             region -> (id: String, kind: String, label: String,
-                       x: Double, y: Double, confidence: Double, interactive: Bool)? in
+                       x: Double, y: Double, confidence: Double, interactive: Bool,
+                       goalMatched: Bool)? in
             guard let bx = num(region["bounds"]?["x"]),
                   let by = num(region["bounds"]?["y"]),
                   let bw = num(region["bounds"]?["width"]),
@@ -2022,22 +2340,47 @@ final class CuaAgentLoop {
                     label: label.isEmpty ? "unlabeled region" : label,
                     x: bx + bw / 2, y: by + bh / 2,
                     confidence: num(region["confidence"]) ?? 0,
-                    interactive: interactive)
+                    interactive: interactive,
+                    goalMatched: Self.regionMatchesGoal(label, words: goalWords))
         }
+        // Goal-matching text first — a non-interactive "Yanky" row is a
+        // valid vclick target — then interactive, then the rest, each by
+        // parser confidence.
         let regions = scored
-            .sorted { ($0.interactive ? 0 : 1, -$0.confidence) < ($1.interactive ? 0 : 1, -$1.confidence) }
+            .sorted { ($0.goalMatched ? 0 : $0.interactive ? 1 : 2, -$0.confidence)
+                      < ($1.goalMatched ? 0 : $1.interactive ? 1 : 2, -$1.confidence) }
             .prefix(24)
             .map { (id: $0.id, kind: $0.kind, label: $0.label, x: $0.x, y: $0.y) }
         return (captureID, regions)
     }
 
-    /// Driver ActionResult honesty: `effect: confirmed` or an explicit
-    /// `verified` readback (including nested postcondition reads like
-    /// `exact_window_effect.verified`) is proof of the requested effect.
+    /// Goal words worth matching a region label against: lowercased
+    /// tokens of three or more characters, stopwords dropped — "click"
+    /// and "the" must never make a region "goal-matching".
+    private static func goalRegionWords(_ goal: String) -> Set<String> {
+        Set(goal.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 && !shortlistStopwords.contains($0) })
+    }
+
+    /// A region label goal-matches when it contains a goal word — whole
+    /// word or substring, case-insensitive. "Yanky" inside a longer
+    /// label still counts; the judge decides whether it is THE target.
+    private static func regionMatchesGoal(_ label: String, words: Set<String>) -> Bool {
+        guard !words.isEmpty else { return false }
+        let lowered = label.lowercased()
+        return words.contains { lowered.contains($0) }
+    }
+
+    /// Driver ActionResult honesty: `effect: confirmed` is the ONLY proof
+    /// of a dispatched effect. A bare `verified: true` — top-level or
+    /// nested — is a delivery acknowledgement, not evidence the goal is
+    /// true: treating it as proof would let the drive certify itself.
+    /// Goal proof comes from the next observation's corpus, never from
+    /// the dispatch receipt.
     private static func isProven(_ result: JSONValue) -> Bool {
-        if result["effect"]?.string == "confirmed" || result["verified"] == .bool(true) { return true }
-        for (_, value) in result.object ?? [:] where value["verified"] == .bool(true) { return true }
-        return false
+        result["effect"]?.string == "confirmed"
     }
 
     /// The driver's own signal that the AX rung could not produce the
@@ -2128,6 +2471,38 @@ final class CuaAgentLoop {
                                             "x": .number(x), "y": .number(y),
                                             "capture_id": .string(captureID),
                                             "delivery_mode": .string("background")])
+        case .doubleClickElement(let token, _):
+            return try await call("double_click", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                   "element_token": .string(token),
+                                                   "delivery_mode": .string("background")])
+        case .rightClickElement(let token, _):
+            return try await call("right_click", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                  "element_token": .string(token),
+                                                  "delivery_mode": .string("background")])
+        case .doubleClickVisual(_, _, let x, let y):
+            // double_click/right_click take no capture_id — the driver
+            // scales window-local pixels against the session's last
+            // capture. The lane's captureID still guards dispatch
+            // freshness: a stale capture never reaches this call.
+            return try await call("double_click", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                   "x": .number(x), "y": .number(y),
+                                                   "delivery_mode": .string("background")])
+        case .rightClickVisual(_, _, let x, let y):
+            return try await call("right_click", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                                  "x": .number(x), "y": .number(y),
+                                                  "delivery_mode": .string("background")])
+        case .dragElements(_, _, _, _, let x1, let y1, let x2, let y2),
+             .dragVisual(_, _, _, let x1, let y1, let x2, let y2):
+            // Background drag is unavailable on macOS — the driver
+            // refuses it — so a drag always fronts the window and holds
+            // the focus lease for the gesture's duration, like a menu
+            // invocation does.
+            return try await leased(focus: true) {
+                try await self.call("drag", ["pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                                             "from_x": .number(x1), "from_y": .number(y1),
+                                             "to_x": .number(x2), "to_y": .number(y2),
+                                             "delivery_mode": .string("foreground")])
+            }
         case .invokeMenu(let path, _):
             // Menu invocation transiently fronts the app — serialize the
             // brief focus grab against peer lanes.
@@ -2199,14 +2574,23 @@ final class CuaAgentLoop {
             // One immediate read confirms the common case; a miss defers to
             // the NEXT ordinary browser observation (pendingNavigation) —
             // the read the loop pays for anyway.
-            let needle = url.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+            // Host equality, not substring: "apple.com" must not pass
+            // against "apple.com.evil.example" or a url merely embedding it
+            // in a query — the same contract navigateBoundBrowser honors.
+            let needle = (URLComponents(string: url)?.host
+                ?? url.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+                    .split(separator: "/").first.map(String.init))?.lowercased() ?? url.lowercased()
             if let after = try? await observeBrowser(pid: pid, wid: wid,
                                                      target: target, tab: tabID),
                let pageURL = Self.browserPageURL(after),
-               pageURL.localizedCaseInsensitiveContains(needle) {
+               CuaTaskAgent.urlHostMatches(pageURL, wanted: needle) {
                 return outcome
             }
+            // A re-armed navigation starts with a clean miss count — a
+            // previous pending read's misses must not shorten this one's
+            // two-miss verification budget.
             pendingNavigation = (key: "navigate", needle: needle)
+            pendingNavigationMisses = 0
             return outcome
         case .browserClick(let ref):
             guard let target = browserTarget, let tab = shownTab else {
@@ -2221,14 +2605,14 @@ final class CuaAgentLoop {
             return try await call("browser_type", ["target_id": target, "tab_id": .string(tab),
                                                    "ref": .string(ref), "text": .string(text),
                                                    "replace": .bool(false), "input_route": .string("dom_event")])
-        case .done, .stuck:
+        case .done, .satisfied, .stuck:
             return .null  // handled before dispatch
         }
     }
 
     private func laneMutates(_ lane: Lane) -> Bool {
         switch lane {
-        case .done, .stuck: return false
+        case .done, .satisfied, .stuck: return false
         default: return true
         }
     }
@@ -2322,19 +2706,9 @@ final class CuaAgentLoop {
         }
         if browserState == nil, !bindingUpgradeTried {
             bindingUpgradeTried = true
-            do {
-                _ = try await call("browser_prepare", [
-                    "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-                    "strategy": .object(["kind": .string("existing_profile")])])
-            } catch let error as DriverConnectionError {
-                // A grant refusal means the daemon wasn't launched with
-                // --grant existing-profile — clear the verified flag so the
-                // next connect re-reconciles instead of trusting stale state.
-                if case .toolRefused(_, let code, _) = error,
-                   code.contains("grant") || code.contains("permission") {
-                    CuaDaemonControl.markGrantUnconfirmed()
-                }
-            } catch {}
+            _ = try? await call("browser_prepare", [
+                "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+                "strategy": .object(["kind": .string("existing_profile")])])
             browserState = try? await observeBrowser(pid: pid, wid: wid, target: nil, tab: nil)
         }
         guard let browserState else { return ([], [], .null) }

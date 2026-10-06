@@ -142,6 +142,7 @@ struct JevUseMCPServer: Sendable {
         var status = "", reason: String?
         switch result.status {
         case .done: status = "done"
+        case .alreadySatisfied(let message): status = "already_satisfied"; reason = message
         case .handedBack(let handBack): status = "handed_back"; reason = handBack.rawValue
         case .blocked(let message): status = "blocked"; reason = message
         case .needsText(let field): status = "needs_text"; reason = field

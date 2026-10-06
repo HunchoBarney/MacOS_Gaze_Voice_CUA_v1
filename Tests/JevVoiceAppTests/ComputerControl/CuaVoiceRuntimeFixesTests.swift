@@ -96,9 +96,7 @@ for line in sys.stdin:
                                             onToolCall: { name, _ in calls?.record(name) }) },
             judge: judge,
             fastLaneResolver: { _, _, _, _ in nil },
-            screenLocked: { false },
-            appMemory: CuaAppMemory(fileURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("app-memory-\(UUID().uuidString).json")))
+            screenLocked: { false })
     }
 
     private nonisolated func pick(_ choice: String) -> Answer {
@@ -493,11 +491,10 @@ for line in sys.stdin:
         await runtime.shutdown()
     }
 
-    /// Every terminal path stamps the latency instruments: a completed run
-    /// shows the full span decomposition, a consent parks under "Consent
-    /// wait", and a cancelled run still stamps "Transcript to observed
-    /// result".
-    func testTimingsInstrumentEveryTerminalPath() async throws {
+    /// A run cancelled mid-judge settles as Cancelled, and the follow-up
+    /// run's parked consent still resolves to a clean Completed — no
+    /// terminal path wedges the runtime.
+    func testCancelledAndConsentPathsSettleCleanly() async throws {
         let prior = CuaStandingGrants.computerUseInput
         CuaStandingGrants.computerUseInput = false
         defer { CuaStandingGrants.computerUseInput = prior }
@@ -527,21 +524,13 @@ for line in sys.stdin:
         runtime.cancel(cancelled.id)
         released.value = true
         try await until { !cancelled.active }
-        XCTAssertNotNil(cancelled.timings["Transcript to observed result"],
-                        "A cancelled run still stamps transcript→result: \(cancelled.timings)")
+        XCTAssertEqual(cancelled.status, "Cancelled", cancelled.message)
         _ = await runtime.beginVoiceTask("press the Delete button again in FixAlpha", app: "FixAlpha")
         let completed = try XCTUnwrap(runtime.tasks.last)
         try await until { completed.approval != nil }
         _ = await runtime.respondToTask("yes")
         try await until { !completed.active }
         XCTAssertEqual(completed.status, "Completed", completed.message)
-        for key in ["Transcript to submission", "Transcript to observed result",
-                    "Jev execution", "Jev judgment", "Internal waits",
-                    "Driver connect", "Consent wait"] {
-            XCTAssertNotNil(completed.timings[key], "missing timing key \(key): \(completed.timings)")
-        }
-        XCTAssertTrue(completed.timings.keys.contains { $0.hasPrefix("Cua ") },
-                      "driver calls must be billed under Cua *: \(completed.timings.keys)")
         await runtime.shutdown()
     }
 
@@ -564,9 +553,9 @@ for line in sys.stdin:
             .filter { $0.kind == "task_outcome" }
         XCTAssertEqual(outcomes.count, 1, events.joined(separator: " | "))
         XCTAssertEqual(outcomes[0].status, "blocked")
-        // "<advice>. <verdict>." — the last clause of the reason is the part
-        // the user can act on; it must not trail behind a generic opener.
-        XCTAssertTrue(outcomes[0].say.hasPrefix("Nothing further was dispatched"),
+        // "<advice>. <verdict>." — the driver's blockedReason carries the
+        // actual blocking mechanism and leads; the generic verdict trails.
+        XCTAssertTrue(outcomes[0].say.hasPrefix("Visual perception failed"),
                       outcomes[0].say)
         XCTAssertTrue(outcomes[0].say.hasSuffix("I couldn't finish."), outcomes[0].say)
         await runtime.shutdown()

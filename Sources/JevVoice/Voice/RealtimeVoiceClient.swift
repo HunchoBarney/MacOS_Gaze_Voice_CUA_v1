@@ -22,8 +22,8 @@ final class RealtimeVoiceClient {
         case sessionUpdated
         case inputCommitted(itemID: String)
         case transcriptDelta(String)
-        case transcriptDone(String, languages: [String])
-        case transcriptFailed(String)
+        case transcriptDone(String, languages: [String], itemID: String = "")
+        case transcriptFailed(String, itemID: String = "")
         case speechStarted
         case speechStopped
         case outputAudio(Data, itemID: String)
@@ -75,9 +75,10 @@ final class RealtimeVoiceClient {
                 "parameters": [
                     "type": "object",
                     "properties": [
-                        "instruction": ["type": "string", "description": "The user's instruction, verbatim."],
-                        "app": ["type": "string", "description": "The app to act in, when the user named one or the screenshot shows one clearly."],
-                        "literal_text": ["type": "string", "description": "Exact text to type, when the user dictated what to write. Do not paraphrase it — plain words with spaces, never URL-encoded forms."]
+                        "instruction": ["type": "string", "description": "The user's instruction, verbatim. Transcribe app and target names exactly as the user spoke them — never substitute a different app or contact name."],
+                        "app": ["type": "string", "description": "The app the user named, transcribed exactly as spoken. Omit when the user didn't name an app."],
+                        "literal_text": ["type": "string", "description": "Exact text to type, when the user dictated what to write. Do not paraphrase it — plain words with spaces, never URL-encoded forms."],
+                        "steps": ["type": "array", "items": ["type": "string"], "description": "Ordered steps when the instruction is a multi-part request ('open Mail then reply to mom' → steps ['open Mail','reply to mom']). Omit for a single action."]
                     ],
                     "required": ["instruction"],
                     "additionalProperties": false
@@ -174,13 +175,15 @@ final class RealtimeVoiceClient {
         ("On it,", "Opening it", "Doing that") — and call computer_command \
         in the same breath, with the user's instruction verbatim. That beat \
         IS the acknowledgement: when the tool returns status "started" you \
-        say nothing more. Fill app when one is \
-        named or obvious from the screenshot (for media pick the likely one — \
+        say nothing more. App and target names in tool args are the user's \
+        own words, verbatim — never a substitute the screen suggests. Fill \
+        app only when the user named one (for media pick the likely one — \
         Spotify, Music, the browser — don't spend a voice turn asking), and \
         literal_text with the content to type or search for — 'play Marvin's \
         Room by Drake' → literal_text "Marvin's Room Drake", not the whole \
         sentence. Repeat names, places, and titles exactly as the user said \
-        them — never paraphrase (Yuba City stays Yuba City).
+        them — never paraphrase (Yuba City stays Yuba City). When the user \
+        names steps, fill steps with each action in order.
 
         Tool results are JSON and carry a "say" field: voice the say text \
         VERBATIM, word for word — it is the acknowledgement the task \
@@ -466,13 +469,14 @@ final class RealtimeVoiceClient {
             return [.transcriptDelta(frame["delta"] as? String ?? "")]
         case "conversation.item.input_audio_transcription.completed":
             let languages = (frame["languages"] as? [[String: Any]])?.compactMap { $0["code"] as? String } ?? []
-            return [.transcriptDone(frame["transcript"] as? String ?? "", languages: languages)]
+            return [.transcriptDone(frame["transcript"] as? String ?? "", languages: languages,
+                                    itemID: frame["item_id"] as? String ?? "")]
         case "conversation.item.input_audio_transcription.failed":
             // The transcript died but the model still heard the audio — the
             // turn can succeed display-less. A distinct event, not .failure:
             // killing the capture over a lost caption is wrong.
             let detail = (frame["error"] as? [String: Any])?["message"] as? String ?? "Transcription failed."
-            return [.transcriptFailed(detail)]
+            return [.transcriptFailed(detail, itemID: frame["item_id"] as? String ?? "")]
         case "response.output_audio.delta":
             guard let delta = frame["delta"] as? String,
                   let pcm = Data(base64Encoded: delta) else { return [] }

@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "artifact": "cua-perception-source.tar.gz",
+      "artifactSha256": "60043c33174f3f6431fe79651c56e09fbb10996db710b574d6cba54d24e2fce9",
+      "artifactSize": 498837,
+      "contentKind": "cua-source",
+      "durableLocation": "Candidate archive source/cua-perception-source.tar.gz",
+      "format": "tar.gz",
+      "license": "MIT",
+      "patches": [],
+      "repository": "https://github.com/trycua/cua",
+      "requiredPaths": [
+        "LICENSE.md",
+        "libs/cua-driver/rust/Cargo.lock",
+        "libs/cua-driver/rust/Cargo.toml",
+        "libs/cua-driver/rust/crates/cua-perception",
+        "libs/cua-driver/rust/crates/cua-perception/models/conversion-recipe.json",
+        "libs/cua-driver/rust/crates/cua-perception/models/export_omniparser_detector.py",
+        "libs/cua-driver/rust/crates/cua-perception/scripts/artifacts.lock.json"
+      ],
+      "revision": "fc83a85c46ca4de1fb9eccf79331611f986bcb30",
+      "sourceOfferStatus": "bundled-review-only"
+    },
+    {
+      "artifact": "omniparser-icon-detect-model.pt",
+      "artifactSha256": "dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57",
+      "artifactSize": 40623819,
+      "contentKind": "model-source-input",
+      "durableLocation": "Candidate archive source/upstream/omniparser-icon-detect-model.pt",
+      "format": "file",
+      "license": "AGPL-3.0-only",
+      "patches": [],
+      "repository": "https://huggingface.co/microsoft/OmniParser-v2.0",
+      "revision": "6600256cb0f1b07651e3bc86166196307bad7e2d",
+      "sourceOfferStatus": "bundled-review-only"
+    },
+    {
+      "artifact": "ultralytics-8f7fe171f0db13e5c2eff55eee3443f8903e5068.tar.gz",
+      "artifactSha256": "6c289215a5ce593a872111b87e58ffff6949d235c2af720e8f01704375f7bf44",
+      "artifactSize": 1872606,
+      "contentKind": "exporter-source",
+      "durableLocation": "Candidate archive source/exporter/ultralytics-8f7fe171f0db13e5c2eff55eee3443f8903e5068.tar.gz",
+      "format": "tar.gz",
+      "license": "AGPL-3.0-only",
+      "patches": [],
+      "repository": "https://github.com/ultralytics/ultralytics",
+      "requiredPaths": [
+        "ultralytics/engine/exporter.py",
+        "pyproject.toml"
+      ],
+      "revision": "8f7fe171f0db13e5c2eff55eee3443f8903e5068",
+      "sourceOfferStatus": "bundled-review-only"
+    },
+    {
+      "artifact": "pytorch-ba56102387ef21a3b04b357e5b183d48f0afefc7.tar.gz",
+      "artifactSha256": "a9623012b046e9cc87c919f178782860bcee9fbf014ad5c24a2655b517d0881b",
+      "artifactSize": 56595340,
+      "contentKind": "exporter-source",
+      "durableLocation": "Candidate archive source/exporter/pytorch-ba56102387ef21a3b04b357e5b183d48f0afefc7.tar.gz",
+      "format": "tar.gz",
+      "license": "BSD-3-Clause",
+      "patches": [],
+      "repository": "https://github.com/pytorch/pytorch",
+      "requiredPaths": [
+        "torch/onnx",
+        "torch/_dynamo",
+        "setup.py"
+      ],
+      "revision": "ba56102387ef21a3b04b357e5b183d48f0afefc7",
+      "sourceOfferStatus": "bundled-review-only"
+    },
+    {
+      "artifact": "torchvision-824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8.tar.gz",
+      "artifactSha256": "8e44b7705c901b9af76113393fe675b02ceeb43b1c688db50e0d8ff8a9dcef03",
+      "artifactSize": 14499056,
+      "contentKind": "exporter-source",
+      "durableLocation": "Candidate archive source/exporter/torchvision-824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8.tar.gz",
+      "format": "tar.gz",
+      "license": "BSD-3-Clause",
+      "patches": [],
+      "repository": "https://github.com/pytorch/vision",
+      "requiredPaths": [
+        "torchvision",
+        "setup.py"
+      ],
+      "revision": "824e8c8726b65fd9d5abdc9702f81c2b0c4c0dc8",
+      "sourceOfferStatus": "bundled-review-only"
+    },
+    {
+      "artifact": "onnx-57b9c6a4f6eebb09ae1b34cfb632078518f72832.tar.gz",
+      "artifactSha256": "a1a9c44e20ea1f9cf0c094e0f82001113b36e0867e04c06966475c46e3c75739",
+      "artifactSize": 13109973,
+      "contentKind": "exporter-source",
+      "durableLocation": "Candidate archive source/exporter/onnx-57b9c6a4f6eebb09ae1b34cfb632078518f72832.tar.gz",
+      "format": "tar.gz",
+      "license": "Apache-2.0",
+      "patches": [],
+      "repository": "https://github.com/onnx/onnx",
+      "requiredPaths": [
+        "onnx",
+        "pyproject.toml"
+      ],
+      "revision": "57b9c6a4f6eebb09ae1b34cfb632078518f72832",
+      "sourceOfferStatus": "bundled-review-only"
+    },
+    {
+      "artifact": "onnxslim-0.1.68.tar.gz",
+      "artifactSha256": "ff1ec2bf61ff10b75e33990b2046c446dec522ba7f0a12b2f984547ff43f9138",
+      "artifactSize": 141502,
+      "contentKind": "exporter-source",
+      "durableLocation": "Candidate archive source/exporter/onnxslim-0.1.68.tar.gz",
+      "format": "tar.gz",
+      "license": "Apache-2.0",
+      "patches": [],
+      "repository": "https://github.com/inisis/OnnxSlim",
+      "requiredPaths": [
+        "onnxslim",
+        "VERSION"
+      ],
+      "revision": "0.1.68",
+      "sourceOfferStatus": "bundled-review-only"
+    }
+  ]
+}

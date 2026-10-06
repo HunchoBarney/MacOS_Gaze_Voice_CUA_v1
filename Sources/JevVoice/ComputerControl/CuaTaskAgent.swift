@@ -51,6 +51,9 @@ final class CuaTaskAgent {
     /// True when this run's launch_app call already carried the resolution's
     /// `launchURLs` — spares a redundant URI re-delivery to a fresh process.
     private var launchURIsDelivered = false
+    /// The scripting-bridge play was already attempted this run — the
+    /// window-bound fallback must not fire the same `tell` twice.
+    private var spotifyScriptingTried = false
     /// Postconditions independently observed during this agent's run, in order.
     /// Only Driver results and readback-verified state are recorded here.
     private(set) var observedPostconditions: [CuaObservedPostcondition] = []
@@ -63,16 +66,23 @@ final class CuaTaskAgent {
             bundleID: bundleID, processID: processID, windowID: windowID, windowTitle: windowTitle))
     }
 
+    /// One bounded osascript run — a seam so tests can answer the Spotify
+    /// and script lanes without a real `tell` ever leaving the build.
+    /// Production defaults to the capped /usr/bin/osascript spawn.
+    private let osascript: (String, TimeInterval) async -> String?
+
     init(call: @escaping Call,
          approve: ((String) async throws -> Bool)? = nil,
          windowID: Int? = nil,
          lanes: (any CuaLaneLeasing)? = CuaLaneRegistry.shared,
-         workID: String = "") {
+         workID: String = "",
+         osascript: ((String, TimeInterval) async -> String?)? = nil) {
         self.call = call
         self.approve = approve
         self.windowID = windowID
         self.lanes = lanes
         self.workID = workID
+        self.osascript = osascript ?? Self.runOsaScript
     }
 
     /// Runs `body` holding the global focus lane — raises, launches and
@@ -88,6 +98,23 @@ final class CuaTaskAgent {
             return value
         } catch {
             await lanes.releaseFocus(workID: workID)
+            throw error
+        }
+    }
+
+    /// The shared pasteboard lane — a clipboard read/write must not land
+    /// between a peer lane's write and readback or a dictation
+    /// snapshot→paste→restore sequence. Serialize on the same lease the
+    /// drive loop's gate holds for clipboard_* tools.
+    private func pasteboardLeased<T>(_ body: () async throws -> T) async throws -> T {
+        guard let lanes else { return try await body() }
+        try await lanes.acquirePasteboard(workID: workID)
+        do {
+            let value = try await body()
+            await lanes.releasePasteboard(workID: workID)
+            return value
+        } catch {
+            await lanes.releasePasteboard(workID: workID)
             throw error
         }
     }
@@ -121,11 +148,15 @@ final class CuaTaskAgent {
             ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         if let parsed = CuaFastAction.parse(goal) {
             // Global lanes need no app and must not queue behind an app
-            // lease — a media key is a system event, not a window action.
-            if case .mediaKey = parsed.action.body {
+            // lease — a media key is a system event, not a window action,
+            // and so are the pasteboard and osascript volume/player reads.
+            switch parsed.action.body {
+            case .mediaKey, .clipboardRead, .clipboardWrite, .scriptVerb:
                 guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
                 else { return nil }
                 return FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: "")
+            default:
+                break
             }
             // A misheard model `app` arg must not sink an otherwise-valid
             // command — and it must not outrank what the user is looking
@@ -220,6 +251,7 @@ final class CuaTaskAgent {
         let name = resolved.name
         if !bundle.isEmpty { bundleID = bundle }
         launchURIsDelivered = false
+        spotifyScriptingTried = false
         try Task.checkCancellation()
         // App-free lanes dispatch before any inventory read: media keys post
         // to the HID tap, deictic text lands at the live insertion point, and
@@ -237,6 +269,30 @@ final class CuaTaskAgent {
                 return try await dispatchDeicticType(payload, action: action, name: name, progress: progress)
             case .navigateURL(let url):
                 return try await dispatchURLLane(url, progress: progress)
+            case .clipboardRead:
+                return try await dispatchClipboardRead(action, progress: progress)
+            case .clipboardWrite(let payload):
+                return try await dispatchClipboardWrite(payload, action: action, progress: progress)
+            case .scriptVerb(let verb):
+                return try await dispatchScriptVerb(verb, action: action, progress: progress)
+            case .systemURL(let verb):
+                return try await dispatchSystemURL(verb, action: action, progress: progress)
+            case .appSearch(let query, let playTopHit) where playTopHit
+                    && (bundle.isEmpty || bundle == Self.spotifyBundle):
+                // "play X" is a media verb, not an open request — the
+                // scripting bridge resolves the top hit inside Spotify and
+                // `current track` proves what actually started. `tell` on a
+                // cold Spotify waits out the launch itself, so this beats
+                // racing launch_app against the app's boot. A consent wall
+                // or a missing player falls through to the URI path below.
+                progress(action.description)
+                spotifyScriptingTried = true
+                if let played = await spotifyAppleScriptPlay(query) {
+                    recordPostcondition(.resultObserved,
+                        "Spotify reports playing \"\(played.track)\" by \(played.artist).",
+                        appName: "Spotify", bundleID: Self.spotifyBundle)
+                    return "Playing \(played.track) by \(played.artist) on Spotify."
+                }
             default:
                 break
             }
@@ -251,10 +307,16 @@ final class CuaTaskAgent {
         var pid = runningMatches.first ?? 0
         var launchResult: JSONValue?
         if runningMatches.isEmpty {
-            // App-control verbs target a running app — launching one just to
-            // hide or quit it would invent work the user did not ask for.
-            if resolved.action != nil, case .appControl = resolved.action!.body {
-                throw DriverConnectionError.refused("\(name) is not running. Nothing was changed.")
+            // App-bound verbs target a running app — launching one just to
+            // hide, kill, resize, read or invoke a menu in it would invent
+            // work the user did not ask for.
+            if let action = resolved.action {
+                switch action.body {
+                case .appControl, .killApp, .windowFrame, .menuVerb, .screenRead:
+                    throw DriverConnectionError.refused("\(name) is not running. Nothing was changed.")
+                default:
+                    break
+                }
             }
             try Task.checkCancellation()
             progress("Opening \(name)…")
@@ -420,6 +482,10 @@ final class CuaTaskAgent {
             return try await runAppControl(verb, pid: pid, name: name, bundle: bundle,
                                            progress: progress)
         }
+        if case .killApp = fast.body {
+            return try await runKillApp(pid: pid, name: name, bundle: bundle,
+                                        progress: progress)
+        }
         var rows = initialRows.isEmpty ? try await listedWindowRows(pid: pid) : initialRows
         if windowID == nil, rows.isEmpty {
             // Confirm the app is truly windowless before spending the reopen
@@ -508,9 +574,19 @@ final class CuaTaskAgent {
                 ? try await dispatchSpotifySearch(query, playTopHit: playTopHit, pid: pid, window: wid, name: name)
                 : try await dispatchAppSearch(query, playTopHit: playTopHit, pid: pid, window: wid, name: name)
             return searched.map { $0 + focusNote }
-        case .appControl:
-            throw DriverConnectionError.malformed // app verbs dispatch in runAppControl
-        case .mediaKey, .deicticType, .navigateURL:
+        case .windowFrame(let verb):
+            return try await dispatchWindowFrame(verb, pid: pid, window: wid,
+                                                 rows: rows, name: name,
+                                                 bundle: bundle, fast: fast)
+        case .menuVerb(let menu):
+            return try await dispatchMenuVerb(menu, pid: pid, window: wid,
+                                              name: name, bundle: bundle)
+        case .screenRead:
+            return try await dispatchScreenRead(pid: pid, window: wid,
+                                                rows: rows, name: name, bundle: bundle)
+        case .appControl, .killApp:
+            throw DriverConnectionError.malformed // process verbs dispatch in their own runners
+        case .mediaKey, .deicticType, .navigateURL, .clipboardRead, .clipboardWrite, .scriptVerb, .systemURL:
             throw DriverConnectionError.malformed // dispatched before window binding
         case .hotkey(let keys, _):
             if keys.count == 1, let key = keys.first {
@@ -831,8 +907,12 @@ final class CuaTaskAgent {
             .filter { !$0.isTerminated }
         if !local.isEmpty { return local.map { Int($0.processIdentifier) } }
         let inventory = try await call("list_apps", [:])
+        // The `running != false` predicate the loop applies everywhere —
+        // a stale/exited row must not read as a live pid or trip the
+        // multiple-instances refusal.
         return (inventory["apps"]?.array ?? []).compactMap {
-            $0["bundle_id"]?.string == bundle ? $0["pid"]?.integer : nil
+            $0["bundle_id"]?.string == bundle && $0["running"] != .bool(false)
+                ? $0["pid"]?.integer : nil
         }.filter { $0 > 0 }
     }
 
@@ -952,15 +1032,22 @@ final class CuaTaskAgent {
 
     /// Element identity across snapshots: tokens are re-minted per read, so
     /// the match is the element's slot — index first, role+label as the
-    /// fallback when the list order shifted.
+    /// fallback when the list order shifted. The slot is positional though:
+    /// a reshuffled tree can seat a different element at it, so the
+    /// role+label match wins outright and an index hit is trusted only when
+    /// it still names the same control.
     static func sameElement(in elements: [JSONValue], index: Int?, role: String?, label: String?) -> JSONValue? {
+        if let role, let match = elements.first(where: {
+            $0["role"]?.string == role && ($0["label"]?.string ?? $0["description"]?.string) == label
+        }) {
+            return match
+        }
         if let index, let hit = elements.first(where: { $0["element_index"]?.integer == index }) {
+            if let role, hit["role"]?.string != role { return nil }
+            if let label, (hit["label"]?.string ?? hit["description"]?.string) != label { return nil }
             return hit
         }
-        guard let role else { return nil }
-        return elements.first {
-            $0["role"]?.string == role && ($0["label"]?.string ?? $0["description"]?.string) == label
-        }
+        return nil
     }
 
     // MARK: - Deterministic lanes beyond the keystroke table
@@ -1011,34 +1098,63 @@ final class CuaTaskAgent {
     /// script failure so the caller can fall back to the URI lane. The
     /// 20s cap covers a first-run TCC consent prompt without stalling the
     /// task forever.
-    nonisolated static func spotifyAppleScriptPlay(_ query: String) async
+    func spotifyAppleScriptPlay(_ query: String) async
         -> (track: String, artist: String)? {
         let escaped = query.replacingOccurrences(of: "\\", with: "\\\\")
                            .replacingOccurrences(of: "\"", with: "\\\"")
-        guard await runOsaScript(
+        guard await osascript(
             "tell application \"Spotify\" to play track \"spotify:search:\(escaped)\"",
-            timeout: 20) != nil else { return nil }
+            20) != nil else { return nil }
         // The search URI resolves asynchronously — the first readback can
         // still show the previous state ("stopped"/"paused") while Spotify
         // fetches the top hit. Poll a few seconds before giving up so a
         // slow resolve doesn't fall through to the GUI fallback.
-        var parts: [String] = []
+        var playing: (track: String, artist: String)?
         for _ in 0..<8 {
-            guard let state = await runOsaScript(
-                "tell application \"Spotify\" to get {name of current track, artist of current track, player state}",
-                timeout: 10) else { return nil }
-            // "{track, artist, playing}" — the state tail decides; name and
-            // artist take the rest, tolerating commas inside either.
-            parts = state.split(separator: ",", omittingEmptySubsequences: false)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-            if parts.count >= 3, parts.last == "playing" { break }
+            guard let state = await spotifyPlayerState() else { return nil }
+            if state.playing { playing = (state.track, state.artist); break }
             if Task.isCancelled { return nil }
             try? await Task.sleep(for: .milliseconds(600))
         }
-        guard parts.count >= 3, parts.last == "playing" else { return nil }
-        parts.removeLast()
+        guard let played = playing else { return nil }
+        // A cold-boot race can drop the URI argument and leave Spotify
+        // resuming the previous queue — "playing" then reports whatever was
+        // cued, not the search's top hit. No content word of the query in
+        // the readback means the search never resolved; return nil so the
+        // caller's visible-results page drives the real search instead.
+        let wanted = Self.queryWords(query)
+        let observed = Self.queryWords("\(played.track) \(played.artist)")
+        guard !wanted.isEmpty, !wanted.isDisjoint(with: observed) else { return nil }
+        return played
+    }
+
+    /// One `current track` readback — "{name, artist, player state}" with
+    /// the state tail deciding `playing` and commas inside either name
+    /// tolerated. nil on a consent prompt, a missing Spotify, or a script
+    /// failure.
+    func spotifyPlayerState() async
+        -> (track: String, artist: String, playing: Bool)? {
+        guard let state = await osascript(
+            "tell application \"Spotify\" to get {name of current track, artist of current track, player state}",
+            10) else { return nil }
+        var parts = state.split(separator: ",", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count >= 3 else { return nil }
+        let playing = parts.removeLast() == "playing"
         let artist = parts.removeLast()
-        return (track: parts.joined(separator: ", "), artist: artist)
+        return (track: parts.joined(separator: ", "), artist: artist, playing: playing)
+    }
+
+    /// Alphanumeric content tokens of a query or track readback, minus the
+    /// filler words a "play X" utterance carries — what identifies the song.
+    private nonisolated static func queryWords(_ text: String) -> Set<String> {
+        let filler: Set<String> = ["play", "playing", "the", "a", "an", "by", "some",
+                                   "it", "that", "this", "song", "songs", "music",
+                                   "track", "tracks", "album", "for", "me", "please",
+                                   "on", "in", "of", "to", "my", "spotify"]
+        return Set(text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 1 && !filler.contains($0) })
     }
 
     /// One osascript invocation, capped — a pending Automation consent
@@ -1307,8 +1423,8 @@ final class CuaTaskAgent {
         // blind Return, and `current track` proves what actually started. A
         // consent wall or a Spotify build without the command returns nil
         // and the URI+Return path below carries the task.
-        if playTopHit,
-           let played = await Self.spotifyAppleScriptPlay(query) {
+        if playTopHit, !spotifyScriptingTried,
+           let played = await spotifyAppleScriptPlay(query) {
             recordPostcondition(.resultObserved,
                                 "Spotify reports playing \"\(played.track)\" by \(played.artist).",
                                 appName: name, bundleID: Self.spotifyBundle,
@@ -1383,6 +1499,15 @@ final class CuaTaskAgent {
         // still one is honest delivery.
         let moved = try await pollDriver(attempts: 4, { try await self.windowTitle(pid: pid, window: wid) },
                                      until: { $0 != nil && $0 != beforeTitle }) ?? nil
+        // The Return ran its settle window — name what is actually playing
+        // so a wrong top hit reads as the track it is, not "dispatched".
+        if let nowPlaying = await spotifyPlayerState(), nowPlaying.playing {
+            recordPostcondition(.resultObserved,
+                "Spotify reports playing \"\(nowPlaying.track)\" by \(nowPlaying.artist).",
+                appName: name, bundleID: Self.spotifyBundle, processID: pid,
+                windowID: wid, windowTitle: moved)
+            return "Searched Spotify for \"\(query)\" — playing \(nowPlaying.track) by \(nowPlaying.artist)."
+        }
         if let moved {
             recordPostcondition(.resultObserved, "Spotify's window moved to \"\(moved)\" after the dispatched play.",
                                 appName: name, bundleID: Self.spotifyBundle, processID: pid,
@@ -1418,10 +1543,20 @@ final class CuaTaskAgent {
         }
         guard let x = number(bounds?["x"]), let y = number(bounds?["y"]),
               let w = number(bounds?["width"]), let h = number(bounds?["height"]) else { return false }
-        return NSScreen.screens.contains { screen in
-            let f = screen.frame
-            return abs(x - f.origin.x) < 3 && abs(y - f.origin.y) < 3
-                && abs(w - f.width) < 3 && abs(h - f.height) < 3
+        return coversAnyScreen(x: x, y: y, width: w, height: h,
+                               screens: NSScreen.screens.map(\.frame))
+    }
+
+    /// Top-left-origin AX/CGWindow bounds against bottom-left-origin
+    /// NSScreen frames — the spaces coincide only on the primary display.
+    /// `screens` is NSScreen-ordered (first = the zero-origin primary
+    /// screen); a frame's top-left y is primaryHeight − y − height.
+    static func coversAnyScreen(x: Double, y: Double, width: Double, height: Double,
+                                screens: [CGRect]) -> Bool {
+        guard let primaryHeight = screens.first?.height else { return false }
+        return screens.contains { f in
+            abs(x - f.origin.x) < 3 && abs(y - (primaryHeight - f.origin.y - f.height)) < 3
+                && abs(width - f.width) < 3 && abs(height - f.height) < 3
         }
     }
 
@@ -1504,6 +1639,452 @@ final class CuaTaskAgent {
         let confirmKey = ["press return", "press enter", "press the return", "press the enter"].contains { actionText.contains($0) }
         if sendContext && confirmKey { return true }
         return goalText.contains("force quit") && actionText.contains("force quit")
+    }
+
+    /// "what's on my clipboard": the owner's own pasteboard read, spoken
+    /// back truncated. No consent — the lane never writes, and the text is
+    /// already the user's. Empty and non-text clipboards say so honestly.
+    private func dispatchClipboardRead(_ action: CuaFastAction,
+                                       progress: (String) -> Void) async throws -> String {
+        progress(action.description)
+        let result = try await pasteboardLeased {
+            try await call("clipboard_read", ["include_text": .bool(true)])
+        }
+        let types = result["types"]?.array?.compactMap { $0.string } ?? []
+        guard var text = result["text"]?.string, !text.isEmpty else {
+            let holding = types.isEmpty ? ""
+                : " It holds \(types.prefix(4).joined(separator: ", ")) — not text."
+            recordPostcondition(.resultObserved,
+                                "Clipboard read: no text on the pasteboard.\(holding)")
+            return types.isEmpty
+                ? "Your clipboard is empty."
+                : "Your clipboard has no text.\(holding)"
+        }
+        // One spoken line, ~300 chars — the pasteboard can hold a book.
+        text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                   .trimmingCharacters(in: .whitespaces)
+        let clipped = text.count > 300 ? String(text.prefix(300)) + "…" : text
+        recordPostcondition(.resultObserved,
+                            "Read \(text.count) character(s) of text off the pasteboard.")
+        return "Your clipboard says: \(clipped)"
+    }
+
+    /// "copy X to my clipboard": a verbatim payload onto the owner's own
+    /// pasteboard — no consent — proven by a same-lease readback so the
+    /// write can never race a peer lane's clipboard work.
+    private func dispatchClipboardWrite(_ payload: String, action: CuaFastAction,
+                                        progress: (String) -> Void) async throws -> String {
+        progress(action.description)
+        let readback = try await pasteboardLeased { () async throws -> JSONValue in
+            _ = try await call("clipboard_write", ["text": .string(payload)])
+            return try await call("clipboard_read", ["include_text": .bool(true)])
+        }
+        guard readback["text"]?.string == payload else {
+            recordPostcondition(.resultObserved,
+                                "clipboard_write completed but the readback did not hold the payload.")
+            return "Copied — the clipboard readback did not confirm it."
+        }
+        recordPostcondition(.resultObserved,
+                            "Verified \(payload.count) character(s) on the pasteboard after the write.")
+        return "On your clipboard."
+    }
+
+    /// "force quit X": SIGKILL through the driver's kill_app — the
+    /// escalation the graceful `.quit` can't reach. The approval replaces
+    /// the drive loop's per-action judgment; a nil approve means the loop
+    /// keeps its own say. The process-gone poll is the proof — never the
+    /// driver's send receipt.
+    private func runKillApp(pid: Int, name: String, bundle: String,
+                            progress: (String) -> Void) async throws -> String? {
+        guard let approve else { return nil }
+        guard try await approve("Force quit \(name)? Unsaved work is lost — the app cannot ask you to save first.") else {
+            throw CancellationError()
+        }
+        // Re-resolve liveness through the same table the launch path reads —
+        // killing a stale pid could hit a recycled process.
+        guard try await runningPIDs(bundle: bundle).contains(pid) else {
+            throw DriverConnectionError.refused("\(name) is no longer running. Nothing was changed.")
+        }
+        progress("Force quitting \(name)")
+        _ = try await call("kill_app", ["pid": .number(Double(pid))])
+        let gone = try await pollDriver({ () async throws -> Bool in
+            NSRunningApplication(processIdentifier: pid_t(pid))?.isTerminated ?? true
+        }, until: { $0 })
+        if gone == true {
+            recordPostcondition(.resultObserved, "Force quit \(name); the process exited.",
+                                appName: name, bundleID: bundle, processID: pid)
+            return "Force quit \(name)."
+        }
+        throw DriverConnectionError.refused("\(name) was sent SIGKILL but is still running.")
+    }
+
+    /// set_window_frame against the bound window — snap halves, maximize,
+    /// center, other display. Geometry comes from NSScreen's visible frame
+    /// (menu bar and Dock excluded) converted into WindowServer's
+    /// top-left-origin space; the driver's own WindowServer readback is the
+    /// verdict, so its "suspected_noop"/"unverifiable" effects are reported
+    /// as what they are.
+    private func dispatchWindowFrame(_ verb: CuaFastAction.WindowVerb,
+                                     pid: Int, window wid: Int, rows: [JSONValue],
+                                     name: String, bundle: String,
+                                     fast: CuaFastAction) async throws -> String {
+        guard let primaryHeight = NSScreen.screens.first?.frame.height else {
+            throw DriverConnectionError.refused("No display is attached.")
+        }
+        let bounds = rows.first(where: { $0["window_id"]?.integer == wid })?["bounds"]
+        func number(_ value: JSONValue?) -> Double? {
+            guard case .number(let d)? = value, d.isFinite else { return nil }
+            return d
+        }
+        // NSScreen frames sit in the bottom-left-origin screen space;
+        // WindowServer/AX bounds are top-left origin on the primary display.
+        // A frame converts by y_ax = primaryHeight − y_ns − height.
+        func toAX(_ r: CGRect) -> (x: Double, y: Double, w: Double, h: Double) {
+            (r.origin.x, primaryHeight - r.origin.y - r.height, r.width, r.height)
+        }
+        // The screen holding the window's center owns the snap; a window
+        // whose bounds never resolve lands on the main screen.
+        var screen = NSScreen.main ?? NSScreen.screens.first
+        if let x = number(bounds?["x"]), let y = number(bounds?["y"]),
+           let w = number(bounds?["width"]), let h = number(bounds?["height"]) {
+            let centerNS = CGPoint(x: x + w / 2, y: primaryHeight - (y + h / 2))
+            if let hosting = NSScreen.screens.first(where: { $0.frame.contains(centerNS) }) {
+                screen = hosting
+            }
+        }
+        guard let current = screen else {
+            throw DriverConnectionError.refused("No display is attached.")
+        }
+        var target = toAX(current.visibleFrame)
+        switch verb {
+        case .left:
+            target.w /= 2
+        case .right:
+            target.x += target.w / 2
+            target.w /= 2
+        case .top:
+            target.h /= 2
+        case .bottom:
+            target.y += target.h / 2
+            target.h /= 2
+        case .fill:
+            break
+        case .center:
+            guard let w = number(bounds?["width"]), let h = number(bounds?["height"]) else {
+                throw DriverConnectionError.refused("The window's current size could not be read to center it.")
+            }
+            target.x += (target.w - w) / 2
+            target.y += (target.h - h) / 2
+            target.w = w
+            target.h = h
+        case .otherDisplay:
+            guard let other = NSScreen.screens.first(where: { $0 != current }) else {
+                return "There's only one display — nowhere else to move \(name)'s window."
+            }
+            guard let w = number(bounds?["width"]), let h = number(bounds?["height"]) else {
+                throw DriverConnectionError.refused("The window's current size could not be read to move it.")
+            }
+            target = toAX(other.visibleFrame)
+            target.x += (target.w - w) / 2
+            target.y += (target.h - h) / 2
+            target.w = w
+            target.h = h
+        }
+        let result = try await call("set_window_frame", [
+            "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+            "x": .number(target.x), "y": .number(target.y),
+            "width": .number(target.w), "height": .number(target.h)])
+        switch result["effect"]?.string {
+        case "confirmed":
+            recordPostcondition(.resultObserved,
+                                "\(fast.result) in \(name); WindowServer confirmed the frame.",
+                                appName: name, bundleID: bundle, processID: pid, windowID: wid)
+            return "\(fast.result) in \(name)."
+        case "suspected_noop":
+            recordPostcondition(.resultObserved,
+                                "\(name)'s window was already near the target frame — no visible change.",
+                                appName: name, bundleID: bundle, processID: pid, windowID: wid)
+            return "\(name)'s window was already there."
+        default:
+            // "unverifiable" (or anything else): the driver dispatched but
+            // could not prove the frame — say exactly that, never "moved".
+            recordPostcondition(.resultObserved,
+                                "set_window_frame on \(name) reported \(result["effect"]?.string ?? "no effect").",
+                                appName: name, bundleID: bundle, processID: pid, windowID: wid)
+            return "Asked \(name)'s window to move; the new frame could not be verified."
+        }
+    }
+
+    /// invoke_menu on the bound window with exact menu-bar paths. The lane
+    /// asks once when the verb is destructive (closeTab) — that replaces the
+    /// drive loop's per-action judgment — and a background app pays the same
+    /// temporary-focus grant the loop's own menu path asks for (invoke_menu
+    /// raises it itself and restores focus). The driver's listed-refusal
+    /// outcome is reported; the lane never manufactures success.
+    private func dispatchMenuVerb(_ verb: CuaFastAction.MenuVerb,
+                                  pid: Int, window wid: Int,
+                                  name: String, bundle: String) async throws -> String? {
+        let path = verb.path
+        if case .closeTab = verb {
+            guard let approve else { return nil }
+            guard try await approve("Close the current tab in \(name)?") else {
+                throw CancellationError()
+            }
+        }
+        // invoke_menu temporarily focuses a background app — same standing
+        // grant the loop asks for.
+        let isFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(pid)
+        if !isFront, !CuaStandingGrants.menuFocus(bundle: bundle) {
+            guard let approve,
+                  try await approve("Temporarily focus \(name) to perform:\n\(path.joined(separator: " → "))\nCua restores the prior focus afterward. Granted once per app — Jarvis remembers this.") else {
+                throw CancellationError()
+            }
+            CuaStandingGrants.grantMenuFocus(bundle: bundle)
+        }
+        // One settle+retry absorbs an answered-but-refused menu path on a
+        // just-raised app, matching the minimize lane — only driver
+        // refusals retry, never transport faults.
+        let args: [String: JSONValue] = ["pid": .number(Double(pid)),
+                                         "window_id": .number(Double(wid)),
+                                         "path": .array(path.map { .string($0) })]
+        let result: JSONValue
+        do {
+            result = try await focusLeased {
+                do {
+                    return try await call("invoke_menu", args)
+                } catch let error as DriverConnectionError {
+                    switch error {
+                    case .closed, .timedOut, .remote, .unavailable, .malformed: throw error
+                    case .refused, .toolRefused: break
+                    }
+                    try await Task.sleep(for: .milliseconds(400))
+                    return try await call("invoke_menu", args)
+                }
+            }
+        } catch let error as DriverConnectionError {
+            // A listed refusal reaches us as a typed toolRefused — the
+            // driver answered: the path is missing, disabled or ambiguous.
+            // Report it as "not there right now"; other refusals are real
+            // failures and propagate.
+            if case .toolRefused(tool: "invoke_menu", code: "menu_path_unavailable", detail: _) = error {
+                recordPostcondition(.resultObserved,
+                                    "\(name) refused \(path.joined(separator: " → ")) (menu_path_unavailable).",
+                                    appName: name, bundleID: bundle, processID: pid, windowID: wid)
+                return "\(name) doesn't have that menu item right now."
+            }
+            throw error
+        }
+        if result["status"]?.string == "listed" {
+            recordPostcondition(.resultObserved,
+                                "\(name) resolved the path to a submenu but no leaf command was named.",
+                                appName: name, bundleID: bundle, processID: pid, windowID: wid)
+            return "\(name) doesn't have that menu item right now."
+        }
+        recordPostcondition(.resultObserved,
+                            "Invoked \(path.joined(separator: " → ")) in \(name).",
+                            appName: name, bundleID: bundle, processID: pid, windowID: wid)
+        return "Invoked \(path.joined(separator: " → ")) in \(name)."
+    }
+
+    /// "what's on my screen": the bound window's AX state read aloud —
+    /// app, title, the first few readable strings and control counts.
+    /// `elements[]` carries only actionable nodes, so the spoken text comes
+    /// from `tree_markdown`'s non-indexed `= "value"` lines. Sparse trees
+    /// report sparseness; the user gets truth over theatre.
+    private func dispatchScreenRead(pid: Int, window wid: Int, rows: [JSONValue],
+                                    name: String, bundle: String) async throws -> String {
+        let snapshot = try await call("get_window_state", [
+            "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
+            "include_screenshot": .bool(false), "max_elements": .number(150)])
+        let elements = snapshot["elements"]?.array ?? []
+        let title = snapshot["window_title"]?.string
+            ?? rows.first(where: { $0["window_id"]?.integer == wid })?["title"]?.string
+            ?? ""
+        let fieldRoles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox",
+                                       "AXSearchField", "AXSecureTextField"]
+        var buttons = 0
+        var fields = 0
+        for element in elements {
+            let role = element["role"]?.string ?? ""
+            if role == "AXButton" { buttons += 1 }
+            if fieldRoles.contains(role) { fields += 1 }
+        }
+        // Display-only nodes render as `- AXRole = "value"` in the markdown —
+        // the readable text the elements array leaves out. First five, ≤80
+        // characters each, deduplicated in order.
+        var texts: [String] = []
+        let markdown = snapshot["tree_markdown"]?.string ?? ""
+        if let expression = try? NSRegularExpression(
+            pattern: #"- AX(?:StaticText|Title|Heading|Label)\s*=\s*"([^"]*)""#) {
+            for match in expression.matches(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)) {
+                guard texts.count < 5,
+                      let range = Range(match.range(at: 1), in: markdown) else { break }
+                let text = String(markdown[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty, !texts.contains(text) else { continue }
+                texts.append(text.count > 80 ? String(text.prefix(80)) + "…" : text)
+            }
+        }
+        let heading = title.isEmpty ? "\(name)'s window" : "\(name)'s window “\(title)”"
+        let degraded = snapshot["degraded"] == .bool(true)
+        var spoken = "On your screen: \(heading)."
+        if texts.isEmpty, elements.isEmpty {
+            spoken += degraded
+                ? " The accessibility read was degraded — nothing readable came back."
+                : " Nothing in it is readable to accessibility."
+        } else {
+            if !texts.isEmpty {
+                spoken += " It says: " + texts.map { "“\($0)”" }.joined(separator: ", ") + "."
+            }
+            var counts: [String] = []
+            if buttons > 0 { counts.append("\(buttons) button\(buttons == 1 ? "" : "s")") }
+            if fields > 0 { counts.append("\(fields) text field\(fields == 1 ? "" : "s")") }
+            if !counts.isEmpty { spoken += " I see \(counts.joined(separator: " and "))." }
+        }
+        recordPostcondition(.resultObserved,
+                            "Read the screen aloud for \(name): \(elements.count) element(s), \(texts.count) spoken text(s).",
+                            appName: name, bundleID: bundle, processID: pid,
+                            windowID: wid, windowTitle: title.isEmpty ? nil : title)
+        return spoken
+    }
+
+    /// Fixed osascript templates for the script lanes — the payload is the
+    /// template choice, never freeform text. `set volume` and `player
+    /// state` ride Standard Additions / the app's own dictionary; a consent
+    /// prompt blocks until the deadline, which runOsaScript caps. `return`
+    /// inside a `tell` returns from the whole script.
+    nonisolated static func scriptSource(_ verb: CuaFastAction.ScriptVerb) -> String {
+        switch verb {
+        case .nowPlaying:
+            // AppleScript has no "\t" escape — `tab` is the tab constant.
+            // `player state is not stopped` guards the track read: a stopped
+            // player's `current track` property raises instead of answering.
+            return """
+            set out to ""
+            if application "Spotify" is running then
+                tell application "Spotify"
+                    if player state is not stopped then
+                        set out to (name of current track) & tab & (artist of current track) & tab & ((player state) as string) & tab & "Spotify"
+                    end if
+                end tell
+            else if application "Music" is running then
+                tell application "Music"
+                    if player state is not stopped then
+                        set out to (name of current track) & tab & (artist of current track) & tab & ((player state) as string) & tab & "Music"
+                    end if
+                end tell
+            end if
+            return out
+            """
+        case .volumeUp:
+            return """
+            set v to (output volume of (get volume settings)) + 10
+            if v > 100 then set v to 100
+            set volume output volume v
+            return v
+            """
+        case .volumeDown:
+            return """
+            set v to (output volume of (get volume settings)) - 10
+            if v < 0 then set v to 0
+            set volume output volume v
+            return v
+            """
+        case .mute(let target):
+            if let target {
+                return target
+                    ? "set volume with output muted\nreturn output muted of (get volume settings)"
+                    : "set volume without output muted\nreturn output muted of (get volume settings)"
+            }
+            return """
+            if output muted of (get volume settings) then
+                set volume without output muted
+                return "false"
+            else
+                set volume with output muted
+                return "true"
+            end if
+            """
+        case .setVolume(let level):
+            let clamped = min(100, max(0, level))
+            return "set volume output volume \(clamped)\nreturn output volume of (get volume settings)"
+        case .getVolume:
+            return "set s to get volume settings\nreturn (output volume of s) & tab & (output muted of s)"
+        }
+    }
+
+    /// script lanes: deterministic osascript templates interpreted into
+    /// honest spoken answers — the track name/state for now-playing, the
+    /// read-back level/mute state for volume. A nil script result means a
+    /// permission prompt or error kept the answer from coming.
+    private func dispatchScriptVerb(_ verb: CuaFastAction.ScriptVerb,
+                                    action: CuaFastAction,
+                                    progress: (String) -> Void) async throws -> String {
+        progress(action.description)
+        let timeout: TimeInterval = verb == .nowPlaying ? 15 : 8
+        guard let out = await osascript(Self.scriptSource(verb), timeout) else {
+            throw DriverConnectionError.refused("The script did not answer — a permission prompt may be waiting for your attention.")
+        }
+        switch verb {
+        case .nowPlaying:
+            let parts = out.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 4 else {
+                recordPostcondition(.resultObserved,
+                                    "Now-playing query: no player running.")
+                return "Nothing is playing."
+            }
+            let artist = parts[1].isEmpty ? "" : " by \(parts[1])"
+            switch parts[2] {
+            case "playing" where !parts[0].isEmpty:
+                recordPostcondition(.resultObserved,
+                                    "\(parts[3]) reports playing \"\(parts[0])\" by \(parts[1]).")
+                return "Playing \(parts[0])\(artist) on \(parts[3])."
+            case "paused" where !parts[0].isEmpty:
+                recordPostcondition(.resultObserved,
+                                    "\(parts[3]) reports paused \"\(parts[0])\" by \(parts[1]).")
+                return "Paused: \(parts[0])\(artist) on \(parts[3])."
+            default:
+                recordPostcondition(.resultObserved,
+                                    "Now-playing query: \(parts[3]) reports \(parts[2]).")
+                return "Nothing is playing."
+            }
+        case .volumeUp, .volumeDown, .setVolume:
+            let level = Int(out.trimmingCharacters(in: .whitespaces))
+            if let level {
+                recordPostcondition(.resultObserved, "System output volume read back at \(level).")
+                return "Volume at \(level)."
+            }
+            recordPostcondition(.resultObserved, "Volume adjusted; the read-back level was not parseable.")
+            return "Adjusted the volume."
+        case .mute:
+            let muted = out == "true"
+            recordPostcondition(.resultObserved,
+                                muted ? "Output muted." : "Output unmuted.")
+            return muted ? "Muted." : "Unmuted."
+        case .getVolume:
+            let parts = out.split(separator: "\t").map(String.init)
+            let level = parts.first ?? out
+            let muted = parts.count > 1 && parts[1] == "true"
+            recordPostcondition(.resultObserved,
+                                "Output volume read at \(level)\(muted ? " (muted)" : "").")
+            return muted ? "Muted — the volume is at \(level)." : "Volume at \(level)."
+        }
+    }
+
+    /// A fixed URL scheme through LaunchServices — Shortcuts runs in place.
+    /// `.delivered` is the honest postcondition: the run itself reports
+    /// through Shortcuts, not the driver.
+    private func dispatchSystemURL(_ verb: CuaFastAction.SystemVerb,
+                                   action: CuaFastAction,
+                                   progress: (String) -> Void) async throws -> String {
+        progress(action.description)
+        guard let target = verb.url else {
+            throw DriverConnectionError.refused("The shortcut URL could not be built.")
+        }
+        guard try await focusLeased({ NSWorkspace.shared.open(target) }) else {
+            throw DriverConnectionError.refused("The shortcut could not be delivered to Shortcuts.")
+        }
+        recordPostcondition(.resultObserved, "\(action.result); delivered to Shortcuts.")
+        return "\(action.result)."
     }
 
 }

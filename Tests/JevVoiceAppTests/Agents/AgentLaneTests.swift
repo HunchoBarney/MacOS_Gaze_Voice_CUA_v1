@@ -147,13 +147,22 @@ final class AgentLaneTests: XCTestCase {
             case "list_windows":
                 return .object(["windows": .array([.object(["window_id": .number(9)])])])
             case "get_window_state":
-                return .object(["elements": .array([]), "title": .string("Inbox")])
+                return .object(["elements": .array([.object([
+                    "element_index": .number(0), "element_token": .string("tok0"),
+                    "role": .string("AXButton"), "label": .string("Open")])]),
+                                "title": .string("Inbox")])
             default:
-                return .object(["ok": .bool(true)])
+                return .object(["effect": .string("confirmed")])
             }
         }
+        var picks = 0
         let judge: CuaTaskAgent.Judge = { _, _ in
-            ["next": self.pick("done"), "doneEvidence": self.pick("proven")]
+            picks += 1
+            // A first-turn done with no dispatch is a fabrication — the
+            // drive clicks once, then reports done honestly.
+            return picks == 1
+                ? ["next": self.pick("click_0"), "doneEvidence": self.pick("proven")]
+                : ["next": self.pick("done"), "doneEvidence": self.pick("proven")]
         }
         let executor = AgentDriveExecutor(call: call, judge: judge,
                                           agentSlug: "inbox", turnID: { "turn-9" },

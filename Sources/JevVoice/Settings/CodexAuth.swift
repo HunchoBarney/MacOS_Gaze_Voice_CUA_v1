@@ -334,7 +334,12 @@ final class CodexAuth: ObservableObject {
     }
 
     /// Spawn-and-collect for short-lived probes; nil only when the process
-    /// can't be launched at all. Timeout terminates — the handler still fires.
+    /// can't be launched at all. Output accumulates via readability
+    /// handlers — the old terminationHandler's readDataToEndOfFile blocked
+    /// until BOTH pipes hit EOF, which never arrives if the child ignores
+    /// SIGTERM or a grandchild inherited the handle. Timeout escalates
+    /// SIGTERM → SIGKILL, and a hard deadline resumes the continuation
+    /// regardless: the probe can never hang forever.
     private func run(_ binary: URL, arguments: [String], timeout: TimeInterval) async -> Outcome? {
         await withCheckedContinuation { continuation in
             let process = Process()
@@ -347,21 +352,40 @@ final class CodexAuth: ObservableObject {
             var environment = ProcessInfo.processInfo.environment
             environment["CODEX_HOME"] = codexHome.path
             process.environment = environment
+            let stdout = SignInOutput(), stderr = SignInOutput()
+            out.fileHandleForReading.readabilityHandler = { stdout.append($0.availableData) }
+            err.fileHandleForReading.readabilityHandler = { stderr.append($0.availableData) }
             let resumed = ResumeGuard()
-            process.terminationHandler = { process in
-                let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(),
-                                    encoding: .utf8) ?? ""
-                let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(),
-                                    encoding: .utf8) ?? ""
+            let finish: @Sendable () -> Void = {
                 resumed.once {
+                    // The handler's capture chain (process → handler →
+                    // finish → process) cycles — clearing breaks it.
+                    process.terminationHandler = nil
+                    out.fileHandleForReading.readabilityHandler = nil
+                    err.fileHandleForReading.readabilityHandler = nil
+                    // terminationStatus raises if the process is still
+                    // running — the forced-finish path can race a SIGKILL.
                     continuation.resume(returning: Outcome(
-                        exitCode: process.terminationStatus, stdout: stdout, stderr: stderr))
+                        exitCode: process.isRunning ? -1 : process.terminationStatus,
+                        stdout: stdout.text, stderr: stderr.text))
                 }
+            }
+            // The last readable chunks can land a beat after termination —
+            // let the handlers drain before the buffers are read.
+            process.terminationHandler = { _ in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { finish() }
             }
             do {
                 try process.run()
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                    if process.isRunning { process.terminate() }
+                    guard process.isRunning else { return }
+                    process.terminate()
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                        // Resume even if the termination handler never
+                        // fired — the child's stubborness is not ours.
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { finish() }
+                    }
                 }
             } catch {
                 resumed.once { continuation.resume(returning: nil) }

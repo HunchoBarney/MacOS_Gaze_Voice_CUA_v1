@@ -87,10 +87,14 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         return Set(criteria.keys)
     }
 
+    /// A done claim passes only after a real effect ran — the click's
+    /// confirmed dispatch is the provenance, never the judge's word.
     func testDoneWithProvenEvidenceReturnsDone() async throws {
         let (loop, _, _) = harness(
             states: [window([element(0, role: "AXButton", label: "Save")])],
-            steps: { _ in self.answers(next: "done") })
+            steps: { step in step == 0
+                ? self.answers(next: "click_0")
+                : self.answers(next: "done") })
         let result = try await loop.drive(DriveTask(goal: "save the file", pid: 7, windowID: 42))
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(result.pid, 7)
@@ -101,7 +105,9 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         let (loop, _, asked) = harness(
             states: [window([element(0, role: "AXButton", label: "Save"),
                              element(1, role: "AXButton", label: "Delete")])],
-            steps: { _ in self.answers(next: "done") })
+            steps: { step in step == 0
+                ? self.answers(next: "click_0")
+                : self.answers(next: "done") })
         let result = try await loop.drive(DriveTask(goal: "save", pid: 7, windowID: 42, deny: ["delete"]))
         XCTAssertEqual(result.status, .done)
         let offered = criteria(asked.value[0])
@@ -213,7 +219,11 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         guard case .maxSteps(let history) = result.status else {
             return XCTFail("expected maxSteps, got \(result.status)")
         }
-        XCTAssertEqual(history.count, 2)
+        // Three ledger lines: dispatch, the identical-re-pick ban note, and
+        // the second dispatch — the re-pick bound bans the lane forward but
+        // a scroll repeat still runs (scrolling twice is a real intent).
+        XCTAssertEqual(history.count, 3)
+        XCTAssertTrue(history.contains { $0.contains("identical action re-picked") })
     }
 
     func testInvalidAnswerHandsBackUntrusted() async throws {
@@ -241,7 +251,11 @@ final class CuaAgentLoopDriveTests: XCTestCase {
         let (loop, _, _) = harness(states: [proven], steps: { _ in self.answers(next: "done") })
         let result = try await loop.drive(DriveTask(goal: "send", pid: 7, windowID: 42,
                                                     successContains: ["sent"]))
-        XCTAssertEqual(result.status, .done)
+        // "sent" already reads true before anything ran — the honest verdict
+        // is alreadySatisfied, not done (nothing dispatched this run).
+        guard case .alreadySatisfied = result.status else {
+            return XCTFail("expected alreadySatisfied, got \(result.status)")
+        }
     }
 
     func testSuspectedNoopArmsPixelLaneWithScreenshotSpace() async throws {
@@ -251,19 +265,36 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             "window_bounds": .object(["x": .number(0), "y": .number(0),
                                       "width": .number(800), "height": .number(600)]),
             "screenshot_width": .number(1600), "screenshot_height": .number(1200)])
+        var clicks = 0
         let (loop, calls, asked) = harness(
             states: [snap, snap],
-            steps: { step in step == 0 ? self.answers(next: "click_0") : self.answers(next: "done") },
+            steps: { step in
+                switch step {
+                case 0: return self.answers(next: "click_0")
+                case 1: return self.answers(next: "pixel_0")
+                default: return self.answers(next: "done")
+                }
+            },
             dispatch: { name, _ in
-                name == "click"
-                    ? .object(["effect": .string("suspected_noop"),
-                               "escalation": .object(["target": .string("pixel"),
-                                                      "reason": .string("suspected_noop")])])
-                    : .object(["effect": .string("confirmed")])
+                if name == "click" {
+                    clicks += 1
+                    // Only the FIRST click reports a suspected noop — the
+                    // armed pixel retry confirms, so the run has a real
+                    // effect for done to rest on.
+                    return clicks == 1
+                        ? .object(["effect": .string("suspected_noop"),
+                                   "escalation": .object(["target": .string("pixel"),
+                                                          "reason": .string("suspected_noop")])])
+                        : .object(["effect": .string("confirmed")])
+                }
+                return .object(["effect": .string("confirmed")])
             })
         let result = try await loop.drive(DriveTask(goal: "go", pid: 7, windowID: 42))
         XCTAssertEqual(result.status, .done)
-        let secondRead = calls.value.filter { $0.0 == "get_window_state" }[1].1
+        let reads = calls.value.filter { $0.0 == "get_window_state" }
+        XCTAssertGreaterThanOrEqual(reads.count, 2)
+        XCTAssertGreaterThanOrEqual(asked.value.count, 2)
+        let secondRead = reads[1].1
         XCTAssertEqual(secondRead["include_screenshot"], .bool(true))
         XCTAssertTrue(criteria(asked.value[1]).contains("pixel_0"))
     }
@@ -433,7 +464,11 @@ final class CuaAgentLoopDriveTests: XCTestCase {
                 return .object(["effect": .string("confirmed")])
             })
         let result = try await loop.drive(DriveTask(goal: "press cmd+n for a new document", pid: 7, windowID: 42))
-        XCTAssertEqual(result.status, .done)
+        // The only dispatch was refused — a run with zero confirmed effects
+        // cannot claim done; the honest settle is blocked.
+        guard case .blocked = result.status else {
+            return XCTFail("expected blocked, got \(result.status)")
+        }
         XCTAssertEqual(calls.value.filter { $0.0 == "bring_to_front" }.count, 0,
                        "A background task must never raise its target window")
         XCTAssertEqual(calls.value.filter { $0.0 == "hotkey" }.count, 1,
@@ -458,7 +493,11 @@ final class CuaAgentLoopDriveTests: XCTestCase {
             })
         let result = try await loop.drive(DriveTask(goal: "press cmd+n for a new document", pid: 7, windowID: 42,
                                                   foreground: true))
-        XCTAssertEqual(result.status, .done)
+        // Refused-only run — zero confirmed effects, so done is vetoed into
+        // an honest blocked rather than a phantom success.
+        guard case .blocked = result.status else {
+            return XCTFail("expected blocked, got \(result.status)")
+        }
         XCTAssertEqual(calls.value.filter { $0.0 == "hotkey" }.count, 1,
                        "The only hotkey call is the refused one — no blind retry")
     }

@@ -244,4 +244,87 @@ final class CuaTaskAgentTests: XCTestCase {
         let sut = CuaTaskAgent(call: { _, _ in .object([:]) })
         XCTAssertTrue(sut.observedPostconditions.isEmpty)
     }
+
+    // MARK: - Spotify play
+
+    /// "play X" is a media verb: the scripting bridge resolves the top hit
+    /// inside Spotify and the `current track` readback proves what actually
+    /// started — no launch_app, no window ceremony, no drive loop.
+    func testPlayPrefersScriptedPlayVerifiedByReadback() async throws {
+        var launchCalls = 0
+        var sources: [String] = []
+        let sut = CuaTaskAgent(call: { tool, _ in
+            if tool == "launch_app" { launchCalls += 1 }
+            return .object([:])
+        }, osascript: { source, _ in
+            sources.append(source)
+            if source.contains("play track") { return "" }
+            if source.contains("player state") { return "No Mistakes, Kanye West, playing" }
+            return nil
+        })
+        let resolved = try XCTUnwrap(sut.resolveFastLane(
+            goal: "play no mistakes by kanye",
+            apps: [app("Spotify", bundle: "com.spotify.client", running: true, pid: 99)]))
+        let evidence = try await sut.runFastLane(resolved,
+                                                 goal: "play no mistakes by kanye") { _ in }
+        XCTAssertEqual(evidence, "Playing No Mistakes by Kanye West on Spotify.")
+        XCTAssertEqual(launchCalls, 0, "the scripting bridge must not pay an app launch")
+        XCTAssertTrue(sources.contains { $0.contains("spotify:search:no%20mistakes")
+                                            || $0.contains("spotify:search:no mistakes") },
+                      "the search URI reaches the play command")
+        XCTAssertTrue(sut.observedPostconditions.contains {
+            $0.kind == .resultObserved && $0.evidence.contains("No Mistakes") })
+    }
+
+    /// The Kendrick failure: Spotify accepts the search URI but resumes its
+    /// stale queue, so the readback names an unrelated track. The content-
+    /// word guard rejects that "playing" state and the honest URI+Return
+    /// path carries the search instead — the evidence names what is ACTUALLY
+    /// playing, never the requested song.
+    func testPlayReadbackRejectingWrongTrackFallsBackToSearch() async throws {
+        var launchedURLs: [String] = []
+        var returnDispatched = false
+        let sut = CuaTaskAgent(call: { tool, args in
+            switch tool {
+            case "launch_app":
+                launchedURLs = (args["urls"]?.array ?? []).compactMap { $0.string }
+                return .object(["pid": .number(99)])
+            case "list_apps":
+                return .object(["apps": .array([
+                    self.app("Spotify", bundle: "com.spotify.client",
+                             running: true, pid: 99)])])
+            case "list_windows":
+                return .object(["windows": .array([.object([
+                    "window_id": .number(7), "title": .string("Spotify"),
+                    "is_on_screen": .bool(true)])])])
+            case "get_window_state":
+                return .object(["elements": .array([.object([
+                    "role": .string("AXSearchField"),
+                    "value": .string("no+mistakes+by+kanye")])]),
+                    "title": .string("Spotify")])
+            case "press_key":
+                returnDispatched = true
+                return .object(["effect": .string("confirmed")])
+            default:
+                return .object([:])
+            }
+        }, osascript: { source, _ in
+            if source.contains("play track") { return "" }
+            if source.contains("player state") { return "Alright, Kendrick Lamar, playing" }
+            return nil
+        })
+        let resolved = try XCTUnwrap(sut.resolveFastLane(
+            goal: "play no mistakes by kanye",
+            apps: [app("Spotify", bundle: "com.spotify.client", running: true, pid: 99)]))
+        let evidence = try await sut.runFastLane(resolved,
+                                                 goal: "play no mistakes by kanye") { _ in }
+        let answer = try XCTUnwrap(evidence)
+        XCTAssertTrue(answer.contains("Kendrick"),
+                      "the wrong track is named, not silently claimed — got: \(answer)")
+        XCTAssertFalse(answer.hasPrefix("Playing No Mistakes"),
+                       "an unrelated readback can never satisfy the request")
+        XCTAssertEqual(launchedURLs, ["spotify:search:no%20mistakes%20by%20kanye"],
+                       "the honest fallback delivers the visible search URI")
+        XCTAssertTrue(returnDispatched, "the verified results page earns the Return press")
+    }
 }

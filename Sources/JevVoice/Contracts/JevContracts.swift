@@ -37,7 +37,13 @@ public struct StepJudgment: Sendable, Equatable {
 
 /// Terminal status of a `driveUntil` run — mirrors Clicky's jev-use statuses.
 public enum DriveStatus: Sendable, Equatable {
+    /// Settled only when at least one effect dispatched this run AND the
+    /// postcondition was verified — "done" is an effect, never a claim.
     case done
+    /// The goal was already true on screen — zero effects dispatched and
+    /// none needed. Distinct from `done` so callers speak it differently
+    /// and never fabricate "I did it" from pure observation.
+    case alreadySatisfied(reason: String)
     case handedBack(HandBackReason)
     case blocked(String)
     /// Loop found fields needing text the caller didn't supply in `values`.
@@ -131,10 +137,19 @@ public struct DriveResult: Sendable {
     /// The bundle id the loop actually resolved — observed identity, never
     /// the caller's application spelling.
     public var bundleID: String?
+    /// At least one effect dispatched and was confirmed this run — the
+    /// only honest base for `.done`. Callers must gate "Done" speech on
+    /// this; `.alreadySatisfied` carries it false by definition.
+    public var dispatchedEffect: Bool
+    /// Why the loop settled blocked — the judge's own reason when it gave
+    /// one, so callers speak "couldn't find 'Yanky'" instead of "(other)".
+    public var blockedReason: String?
     public init(status: DriveStatus, history: [String] = [], pid: Int? = nil, windowID: Int? = nil,
-                bundleID: String? = nil) {
+                bundleID: String? = nil, dispatchedEffect: Bool = false,
+                blockedReason: String? = nil) {
         self.status = status; self.history = history; self.pid = pid
         self.windowID = windowID; self.bundleID = bundleID
+        self.dispatchedEffect = dispatchedEffect; self.blockedReason = blockedReason
     }
 }
 
@@ -160,14 +175,19 @@ public struct TaskSpec: Sendable {
     /// background phrasing leave it false so the user's foreground app is
     /// preserved.
     public var foreground: Bool
+    /// Ordered steps the voice model emitted with `computer_command` — the
+    /// inline plan for multi-part instructions ("open Mail then reply to
+    /// mom" → ["open Mail", "reply to mom"]). Empty for a single action.
+    /// Advisory: folds into the loop's previousContext, never claims done.
+    public var steps: [String]
     public init(goal: String, application: String? = nil, scope: Scope = .work,
                 window: String? = nil, deny: [String] = [], values: [String: String] = [:],
                 literalText: String? = nil, successContains: [String] = [],
-                foreground: Bool = false) {
+                foreground: Bool = false, steps: [String] = []) {
         self.goal = goal; self.application = application; self.scope = scope
         self.window = window; self.deny = deny; self.values = values
         self.literalText = literalText; self.successContains = successContains
-        self.foreground = foreground
+        self.foreground = foreground; self.steps = steps
     }
 }
 

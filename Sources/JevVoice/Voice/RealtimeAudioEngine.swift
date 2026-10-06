@@ -137,9 +137,12 @@ final class RealtimePlayer: @unchecked Sendable {
     private var scheduledMs = 0.0
     private var playedMs = 0.0
     private var currentItemID: String?
-    /// Scheduled total when the current item started — playedMs is
-    /// cumulative across items, so per-item progress is the delta from this.
-    private var itemStartScheduledMs = 0.0
+    /// Played total when the current item started — playedMs is cumulative
+    /// across items, so per-item progress is the delta from this. The
+    /// scheduled ledger can't be the baseline: the previous item's unplayed
+    /// remainder (ring-dropped or still buffered) would count against this
+    /// item and clamp the truncation point below what the user heard.
+    private var itemStartPlayedMs = 0.0
     /// Completion handlers of discarded buffers fire AFTER interrupt()
     /// resets the counters — this epoch makes them inert instead of
     /// re-inflating playedMs into an instant-false "drained" state.
@@ -175,6 +178,15 @@ final class RealtimePlayer: @unchecked Sendable {
     /// the audio the user actually heard while dropped frames can't hold
     /// the turn open forever.
     private var resolvedMs = 0.0
+    /// Stall detection for the sink path: resolvedMs at the last observed
+    /// advance, and the uptime the current freeze began. A write the sink
+    /// discarded without ledgering it (a failed convert never reaches
+    /// consumedMs or droppedMs) would otherwise leave resolvedMs short of
+    /// scheduledMs forever — playbackIdle stays false and turn end waits
+    /// out the 25s drainDeadline. Frozen counters with audio outstanding
+    /// can't be real playback, so the gap resolves after 2s.
+    private var sinkProgressMs = 0.0
+    private var sinkStallBegan = 0.0
     /// 25ms poll that keeps playedMs tracking sink.consumedMs while audio
     /// is outstanding — the sink has no per-buffer completion to hook.
     private var drainPoll: DispatchSourceTimer?
@@ -212,6 +224,8 @@ final class RealtimePlayer: @unchecked Sendable {
             self.lock.lock()
             self.sinkBaseMs = sink?.consumedMs ?? 0
             self.sinkBaseDroppedMs = sink?.droppedMs ?? 0
+            self.sinkProgressMs = self.resolvedMs
+            self.sinkStallBegan = 0
             self.lock.unlock()
             sink?.onDrained = { [weak self] in
                 self?.queue.async { self?.sampleSinkProgress() }
@@ -242,6 +256,20 @@ final class RealtimePlayer: @unchecked Sendable {
         let wasDrained = scheduledMs == 0 || resolvedMs >= scheduledMs - 0.5
         playedMs = max(playedMs, consumed - sinkBaseMs)
         resolvedMs = max(resolvedMs, playedMs + (dropped - sinkBaseDroppedMs))
+        if resolvedMs != sinkProgressMs {
+            sinkProgressMs = resolvedMs
+            sinkStallBegan = 0
+        } else if scheduledMs > resolvedMs + 0.5 {
+            if sinkStallBegan == 0 {
+                sinkStallBegan = ProcessInfo.processInfo.systemUptime
+            } else if ProcessInfo.processInfo.systemUptime - sinkStallBegan > 2 {
+                Self.log.notice("player_sink_stall resolved=\(self.resolvedMs, privacy: .public) scheduled=\(self.scheduledMs, privacy: .public)")
+                resolvedMs = scheduledMs
+                sinkStallBegan = 0
+            }
+        } else {
+            sinkStallBegan = 0
+        }
         let drained = scheduledMs > 0 && resolvedMs >= scheduledMs - 0.5
         if drained { resolvedMs = scheduledMs }
         lock.unlock()
@@ -281,7 +309,7 @@ final class RealtimePlayer: @unchecked Sendable {
             }
             if self.currentItemID != itemID {
                 self.currentItemID = itemID
-                self.itemStartScheduledMs = self.scheduledMs
+                self.itemStartPlayedMs = self.playedMs
             }
             let gen = self.generation
             self.lock.unlock()
@@ -385,7 +413,7 @@ final class RealtimePlayer: @unchecked Sendable {
     /// item started.
     func playedMilliseconds() -> Int {
         lock.lock(); defer { lock.unlock() }
-        return max(0, Int((playedMs - itemStartScheduledMs).rounded(.down)))
+        return max(0, Int((playedMs - itemStartPlayedMs).rounded(.down)))
     }
 
     /// Stop playback and drop everything queued — the local half of barge-in.
@@ -407,8 +435,9 @@ final class RealtimePlayer: @unchecked Sendable {
         }
         lock.lock()
         let item = currentItemID
-        let played = max(0, Int((playedMs - itemStartScheduledMs).rounded(.down)))
-        scheduledMs = 0; playedMs = 0; resolvedMs = 0; itemStartScheduledMs = 0
+        let played = max(0, Int((playedMs - itemStartPlayedMs).rounded(.down)))
+        scheduledMs = 0; playedMs = 0; resolvedMs = 0; itemStartPlayedMs = 0
+        sinkProgressMs = 0; sinkStallBegan = 0
         currentItemID = nil
         if let item { interruptedItemIDs.insert(item) }
         droppingUntilDone = droppingUntilDone || untilResponseDone

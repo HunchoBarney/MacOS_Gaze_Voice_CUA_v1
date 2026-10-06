@@ -279,9 +279,8 @@ final class CuaVoiceRuntimeLiveTests: XCTestCase {
             if let foregroundBeforeTasks {
                 XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, foregroundBeforeTasks)
             }
-            let queueWaits = works.map { $0.timings["Queue wait"] ?? -1 }
             let taskOutcomes = works.map { "\($0.bundle ?? "unknown") window \($0.window ?? -1): \($0.status)" }
-            print("Parallel runtime fixture: model requests \(modelCalls); queue waits \(queueWaits); tasks \(taskOutcomes); foreground PID \(foregroundBeforeTasks.map { String($0) } ?? "unknown").")
+            print("Parallel runtime fixture: model requests \(modelCalls); tasks \(taskOutcomes); foreground PID \(foregroundBeforeTasks.map { String($0) } ?? "unknown").")
             await restoreAndClean()
         } catch {
             await restoreAndClean()
