@@ -1,0 +1,69 @@
+{
+  "phase": "P2a",
+  "criteria": [
+    {
+      "id": "P2a-1",
+      "behavior": "EyeTracking/spikes/ort-node/ is self-contained: own package.json pinning onnxruntime-node@1.30.0 + onnxruntime-web@1.30.0, committed lockfile, .gitignore for node_modules/; npm install succeeds inside it without touching EyeTracking/package.json or pnpm-lock.yaml",
+      "check": "ls EyeTracking/spikes/ort-node; read its package.json pins; `git diff EyeTracking/package.json EyeTracking/pnpm-lock.yaml` shows ONLY the pre-existing hunks recorded in the ExecPlan Context (onnxruntime-web 1.26->1.30 + @litertjs/core removal) and no new lines",
+      "expected": "Spike dir standalone; EyeTracking dep diff unchanged from the recorded pre-existing baseline",
+      "passes": true,
+      "evidence": "PASS: spikes/ort-node/package.json pins onnxruntime-node@1.30.0 + onnxruntime-web@1.30.0 exactly (\"type\":\"module\"), committed package-lock.json, .gitignore=node_modules/. `git diff EyeTracking/package.json` shows ONLY the pre-existing hunks (@litertjs/core removal + onnxruntime-web 1.26.0->1.30.0); pnpm-lock unchanged by this phase. npm install used --cache /tmp/npm-cache-ort-node (global cache EACCES)."
+    },
+    {
+      "id": "P2a-2",
+      "behavior": "measure.mjs discovers every .onnx under EyeTracking/public/models/ dynamically and --smoke lists each with introspected input names/shapes/dtypes; symbolic dims (e.g. gaze_Nx3x160x160 batch N) resolve per the plan's policy with the chosen value recorded; the phase file's inventory table maps each model to a pipeline role + cadence read from inferenceWorker.ts source",
+      "check": "cd EyeTracking/spikes/ort-node && node measure.mjs --smoke; read the recorded model/shape/role/cadence table in P2a-coreml-tracker.md",
+      "expected": "All 6 models listed with real introspected shapes + symbolic-dim resolution recorded; role/cadence justified from source lines, not assumed",
+      "passes": true,
+      "evidence": "PASS: `node measure.mjs --smoke` lists all 6 models dynamically with introspected inputs \u2014 gaze_1 input float32[1,3,160,160]; gaze_N symbolic {\"N\":1} resolved+recorded; mobileone [1,3,448,448]; retinaface input [1,3,480,640]; vsdlm images [1,3,30,48]; yolomit images [1,3,480,640]. Inventory table at P2a-coreml-tracker.md:194 maps role+cadence with source cites (inferenceWorker.ts:296/844/897/903, electron/main.cjs:357-372, runtimes.ts:142-146/227, core.ts:810-811)."
+    },
+    {
+      "id": "P2a-3",
+      "behavior": "measure.mjs runs per model x EP with seeded deterministic inputs, >=20 warmup + >=100 timed iterations (configurable; --smoke uses tiny counts), performance.now() timing, median/p50/p95 ms + RSS (max over per-iteration samples + post-run) recorded; InferenceSession.create failure -> load_error row not abort; sessions torn down between measurements; timed runs carry NO profiling",
+      "check": "read measure.mjs; run --smoke on at least cpu + coreml",
+      "expected": "Timing discipline as specified; results.json rows carry median/p50/p95/RSS; load_error is a row status",
+      "passes": true,
+      "evidence": "PASS: results.json rows carry warmup=20, iters=100, p50_ms/p95_ms/rss_peak_mb/status. load_error + run_error are row statuses (retinaface@coreml = run_error recorded, spike continued). Seeded mulberry32 inputs (seed 42), performance.now() timing, session.release() between models. Timed runs carry no profiling (profile is a separate --profile pass)."
+    },
+    {
+      "id": "P2a-4",
+      "behavior": "Core ML EP binding is proven per model in a SEPARATE --profile pass (never on timed iterations): endProfiling output lands under results/profiles/<model>-<ep>.json and results.json rows carry coreml_bound:true|false + bound_nodes/total_nodes, or coreml_unbound:true (never silently accepted as CPU)",
+      "check": "inspect results/profiles/*.json + profile evidence fields on every coreml row in results.json; rerun --profile on one model if needed",
+      "expected": "Every coreml measurement carries bound/unbound evidence from a separate profiling pass",
+      "passes": true,
+      "evidence": "PASS: results/profiles/<model>-coreml.json for all 6 models (separate pass, profileFilePrefix per model). Bound fractions: gaze_1 3/6, gaze_N 6/18, mobileone 3/3, retinaface 7/22, vsdlm 6/12, yolomit 9/18 nodes on CoreML EP \u2014 ORT leaves shape/Concat residue on CPU by design. retinaface bound AND still run_errors (binding \u2260 successful run)."
+    },
+    {
+      "id": "P2a-5",
+      "behavior": "wasm baseline measured on the same machine via onnxruntime-web in the same script (--ep wasm), so the comparison is same-box, not remembered numbers",
+      "check": "results.json contains wasm rows for every model",
+      "expected": "Same-box wasm baseline present for all models",
+      "passes": true,
+      "evidence": "PASS: wasm rows for all 6 models via onnxruntime-web in-node (numThreads=1, wasmPaths\u2192dist). gaze wasm p50 456.5ms vs coreml 3.86ms \u2014 same-box comparison, not remembered numbers."
+    },
+    {
+      "id": "P2a-6",
+      "behavior": "--chain mode reports the cadence-weighted effective per-frame cost per EP (sum unconditional.p50 + sum cadenced.p50 x cadence_hz/15) plus the strict all-models total for contrast; results/ (results.json + REPORT.md + profiles/) committed as the deliverable; REPORT.md contains per-model table, chain table, and the 66.7ms bar",
+      "check": "node measure.mjs --chain --ep coreml; node measure.mjs --report; read results/REPORT.md",
+      "expected": "Weighted + strict chain numbers per EP; populated REPORT.md committed",
+      "passes": true,
+      "evidence": "PASS: --chain emits weighted effective_ms per EP (estimate\u00d71 + detect\u00d71/15 + appearance\u00d75/15) plus strict_ms contrast. coreml: 5.01ms/199.6fps weighted, 20.82ms strict; cpu 151.78/6.6fps; wasm 531.09/1.9fps. results/REPORT.md has per-model table, binding table, chain table, 66.7ms bar, verdict."
+    },
+    {
+      "id": "P2a-7",
+      "behavior": "A verdict is recorded in the phase file: PROMOTE iff chain p50 >=15fps on coreml on this machine (MacBookPro17,1 / 8GB), else DISCARD with a documented ranked fallback; a coreml_unbound outcome is recorded honestly in the reasoning",
+      "check": "read the verdict paragraph in P2a-coreml-tracker.md (Retrospective/Handoff) + the chain numbers it cites",
+      "expected": "Verdict present, cites measured chain numbers, fallback documented on DISCARD",
+      "passes": true,
+      "evidence": "PASS: verdict PROMOTE recorded at P2a-coreml-tracker.md:232 (Surprises) + Decision Log #1 (:263) citing 5.01ms weighted \u226466.7ms on MacBookPro17,1/8GB. Honest caveat logged: retinaface CoreML run_error on zero-box NMS \u2192 detector on CPU EP \u22487.03ms weighted or yolo variant; verdict unchanged."
+    },
+    {
+      "id": "P2a-8",
+      "behavior": "Gate discipline held: fresh-context jarvis-judge returned VERDICT: PASS, evidence recorded, PROGRESS.md updated, milestone commit(s) on ship/v1-p2a staged only from owned paths",
+      "check": "this file's evidence fields; git log ship/v1-p2a; scripts/check-owned-paths.py P2a",
+      "expected": "All criteria pass with evidence; commits contain only owned paths",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}

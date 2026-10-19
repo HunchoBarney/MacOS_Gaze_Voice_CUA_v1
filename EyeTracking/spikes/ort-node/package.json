@@ -1,0 +1,11 @@
+{
+  "name": "ort-node-spike",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "P2a spike: onnxruntime-node CoreML EP bench for the tracker model set",
+  "dependencies": {
+    "onnxruntime-node": "1.30.0",
+    "onnxruntime-web": "1.30.0"
+  }
+}

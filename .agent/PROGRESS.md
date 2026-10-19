@@ -120,3 +120,66 @@ layer — see P1-bench.md Handoff for repro + files.
 never touch LatencyLedger (bench owns wall-clock timing until P4/P5
 emit spans); `make local` reports tracker-not-ready while the app runs
 fine for drive_until — tracker readiness is not a bench prerequisite.
+
+## 2026-10-19 — P2a readiness — devin-local (SWE-2)
+
+**Did:** P2a G1 artifacts written —
+`.agent/phases/P2a-coreml-tracker.md` (self-contained spike: offline
+`onnxruntime-node` CoreML-vs-CPU-vs-ort-web-wasm bench of every
+`EyeTracking/public/models/*.onnx`, per-frame chain composed from the
+real inference-worker path, ≥15FPS promote bar, self-contained spike
+dir `EyeTracking/spikes/ort-node/` so EyeTracking's entangled dep files
+stay untouched) + `.agent/acceptance/P2a.json` (8 default-fail
+criteria, validates 0/8). PROGRAM.md P4 row now explicitly owns the
+session-label wedge bug found in P1.
+
+**Evidence:** `check-acceptance.py P2a.json` → 0/8 schema-valid;
+`check-owned-paths.py P2a` → parses, 4 patterns; onnxruntime-node
+latest stable = 1.30.0 (published 2026-09-14); env snapshot confirms
+MacBookPro17,1 = M1/8GB = the shipping floor.
+
+**State:** P2a plan ready for G1 — awaiting user approval, then
+branch `ship/v1-p2a` + implementation.
+
+**Next:** user G1 → implementer builds spike (M1 scaffold/inventory →
+M2 per-model×EP+EP-binding proof → M3 chain/report/verdict → M4
+acceptance/judge/commits).
+
+**Surprises:** `EyeTracking/package.json`+`pnpm-lock.yaml` carry the
+user's uncommitted `onnxruntime-web` 1.26→1.30 upgrade — the
+self-contained spike dir sidesteps entangling it rather than asking
+for a pre-commit.
+
+## 2026-10-19 — P2a complete: PROMOTE ort-node+CoreML (ship/v1-p2a)
+
+**Verdict: PROMOTE.** Measured on the floor machine itself
+(MacBookPro17,1 / M1 / 8 GB / node v26.8.1 / ort-node 1.30.0): CoreML
+cadence-weighted effective chain p50 = **5.01 ms ≈ 199.6 FPS** vs the
+66.7 ms bar; strict all-models = 20.82 ms. CPU 151.78 ms (6.6 FPS),
+same-box wasm 531.09 ms (1.9 FPS). Judge recomputed every number —
+exact match, PASS.
+
+**Headline finding:** `retinaface` detector **run_errors under CoreML
+on every zero-detection frame** (fused NMS emits `{0,3}` tensor — EP
+rejects zero-element dynamics). Not a bench artifact — fires on any
+no-face production frame. Promoted architecture: gaze/appearance/lip
+on `coreml`, detector on `cpu` EP (or yolo variant on CoreML, p50
+9.90 ms) → honest fallback ≈7.03 ms weighted (≈142 FPS), verdict
+unchanged.
+
+**Artifacts:** `EyeTracking/spikes/ort-node/` — self-contained npm
+package (pins ort-node+ort-web @1.30.0, own lockfile, zero touch of
+EyeTracking/package.json/pnpm-lock.yaml), `measure.mjs` (6 models
+auto-discovered, symbolic-N→1 recorded, seeded inputs, 20w+100i,
+separate --profile pass for binding proof: all models partially bound),
+`results/{results.json,REPORT.md,profiles/}` committed.
+
+**For P8:** inference is NOT the bottleneck (~5-7 ms of the 66.7 ms
+frame budget) — camera capture + preprocessing + calibration own the
+rest, unmeasured here. Detector EP split is a hard requirement, not a
+preference.
+
+**Gates:** G1 judge FAIL'd 5 defects (cadenced-pipeline denominator,
+missing 6th model, symbolic-dim policy, load_error vocab,
+profiling-on-timed-runs) — all fixed pre-implementation; G5 judge PASS
+with notes only. Acceptance 7/8 pending P2a-8 (this commit).

@@ -1,0 +1,692 @@
+{
+  "machine": {
+    "model": "MacBookPro17,1",
+    "cpu": "Apple M1",
+    "mem_bytes": 8589934592,
+    "arch": "arm64",
+    "node": "v26.8.1"
+  },
+  "seed": 42,
+  "results": [
+    {
+      "model": "gaze_1x3x160x160.onnx",
+      "role": "estimate",
+      "cadence_hz": 15,
+      "role_source": "unconditional per frame — inferenceWorker.ts:903 (models.estimate), input 'input' [1,3,160,160] runtimes.ts:227",
+      "ep": "cpu",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 113.07341599999927,
+      "median_ms": 129.80270800000108,
+      "p50_ms": 129.80270800000108,
+      "p95_ms": 151.715416,
+      "max_ms": 375.74012500000026,
+      "rss_bytes": 378699776
+    },
+    {
+      "model": "gaze_Nx3x160x160.onnx",
+      "role": "off",
+      "cadence_hz": 0,
+      "role_source": "unreferenced by shipped defaults — electron/main.cjs:357-371 names gaze_1x3x160x160 only; benched with N resolved to 1",
+      "ep": "cpu",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            "N",
+            3,
+            160,
+            160
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "dtype": "float32",
+          "symbolic_resolved": {
+            "N": 1
+          }
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 106.64516699999876,
+      "median_ms": 134.26650000000154,
+      "p50_ms": 134.26650000000154,
+      "p95_ms": 251.22908299999835,
+      "max_ms": 502.05433300000004,
+      "rss_bytes": 370540544
+    },
+    {
+      "model": "mobileone_s0_gaze.onnx",
+      "role": "appearance",
+      "cadence_hz": 5,
+      "role_source": "~5Hz via appearanceChannel.maybeRun — inferenceWorker.ts:897, APPEARANCE_PERIOD_MS=220 core.ts:811; forced wasm in prod runtimes.ts:142-146; input [1,3,448,448] core.ts:810",
+      "ep": "cpu",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            448,
+            448
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            448,
+            448
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 29.33445799999754,
+      "median_ms": 35.584875000000466,
+      "p50_ms": 35.584875000000466,
+      "p95_ms": 41.984958000000915,
+      "max_ms": 305.7201249999998,
+      "rss_bytes": 308051968
+    },
+    {
+      "model": "retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
+      "role": "detect",
+      "cadence_hz": 1,
+      "role_source": "default detector (detector=retinaface) — electron/main.cjs:354-364; <=1Hz DETECT_INTERVAL_MS=1000 inferenceWorker.ts:296,844; input 'input' [1,3,480,640]",
+      "ep": "cpu",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 33.36833299999853,
+      "median_ms": 40.26462499999616,
+      "p50_ms": 40.26462499999616,
+      "p95_ms": 45.130457999999635,
+      "max_ms": 45.86137500000041,
+      "rss_bytes": 306348032
+    },
+    {
+      "model": "vsdlm_l.onnx",
+      "role": "lip",
+      "cadence_hz": 0,
+      "role_source": "off unless --enable-lip-motion && detector===yolo — electron/main.cjs:372, inferenceWorker.ts:954-957; input 'images' [1,3,30,48] runtimes.ts:191,246",
+      "ep": "cpu",
+      "inputs": [
+        {
+          "name": "images",
+          "dims": [
+            1,
+            3,
+            30,
+            48
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            30,
+            48
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 2.3168339999974705,
+      "median_ms": 2.7735830000019632,
+      "p50_ms": 2.7735830000019632,
+      "p95_ms": 4.716832999998587,
+      "max_ms": 5.950666999997338,
+      "rss_bytes": 296992768
+    },
+    {
+      "model": "yolomit_t_wholebody28_1x3x480x640.onnx",
+      "role": "detect",
+      "cadence_hz": 1,
+      "role_source": "alternate detector (--detector yolo) — electron/main.cjs:360-363; same <=1Hz cadence; input session.inputNames[0] ('images') [1,3,480,640] runtimes.ts:187,201",
+      "ep": "cpu",
+      "inputs": [
+        {
+          "name": "images",
+          "dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 90.26591699999699,
+      "median_ms": 111.49841699999524,
+      "p50_ms": 111.49841699999524,
+      "p95_ms": 128.3115420000031,
+      "max_ms": 149.171875,
+      "rss_bytes": 303972352
+    },
+    {
+      "model": "gaze_1x3x160x160.onnx",
+      "role": "estimate",
+      "cadence_hz": 15,
+      "role_source": "unconditional per frame — inferenceWorker.ts:903 (models.estimate), input 'input' [1,3,160,160] runtimes.ts:227",
+      "ep": "coreml",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 3.4173340000006647,
+      "median_ms": 3.862500000000182,
+      "p50_ms": 3.862500000000182,
+      "p95_ms": 6.379624999999578,
+      "max_ms": 6.628666000000521,
+      "rss_bytes": 556908544,
+      "bound_nodes": 3,
+      "total_nodes": 6,
+      "profile_file": "results/profiles/gaze_1x3x160x160-coreml.json",
+      "coreml_bound": true
+    },
+    {
+      "model": "gaze_Nx3x160x160.onnx",
+      "role": "off",
+      "cadence_hz": 0,
+      "role_source": "unreferenced by shipped defaults — electron/main.cjs:357-371 names gaze_1x3x160x160 only; benched with N resolved to 1",
+      "ep": "coreml",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            "N",
+            3,
+            160,
+            160
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "dtype": "float32",
+          "symbolic_resolved": {
+            "N": 1
+          }
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 3.902165999999852,
+      "median_ms": 5.112708000000566,
+      "p50_ms": 5.112708000000566,
+      "p95_ms": 5.564249999999447,
+      "max_ms": 5.965333000000101,
+      "rss_bytes": 163381248,
+      "bound_nodes": 6,
+      "total_nodes": 18,
+      "profile_file": "results/profiles/gaze_Nx3x160x160-coreml.json",
+      "coreml_bound": true
+    },
+    {
+      "model": "mobileone_s0_gaze.onnx",
+      "role": "appearance",
+      "cadence_hz": 5,
+      "role_source": "~5Hz via appearanceChannel.maybeRun — inferenceWorker.ts:897, APPEARANCE_PERIOD_MS=220 core.ts:811; forced wasm in prod runtimes.ts:142-146; input [1,3,448,448] core.ts:810",
+      "ep": "coreml",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            448,
+            448
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            448,
+            448
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 1.4014999999999418,
+      "median_ms": 1.4620409999988624,
+      "p50_ms": 1.4620409999988624,
+      "p95_ms": 1.818042000000787,
+      "max_ms": 2.3727080000007845,
+      "rss_bytes": 203620352,
+      "bound_nodes": 3,
+      "total_nodes": 3,
+      "profile_file": "results/profiles/mobileone_s0_gaze-coreml.json",
+      "coreml_bound": true
+    },
+    {
+      "model": "retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
+      "role": "detect",
+      "cadence_hz": 1,
+      "role_source": "default detector (detector=retinaface) — electron/main.cjs:354-364; <=1Hz DETECT_INTERVAL_MS=1000 inferenceWorker.ts:296,844; input 'input' [1,3,480,640]",
+      "ep": "coreml",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "run_error",
+      "error": "Non-zero status code returned while running 9725669114890332002_CoreML_9725669114890332002_6 node. Name:'CoreMLExecutionProvider_9725669114890332002_CoreML_9725669114890332002_6_6' Status Message: coreml_execution_provider.cc:222 operator() Input (nms_selected_indices) has a dynamic shape ({-1,3}) but the runtime shape ({0,3}) has zero elements. This is not supported by the CoreML EP.",
+      "bound_nodes": 7,
+      "total_nodes": 22,
+      "profile_file": "results/profiles/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70-coreml.json",
+      "profile_run_error": "Non-zero status code returned while running 9725669114890332002_CoreML_9725669114890332002_6 node. Name:'CoreMLExecutionProvider_9725669114890332002_CoreML_9725669114890332002_6_6' Status Message: coreml_execution_provider.cc:222 operator() Input (nms_selected_indices) has a dynamic shape ({-1,3}) but the runtime shape ({0,3}) has zero elements. This is not supported by the CoreML EP.",
+      "coreml_bound": true
+    },
+    {
+      "model": "vsdlm_l.onnx",
+      "role": "lip",
+      "cadence_hz": 0,
+      "role_source": "off unless --enable-lip-motion && detector===yolo — electron/main.cjs:372, inferenceWorker.ts:954-957; input 'images' [1,3,30,48] runtimes.ts:191,246",
+      "ep": "coreml",
+      "inputs": [
+        {
+          "name": "images",
+          "dims": [
+            1,
+            3,
+            30,
+            48
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            30,
+            48
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 0.4446250000000873,
+      "median_ms": 0.4849579999990965,
+      "p50_ms": 0.4849579999990965,
+      "p95_ms": 0.6481669999993755,
+      "max_ms": 0.8727500000004511,
+      "rss_bytes": 226820096,
+      "bound_nodes": 6,
+      "total_nodes": 12,
+      "profile_file": "results/profiles/vsdlm_l-coreml.json",
+      "coreml_bound": true
+    },
+    {
+      "model": "yolomit_t_wholebody28_1x3x480x640.onnx",
+      "role": "detect",
+      "cadence_hz": 1,
+      "role_source": "alternate detector (--detector yolo) — electron/main.cjs:360-363; same <=1Hz cadence; input session.inputNames[0] ('images') [1,3,480,640] runtimes.ts:187,201",
+      "ep": "coreml",
+      "inputs": [
+        {
+          "name": "images",
+          "dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 7.2881669999987935,
+      "median_ms": 9.902333000001818,
+      "p50_ms": 9.902333000001818,
+      "p95_ms": 15.083417000001646,
+      "max_ms": 39.401834000000235,
+      "rss_bytes": 308248576,
+      "bound_nodes": 9,
+      "total_nodes": 18,
+      "profile_file": "results/profiles/yolomit_t_wholebody28_1x3x480x640-coreml.json",
+      "coreml_bound": true
+    },
+    {
+      "model": "gaze_1x3x160x160.onnx",
+      "role": "estimate",
+      "cadence_hz": 15,
+      "role_source": "unconditional per frame — inferenceWorker.ts:903 (models.estimate), input 'input' [1,3,160,160] runtimes.ts:227",
+      "ep": "wasm",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 410.8485419999997,
+      "median_ms": 456.52950000000055,
+      "p50_ms": 456.52950000000055,
+      "p95_ms": 530.5698330000014,
+      "max_ms": 882.2507919999989,
+      "rss_bytes": 624525312
+    },
+    {
+      "model": "gaze_Nx3x160x160.onnx",
+      "role": "off",
+      "cadence_hz": 0,
+      "role_source": "unreferenced by shipped defaults — electron/main.cjs:357-371 names gaze_1x3x160x160 only; benched with N resolved to 1",
+      "ep": "wasm",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            "N",
+            3,
+            160,
+            160
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            160,
+            160
+          ],
+          "dtype": "float32",
+          "symbolic_resolved": {
+            "N": 1
+          }
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 410.60654200000863,
+      "median_ms": 460.8627919999999,
+      "p50_ms": 460.8627919999999,
+      "p95_ms": 597.3838329999999,
+      "max_ms": 1049.5206670000043,
+      "rss_bytes": 742440960
+    },
+    {
+      "model": "mobileone_s0_gaze.onnx",
+      "role": "appearance",
+      "cadence_hz": 5,
+      "role_source": "~5Hz via appearanceChannel.maybeRun — inferenceWorker.ts:897, APPEARANCE_PERIOD_MS=220 core.ts:811; forced wasm in prod runtimes.ts:142-146; input [1,3,448,448] core.ts:810",
+      "ep": "wasm",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            448,
+            448
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            448,
+            448
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 120.65262500000244,
+      "median_ms": 133.6034159999981,
+      "p50_ms": 133.6034159999981,
+      "p95_ms": 170.16529200000514,
+      "max_ms": 185.5743339999899,
+      "rss_bytes": 276496384
+    },
+    {
+      "model": "retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
+      "role": "detect",
+      "cadence_hz": 1,
+      "role_source": "default detector (detector=retinaface) — electron/main.cjs:354-364; <=1Hz DETECT_INTERVAL_MS=1000 inferenceWorker.ts:296,844; input 'input' [1,3,480,640]",
+      "ep": "wasm",
+      "inputs": [
+        {
+          "name": "input",
+          "dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 86.8609169999836,
+      "median_ms": 101.96812500001397,
+      "p50_ms": 101.96812500001397,
+      "p95_ms": 110.49579200000153,
+      "max_ms": 127.0058339999814,
+      "rss_bytes": 276070400
+    },
+    {
+      "model": "vsdlm_l.onnx",
+      "role": "lip",
+      "cadence_hz": 0,
+      "role_source": "off unless --enable-lip-motion && detector===yolo — electron/main.cjs:372, inferenceWorker.ts:954-957; input 'images' [1,3,30,48] runtimes.ts:191,246",
+      "ep": "wasm",
+      "inputs": [
+        {
+          "name": "images",
+          "dims": [
+            1,
+            3,
+            30,
+            48
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            30,
+            48
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 6.731874999997672,
+      "median_ms": 8.039999999979045,
+      "p50_ms": 8.039999999979045,
+      "p95_ms": 11.664999999979045,
+      "max_ms": 12.250832999998238,
+      "rss_bytes": 203030528
+    },
+    {
+      "model": "yolomit_t_wholebody28_1x3x480x640.onnx",
+      "role": "detect",
+      "cadence_hz": 1,
+      "role_source": "alternate detector (--detector yolo) — electron/main.cjs:360-363; same <=1Hz cadence; input session.inputNames[0] ('images') [1,3,480,640] runtimes.ts:187,201",
+      "ep": "wasm",
+      "inputs": [
+        {
+          "name": "images",
+          "dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "resolved_dims": [
+            1,
+            3,
+            480,
+            640
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "status": "ok",
+      "warmup": 20,
+      "iters": 100,
+      "min_ms": 302.8355829999782,
+      "median_ms": 348.4897920000076,
+      "p50_ms": 348.4897920000076,
+      "p95_ms": 602.590125000017,
+      "max_ms": 926.4677920000104,
+      "rss_bytes": 103006208
+    }
+  ],
+  "chains": [
+    {
+      "ep": "coreml",
+      "effective_ms": 5.010002533333257,
+      "effective_ms_default_detector": 4.349846999999802,
+      "strict_ms": 20.824540000000525,
+      "weighted_p95_ms": 7.991200133333283,
+      "fps_effective": 199.60069747403494,
+      "fps_strict": 48.020268394882905,
+      "rss_max_bytes": 556908544,
+      "models_measured": 5,
+      "missing": [
+        "retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx:run_error"
+      ]
+    },
+    {
+      "ep": "cpu",
+      "effective_ms": 151.78186913333397,
+      "effective_ms_default_detector": 144.34864133333429,
+      "strict_ms": 454.19070799999645,
+      "weighted_p95_ms": 177.27320200000048,
+      "fps_effective": 6.58840219658609,
+      "fps_strict": 2.2017183143253733,
+      "rss_max_bytes": 378699776,
+      "models_measured": 6,
+      "missing": []
+    },
+    {
+      "ep": "wasm",
+      "effective_ms": 531.0944998000014,
+      "effective_ms_default_detector": 507.86184700000086,
+      "strict_ms": 1509.4936249999992,
+      "weighted_p95_ms": 634.8306581333377,
+      "fps_effective": 1.882904078985149,
+      "fps_strict": 0.6624738146873596,
+      "rss_max_bytes": 742440960,
+      "models_measured": 6,
+      "missing": []
+    }
+  ],
+  "generated_at": "2026-10-19T06:14:59.006Z"
+}
