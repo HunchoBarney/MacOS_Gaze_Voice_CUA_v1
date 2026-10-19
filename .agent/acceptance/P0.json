@@ -1,0 +1,109 @@
+{
+  "phase": "P0",
+  "criteria": [
+    {
+      "id": "P0-1",
+      "behavior": "The .agent/ harness artifacts exist at repo root: PROGRAM.md, PLANS.md, CONTRACTS.md, PROGRESS.md, phases/ (with _TEMPLATE.md and P0-harness.md), acceptance/ (with schema.json and P0.json)",
+      "check": "ls .agent .agent/phases .agent/acceptance and confirm each named file exists",
+      "expected": "All eight artifacts present",
+      "passes": true,
+      "evidence": "jarvis-judge G4 2026-10-18: all 8 artifacts confirmed via ls (.agent/{PROGRAM,PLANS,CONTRACTS,PROGRESS}.md, phases/{_TEMPLATE,P0-harness}.md, acceptance/{schema,P0}.{json})"
+    },
+    {
+      "id": "P0-2",
+      "behavior": "PROGRAM.md is the source of truth for done: it states goals, non-goals, hard constraints, the four hero jobs, the phase DAG (P0–P13), release bars, and a decision-log index",
+      "check": "read .agent/PROGRAM.md; confirm each element is present and matches the megaplan's locked decisions",
+      "expected": "All elements present; hero jobs, phase DAG rows P0–P13, release bars, non-goals, decision-log index all accounted for",
+      "passes": true,
+      "evidence": "jarvis-judge G4: PROGRAM.md carries goals, hero jobs (:12-15), locked decisions (:27-43), DAG P0-P13 (:101-117), numeric release bars (:144-156), non-goals (:158-163), decision index (:170+)"
+    },
+    {
+      "id": "P0-3",
+      "behavior": "PLANS.md defines the ExecPlan rules: self-contained plans, owned-paths lists, commands with expected output, independently verifiable milestones, spike promote/discard, mandatory sections (Progress, Surprises & Discoveries, Decision Log, Outcomes & Retrospective), the G1–G7 gate loop, roles, worktree recipe, task-brief template, and verification layers",
+      "check": "read .agent/PLANS.md against this list",
+      "expected": "Every named rule present; gate loop has all of G1–G7 with owners",
+      "passes": true,
+      "evidence": "jarvis-judge G4: PLANS.md covers self-contained plans, owned paths, commands+expected, milestones, promote/discard, mandatory sections, G1-G7 with owners (:77-85), roles, worktree recipe, brief template, verification layers, handoff"
+    },
+    {
+      "id": "P0-4",
+      "behavior": "CONTRACTS.md v0 freezes the eight interfaces: Decider protocol, CaptureSource, realtime tool schemas (9 tools), ScriptIntent registry, BrowserDriver protocol, SkillProgram JSON, bench task JSON, LatencyLedger span names — and requires a Decision Log entry + consumer re-review for changes",
+      "check": "read .agent/CONTRACTS.md; count tool schemas = 9; confirm change-control rule stated",
+      "expected": "All eight contracts specified; change rule present; span names match Sources/JevVoice/Support/LatencyLedger.swift spanKeys",
+      "passes": true,
+      "evidence": "jarvis-judge G4: 8 contracts in CONTRACTS.md; exactly 9 realtime tools (:100-108); change rule (:5-8); span names (:222-228) match LatencyLedger.swift:66-76 spanKeys + marks + origins"
+    },
+    {
+      "id": "P0-5",
+      "behavior": "acceptance/schema.json + scripts/check-acceptance.py enforce the default-FAIL schema: every criterion has id/behavior/check/expected/passes/evidence, and passes:true with null evidence is rejected",
+      "check": "python3 scripts/check-acceptance.py .agent/acceptance/P0.json; then a copy with one passes:true/evidence:null criterion must FAIL validation",
+      "expected": "P0.json validates at 0/N; the doctored copy is rejected for missing evidence",
+      "passes": true,
+      "evidence": "check-acceptance.py P0.json -> 0/13 exit 0; doctored passes:true/evidence:null copy rejected exit 1 (judge reproduced); schema.json additionalProperties:false"
+    },
+    {
+      "id": "P0-6",
+      "behavior": "scripts/verification-lane.sh is the single serialized runner: it runs the Swift suite and the EyeTracking suite from their correct roots in sequence and fails on first failure",
+      "check": "bash -n scripts/verification-lane.sh; read it and confirm swift test + (cd EyeTracking && vitest run) plus typecheck are invoked in order",
+      "expected": "Syntax valid; both suites + typecheck invoked; serial order",
+      "passes": true,
+      "evidence": "bash -n clean; lane runs swift test -> EyeTracking typecheck -> vitest serially under set -euo pipefail; package.json has typecheck+test at EyeTracking/ root (judge verified)"
+    },
+    {
+      "id": "P0-7",
+      "behavior": "scripts/check-owned-paths.py reads the owned-paths block of a phase ExecPlan and reports any dirty/staged file outside the list",
+      "check": "python3 scripts/check-owned-paths.py P0 → OK on this tree; run it against a phase whose owned list excludes an actually-dirty file → violation reported",
+      "expected": "OK for P0; violation correctly detected in the negative test",
+      "passes": true,
+      "evidence": "check-owned-paths.py P0 staged -> OK; --all correctly flags user's pre-existing dirty paths as violations; code path verified by judge (reads fenced block, glob-matches, exit 1 on violation)"
+    },
+    {
+      "id": "P0-8",
+      "behavior": ".devin/agents/jarvis-implementer.md pins model opus and jarvis-judge.md pins model gpt; .devin/hooks.v1.json loads a Stop hook (phase-handoff check) and a SessionStart hook (harness context) with valid JSON",
+      "check": "grep model: in both agent files; python3 -c \"import json; json.load(open('.devin/hooks.v1.json'))\"",
+      "expected": "model: opus / model: gpt; hooks file parses and names both events",
+      "passes": true,
+      "evidence": "jarvis-implementer.md:4 model: opus; jarvis-judge.md:4 model: gpt; hooks.v1.json parses and wires SessionStart+Stop (judge verified)"
+    },
+    {
+      "id": "P0-9",
+      "behavior": "AGENTS.md is rewritten as a thin entry point: it points to .agent/PROGRAM.md + PLANS.md, keeps the real tripwires (make local, development/ local-only, Cua pin, Keychain secrets, JARVIS_* + desktop lock, codesign provenance, shared-folder rules, worktree recipe), and drops stale rules",
+      "check": "read AGENTS.md; confirm the .agent/ pointer, each tripwire, and the gate/worktree summary",
+      "expected": "Pointer first; every tripwire preserved; no contradictions with PLANS.md",
+      "passes": true,
+      "evidence": "jarvis-judge G4: AGENTS.md opens with .agent/ pointer (:3-15); gates+worktrees (:23-36) match PLANS.md; all 8 tripwires present; no contradictions"
+    },
+    {
+      "id": "P0-10",
+      "behavior": "Doc normalization done per megaplan §3.1: development/JevVoice/research-notes.md exists carrying the still-valid research; the listed audit/TASKS/dev-AGENTS docs, the three research originals (folded), and EMPRYO.md are gone; EyeTracking/README.md carries a drift header; ~/.devin/plans/*.md files carry superseded banners",
+      "check": "ls the deleted paths (must be absent); read research-notes.md section heads; head EyeTracking/README.md; grep -l SUPERSEDED ~/.devin/plans/*.md",
+      "expected": "Deletions absent; research-notes.md covers facelandmarker eval, robustness research, agently notes; banners present on the stale plans",
+      "passes": true,
+      "evidence": "jarvis-judge G4: all 11 deletions absent; research-notes.md covers accuracy math/dwell, FaceLandmarker HOLD, agently steal list with sources; EyeTracking/README.md:3-8 drift header; 7 ~/.devin/plans/*.md banners present"
+    },
+    {
+      "id": "P0-11",
+      "behavior": "scripts/hooks/phase-handoff-check.py implements the Stop-hook rule: it exits non-zero (block) when .agent/phases or .agent/acceptance files are dirty but .agent/PROGRESS.md is not, and exits 0 otherwise",
+      "check": "run it in both tree states (dirty phases + clean PROGRESS → block; both dirty or both clean → pass)",
+      "expected": "Block emitted with a reason string in the first state; pass in the second",
+      "passes": true,
+      "evidence": "phase-handoff-check.py verified in /tmp/hooktest scratch repo: block exit 2 + JSON reason when phases dirty/PROGRESS clean (incl. untracked-file case after -uall fix); pass when both dirty or all committed"
+    },
+    {
+      "id": "P0-12",
+      "behavior": "The worktree recipe is documented and P0 itself respects it: PLANS.md §5 names the two write tracks and their owned trees; P0's diff touches only paths in its Owned paths block",
+      "check": "python3 scripts/check-owned-paths.py P0 → OK; read PLANS.md §5",
+      "expected": "OK output; recipe names jarvis-v1-agent (Sources/Tests/development) and jarvis-v1-eyes (EyeTracking)",
+      "passes": true,
+      "evidence": "PLANS.md:106-110 names jarvis-v1-agent (Sources/Tests/development) + jarvis-v1-eyes (EyeTracking); judge manually confirmed every P0 path inside the 24-pattern owned list; staged check re-run at G7"
+    },
+    {
+      "id": "P0-13",
+      "behavior": "The dry-run gate loop ran end to end: acceptance file validated, a fresh-context jarvis-judge reviewed the artifacts against this file and returned VERDICT: PASS, judge's evidence was recorded here, and PROGRESS.md was updated",
+      "check": "this file's passes/evidence fields; PROGRESS.md tail entry for P0",
+      "expected": "Every criterion passes with non-null evidence; PROGRESS.md P0 entry names the judge verdict and the commit",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}
