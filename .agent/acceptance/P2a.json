@@ -62,8 +62,8 @@
       "behavior": "Gate discipline held: fresh-context jarvis-judge returned VERDICT: PASS, evidence recorded, PROGRESS.md updated, milestone commit(s) on ship/v1-p2a staged only from owned paths",
       "check": "this file's evidence fields; git log ship/v1-p2a; scripts/check-owned-paths.py P2a",
       "expected": "All criteria pass with evidence; commits contain only owned paths",
-      "passes": false,
-      "evidence": null
+      "passes": true,
+      "evidence": "PASS: fresh-context jarvis-judge VERDICT: PASS (recomputed all chain numbers exactly \u2014 coreml 5.01ms effective / 7.03ms CPU-detector fallback verified from rows; profile JSONs genuine ORT output; all file:line citations checked). Judge notes fixed: 'eff_ms (default det.)' column now \u2020-flags zero-detector-cost cells; memory reads 8GB not 9. Milestone commit f615c8e on ship/v1-p2a \u2014 check-owned-paths.py \u2192 '15 staged file(s) inside P2a owned set'. Retrospective+Handoff filled with verdict, per-EP table, and P8 assumptions."
     }
   ]
 }
