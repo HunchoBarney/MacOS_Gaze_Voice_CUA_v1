@@ -102,8 +102,8 @@
       "behavior": "The dry-run gate loop ran end to end: acceptance file validated, a fresh-context jarvis-judge reviewed the artifacts against this file and returned VERDICT: PASS, judge's evidence was recorded here, and PROGRESS.md was updated",
       "check": "this file's passes/evidence fields; PROGRESS.md tail entry for P0",
       "expected": "Every criterion passes with non-null evidence; PROGRESS.md P0 entry names the judge verdict and the commit",
-      "passes": false,
-      "evidence": null
+      "passes": true,
+      "evidence": "Dry-run gate loop completed 2026-10-18: jarvis-judge fresh-context review returned VERDICT: PASS with per-criterion evidence (12 artifact criteria MET); 2 findings fixed pre-commit (decision index D1/D2, hook -uall/rename edge); milestone commit 2e62f29 on ship/v1-p0 staged exactly 24 owned files (check-owned-paths OK); PROGRESS.md P0 entries name verdict+commit"
     }
   ]
 }

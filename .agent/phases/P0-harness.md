@@ -1,6 +1,6 @@
 # P0 — Harness setup ExecPlan
 
-> Status: in-progress
+> Status: done
 > Track: main · Depends on: — · Branch: `ship/v1-p0`
 > Acceptance: `.agent/acceptance/P0.json` · Contracts touched: all (v0 authored here)
 
@@ -131,7 +131,7 @@ evidence.
 - [x] M1 artifacts written — check: `check-acceptance.py` → `0/13` schema-valid
 - [x] M2 scripts/hooks/agents — checks: py_compile clean, bash -n clean, hooks JSON parses, hook block/pass states verified in scratch repo
 - [x] M3 AGENTS.md + doc normalization — 11 deletions, research-notes.md folded, drift headers, plan banners
-- [ ] M4 dry-run gates + commit
+- [x] M4 dry-run gates + commit — judge PASS; commits `2e62f29` + handoff
 
 ## Surprises & Discoveries
 
@@ -153,7 +153,28 @@ evidence.
 
 ## Outcomes & Retrospective
 
-<Filled at G7.>
+Shipped: the full harness (8 `.agent/` artifacts), 5 verification/hook
+scripts, model-pinned agent profiles, hooks config, AGENTS.md rewrite,
+doc normalization (11 deletions + research-notes.md fold + 2 headers +
+7 plan banners). `check-acceptance.py --green` → **13/13** with
+evidence. Judge verdict: PASS on first review (findings were 2 risks +
+3 notes, all fixed or documented pre-commit).
+
+Retrospective notes for future phases:
+
+- The dry-run already earned its keep: the judge caught a vacuous
+  positive (P0-7's staged check means nothing until files are staged)
+  and the `-uall` gap in the Stop hook — both fixed before commit.
+- On a shared dirty tree, "staged set ⊆ owned paths" is the meaningful
+  owned-paths gate; `--all` only makes sense on clean-baseline
+  worktrees.
+- Entangled user edits are real: two files (README.md,
+  EyeTracking/README.md) had to stay unstaged to avoid committing the
+  user's in-flight rewrite. Their P0 bits ride their later commit —
+  same pattern will recur on any phase touching user-dirty files.
+- `development/AGENTS.md` was gitignored, never tracked — normalize
+  checks should confirm tracking status before listing deletions in
+  commit messages.
 
 ## Handoff
 
@@ -161,3 +182,17 @@ Next phase is P1 (bench test user + harness + baseline). It consumes:
 `acceptance/schema.json`, `bench task JSON` contract §7,
 `scripts/verification-lane.sh` for its serialized runner, and the
 worktree recipe in `PLANS.md` §5.
+
+State a fresh agent needs:
+
+- Branch `ship/v1-p0` has the milestone commit `2e62f29` + this handoff
+  commit; **user merges** — do not merge or push.
+- `README.md` (`.agent/` pointer) and `EyeTracking/README.md` (drift
+  header) carry P0 edits sitting in the user's uncommitted set —
+  intentional, see Outcomes.
+- The five deleted audit docs' post-HEAD uncommitted rewrites are gone
+  per D2; HEAD versions remain in history; still-valid substance is in
+  `development/JevVoice/research-notes.md`.
+- Stop hook is live: ending a session with dirty
+  `.agent/phases|acceptance` and clean `PROGRESS.md` blocks with a
+  reason — keep PROGRESS updated as you go.

@@ -62,3 +62,30 @@ passes when both dirty or all committed.
 apply flips with evidence → commit `ship/v1-p0`.
 
 **Surprises:** none new.
+
+## 2026-10-18 — P0 done — devin-local (SWE-2)
+
+**Did:** G4 dry-run + G7. `jarvis-judge` (gpt, fresh context) reviewed
+all 13 criteria → **VERDICT: PASS**; fixed its 2 actionable findings
+(PROGRAM index missing D1/D2; Stop hook missed untracked/rename paths →
+`-uall` + ` -> ` split, re-verified in scratch repo). Recorded verdict
+into `acceptance/P0.json` → `--green` **13/13**. Staged 24 owned files
+by name → `check-owned-paths.py P0` OK → milestone commit **`2e62f29`**
+on `ship/v1-p0`, plus the handoff commit closing this entry.
+
+**Evidence:** judge report (per-criterion file:line);
+`check-acceptance.py --green` → 13/13; `check-owned-paths.py` →
+24 files OK; `git log` → `2e62f29`.
+
+**State:** P0 complete. Harness is live: SessionStart injects the
+`.agent/` pointer, Stop hook requires PROGRESS hygiene on phase work.
+
+**Next:** P1 — bench test user + harness + baseline. Write
+`.agent/phases/P1-bench.md` from `_TEMPLATE.md`, get G1 user approval,
+then contract → implement → judge.
+
+**Surprises:** `git add`/`git rm` refuse deleted-path pathspecs when a
+file is already gone from the tree — use `git rm` for tracked
+deletions, and confirm tracking status first (`development/AGENTS.md`
+was gitignored, nothing to stage). The staged-vs-`--all` distinction in
+check-owned-paths exists because this tree is shared-dirty.
