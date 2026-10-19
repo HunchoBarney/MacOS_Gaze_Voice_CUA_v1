@@ -183,3 +183,34 @@ preference.
 missing 6th model, symbolic-dim policy, load_error vocab,
 profiling-on-timed-runs) — all fixed pre-implementation; G5 judge PASS
 with notes only. Acceptance 7/8 pending P2a-8 (this commit).
+
+## 2026-10-19 — P2b complete: browser-driver pick measured (ship/v1-p2b)
+
+**Pick: chrome-devtools-mcp@1.10.1 (`--autoConnect`) primary + Cua
+`browser_*` fallback** — the locked direction confirmed with numbers,
+not intent.
+
+Arm-B (isolated, interleaved, N=15): devtools 83% cell-ok vs cua 32%;
+attach 6.2s vs 11.7s; per-op devtools {nav 1334, snap 164, click 1093,
+extract 222, settle 216}ms vs cua {1692, 68, 2088, 546, 746}ms. Cua's
+semantic_v2 snapshots are 7× smaller (8-63KB vs 1-470KB) but heavy-page
+snapshots hit the 15s read deadline and killed the stdio transport
+(301 cascade errors; reattach always recovered).
+
+Arm-A (real profile): both drivers gated by Chrome's "Allow remote
+debugging?" consent — one human click unlocks both (ws 101 in 2.7s;
+autoConnect attaches; cua bound a real logged-in tab in 12.9s).
+Post-consent: devtools full corpus in own tab (snapshot 72ms); cua
+read-only ~2-3s/op floor on `existing_profile` — no tab verbs exist,
+so mutation on the real profile would require user-tab writes (spike
+rule: unsupported). P10 gets a documented first-run consent step.
+
+Robustness matrix: 26 cells recorded — 16 ok, 10 blocked_env (arm-A
+cells blocked pre-consent stay recorded, not silently omitted). Clean
+stale-ref refusals both sides, reattach works (devtools 4.7s / cua
+12.5s); killed-proxy leaks an empty isolated-* profile dir — P7 needs
+a sweeper.
+
+Artifacts: `spikes/browser-drivers/` (results: 2016 rows, 36 cycles).
+Run state: laptop closed mid-window — consent click landed, Arm-A
+rerun completed after resume.

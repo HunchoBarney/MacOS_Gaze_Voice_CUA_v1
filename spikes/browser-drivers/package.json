@@ -1,0 +1,9 @@
+{
+  "name": "p2b-browser-drivers-spike",
+  "private": true,
+  "version": "0.0.0",
+  "description": "P2b spike: chrome-devtools-mcp vs Cua browser_* measurement harness. Not a shipped artifact.",
+  "dependencies": {
+    "chrome-devtools-mcp": "1.10.1"
+  }
+}

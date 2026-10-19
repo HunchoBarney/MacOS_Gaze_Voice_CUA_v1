@@ -1,0 +1,10 @@
+cycle arm=A driver=devtools iter=0 attach=18429.8ms teardown=Nonems blocked_env
+cycle arm=A driver=cua iter=0 attach=3994.3ms teardown=Nonems blocked_env
+session arm=A driver=devtools attach=18114.9ms blocked_env autoConnect attach timed out — Chrome remote-debugging consent dialog ('Allow remote debugging?') pending: read deadline
+session arm=A driver=cua attach=3518.2ms blocked_env all 11 candidate window(s) refused — bind w12244: consent-gated, dialog pending, prepare skipped; bind w12246: consent-g
+run done: 540 rows, 12 cycles, leaked proxies: []
+cycle arm=A driver=devtools iter=0 attach=18133.6ms teardown=Nonems blocked_env
+cycle arm=A driver=cua iter=0 attach=2710.6ms teardown=Nonems blocked_env
+session arm=A driver=devtools attach=18004.5ms blocked_env autoConnect attach timed out — Chrome remote-debugging consent dialog ('Allow remote debugging?') pending: read deadline
+session arm=A driver=cua attach=2831.7ms blocked_env all 13 candidate window(s) refused — bind w12244: consent-gated, dialog pending, prepare skipped; bind w12246: consent-g
+run done: 540 rows, 12 cycles, leaked proxies: []

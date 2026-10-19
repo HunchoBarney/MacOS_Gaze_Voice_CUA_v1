@@ -1,0 +1,19 @@
+arm=A driver=devtools attach blocked_env: autoConnect attach timed out — Chrome remote-debugging consent dialog ('Allow remote debugging?') pending: read deadline
+arm=A driver=cua attach blocked_env: all 14 candidate window(s) refused — bind w12244: consent-gated, dialog pending, prepare skipped; bind w12246: consent-g
+{"arm": "B", "driver": "devtools", "check": "stale_ref_click", "site": "wikipedia", "wall_ms": 7483.6, "status": "ok", "detail": "clean refusal: Error: Failed to interact with the element with uid 1_0. The element did not become interactive within the configured timeout.", "session_label": "p2b-67654-3"}
+{"arm": "B", "driver": "devtools", "check": "iframe_snapshot", "site": "mdn-iframe", "wall_ms": 3110.0, "status": "ok", "detail": "bytes=106565", "session_label": "p2b-67654-3"}
+{"arm": "B", "driver": "devtools", "check": "cross_origin_nav", "site": "iana", "wall_ms": 12.3, "status": "ok", "detail": "bytes=5100", "session_label": "p2b-67654-3"}
+{"arm": "B", "driver": "devtools", "check": "snapshot_bytes", "site": "example", "wall_ms": 8.6, "status": "ok", "detail": "bytes=1235", "session_label": "p2b-67654-3"}
+{"arm": "B", "driver": "devtools", "check": "snapshot_bytes", "site": "wikipedia", "wall_ms": 1052.3, "status": "ok", "detail": "bytes=469755", "session_label": "p2b-67654-3"}
+{"arm": "B", "driver": "devtools", "check": "snapshot_bytes", "site": "github", "wall_ms": 403.6, "status": "ok", "detail": "bytes=19087", "session_label": "p2b-67654-3"}
+{"arm": "B", "driver": "devtools", "check": "snapshot_bytes", "site": "spa", "wall_ms": 119.7, "status": "ok", "detail": "bytes=30272", "session_label": "p2b-67654-3"}
+{"arm": "B", "driver": "devtools", "check": "reattach_after_kill", "site": "-", "wall_ms": 4676.6, "status": "ok", "detail": "bytes=62 refs=1", "session_label": "p2b-67654-4"}
+{"arm": "B", "driver": "cua", "check": "stale_ref_click", "site": "wikipedia", "wall_ms": 7056.0, "status": "ok", "detail": "clean refusal: refused (browser_ref_stale): ref p118:7 is stale \u2014 the page navigated or the snapshot was superseded; re-run get_browser_state to re-snapshot", "session_label": "p2b-67654-5"}
+{"arm": "B", "driver": "cua", "check": "iframe_snapshot", "site": "mdn-iframe", "wall_ms": 4928.9, "status": "ok", "detail": "bytes=443", "session_label": "p2b-67654-5"}
+{"arm": "B", "driver": "cua", "check": "cross_origin_nav", "site": "iana", "wall_ms": 1498.3, "status": "ok", "detail": "bytes=24517", "session_label": "p2b-67654-5"}
+{"arm": "B", "driver": "cua", "check": "snapshot_bytes", "site": "example", "wall_ms": 74.3, "status": "ok", "detail": "bytes=8297", "session_label": "p2b-67654-5"}
+{"arm": "B", "driver": "cua", "check": "snapshot_bytes", "site": "wikipedia", "wall_ms": 10291.6, "status": "ok", "detail": "bytes=63061", "session_label": "p2b-67654-5"}
+{"arm": "B", "driver": "cua", "check": "snapshot_bytes", "site": "github", "wall_ms": 1006.2, "status": "ok", "detail": "bytes=14686", "session_label": "p2b-67654-5"}
+{"arm": "B", "driver": "cua", "check": "snapshot_bytes", "site": "spa", "wall_ms": 1423.8, "status": "ok", "detail": "bytes=57416", "session_label": "p2b-67654-5"}
+{"arm": "B", "driver": "cua", "check": "reattach_after_kill", "site": "-", "wall_ms": 12460.7, "status": "ok", "detail": "bytes=899 refs=0 url=about:blank", "session_label": "p2b-67654-6"}
+robustness done: 26 rows

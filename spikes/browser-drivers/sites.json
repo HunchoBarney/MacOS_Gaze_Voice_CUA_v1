@@ -1,0 +1,60 @@
+{
+  "comment": "P2b corpus. Each site declares the URL plus safe targets per mutating op: only navigation links / inert controls are clicked, and typing goes into a search field with NO submit. Sites with no safe target for an op record 'unsupported' rows for that op rather than picking an arbitrary element.",
+  "sites": [
+    {
+      "id": "example",
+      "class": "baseline",
+      "url": "https://example.com/",
+      "click": {
+        "role": "link",
+        "name": "learn"
+      },
+      "type": null,
+      "extract_query": "Example Domain"
+    },
+    {
+      "id": "wikipedia",
+      "class": "dense-dom",
+      "url": "https://en.wikipedia.org/wiki/Entropy",
+      "click": {
+        "role": "link",
+        "name": "article"
+      },
+      "type": {
+        "role": [
+          "searchbox",
+          "textbox"
+        ],
+        "name": "search",
+        "text": "p2b probe"
+      },
+      "extract_query": "Entropy"
+    },
+    {
+      "id": "github",
+      "class": "real-profile",
+      "url": "https://github.com/",
+      "click": {
+        "role": "link",
+        "name": "pricing"
+      },
+      "type": null,
+      "extract_query": "GitHub"
+    },
+    {
+      "id": "spa",
+      "class": "spa",
+      "url": "https://react.dev/",
+      "click": {
+        "role": "link",
+        "name": "learn"
+      },
+      "type": null,
+      "extract_query": "React"
+    }
+  ],
+  "robustness": {
+    "iframe_url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe",
+    "cross_origin_url": "https://www.iana.org/domains/example"
+  }
+}
