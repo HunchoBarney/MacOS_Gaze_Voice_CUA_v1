@@ -1,0 +1,11 @@
+{
+  "id": "gaze.dwell-click",
+  "hero_job": "gaze",
+  "prompt": "Click what I'm looking at",
+  "inject": "mcp_stdio",
+  "requires": "human",
+  "success": {"kind": "app_frontmost", "expect": {"app": "<expected>"}},
+  "budget": {"p50_ms": 500, "tier": "T0"},
+  "tags": ["gaze", "hero", "manual"],
+  "runs": 5
+}

@@ -1,0 +1,12 @@
+{
+  "id": "notes.create",
+  "hero_job": "notes",
+  "prompt": "Create a note called bench-check",
+  "app": "Notes",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
+  "success": {"kind": "ax_state", "expect": {"app": "Notes", "check": "running"}},
+  "budget": {"p50_ms": 4000, "tier": "T3"},
+  "tags": ["notes", "hero", "mutating"],
+  "runs": 5
+}

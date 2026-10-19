@@ -1,0 +1,13 @@
+{
+  "id": "safari.open-example",
+  "hero_job": "browser",
+  "prompt": "Open example.com in Safari",
+  "app": "Safari",
+  "inject": "mcp_stdio",
+  "requires": "local-safe",
+  "setup": "bench/reset/safari-example.sh",
+  "success": {"kind": "dom_state", "expect": {"browser": "Safari", "text": "example.com"}},
+  "budget": {"p50_ms": 15000, "tier": "TB"},
+  "tags": ["browser", "web"],
+  "runs": 5
+}

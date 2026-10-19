@@ -1,0 +1,12 @@
+{
+  "id": "calendar.add-event",
+  "hero_job": "calendar",
+  "prompt": "Add an event called bench review tomorrow at noon to my calendar",
+  "app": "Calendar",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
+  "success": {"kind": "ax_state", "expect": {"app": "Calendar", "check": "running"}},
+  "budget": {"p50_ms": 1500, "tier": "T1"},
+  "tags": ["calendar", "hero", "mutating"],
+  "runs": 5
+}

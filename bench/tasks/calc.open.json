@@ -1,0 +1,13 @@
+{
+  "id": "calc.open",
+  "hero_job": "utility",
+  "prompt": "Open Calculator",
+  "app": "Calculator",
+  "inject": "mcp_stdio",
+  "requires": "local-safe",
+  "setup": "bench/reset/calc.sh",
+  "success": {"kind": "ax_state", "expect": {"app": "Calculator", "check": "running"}},
+  "budget": {"p50_ms": 4000, "tier": "T3"},
+  "tags": ["one-shot", "app-launch"],
+  "runs": 5
+}

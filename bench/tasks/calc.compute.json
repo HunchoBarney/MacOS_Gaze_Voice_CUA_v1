@@ -1,0 +1,13 @@
+{
+  "id": "calc.compute",
+  "hero_job": "utility",
+  "prompt": "In Calculator, compute 12 times 7",
+  "app": "Calculator",
+  "inject": "mcp_stdio",
+  "requires": "local-safe",
+  "setup": "bench/reset/calc.sh",
+  "success": {"kind": "ax_state", "expect": {"app": "Calculator", "queries": ["value of text field 1 of window 1", "value of static text 1 of window 1", "value of text field 1 of group 1 of window 1"], "contains": "84"}},
+  "budget": {"p50_ms": 4000, "tier": "T3"},
+  "tags": ["app-launch", "compute"],
+  "runs": 5
+}

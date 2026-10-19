@@ -1,0 +1,13 @@
+{
+  "id": "textedit.type",
+  "hero_job": "utility",
+  "prompt": "Open TextEdit and type the text jev bench check 42",
+  "app": "TextEdit",
+  "inject": "mcp_stdio",
+  "requires": "local-safe",
+  "setup": "bench/reset/textedit.sh",
+  "success": {"kind": "ax_state", "expect": {"app": "TextEdit", "queries": ["value of text area 1 of window 1"], "contains": "jev bench check 42"}},
+  "budget": {"p50_ms": 8000, "tier": "T3"},
+  "tags": ["typing"],
+  "runs": 5
+}

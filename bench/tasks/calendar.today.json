@@ -1,0 +1,12 @@
+{
+  "id": "calendar.today",
+  "hero_job": "calendar",
+  "prompt": "What is on my calendar today?",
+  "app": "Calendar",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
+  "success": {"kind": "ax_state", "expect": {"app": "Calendar", "check": "running"}},
+  "budget": {"p50_ms": 1500, "tier": "T1"},
+  "tags": ["calendar", "hero"],
+  "runs": 5
+}

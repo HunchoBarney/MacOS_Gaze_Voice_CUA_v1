@@ -89,3 +89,34 @@ file is already gone from the tree — use `git rm` for tracked
 deletions, and confirm tracking status first (`development/AGENTS.md`
 was gitignored, nothing to stage). The staged-vs-`--all` distinction in
 check-owned-paths exists because this tree is shared-dirty.
+
+## 2026-10-19 — P1 done — devin-local (SWE-2) + jarvis-implementer + jarvis-judge
+
+**Did:** Bench harness shipped under `bench/` (16-task corpus, MCP
+stdio client, 5-kind verifiers, classifier covering the full
+`describe()` vocabulary, runner/report/suite/env-snapshot,
+`scripts/bench/create-test-user.sh`) + CONTRACTS §7 amendment (D3/D4)
++ PROGRAM index. Live slice ran for real: 35 `drive_until` rows on the
+installed app → `bench/results/results-live-20261019.jsonl` +
+`baseline.json`/`baseline-report.md`. Judge: G1 FAIL→fixes→PASS;
+implementation FAIL (UnboundLocalError + stale wall_ms rows)→fixes→
+**VERDICT: PASS**.
+
+**Evidence:** `bench/selftest.py` → 18 tests OK (×3, incl. post-fix);
+`check-acceptance.py P1.json` → 10/11 (P1-11 completes with this
+commit); baseline: calc.quit 5/5 @p50 1.3s, finder.frontmost 5/5 @1.3s,
+calc.open 3/5 @5.4s (2 false_done), compute/safari/chrome/textedit 0/5
+verbatim; T0/T3 bars missed — measured, not guessed.
+
+**State:** P1 complete pending the milestone commit on `ship/v1-p1`.
+
+**Next:** P2 spikes. IMPORTANT carry-forward bug: reused `--agent`
+slug on `--mcp-stdio` children permanently wedges drive_until
+(tombstoned session label binds dead transport; ~1.2s `.closed` every
+call). Bench mitigates with unique slugs; fix belongs in drive/session
+layer — see P1-bench.md Handoff for repro + files.
+
+**Surprises:** the wedge bug itself (headline); mcp-stdio children
+never touch LatencyLedger (bench owns wall-clock timing until P4/P5
+emit spans); `make local` reports tracker-not-ready while the app runs
+fine for drive_until — tracker readiness is not a bench prerequisite.

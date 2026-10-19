@@ -193,25 +193,51 @@ skill auto-retires after consecutive failures (threshold set in P9).
 
 ## 7. Bench task JSON
 
-The bench corpus in the test user. Every hero job and every release bar
-maps to tasks of this shape:
+The bench corpus. Every hero job and every release bar maps to tasks of
+this shape:
 
 ```json
 {
   "id": "inbox.read-latest",
   "hero_job": "inbox",
   "prompt": "Read me my latest email",
+  "app": "Mail",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
   "setup": "bench/reset/inbox.sh",
-  "success": { "kind": "speaks_substring|ax_state|file_state|dom_state", "expect": "..." },
-  "budget": { "p50_ms": 500, "tier": "T0" },
+  "success": { "kind": "ax_state", "expect": { "app": "Mail", "check": "running" } },
+  "budget": { "p50_ms": 4000, "tier": "T3" },
   "tags": ["one-shot"],
   "runs": 5
 }
 ```
 
-`setup` is a script that restores the environment (no real Mail/Messages
-mutations leak). `success` kinds are closed-set — new kinds need a
-contract revision.
+Field semantics (amended — D3):
+
+- `inject` (default `"mcp_stdio"`) — how the prompt reaches the app; the
+  only supported value is `"mcp_stdio"` (`drive_until` over the app's
+  `--mcp-stdio` surface, `goal`=prompt, `app`=hint). New injectors are a
+  contract revision.
+- `requires` — `"local-safe" | "test-user" | "human"`: which account the
+  task may run in. `local-safe` never names a mutating app; `human`
+  tasks are recorded for coverage and never injected.
+- `app` (optional) — app hint passed as `drive_until`'s `app` argument.
+- `setup` (optional) — script that restores the environment (no real
+  Mail/Messages mutations leak).
+- `success.kind` is a closed set —
+  `speaks_substring | file_state | ax_state | app_frontmost |
+  dom_state`; new kinds need a contract revision. Expect shapes:
+  - `speaks_substring`: `{ "text": "<substring>" }` — case-insensitive
+    substring of the result text.
+  - `file_state`: `{ "path": "...", "must": "exists|contains|absent",
+    "text": "..." }` (`text` required only for `contains`).
+  - `ax_state`: `{ "app": "...", "check": "running|not_running|
+    frontmost" }` or `{ "app": "...", "queries": ["<AX get-expression>",
+    ...], "contains": "<substr>" }` — System Events, queries tried in
+    order.
+  - `app_frontmost`: `{ "app": "..." }` — frontmost process name equals.
+  - `dom_state`: `{ "browser": "Safari" | "Google Chrome",
+    "text": "..." }` — front window URL contains text.
 
 ## 8. `LatencyLedger` span names (frozen — append-only)
 

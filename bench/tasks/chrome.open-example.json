@@ -1,0 +1,13 @@
+{
+  "id": "chrome.open-example",
+  "hero_job": "browser",
+  "prompt": "Open example.com in Google Chrome",
+  "app": "Google Chrome",
+  "inject": "mcp_stdio",
+  "requires": "local-safe",
+  "setup": "bench/reset/chrome-example.sh",
+  "success": {"kind": "dom_state", "expect": {"browser": "Google Chrome", "text": "example.com"}},
+  "budget": {"p50_ms": 15000, "tier": "TB"},
+  "tags": ["browser", "web"],
+  "runs": 5
+}

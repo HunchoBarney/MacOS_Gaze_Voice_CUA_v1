@@ -1,0 +1,12 @@
+{
+  "id": "inbox.unread-count",
+  "hero_job": "inbox",
+  "prompt": "How many unread emails do I have?",
+  "app": "Mail",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
+  "success": {"kind": "ax_state", "expect": {"app": "Mail", "check": "running"}},
+  "budget": {"p50_ms": 1500, "tier": "T1"},
+  "tags": ["inbox", "hero"],
+  "runs": 5
+}

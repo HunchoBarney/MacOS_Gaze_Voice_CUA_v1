@@ -1,0 +1,12 @@
+{
+  "id": "inbox.read-latest",
+  "hero_job": "inbox",
+  "prompt": "Read me my latest email",
+  "app": "Mail",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
+  "success": {"kind": "ax_state", "expect": {"app": "Mail", "check": "running"}},
+  "budget": {"p50_ms": 4000, "tier": "T3"},
+  "tags": ["inbox", "hero"],
+  "runs": 5
+}

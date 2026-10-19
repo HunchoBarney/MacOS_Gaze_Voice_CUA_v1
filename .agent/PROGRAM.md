@@ -172,3 +172,4 @@ section) and appended here one line each.
 | D0 | 2026-10-18 | P0 | Harness created; PreToolUse per-subagent path scoping deferred (hook payloads carry no agent identity) → owned-paths enforced by `scripts/check-owned-paths.py` at G4/G7 instead |
 | D1 | 2026-10-18 | P0 | P0 runs in the primary checkout on `ship/v1-p0`, not a worktree — doc normalization must edit files with uncommitted user changes a worktree can't see |
 | D2 | 2026-10-18 | P0 | `research-notes.md` is the single kept dev doc; audits deleted outright — point-in-time findings already encoded in "Verified problems" |
+| D3 | 2026-10-18 | P1 | Bench task JSON gains `inject` (default `"mcp_stdio"`), `requires` (`"local-safe"\|"test-user"\|"human"`), optional `app` hint; verifier kinds `app_frontmost`+`dom_state` made explicit |

@@ -1,0 +1,13 @@
+{
+  "id": "calc.quit",
+  "hero_job": "utility",
+  "prompt": "Quit Calculator",
+  "app": "Calculator",
+  "inject": "mcp_stdio",
+  "requires": "local-safe",
+  "setup": "bench/reset/calc-open.sh",
+  "success": {"kind": "ax_state", "expect": {"app": "Calculator", "check": "not_running"}},
+  "budget": {"p50_ms": 4000, "tier": "T3"},
+  "tags": ["one-shot", "app-quit"],
+  "runs": 5
+}

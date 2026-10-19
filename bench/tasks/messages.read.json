@@ -1,0 +1,12 @@
+{
+  "id": "messages.read",
+  "hero_job": "inbox",
+  "prompt": "Read my latest Messages conversation",
+  "app": "Messages",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
+  "success": {"kind": "ax_state", "expect": {"app": "Messages", "check": "running"}},
+  "budget": {"p50_ms": 4000, "tier": "T3"},
+  "tags": ["inbox", "hero"],
+  "runs": 5
+}

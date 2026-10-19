@@ -1,0 +1,12 @@
+{
+  "id": "gmail.open",
+  "hero_job": "browser",
+  "prompt": "Open my Gmail in Chrome",
+  "app": "Google Chrome",
+  "inject": "mcp_stdio",
+  "requires": "test-user",
+  "success": {"kind": "dom_state", "expect": {"browser": "Google Chrome", "text": "mail.google.com"}},
+  "budget": {"p50_ms": 15000, "tier": "TB"},
+  "tags": ["browser", "web", "hero"],
+  "runs": 5
+}

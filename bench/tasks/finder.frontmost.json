@@ -1,0 +1,12 @@
+{
+  "id": "finder.frontmost",
+  "hero_job": "utility",
+  "prompt": "Bring Finder to the front",
+  "app": "Finder",
+  "inject": "mcp_stdio",
+  "requires": "local-safe",
+  "success": {"kind": "app_frontmost", "expect": {"app": "Finder"}},
+  "budget": {"p50_ms": 500, "tier": "T0"},
+  "tags": ["one-shot", "focus"],
+  "runs": 5
+}
