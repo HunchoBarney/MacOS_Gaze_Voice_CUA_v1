@@ -485,7 +485,8 @@ Post-implementation surprises:
 | # | Date | Decision | Why |
 |---|---|---|---|
 | 1 | 2026-10-19 | devToolsMcp (chrome-devtools-mcp@1.10.1, `--autoConnect`) primary; Cua `browser_*` fallback | Arm-B interleaved: devtools 83% cell-ok vs cua 32%; attach 6.2s vs 11.7s; per-op p50s devtools navigate 1334/snapshot 164/click 1093/extract 222/settle 216 vs cua 1692/68/2088/546/746 — cua snapshot wins on bytes (8-63KB vs 1-470KB) but its semantic_v2 on heavy pages hits the 15s read deadline and killed the stdio transport (301 cascade errors). Arm-A post-consent: devtools ran the full mutating corpus on the real profile in its own tab (snapshot 72ms); cua can only read bound user tabs (~2-3s floor even on about:blank) and cannot mutate without touching user tabs — no tab-lifecycle verbs exist. P7 needs an orphan-dir sweeper for killed-proxy leaks. |
-| 2 | 2026-10-19 | Treat Chrome's remote-debugging consent as a rare per-instance gate, not a defect: P7 holds ONE persistent browser-level ws connection (daemon-side); P10 does a guided one-time enable; a JevVoice-owned Chrome profile (`--user-data-dir` + `--remote-debugging-port`, zero dialogs) is the documented unattended alternative | Research + this machine's evidence: `devtools.remote_debugging.user-enabled:true` persists in Local State (toggle survives restart); the grant is durable per DevToolsActivePort generation — one Allow covered ~75min and ~20 attaches incl. a fresh ws handshake at 101 with no dialog (verified post-run). Chrome engineers confirm consent is per-ws-connection by design with no 'remember' option (chrome-devtools-mcp #825/#1794); observed durability means per-PROCESS reconnects are what spam dialogs — a held connection amortizes it. Non-default `--user-data-dir` never prompts (Chrome's own documented workaround); Chrome for Testing is exempt from the M136 block entirely. Extension chrome.debugger is a third path (install-time consent, infobar instead of modal) — heavier, keep as backup. |
+| 2 | 2026-10-19 | Treat Chrome's remote-debugging consent as a rare per-instance gate, not a defect: P7 holds ONE persistent browser-level ws connection (daemon-side); P10 does a guided one-time enable; a JevVoice-owned Chrome profile (`--user-data-dir` + `--remote-debugging-port`, zero dialogs) is the documented unattended alternative | Research + this machine's evidence: `devtools.remote_debugging.user-enabled:true` persists in Local State (toggle survives restart); the grant is durable per DevToolsActivePort generation — one Allow covered ~75min and ~20 attaches incl. a fresh ws handshake at 101 with no dialog (verified post-run). Chrome engineers confirm consent is per-ws-connection by design with no 'remember' option (chrome-devtools-mcp #825/#1794); observed durability means per-PROCESS reconnects are what spam dialogs — a held connection amortizes it. Non-default `--user-data-dir` never prompts (verified live: /json/version answered on a test profile, zero dialogs); Chrome for Testing is exempt from the M136 block entirely. Extension chrome.debugger is a third path (install-time consent, infobar instead of modal) — heavier, keep as backup. |
+| 3 | 2026-10-19 | REAL logged-in profile is the primary browser surface — do NOT fork to a JevVoice profile. All OS/browser grants are collected ONCE during onboarding (locked in PROGRAM.md): the Chrome step is enable-toggle → our first attach fires the one Allow → held connection keeps it silent. The zero-dialog owned-profile mode demotes to an optional alternative | User directive: "use my actual profile, okay with permission once during onboarding — all permissions issued once during onboarding." Fits the evidence: the single Allow already amortizes over the Chrome instance; the only recurring-prompt case is after a Chrome restart IF the grant doesn't persist across restarts (P10 verification item — deliberately not tested by restarting the user's browser). |
 
 ## Outcomes & Retrospective
 
@@ -524,13 +525,17 @@ Decision Log #1).
   cheaper model context, why it remains the fallback.
 - Arm-A (real profile, post-consent): devtools full corpus in own tab
   (snapshot 72ms); cua read-only ~2-3s/op floor on `existing_profile`,
-  no mutation without touching user tabs. First-run requires ONE
-  Chrome consent click — then ws/devtoolsActivePort works (101 in
-  2.7s). Post-settle attach p50: cua 6.9s (10/10 ok), devtools 7.6s;
-  while the dialog is still dismissing cua intermittently refuses
-  'consent did not settle for reconnect' — retry, don't fail.
+  no mutation without touching user tabs. The ONE Chrome consent
+  click is owned by P10 onboarding (Decision #3): enable-toggle →
+  first attach fires Allow → held connection keeps it silent for the
+  Chrome instance. Post-settle attach p50: cua 6.9s (10/10 ok),
+  devtools 7.6s; while the dialog is still dismissing cua
+  intermittently refuses 'consent did not settle for reconnect' —
+  retry, don't fail.
 - P7 builds: `ChromeDevToolsDriver` (primary, `new_page`-owned tabs,
-  `pageId` numeric handles) + `CuaBrowserDriver` (fallback —
+  `pageId` numeric handles) holding ONE persistent browser-level ws
+  connection daemon-side — per-process reconnects are what re-trigger
+  consent dialogs; `CuaBrowserDriver` (fallback —
   `get_browser_state` read paths, isolated-profile acting when the
   real profile isn't granted). SafariAppleEventsDriver unchanged.
 - Robustness findings for P7: stale-ref refusals are clean on both

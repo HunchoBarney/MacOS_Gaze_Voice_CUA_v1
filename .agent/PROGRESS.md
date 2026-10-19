@@ -237,3 +237,16 @@ annoying — find a fix. Findings recorded as P2b Decision Log #2:
   Chrome's own recommended pattern); user logs into key sites once
   there. Chrome for Testing also exempt; extension chrome.debugger
   is a third path (infobar not modal) kept as backup.
+
+## 2026-10-19 — Locked: real-profile primary, onboarding grants once
+
+User directive: use the real logged-in Chrome profile (no profile
+fork); all permissions issued once during onboarding. Locked two
+PROGRAM.md rows: 'Permissions' (all grants once at onboarding — TCC +
+Chrome toggle/Allow; no recurring prompts) and 'Browser attach'
+(real profile primary; P7 holds one persistent browser-level ws
+connection → ≤1 Allow per Chrome launch; JevVoice-owned profile kept
+as documented zero-dialog alternative). P2b Decision Log #3 records
+the rationale. Open verification for P10: does the consent grant
+survive a Chrome restart? (Not tested — restarting the user's browser
+unannounced was out of scope.)
