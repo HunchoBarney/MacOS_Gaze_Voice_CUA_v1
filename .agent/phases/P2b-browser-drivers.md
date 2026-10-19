@@ -319,7 +319,9 @@ Checks: `python3 scripts/check-acceptance.py .agent/acceptance/P2b.json`
 - [x] M1 scaffold + env probe + corpus
 - [x] M2 Cua side measured
 - [x] M3 devtools-mcp side measured
-- [ ] M4 report + pick + acceptance + judge + commits
+- [x] M4 report + pick + acceptance + judge + commits
+      (judge PASS round 3; milestone 354b78b + acceptance commit on
+      ship/v1-p2b)
   (REPORT.md + pick drafted; acceptance/judge/commits outstanding)
 
 ## Surprises & Discoveries
