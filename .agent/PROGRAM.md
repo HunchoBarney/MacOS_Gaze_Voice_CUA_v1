@@ -105,7 +105,7 @@ flags, time-saved).
 | P2c | Spike: Codex app-server computer-use headless feasibility | agent | P1 | promote/discard + evidence |
 | P2d | Spike: SpeechAnalyzer vs Parakeet + live-partials fix | voice | P1 | latency/WER/RAM table; winner picked |
 | P3 | Voice one-brain (gated `response.create`, claim-ledger deletion, hold warm-up, realtime tools rewrite, delete gpt-4o/-mini + IntentClassifier/LocalChooser + CommandSpotter) | voice | P2d | Zero double-dispatch (50 paraphrases); T0 ≤300 ms; no images on socket |
-| P4 | `TaskLoop` refactor + `JevDecider` (recall v2 A/B, 4-round budget, settle, agents via same loop, delete perception lane) | agent | P1 | DriveLoop tests green on TaskLoop; Jev slice ≥95%/≤4 s |
+| P4 | `TaskLoop` refactor + `JevDecider` (recall v2 A/B, 4-round budget, settle, agents via same loop, delete perception lane) + **session-label wedge fix** (P1 finding: reused `--agent` slugs wedge drive_until until daemon respawn — `CuaDriveServer.swift:205,209`, `DriveLoop.swift:264-322`) | agent | P1 | DriveLoop tests green on TaskLoop; Jev slice ≥95%/≤4 s; repeated same-slug `--mcp-stdio` calls stay live |
 | P5 | `OpenAIResponsesClient` + `SolDecider` (actions→Cua, batching, consent-at-risk, `pending_safety_checks`→user, effort ladder, gaze hint, recording) | agent | P4 | Complex slice ≥80%/≤60 s; red-team zero violations |
 | P6 | Script lane (hero intents + `inbox_brief`, argv-only, read-back confirm, contacts/dates, `NSAppleEventsUsageDescription`) | voice | P3 | Per-intent ≥99%/≤1.5 s; injection tests; brief ≤5 s |
 | P7 | `BrowserDecider` + drivers (ChromeDevToolsDriver, CuaBrowserDriver, SafariAppleEventsDriver) + `DOMSnapshot.js` + `extract` + settle | agent | P2b, P5 | Browser slice ≥90%/≤15 s; ≥2× Sol-pixel path |
