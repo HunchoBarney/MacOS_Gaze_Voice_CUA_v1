@@ -41,6 +41,8 @@ Computer Use and Browser Use.
 | Parallelism | ≤2 write tracks, isolated worktrees, disjoint owned paths; read-only agents unbounded |
 | Agent models | Implementer `opus`; judge `gpt` (fresh context, skeptical, read-only); research/explore `swe` |
 | Uncommitted tree | User owns existing uncommitted changes; phases build on the working tree |
+| Permissions | All grants issued ONCE during onboarding — TCC (Screen Recording, Accessibility, Microphone) + Chrome remote-debugging toggle & Allow. No recurring prompts in product flows (user directive, 2026-10-19) |
+| Browser attach | User's REAL logged-in Chrome is the primary surface (no profile fork); P7 driver holds one persistent browser-level ws connection → ≤1 Allow per Chrome launch; JevVoice-owned `--user-data-dir` profile is the documented zero-dialog alternative |
 
 ## Verified problems this program fixes (Oct 16–17 evidence)
 
