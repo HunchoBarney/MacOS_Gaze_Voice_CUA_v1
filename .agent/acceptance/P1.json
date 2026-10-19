@@ -86,8 +86,8 @@
       "behavior": "Dry-run gate discipline held: fresh-context jarvis-judge returned VERDICT: PASS, evidence recorded here, PROGRESS.md updated, milestone commit(s) on ship/v1-p1 staged only from owned paths",
       "check": "this file's evidence fields; git log ship/v1-p1; scripts/check-owned-paths.py P1",
       "expected": "All criteria pass with evidence; commits contain only owned paths",
-      "passes": false,
-      "evidence": null
+      "passes": true,
+      "evidence": "jarvis-judge fresh-context: VERDICT PASS (re-review after FAIL-fix loop, all 10 criteria verified w/ file:line); check-acceptance 11/11; check-owned-paths.py P1 \u2192 40 staged files OK; milestone commit deaf792 on ship/v1-p1"
     }
   ]
 }
