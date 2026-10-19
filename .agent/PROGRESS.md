@@ -250,3 +250,44 @@ as documented zero-dialog alternative). P2b Decision Log #3 records
 the rationale. Open verification for P10: does the consent grant
 survive a Chrome restart? (Not tested — restarting the user's browser
 unannounced was out of scope.)
+
+## 2026-10-19 — P2c started (ship/v1-p2c)
+
+ExecPlan .agent/phases/P2c-codex-cu-headless.md + acceptance
+.agent/acceptance/P2c.json written (8 criteria, 0/8 default).
+Plan-grounding done directly (vendored codex 0.160.0, computer_use
+stable+enabled, app-server v2 schema dumped, ChatGPT auth live, no
+jevbench user → measurable-unattended vs documented-multiuser split).
+NOTE: G1 judge subagent was user-canceled twice; plan review done
+inline instead — 7 fixes applied (scoped bundle allow-list variant,
+TCC-prompt pause→needs_human, turn/interrupt abort path, TextEdit
+verify without save dialog, home/ gitignore, mechanism discovery
+order, model-fallback order).
+
+## 2026-10-19 — PAUSED mid-P2c (user restarting laptop) — RESUME STATE
+
+Branch: ship/v1-p2c. P2b fully done (commits 354b78b, 9af1d86,
+c3d289c, f1e9e92, 3dbba8d on ship/v1-p2b).
+
+P2c status: ExecPlan + acceptance written; G1 judge FAIL'd with 8
+findings — ALL FIXED in plan/acceptance (requirements-vs-config
+distinction, cu_evidence tool-activation proof + activation
+checkpoint, per-run MARK verifiers, pinned approvals base incl.
+scoped-first, predeclared verdict rule, executable check commands,
+hypotheses-not-assertions for background sessions, symlink-aware
+secrets check). No implementation started — spikes/codex-cu/ does
+NOT exist yet.
+
+NEXT on resume: spawn jarvis-implementer for M1-M3 with the
+ExecPlan as contract. Key brief (already prepared): vendored codex
+build/vendor/CodexRuntime/bin/codex 0.160.0; ChatGPT auth live;
+app-server = line-delimited JSON-RPC WITHOUT "jsonrpc" member;
+flow initialize→thread/start→turn/start→turn/interrupt; server→client
+asks MUST be answered; client pattern = bench/lib/mcp_stdio.py;
+schema dump at /tmp/codex-schema (regenerate if wiped:
+`codex app-server generate-json-schema --out <dir>`); desktop runs
+wrap in scripts/with-desktop-lock.py. WARN USER BEFORE RUNS:
+canary tasks drive the real mouse/keyboard briefly; first run may
+pop a TCC prompt for codex — one click = onboarding grant.
+
+No stray processes required: none left running at pause.

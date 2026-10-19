@@ -1,0 +1,69 @@
+{
+  "phase": "P2c",
+  "criteria": [
+    {
+      "id": "P2c-1",
+      "behavior": "spikes/codex-cu/ is self-contained: stdlib-Python orchestrator, vendored codex path pinned (build/vendor/CodexRuntime/bin/codex 0.160.0), no npm/pip deps, .gitignore covers home/ (CODEX_HOME + auth.json symlink), no files outside owned set touched; dirty-baseline captured at M1",
+      "check": "`ls spikes/codex-cu` shows appserver.py/probe.py/tasks.json/run.py/report.py/results/; `grep -rn 'CodexRuntime/bin/codex\\|0.160' spikes/codex-cu/*.py` hits; `cat spikes/codex-cu/.gitignore` includes home/; python3 one-liner diffs `git status --porcelain` + `git diff` vs spikes/codex-cu/results/dirty-baseline.txt showing 0 NEW non-owned hunks; `git show --name-only --format=` on phase commits shows only owned paths",
+      "expected": "Spike standalone; results committed; no production or bench files in phase commits",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2c-2",
+      "behavior": "probe records REAL state via actual app-server protocol calls: vendored codex version, computer_use feature state, auth mode, configRequirements response incl. ComputerUseRequirements fields AS RETURNED (nulls recorded as nulls — requirements are declared constraints, distinct from writable Config.computer_use), effective config, model catalog incl. sol family",
+      "check": "`python3 -c \"import json; d=json.load(open('spikes/codex-cu/results/results.json')); print(d['probe'])\"` shows populated fields incl. the requirements object verbatim; `grep -n 'configRequirements' spikes/codex-cu/probe.py` shows a real RPC call; probe exits non-zero or rows mark blocked_env when auth/init fails",
+      "expected": "Probe block populated with protocol-derived values; requirements vs config not conflated",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2c-3",
+      "behavior": ">=3 canary GUI tasks attempted via app-server thread/start + turn/start, each row carrying: per-run unique MARK, wall_ms, turn status, cu_evidence (item-stream signatures proving actual computer-tool calls — shell/open -a successes WITHOUT cu evidence are ok_no_cu, not ok), tokens, and INDEPENDENT end-state verification (AppleScript/AX/file checks with pre-run state snapshot — never the agent's claim)",
+      "check": "`python3 -c \"import json; d=json.load(open('spikes/codex-cu/results/results.json')); print([ (r['task'],r['status'],r.get('cu_evidence'),r.get('verify')) for r in d['rows'] if r.get('kind')=='task'])\"` lists rows with MARK/cu_evidence/verify; verifier implementations exist in run.py or tasks.json; recompute task count",
+      "expected": "Canary rows with independent verification AND computer-use proof; no claimed-but-unverified successes",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2c-4",
+      "behavior": "unattended-approvals matrix executed with a PINNED shared base (fresh CODEX_HOME per variant, same model/effort/sandbox, effective_config captured): which config ran computer-use turns with ZERO human clicks (scoped / never / auto_review / persistent / default), event-log excerpts showing approvals requested vs auto-resolved, TCC grant events recorded separately from zero-click claims",
+      "check": "`python3 -c \"import json; d=json.load(open('spikes/codex-cu/results/results.json')); print([ (r['variant'],r['status'],r.get('approvals')) for r in d['rows'] if r.get('kind')=='variant'])\"` shows variant rows; run logs contain approval request/resolution events; REPORT.md's named working config matches raw events",
+      "expected": "Named approval mode + effective-config evidence; no hand-waving",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2c-5",
+      "behavior": "background/multi-user session section exists as LABELED hypotheses (allowLockedComputerUse semantics, switched-out WindowServer actuation, per-session TCC, jevbench gap) with each claim tagged verified / documented / unverified — no categorical claims without evidence",
+      "check": "REPORT.md + phase file contain the section; every claim carries a label; grep for unlabeled categorical claims on background sessions",
+      "expected": "Honest split between measured, documented, and unverified findings",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2c-6",
+      "behavior": "REPORT.md has measurements table + verdict matching the PREDECLARED rule: PROMOTE iff >=2 canary ok rows carry cu_evidence under a zero-click unattended config; DISCARD on systematic no-CU or human-required failures; CONDITIONAL only with the named condition; this-session success never presented as background-session proof",
+      "check": "verdict text in REPORT.md + phase Decision Log cites the rule and the rows it matched; handoff names what P-next builds or why discarded",
+      "expected": "Verdict recorded with numbers against the declared bar",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2c-7",
+      "behavior": "secrets hygiene: no API keys/tokens in spike files or logs; auth uses existing codex login only; child env restricted; CODEX_HOME (with auth.json symlink) under gitignored spikes/codex-cu/home/ and never committed",
+      "check": "`git ls-files spikes/codex-cu | grep -v home/` + `grep -rnoE 'sk-[A-Za-z0-9]+|Bearer [A-Za-z0-9._-]+' spikes/codex-cu --exclude-dir=home` returns empty; run.py env construction reviewed (allowlist, not full host env); `test ! -e spikes/codex-cu/home/auth.json || file spikes/codex-cu/home/auth.json` shows symlink-only artifact (contents never read)",
+      "expected": "No secrets on disk; env allowlist discipline; auth symlink ignored",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2c-8",
+      "behavior": "fresh-context judge returns VERDICT: PASS; commits land on ship/v1-p2c containing only owned paths",
+      "check": "judge report; `git log --name-only --format=` on phase commits shows only owned paths",
+      "expected": "Judge PASS + clean commits",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}
