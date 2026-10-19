@@ -214,3 +214,26 @@ a sweeper.
 Artifacts: `spikes/browser-drivers/` (results: 2016 rows, 36 cycles).
 Run state: laptop closed mid-window — consent click landed, Arm-A
 rerun completed after resume.
+
+## 2026-10-19 — P2b follow-up: consent-dialog mitigation researched
+
+Post-phase question (user): the "Allow remote debugging?" click is
+annoying — find a fix. Findings recorded as P2b Decision Log #2:
+
+- The grant is durable per Chrome instance (DevToolsActivePort
+  generation): one Allow covered ~75min + ~20 attaches; a fresh ws
+  handshake still 101s post-run. NOT per-connection on Chrome 155.
+- `devtools.remote_debugging.user-enabled:true` persists in Local
+  State — the chrome://inspect toggle itself survives restart.
+- Chrome's consent is by design (anti-infostealer), no 'remember'
+  option, per new debugging session. Dialog spam in the wild comes
+  from tools spawning per-session clients that each re-dial.
+- Fix chosen for the product: P7's driver holds ONE persistent
+  browser-level ws connection (daemon-side, like Cua's serve) → at
+  most one click per Chrome launch; P10 onboarding guides the
+  one-time toggle enable + Allow.
+- Documented zero-dialog alternative: JevVoice-owned Chrome profile
+  (`--user-data-dir` + `--remote-debugging-port` never prompts —
+  Chrome's own recommended pattern); user logs into key sites once
+  there. Chrome for Testing also exempt; extension chrome.debugger
+  is a third path (infobar not modal) kept as backup.
