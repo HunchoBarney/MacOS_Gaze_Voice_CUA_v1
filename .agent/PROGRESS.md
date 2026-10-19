@@ -291,3 +291,57 @@ canary tasks drive the real mouse/keyboard briefly; first run may
 pop a TCC prompt for codex — one click = onboarding grant.
 
 No stray processes required: none left running at pause.
+
+## 2026-10-19 — P2c M1–M3 implemented (jarvis-implementer) — awaiting judge
+
+What: spikes/codex-cu/ (appserver.py, probe.py, tasks.json, run.py,
+report.py, results/). A partial pre-restart scaffold existed (baseline +
+probe + untested runner); it was reused after checking it against the schema.
+5 GUI runs under with-desktop-lock (screen driven). Runs 1–4 superseded
+(rows kept in results/run-*.rows.json), run 20261019-162132 = evidence.
+
+Findings: vendored codex 0.160.0 has NO computer tool (bare:
+698 connector tools, 0 CU). CU comes from the ChatGPT app's
+~/.codex/computer-use "Codex Computer Use.app", wired in as an MCP server
+(SkyComputerUseClient mcp). The gate is Sky's per-app approval via
+mcpServer/elicitation/request. approval_policy=never auto-declines it
+(scoped/never refused), default/auto_review forward it to the client,
+allow_persistent_approval is not settable. Added variant client_allowlist
+(the client accepts only corpus apps) → textedit/finder/notes ok with
+cu_evidence, 0 human clicks, p50 27.6s, Dictionary refused, 0 TCC
+prompts, 0 orphans.
+
+Verdict: predeclared rule = PROMOTE (this console session only).
+Implementer recommends CONDITIONAL (client must answer elicitations;
+external CU host; MARK matched only case-insensitively after autocorrect
+p→P; background session unverified). Recorded in phase Decision Log #3.
+
+Side effects cleaned: 5 MARK-only TextEdit iCloud autosave .rtf files moved
+to iCloud Trash; MARK notes in Notes' Recently Deleted.
+
+Next: G4 fresh-context jarvis-judge on P2c.json (evidence filled, all
+passes=false); user/orchestrator confirms PROMOTE vs CONDITIONAL; commit
+owned paths by name (results/ ≈7.3MB incl. 2.9MB dirty baseline). HUMAN
+step still open: jevbench user for the background-session test.
+
+## 2026-10-19 — P2c G4/G7: judge PASS, verdict PROMOTE (console session), phase complete
+
+G4 judge bd701076: PASS 7/7 (P2c-1..7 MET) with recomputation — 3 ok
+task rows rederived from raw results, p50 27.6s, 0 new non-owned hunks
+vs dirty-baseline, 15 auth symlinks / 0 copies. Ruled PROMOTE (not
+CONDITIONAL): the conditional clause requires reduced unattended-ness
+and client_allowlist is genuinely zero-click. Deployment prerequisites
+recorded in phase Decision Log #3 + Handoff (JevVoice client owns the
+elicitation policy — needs exact bundle-id matching for product;
+product ships/requires Codex Computer Use.app; jevbench run for the
+background/multi-user claims). P2c-7 evidence corrected to note 4
+harmless literal matches in dirty-baseline (not a fully empty scan).
+
+Acceptance P2c.json: 8/8 --green. Milestone + acceptance commits on
+ship/v1-p2c.
+
+Side effects noted: TextEdit iCloud autosave .rtf files → iCloud Trash;
+MARK note in Notes Recently Deleted. HUMAN step open: jevbench user
+(sudo scripts/bench/create-test-user.sh) for background-session test.
+
+Next: P2d (SpeechAnalyzer vs Parakeet) — gates the voice lane.

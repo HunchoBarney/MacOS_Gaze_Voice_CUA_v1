@@ -253,17 +253,143 @@ spikes/codex-cu/**
 
 ## Surprises & findings (fill during execution)
 
+Evidence: `spikes/codex-cu/results/` (results.json, REPORT.md, run-*.log,
+superseded run-*.rows.json). All runs on 2026-10-19, vendored codex 0.160.0.
+
+- **The vendored codex has no computer tool of its own.** With the
+  `computer_use` feature stable+enabled and an empty config,
+  `mcpServerStatus/list` shows only `codex_apps` (698 connector tools,
+  zero CU tools) and the model answers `NO_COMPUTER_TOOL`. Computer use
+  comes from an EXTERNAL host installed by the ChatGPT desktop app:
+  `~/.codex/computer-use/Codex Computer Use.app` (SkyComputerUseService +
+  SkyComputerUseClient). The desktop app normally reaches it through
+  `node_repl` + the `@oai/sky` JS package (computer-use plugin skill);
+  the host's `~/.codex/config.toml` also carries a disabled
+  `[mcp_servers.computer-use]` entry (`SkyComputerUseClient mcp`). The
+  spike uses that MCP form (`mcp_sky`): 10 tools (list_apps,
+  get_app_state, click, type_text, press_key, scroll, drag, set_value,
+  select_text, perform_secondary_action). No mouse-move tool exists; the
+  activation prompt falls back to get_app_state.
+- **Cold start**: the first Sky calls after SkyComputerUseService launches
+  return `bootstrapTimedOut` (run 1). Fix: a direct
+  `mcpServer/tool/call list_apps` warm-up per session (no model turn),
+  ~6s the first time, then calls succeed.
+- **The real gate is Sky's per-app approval, delivered as an MCP
+  elicitation** — `mcpServer/elicitation/request`, mode `form`, message
+  "Allow ChatGPT to use TextEdit?", `_meta: {"persist": ["always"]}`,
+  empty requestedSchema. Codex config does NOT pre-answer it:
+  `approval_policy=never` (scoped AND never variants) makes codex
+  auto-DECLINE it ("Computer Use approval denied via MCP elicitation"),
+  even for apps on the `computer_use.macos.bundle_ids` allow-list.
+  `default` and `auto_review` forward it to the client; the auto-review
+  subagent does not resolve it.
+- **Zero-human-click works when the CLIENT answers the elicitation.**
+  Added variant `client_allowlist` (no config delta; the spike client
+  accepts the elicitation only if it names a corpus app, declines
+  everything else). Accepting with `content: {}` and no persist meta
+  did NOT persist across sessions (later scoped/never runs still denied).
+  Dictionary (out of list) was refused every run — the scope boundary is
+  client-side.
+- **`allowPersistentApproval` / `allowLockedComputerUse` are not
+  client-settable.** Both live only in `ComputerUseRequirementsToml`
+  (binary strings); `ComputerUseConfigToml` has 3 fields; writing
+  `computer_use.allow_persistent_approval` does not show up in the
+  `config/read` readback. `configRequirements/read` → `{"requirements":
+  null}` on this machine.
+- **No TCC prompt for codex**: Sky actuation runs under the
+  already-granted `Codex Computer Use.app`; no TCC dialog was seen in any
+  run (needs_human never came from TCC).
+- **Verifier traps (not codex bugs)**: CU `type_text` of a MARK leaves
+  AppKit's autocorrect `NSCorrectionPanel` in `_interceptEvents`, which
+  stalls Apple Events to TextEdit/Notes (proven with `sample`). Verifiers
+  fall back to AX reads (TextEdit) or send Escape (Notes) before reading.
+  TextEdit's `whose text contains` fails with -1700. macOS 26
+  Calculator's display is only reachable by walking UI elements (lazy
+  SwiftUI AX tree; `entire contents` returns nothing). Sky's
+  `get_app_state` times out (-10005) on a running TextEdit with zero
+  windows → runner quits TextEdit only when it has 0 documents.
+- **Runner safety bug found + fixed**: started as a background job, the
+  runner inherited SIGINT=SIG_IGN, so ctrl-c did nothing (run 1, stopped
+  with SIGTERM + manual app-server kill; no orphans). The runner now
+  installs INT/TERM handlers; runs 2–5 stopped cleanly with
+  `leaked={}`.
+- **Autocorrect rewrites typed text**: CU `type_text` of `p2c-…` landed
+  as `P2c-…` in TextEdit and Notes. Verifiers (AppleScript `contains`,
+  which ignores case) still attribute the text to the run, but a strict
+  exact-text check would pass only finder.reveal.
+- **Calculator restores state across launches**: in run 5 it relaunched
+  showing run 4's `4+7 = 11`, and the agent claimed success after only
+  reading state. The actuation requirement classed it `ok_no_cu` (no false
+  Done). The pre-snapshot can't see restored state while the app isn't
+  running.
+- **Side effects outside the sandbox**: TextEdit iCloud autosave wrote 5
+  MARK-only `.rtf` files into `~/Library/Mobile
+  Documents/com~apple~TextEdit/Documents` despite `close … saving no`
+  (moved to iCloud Trash after verifying contents). Deleted MARK notes sit
+  in Notes' Recently Deleted.
+- Tokens per CU task: ~150–200k input (75–88% cached), ≤301 output.
+  Turn wall time 22–85s.
+
 ## Decision Log
 
 | # | Date | Decision | Why |
 |---|---|---|---|
+| 1 | 2026-10-19 | Mechanism = Sky MCP server (`SkyComputerUseClient mcp`, from `~/.codex/computer-use`) wired into a spike CODEX_HOME | Discovery order: bare vendored codex has no CU tool (zero-turn `mcpServerStatus/list` + model `NO_COMPUTER_TOOL`); mcp_sky exposes 10 CU tools. `codex exec` + node_repl/@oai/sky were not needed |
+| 2 | 2026-10-19 | Added variant `client_allowlist` (no config delta; client accepts Sky's per-app elicitation only for corpus apps) beyond the 5 predeclared variants | All 5 predeclared variants were measured first; none clears the gate (never/scoped auto-decline it, default/auto_review forward it to the client, persistent not settable). The brief said server→client asks are "answered per config", and answering them is exactly what a product client would do |
+| 3 | 2026-10-19 | Verdict by predeclared rule: **PROMOTE (this console session only)** — G4 judge confirmed PROMOTE is the correct label: CONDITIONAL requires *reduced unattended-ness*, and `client_allowlist` is genuinely zero-click. Rows: run 20261019-162132 corpus under client_allowlist, textedit.type/finder.reveal/notes.snippet = ok with cu_evidence, 0 declined asks, p50 27.6s, Dictionary refused, 0 transport deaths | Deployment prerequisites (handoff conditions, not verdict demotions): (a) JevVoice's client owns the `mcpServer/elicitation/request` policy — substring allow-list is spike-grade, needs exact bundle-id matching for product; (b) product ships or requires the ChatGPT app's `Codex Computer Use.app`; (c) 2 of 3 ok rows match the MARK case-insensitively (autocorrect `p→P`) — case-insensitive verifier, not exact-text fidelity; (d) background/multi-user behaviour unverified (needs jevbench) |
 
 ## Outcomes & Retrospective
 
-<Filled at G7.>
+5 runs. Runs 1–4 exposed mechanism, cold-start, gate, verifier and
+runner-signal problems; each was fixed in the spike and the superseded
+rows are kept in `results/run-*.rows.json`. Run 5 is the clean evidence
+run. G4 judge: PASS (7/7), verdict confirmed PROMOTE under the
+predeclared rule. Lesson: macOS app quirks (autocorrect panels, iCloud
+autosave, state restore) dominate the cost of independent GUI
+verification. Any P-later GUI bench should budget for them and use
+spell-safe markers.
 
 ## Handoff
 
-<Filled at G7 — must name: the verdict, what a background-agent lane
-would need (auth, TCC, session model, jevbench), measured
-latency/tokens, what P-next builds on it or why discarded.>
+- **Verdict**: **PROMOTE for THIS console session** (3/4 canary tasks
+  ok with cu_evidence under `client_allowlist`, 0 human clicks,
+  p50 27.6s, scope refusal verified). Not background-session proof;
+  Decision Log #3 lists the deployment prerequisites.
+- **What a background-agent lane needs**:
+  - auth: existing ChatGPT login via an auth.json symlink. Proven: a
+    fresh CODEX_HOME per agent works.
+  - CU host: `Codex Computer Use.app` (ChatGPT desktop app install),
+    wired in as an MCP server. Warm it once per session.
+  - approval: the client answers `mcpServer/elicitation/request` from a
+    JevVoice-owned app allow-list (maps onto the locked Permissions
+    decision). Codex config cannot do this: `approval_policy=never`
+    declines the request.
+  - TCC: no prompt was seen; the grants sit on Codex Computer Use.app.
+  - session model: unverified, see below.
+- **Measured**: turn wall 22–85s per task (p50 27.6s); ~150–200k input
+  tokens per task (75–88% cached), ≤301 output; Sky warm-up 6–11s
+  per session.
+- **P-next builds**: a JevVoice client answerer (allow-list policy +
+  audit of every elicitation), a CU-host presence/version check, and
+  the jevbench run below.
+
+### Background / multi-user session (labeled)
+
+- **[verified]** All runs used the logged-in console session; Sky drove
+  hidden/background apps without bringing them frontmost.
+- **[documented]** `allowLockedComputerUse` and `allowPersistentApproval`
+  exist only in `ComputerUseRequirementsToml` (requirements.toml / MDM /
+  cloud), not in user config. This machine returns `requirements: null`.
+- **[documented]** The Sky bundle contains `CUALockScreenGuardian.app`
+  (the file exists; its behaviour was not tested).
+- **[unverified]** Whether `allowLockedComputerUse` enables actuation on
+  a locked or switched-out session.
+- **[unverified]** Whether a fast-user-switched (non-console) session has
+  a WindowServer Sky can actuate. Needs the jevbench user
+  (`sudo scripts/bench/create-test-user.sh`, a human step that was not
+  done).
+- **[unverified]** Per-user TCC: a background user most likely needs its
+  own Accessibility/Screen Recording grants for Codex Computer Use.app
+  (TCC databases are per-user). This is a hypothesis.
+- **[unverified]** Whether Codex Computer Use.app and its per-app
+  approvals exist for another macOS user.

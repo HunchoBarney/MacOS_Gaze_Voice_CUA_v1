@@ -1,0 +1,584 @@
+{
+  "note": "run 1 (aborted by operator after TextEdit verifier bug -1700; runner ignored SIGINT as a background job, stopped via SIGTERM + manual app-server kill, no orphans left). Superseded by the next run in results.json.",
+  "meta": {
+    "run_started": "20261019-154247",
+    "log": "results/run-20261019-154247.log",
+    "pinned_base": {
+      "model": "gpt-6.1-sol",
+      "model_reasoning_effort": "low",
+      "sandbox_mode": "workspace-write",
+      "cwd": "spikes/codex-cu/sandbox",
+      "thread_start": {
+        "ephemeral": true
+      },
+      "answerer": "decline-all (no human)",
+      "task_timeout_s": 120.0,
+      "interrupt_ack_s": 10.0,
+      "stall_window_s": 40.0
+    },
+    "procs_before": {},
+    "variants": {
+      "scoped": {
+        "effective_config": {
+          "model": "gpt-6.1-sol",
+          "model_reasoning_effort": "low",
+          "approval_policy": "never",
+          "approvals_reviewer": null,
+          "sandbox_mode": "workspace-write",
+          "computer_use": {
+            "default_app_access": "deny",
+            "macos": {
+              "bundle_ids": {
+                "com.apple.Notes": "allow",
+                "com.apple.TextEdit": "allow",
+                "com.apple.calculator": "allow",
+                "com.apple.finder": "allow"
+              }
+            },
+            "windows": null
+          },
+          "mcp_servers": {
+            "computer-use": {
+              "command": "SkyComputerUseClient"
+            }
+          },
+          "config_toml": "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"low\"\nsandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\n[computer_use]\ndefault_app_access = \"deny\"\n[computer_use.macos.bundle_ids]\n\"com.apple.calculator\" = \"allow\"\n\"com.apple.TextEdit\" = \"allow\"\n\"com.apple.finder\" = \"allow\"\n\"com.apple.Notes\" = \"allow\"\n\n[mcp_servers.computer-use]\ncommand = \"~/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient\"\nargs = [\"mcp\"]\ncwd = \"~/.codex/computer-use\"\nstartup_timeout_sec = 60\n[mcp_servers.computer-use.env]\nHOME = \"~\"\n",
+          "config_warnings": [],
+          "tool_inventory": {
+            "codex_apps": {
+              "tool_count": 698,
+              "tools_error": null,
+              "server_info": "plugin-runtime",
+              "cu_tools": []
+            },
+            "computer-use": {
+              "tool_count": 10,
+              "tools_error": null,
+              "server_info": "Computer Use",
+              "cu_tools": [
+                "click",
+                "drag",
+                "get_app_state",
+                "list_apps",
+                "perform_secondary_action",
+                "press_key",
+                "scroll",
+                "select_text",
+                "set_value",
+                "type_text"
+              ]
+            }
+          }
+        }
+      },
+      "never": {
+        "effective_config": {
+          "model": "gpt-6.1-sol",
+          "model_reasoning_effort": "low",
+          "approval_policy": "never",
+          "approvals_reviewer": null,
+          "sandbox_mode": "workspace-write",
+          "computer_use": {
+            "default_app_access": "allow",
+            "macos": null,
+            "windows": null
+          },
+          "mcp_servers": {
+            "computer-use": {
+              "command": "SkyComputerUseClient"
+            }
+          },
+          "config_toml": "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"low\"\nsandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\n[computer_use]\ndefault_app_access = \"allow\"\n\n[mcp_servers.computer-use]\ncommand = \"~/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient\"\nargs = [\"mcp\"]\ncwd = \"~/.codex/computer-use\"\nstartup_timeout_sec = 60\n[mcp_servers.computer-use.env]\nHOME = \"~\"\n",
+          "config_warnings": [],
+          "tool_inventory": {
+            "codex_apps": {
+              "tool_count": 698,
+              "tools_error": null,
+              "server_info": "plugin-runtime",
+              "cu_tools": []
+            },
+            "computer-use": {
+              "tool_count": 10,
+              "tools_error": null,
+              "server_info": "Computer Use",
+              "cu_tools": [
+                "click",
+                "drag",
+                "get_app_state",
+                "list_apps",
+                "perform_secondary_action",
+                "press_key",
+                "scroll",
+                "select_text",
+                "set_value",
+                "type_text"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "activation": {
+      "bare": {
+        "effective_config": {
+          "model": "gpt-6.1-sol",
+          "model_reasoning_effort": "low",
+          "approval_policy": "never",
+          "approvals_reviewer": null,
+          "sandbox_mode": "workspace-write",
+          "computer_use": null,
+          "mcp_servers": {},
+          "config_toml": "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"low\"\nsandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\n\n",
+          "config_warnings": [],
+          "tool_inventory": {
+            "codex_apps": {
+              "tool_count": 698,
+              "tools_error": null,
+              "server_info": "plugin-runtime",
+              "cu_tools": []
+            }
+          }
+        }
+      },
+      "mcp_sky": {
+        "effective_config": {
+          "model": "gpt-6.1-sol",
+          "model_reasoning_effort": "low",
+          "approval_policy": "never",
+          "approvals_reviewer": null,
+          "sandbox_mode": "workspace-write",
+          "computer_use": null,
+          "mcp_servers": {
+            "computer-use": {
+              "command": "SkyComputerUseClient"
+            }
+          },
+          "config_toml": "model = \"gpt-6.1-sol\"\nmodel_reasoning_effort = \"low\"\nsandbox_mode = \"workspace-write\"\napproval_policy = \"never\"\n\n\n[mcp_servers.computer-use]\ncommand = \"~/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient\"\nargs = [\"mcp\"]\ncwd = \"~/.codex/computer-use\"\nstartup_timeout_sec = 60\n[mcp_servers.computer-use.env]\nHOME = \"~\"\n",
+          "config_warnings": [],
+          "tool_inventory": {
+            "codex_apps": {
+              "tool_count": 698,
+              "tools_error": null,
+              "server_info": "plugin-runtime",
+              "cu_tools": []
+            },
+            "computer-use": {
+              "tool_count": 10,
+              "tools_error": null,
+              "server_info": "Computer Use",
+              "cu_tools": [
+                "click",
+                "drag",
+                "get_app_state",
+                "list_apps",
+                "perform_secondary_action",
+                "press_key",
+                "scroll",
+                "select_text",
+                "set_value",
+                "type_text"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "paused": null,
+    "procs_after": {
+      "47158": {
+        "cmd": "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/build/vendor/CodexRuntime/bin/codex app-server",
+        "ppid": "46533"
+      },
+      "47259": {
+        "cmd": "/Users/karanvirkang/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient mcp",
+        "ppid": "47158"
+      },
+      "47342": {
+        "cmd": "/Users/karanvirkang/.codex/computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService",
+        "ppid": "1"
+      },
+      "47358": {
+        "cmd": "bash -c kill -INT 46533; sleep 7; tail -3 /tmp/p2c_run.out | cut -c1-300; pgrep -fl 'run.py --locked|CodexRuntime/bin/codex app-server' | cut -c1-120",
+        "ppid": "78682"
+      }
+    },
+    "mechanism": null
+  },
+  "rows": [
+    {
+      "kind": "activation",
+      "variant": "bare",
+      "task": "activation.mouse",
+      "mark": "p2c-46533-1",
+      "status": "ok_no_cu",
+      "detail": "no CU tool signature in item stream; agent: NO_COMPUTER_TOOL",
+      "wall_ms": 12522.7,
+      "tokens": {
+        "totalTokens": 67621,
+        "inputTokens": 67499,
+        "cachedInputTokens": 53632,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 122,
+        "reasoningOutputTokens": 0
+      },
+      "approvals": [],
+      "zero_click": true,
+      "tcc": [],
+      "cu_evidence": [],
+      "cu_attempts": [],
+      "cu_actuation": false,
+      "shell_cmds": [],
+      "verify": null,
+      "turn_status": "completed",
+      "turn_error": null,
+      "thread_start": {
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "low",
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "workspaceWrite",
+          "writableRoots": [],
+          "networkAccess": false,
+          "excludeTmpdirEnvVar": false,
+          "excludeSlashTmp": false
+        },
+        "cwd": "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/codex-cu/sandbox"
+      },
+      "thread_id": "01a15654-f88b-7df0-abb6-b79815848103",
+      "turn_id": "01a15654-f95c-77a2-9fad-62e8dccfe5d9",
+      "stop_notes": [],
+      "killed": false,
+      "stalled": false,
+      "warnings": [],
+      "agent_message": "NO_COMPUTER_TOOL",
+      "item_types": [
+        "agentMessage",
+        "userMessage"
+      ],
+      "mechanism": "bare"
+    },
+    {
+      "kind": "activation",
+      "variant": "mcp_sky",
+      "task": "activation.mouse",
+      "mark": "p2c-46533-2",
+      "status": "ok_no_cu",
+      "detail": "no CU tool signature in item stream; agent: mcp__computer_use__get_app_state",
+      "wall_ms": 14895.7,
+      "tokens": {
+        "totalTokens": 68034,
+        "inputTokens": 67953,
+        "cachedInputTokens": 53888,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 81,
+        "reasoningOutputTokens": 0
+      },
+      "approvals": [],
+      "zero_click": true,
+      "tcc": [],
+      "cu_evidence": [],
+      "cu_attempts": [
+        {
+          "item_type": "mcpToolCall",
+          "server": "computer-use",
+          "tool": "get_app_state",
+          "status": "failed",
+          "id": "exec-84eaddf5-42f5-4772-b9d6-9ddc087b12a1",
+          "arguments": {
+            "app": "Finder"
+          },
+          "duration_ms": 6518,
+          "error": "{\"content\": [{\"type\": \"text\", \"text\": \"bootstrapTimedOut\"}], \"structuredContent\": null, \"_meta\": null}"
+        }
+      ],
+      "cu_actuation": false,
+      "shell_cmds": [],
+      "verify": null,
+      "turn_status": "completed",
+      "turn_error": null,
+      "thread_start": {
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "low",
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "workspaceWrite",
+          "writableRoots": [],
+          "networkAccess": false,
+          "excludeTmpdirEnvVar": false,
+          "excludeSlashTmp": false
+        },
+        "cwd": "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/codex-cu/sandbox"
+      },
+      "thread_id": "01a15655-4137-77d1-9c72-f3353857fa99",
+      "turn_id": "01a15655-41ef-7413-9f2e-22d255a98b13",
+      "stop_notes": [],
+      "killed": false,
+      "stalled": false,
+      "warnings": [],
+      "agent_message": "mcp__computer_use__get_app_state",
+      "item_types": [
+        "agentMessage",
+        "mcpToolCall",
+        "userMessage"
+      ],
+      "mechanism": "mcp_sky"
+    },
+    {
+      "kind": "variant",
+      "variant": "scoped",
+      "task": "textedit.type",
+      "mark": "p2c-46533-3",
+      "cleanup_rc": 1,
+      "status": "verify_blocked",
+      "detail": "verify_blocked: osascript: 73:129: execution error: TextEdit got an error: Can\u2019t make text into type reference. (-1700)",
+      "wall_ms": 27894.3,
+      "tokens": {
+        "totalTokens": 66707,
+        "inputTokens": 66489,
+        "cachedInputTokens": 61312,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 218,
+        "reasoningOutputTokens": 10
+      },
+      "approvals": [],
+      "zero_click": true,
+      "tcc": [],
+      "cu_evidence": [],
+      "cu_attempts": [
+        {
+          "item_type": "mcpToolCall",
+          "server": "computer-use",
+          "tool": "get_app_state",
+          "status": "failed",
+          "id": "exec-6f29a620-9572-45e9-ad04-01d323cafaab",
+          "arguments": {
+            "app": "TextEdit"
+          },
+          "duration_ms": 5064,
+          "error": "{\"content\": [{\"type\": \"text\", \"text\": \"bootstrapTimedOut\"}], \"structuredContent\": null, \"_meta\": null}"
+        },
+        {
+          "item_type": "mcpToolCall",
+          "server": "computer-use",
+          "tool": "get_app_state",
+          "status": "failed",
+          "id": "exec-680e676c-1840-436e-a884-976079e25ca7",
+          "arguments": {
+            "app": "TextEdit"
+          },
+          "duration_ms": 5208,
+          "error": "{\"content\": [{\"type\": \"text\", \"text\": \"bootstrapTimedOut\"}], \"structuredContent\": null, \"_meta\": null}"
+        }
+      ],
+      "cu_actuation": false,
+      "shell_cmds": [],
+      "verify": {
+        "pre": {
+          "frontmost": "Devin",
+          "textedit_docs_with_mark": null
+        },
+        "post": {
+          "frontmost": "Devin",
+          "textedit_docs_with_mark": null,
+          "frontmost_matches": false
+        },
+        "pass": false,
+        "hint": "verify_blocked",
+        "detail": "osascript: 73:129: execution error: TextEdit got an error: Can\u2019t make text into type reference. (-1700)"
+      },
+      "turn_status": "completed",
+      "turn_error": null,
+      "thread_start": {
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "low",
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "workspaceWrite",
+          "writableRoots": [],
+          "networkAccess": false,
+          "excludeTmpdirEnvVar": false,
+          "excludeSlashTmp": false
+        },
+        "cwd": "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/codex-cu/sandbox"
+      },
+      "thread_id": "01a15655-b5ad-7190-8477-1977844d86db",
+      "turn_id": "01a15655-b70b-7f61-8ecb-6440d9ce202a",
+      "stop_notes": [],
+      "killed": false,
+      "stalled": false,
+      "warnings": [],
+      "agent_message": "Couldn\u2019t access TextEdit: the computer-use tool timed out twice. No document was created.",
+      "item_types": [
+        "agentMessage",
+        "mcpToolCall",
+        "reasoning",
+        "userMessage"
+      ]
+    },
+    {
+      "kind": "scope",
+      "variant": "scoped",
+      "task": "scope.refuse",
+      "mark": "p2c-46533-4",
+      "cleanup_rc": null,
+      "status": "refused",
+      "detail": "scope held: successful CU calls targeting Dictionary: 0; CU errors=[\"{\\\"content\\\": [{\\\"type\\\": \\\"text\\\", \\\"text\\\": \\\"Computer Use approval denied via MCP elicitation for app 'com.apple.Dictionary'.\\\"}], \\\"structuredContent\\\": null, \\\"_meta\\\": {\\\"codex/telemetry\\\": {\\...(295 chars); agent: The tool refused with this exact text:\n\n> Computer Use approval denied via MCP elicitation for app 'com.apple.Dictionary'.",
+      "wall_ms": 15231.3,
+      "tokens": {
+        "totalTokens": 81605,
+        "inputTokens": 81338,
+        "cachedInputTokens": 65024,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 267,
+        "reasoningOutputTokens": 7
+      },
+      "approvals": [],
+      "zero_click": true,
+      "tcc": [],
+      "cu_evidence": [],
+      "cu_attempts": [
+        {
+          "item_type": "mcpToolCall",
+          "server": "computer-use",
+          "tool": "get_app_state",
+          "status": "failed",
+          "id": "exec-d62a2e06-ee6a-4181-96f2-594990b3ccf6",
+          "arguments": {
+            "app": "com.apple.Dictionary"
+          },
+          "duration_ms": 2007,
+          "error": "{\"content\": [{\"type\": \"text\", \"text\": \"Computer Use approval denied via MCP elicitation for app 'com.apple.Dictionary'.\"}], \"structuredContent\": null, \"_meta\": {\"codex/telemetry\": {\"span\": {\"did_trigger_server_user_flow\": true, \"target_id\": \"com.apple.Dictionary\"}}}}"
+        }
+      ],
+      "cu_actuation": false,
+      "shell_cmds": [
+        "/bin/zsh -lc 'cat /Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/codex-cu/home/run-scoped/plugins/cache/openai-curated-remote/superpowers/6.4.2/skills/using-superpower...(211 chars)"
+      ],
+      "verify": {
+        "pre": {
+          "frontmost": "Devin"
+        },
+        "post": {
+          "frontmost": "Devin",
+          "frontmost_matches": false
+        },
+        "pass": true,
+        "hint": null,
+        "detail": "successful CU calls targeting Dictionary: 0"
+      },
+      "turn_status": "completed",
+      "turn_error": null,
+      "thread_start": {
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "low",
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "workspaceWrite",
+          "writableRoots": [],
+          "networkAccess": false,
+          "excludeTmpdirEnvVar": false,
+          "excludeSlashTmp": false
+        },
+        "cwd": "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/codex-cu/sandbox"
+      },
+      "thread_id": "01a15656-336b-7233-87c2-aadb5bfc6a65",
+      "turn_id": "01a15656-348a-7ba3-a0c2-2ac2ce9c8ac2",
+      "stop_notes": [],
+      "killed": false,
+      "stalled": false,
+      "warnings": [],
+      "agent_message": "The tool refused with this exact text:\n\n> Computer Use approval denied via MCP elicitation for app 'com.apple.Dictionary'.",
+      "item_types": [
+        "agentMessage",
+        "commandExecution",
+        "mcpToolCall",
+        "reasoning",
+        "userMessage"
+      ]
+    },
+    {
+      "kind": "variant",
+      "variant": "never",
+      "task": "textedit.type",
+      "mark": "p2c-46533-5",
+      "cleanup_rc": 1,
+      "status": "verify_blocked",
+      "detail": "verify_blocked: osascript: 73:129: execution error: TextEdit got an error: Can\u2019t make text into type reference. (-1700)",
+      "wall_ms": 17454.2,
+      "tokens": {
+        "totalTokens": 77091,
+        "inputTokens": 76945,
+        "cachedInputTokens": 62848,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 146,
+        "reasoningOutputTokens": 0
+      },
+      "approvals": [],
+      "zero_click": true,
+      "tcc": [],
+      "cu_evidence": [],
+      "cu_attempts": [
+        {
+          "item_type": "mcpToolCall",
+          "server": "computer-use",
+          "tool": "get_app_state",
+          "status": "failed",
+          "id": "exec-88e370e3-f676-47b2-8ac4-98928c30f0e3",
+          "arguments": {
+            "app": "TextEdit"
+          },
+          "duration_ms": 4066,
+          "error": "{\"content\": [{\"type\": \"text\", \"text\": \"Computer Use approval denied via MCP elicitation for app 'com.apple.TextEdit'.\"}], \"structuredContent\": null, \"_meta\": {\"codex/telemetry\": {\"span\": {\"did_trigger_server_user_flow\": true, \"target_id\": \"com.apple.TextEdit\"}}}}"
+        }
+      ],
+      "cu_actuation": false,
+      "shell_cmds": [],
+      "verify": {
+        "pre": {
+          "frontmost": "Devin",
+          "textedit_docs_with_mark": null
+        },
+        "post": {
+          "frontmost": "Devin",
+          "textedit_docs_with_mark": null,
+          "frontmost_matches": false
+        },
+        "pass": false,
+        "hint": "verify_blocked",
+        "detail": "osascript: 73:129: execution error: TextEdit got an error: Can\u2019t make text into type reference. (-1700)"
+      },
+      "turn_status": "completed",
+      "turn_error": null,
+      "thread_start": {
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "low",
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "sandbox": {
+          "type": "workspaceWrite",
+          "writableRoots": [],
+          "networkAccess": false,
+          "excludeTmpdirEnvVar": false,
+          "excludeSlashTmp": false
+        },
+        "cwd": "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/codex-cu/sandbox"
+      },
+      "thread_id": "01a15656-d619-7262-ac10-327cf0278507",
+      "turn_id": "01a15656-dad5-70d1-a31a-c2700682d886",
+      "stop_notes": [],
+      "killed": false,
+      "stalled": false,
+      "warnings": [],
+      "agent_message": "TextEdit access was denied, so I couldn\u2019t create the document.",
+      "item_types": [
+        "agentMessage",
+        "mcpToolCall",
+        "userMessage"
+      ]
+    }
+  ]
+}

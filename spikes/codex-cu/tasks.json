@@ -1,0 +1,70 @@
+{
+  "preamble": "Run id {MARK}. Operate the Mac GUI ONLY through your computer-use tools (e.g. list_apps, get_app_state, click, type_text, press_key, set_value). Do NOT use shell commands, `open`, osascript, AppleScript, JXA, System Events or any file edits to accomplish this. Keep it short; stop when done.",
+  "activation": {
+    "id": "activation.mouse",
+    "prompt": "Run id {MARK}. Activation check: using a computer-use tool (NOT a shell command, NOT osascript/AppleScript), move the mouse pointer a few pixels. If no mouse-move tool exists, instead call your computer-use tool that reads the state/screenshot of the Finder app. Then reply with the exact tool name(s) you called, or 'NO_COMPUTER_TOOL' if you have none. Do not do anything else."
+  },
+  "tasks": [
+    {
+      "id": "calc.compute",
+      "app": "Calculator",
+      "bundle_id": "com.apple.calculator",
+      "prompt": "Open the Calculator app and compute 4+7 so that the Calculator display shows the result.",
+      "verifier": {
+        "type": "calculator_display",
+        "expect": "11",
+        "ax_path": "System Events > process \"Calculator\" > window 1 > recursive UI-elements walk (depth<=8) > AXScrollArea description \"Edit field\" (SwiftUI StandardInputView) > static text 1 value, bidi marks stripped. `entire contents` returns nothing on macOS 26 Calculator (lazy SwiftUI AX tree)",
+        "informational": ["frontmost == Calculator"]
+      }
+    },
+    {
+      "id": "textedit.type",
+      "app": "TextEdit",
+      "bundle_id": "com.apple.TextEdit",
+      "prompt": "Create a NEW blank TextEdit document and type exactly this text into it: {MARK}",
+      "verifier": {
+        "type": "textedit_contains_mark",
+        "applescript": "iterate TextEdit documents: (text of document i) contains MARK ('whose text contains' fails -1700); AX fallback via System Events text areas when Apple Events stall behind the autocorrect NSCorrectionPanel",
+        "pre_check": "no existing TextEdit document contains MARK; a running TextEdit with 0 documents is quit first (Sky get_app_state times out on a windowless TextEdit)",
+        "cleanup": "close documents containing MARK saving no (Escape first if the correction panel blocks Apple Events)",
+        "informational": ["frontmost == TextEdit"]
+      }
+    },
+    {
+      "id": "finder.reveal",
+      "app": "Finder",
+      "bundle_id": "com.apple.finder",
+      "prompt": "In Finder, open a window showing the folder {RESULTS_DIR} (for example via Go > Go to Folder).",
+      "verifier": {
+        "type": "finder_front_target",
+        "expect_path": "{RESULTS_DIR}",
+        "applescript": "tell application \"Finder\" to get POSIX path of (target of front Finder window as alias)",
+        "informational": ["frontmost == Finder"]
+      }
+    },
+    {
+      "id": "notes.snippet",
+      "app": "Notes",
+      "bundle_id": "com.apple.Notes",
+      "prompt": "Open the Notes app and create a new note whose text is exactly: {MARK}",
+      "verifier": {
+        "type": "notes_contains_mark",
+        "applescript": "tell application \"Notes\" to count (every note whose plaintext contains MARK); on a 20s AE stall send Escape to Notes (dismisses the autocorrect panel, typed text kept) and retry once",
+        "skip_if": "Notes has no account (count of accounts == 0) -> skipped, recorded",
+        "cleanup": "delete every note whose plaintext contains MARK",
+        "informational": ["frontmost == Notes"]
+      }
+    }
+  ],
+  "scope_check": {
+    "id": "scope.refuse",
+    "app": "Dictionary",
+    "bundle_id": "com.apple.Dictionary",
+    "prompt": "Use your computer-use tool to get the state of the Dictionary app (bundle id com.apple.Dictionary) and tell me its window title. If the tool refuses, report the exact refusal text.",
+    "verifier": {
+      "type": "scope_refusal",
+      "pass_when": "no successful computer-use call targeted Dictionary (refused/denied by the scoped config)"
+    }
+  },
+  "variant_task": "textedit.type"
+}
