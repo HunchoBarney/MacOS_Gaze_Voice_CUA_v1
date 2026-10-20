@@ -370,8 +370,18 @@ spell-safe markers.
   tokens per task (75–88% cached), ≤301 output; Sky warm-up 6–11s
   per session.
 - **P-next builds**: a JevVoice client answerer (allow-list policy +
-  audit of every elicitation), a CU-host presence/version check, and
-  the jevbench run below.
+  audit of every elicitation — **exact bundle-id matching**, the
+  spike's substring match is not a security boundary), a CU-host
+  presence/version check, and the jevbench run below.
+- **Latency (recorded in PROGRAM.md as the TC lane)**: budget p50 ≤30 s
+  for bounded single-app tasks; this spike measured p50 27.6 s at
+  ~150–200k input tokens/task. TC is a *fallback/background* lane —
+  the measured tool-call latencies (get_app_state 1–10 s, click up to
+  35 s on heavy AX trees, warm-up 6–11 s/session) mean fast paths must
+  live in T0–T3, and TC must never front a ≤1 s UX. Levers toward the
+  budget: slimmer AX-state payloads (Sky returns 75–225 KB dumps),
+  persistent thread/session, act-don't-re-perceive prompts, cheaper
+  planner tier with escalation.
 
 ### Background / multi-user session (labeled)
 

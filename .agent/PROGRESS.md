@@ -345,3 +345,26 @@ MARK note in Notes Recently Deleted. HUMAN step open: jevbench user
 (sudo scripts/bench/create-test-user.sh) for background-session test.
 
 Next: P2d (SpeechAnalyzer vs Parakeet) — gates the voice lane.
+
+## 2026-10-19 — PROGRAM.md: TC lane budget + visionOS eye model (user directives)
+
+Two user-directed plan updates committed as program docs:
+
+1. **Latency**: executors formalized as lanes T0→T4 + new **TC codex-CU
+   lane** (P2c-promoted Sky path): bounded single-app tasks p50 ≤30 s
+   (measured 27.6 s). TC is fallback/background only — fast paths stay
+   in T0–T3; ack ≤300 ms always, ≥T3 streams progress, T4/TC
+   interruptible. Levers documented (slim AX payloads, persistent
+   session, act-don't-re-perceive, planner tiers). Release bars gained
+   the TC line; P2c Handoff links it.
+2. **Eye tracking**: locked decision rewritten to copy the visionOS
+   input model — gaze = targeting only (element hover-highlight +
+   steady-state confidence dot; NEVER a cursor), selection = separate
+   channel (voice/click, never gaze alone), deciders receive resolved
+   target identity (no raw coords — privacy + grounding), dwell =
+   accessibility opt-in, every flow works without gaze. P8/P11 DAG rows
+   updated (≥60 pt ≈2.5° target spacing, resolved-target hint).
+   Research: Apple HIG "Eyes" + "Designing for visionOS", WWDC23/25.
+
+Decision Log index backfilled D4–D8 (P2a/P2b verdicts, permissions-
+once, TC lane, visionOS model). Next: P2d (SpeechAnalyzer vs Parakeet).

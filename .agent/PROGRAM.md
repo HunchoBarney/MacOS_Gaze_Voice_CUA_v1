@@ -33,7 +33,7 @@ Computer Use and Browser Use.
 | Voice brain | Local first, realtime on miss |
 | UI decision-making | One `TaskLoop`: `JevDecider` (≤4 rounds) → `SolDecider`; `BrowserDecider` (DOM-first, Sol) for tabs |
 | Screenshots | Realtime: never; pixels only when a decider needs them; one capture reused per step |
-| Eye tracking | Core feature; highlight always, dot when steady, dwell off by default |
+| Eye tracking | Core feature — copies the **visionOS input model**: eyes are the *targeting* mechanism only (the gazed element gets a hover-style highlight; a steady-state dot shows track confidence). Selection is always a *separate channel* — voice command, click, or key; gaze alone never actuates. Deciders receive the **resolved target identity** (AX element/window ref), never raw gaze coordinates. Dwell = accessibility opt-in, off by default; every gaze flow must also work without gaze (user directive 2026-10-19: "copy Apple") |
 | Bench | Separate macOS test user; ≥5 runs on hero tasks; Wilson CI; head-to-head vs Codex Computer Use + Browser Use |
 | Hardware floor | 8 GB M1 |
 | Commits | Per milestone on `ship/v1-<phase>` branches in worktrees; **user merges** |
@@ -74,9 +74,20 @@ deterministic parse → hit: execute + clear buffer; miss: commit +
 response.create → one typed tool call` (realtime tool schemas in
 `.agent/CONTRACTS.md`).
 
-Executors: T0 FastLane ≤0.3 s; T1 script lane ≤1.5 s; T2 skill replay
-≤2 s; T3 `TaskLoop`+`JevDecider` AX-only ≤4 s; TB `BrowserDecider`
-≤15 s typical; T4 `SolDecider` ≤60 s. In-loop escalation Jev→Sol
+Executors (lane budgets — routing picks the cheapest lane that can do
+the job; the generalist lanes are fallbacks, not front doors): T0
+FastLane ≤0.3 s; T1 script lane ≤1.5 s; T2 skill replay ≤2 s; T3
+`TaskLoop`+`JevDecider` AX-only ≤4 s; TB `BrowserDecider` ≤15 s
+typical; T4 `SolDecider` ≤60 s; **TC codex-CU agent lane** (Sky MCP
+host via app-server, P2c): bounded single-app GUI tasks p50 ≤30 s —
+measured p50 27.6 s, ~150–200k input tokens/task (75–88% cached).
+TC is for open-ended GUI work T0–T3 can't express and background/batch
+jobs; nothing a fast lane can do may route through TC. TC levers to
+reach budget: slimmer AX-state payloads (Sky dumps 75–225KB/task),
+persistent thread/session (warm-up 6–11 s amortized), act-don't-
+re-perceive prompts, cheaper planner tier with escalation.
+UX: ack ≤300 ms always; lanes ≥T3 stream progress; every T4/TC run is
+interruptible. In-loop escalation Jev→Sol
 (2 low-confidence picks, stale screen, invalid choice, degraded AX,
 4 rounds); Browser→Sol pixels when DOM can't ground; Sol effort
 low→medium→high on failed verification/stall.
@@ -111,10 +122,10 @@ flags, time-saved).
 | P5 | `OpenAIResponsesClient` + `SolDecider` (actions→Cua, batching, consent-at-risk, `pending_safety_checks`→user, effort ladder, gaze hint, recording) | agent | P4 | Complex slice ≥80%/≤60 s; red-team zero violations |
 | P6 | Script lane (hero intents + `inbox_brief`, argv-only, read-back confirm, contacts/dates, `NSAppleEventsUsageDescription`) | voice | P3 | Per-intent ≥99%/≤1.5 s; injection tests; brief ≤5 s |
 | P7 | `BrowserDecider` + drivers (ChromeDevToolsDriver, CuaBrowserDriver, SafariAppleEventsDriver) + `DOMSnapshot.js` + `extract` + settle | agent | P2b, P5 | Browser slice ≥90%/≤15 s; ≥2× Sol-pixel path |
-| P8 | Eye core: Core ML inference, camera recovery, visible steady dot, durable calibration + drift prompt | eyes | P2a | ≥15 fps; wake recovery ≤5 s; calibration checks |
+| P8 | Eye core: Core ML inference, camera recovery, **visionOS gaze-target model** (element hover-highlight on look, steady-state confidence dot, no gaze-cursor), durable calibration + drift prompt | eyes | P2a | ≥15 fps; wake recovery ≤5 s; calibration checks |
 | P9 | Skill compiler (store, compile from traces/recordings, validation, retirement, matching) | agent | P5, P7 | Repeat slice ≥95%/≤3 s; no unverified done |
 | P10 | First run (privacy, permissions incl. Automation + browser toggles, calibration, 3 magic moments) + desirability (brief, undo, read-back, feedback, metrics) + settings consolidation | voice | P3, P6 | 3 moments ≤3 min; human G6 |
-| P11 | Eye polish: fps-adaptive sampling floors, dwell (off default, 1 s+look-away when on), geometry, resource budget + model pruning, gaze→deciders, smoke script | eyes | P8, P5 | Gaze slice ≥95%; tracker-smoke green |
+| P11 | Eye polish: fps-adaptive sampling floors, dwell (accessibility opt-in: off default, 1 s+look-away when on), geometry (≥60 pt / ≈2.5° min target spacing per visionOS guidance), resource budget + model pruning, gaze→deciders as **resolved-target hint** (never raw coords), smoke script | eyes | P8, P5 | Gaze slice ≥95%; tracker-smoke green |
 | P12 | Packaging (strict bundle-tracker + node + onnxruntime + devtools-mcp + pruned models), embedded keys, spend caps, diagnostics, demo warm-start, tester guide | main | all | Clean-Mac install; demo flow 10/10 |
 | P13 | RC bench + head-to-head | main | P12 | Every release bar |
 
@@ -127,7 +138,7 @@ low-value script intents → agent polish.
 |---|---|
 | Mac actuation, AX+pixels, settle, zoom, recording | Cua Driver v0.34 (pinned, hash-verified) |
 | Complex UI reasoning | OpenAI Responses `computer` tool on `gpt-6.1-sol` (WebSocket, caching, effort, Ultrafast flag) |
-| Background Mac agent (spike) | Codex app-server Computer Use — unverified, 1-day spike |
+| Background Mac agent | Codex app-server + `Codex Computer Use.app` (Sky) MCP — **P2c PROMOTED** (console session): JevVoice client owns the per-app elicitation policy (exact bundle-id matching); locked/background-session unverified → jevbench test |
 | Chrome DOM | Chrome DevTools MCP `--autoConnect` on bundled node; Cua `browser_*` fallback |
 | Safari DOM | `do JavaScript` via Apple Events (needs "Allow JavaScript from Apple Events") |
 | Browser speed | Browser-Use design: indexed compact DOM, on-demand screenshots, `extract(q)`, history-before-state, terse actions |
@@ -145,7 +156,9 @@ low-value script intents → agent polish.
 
 - One-shots: p50 <0.5 s and ≥99%. Everyday hero tasks: p50 <5 s ≥95%.
   Replay: p50 <3 s ≥95%. Browser: p50 <15 s ≥90%. Novel complex:
-  p50 <60 s ≥80%. Wilson lower bound ≥ bar −7.
+  p50 <60 s ≥80%. **CU-agent lane (TC): bounded single-app tasks
+  p50 ≤30 s with independent verification** (P2c baseline 27.6 s).
+  Wilson lower bound ≥ bar −7.
 - Head-to-head: faster than Codex Computer Use on ≥70% shared subset at
   equal-or-better success; browser subset within 1.2× of Browser Use or
   faster.
@@ -175,3 +188,8 @@ section) and appended here one line each.
 | D1 | 2026-10-18 | P0 | P0 runs in the primary checkout on `ship/v1-p0`, not a worktree — doc normalization must edit files with uncommitted user changes a worktree can't see |
 | D2 | 2026-10-18 | P0 | `research-notes.md` is the single kept dev doc; audits deleted outright — point-in-time findings already encoded in "Verified problems" |
 | D3 | 2026-10-18 | P1 | Bench task JSON gains `inject` (default `"mcp_stdio"`), `requires` (`"local-safe"\|"test-user"\|"human"`), optional `app` hint; verifier kinds `app_frontmost`+`dom_state` made explicit |
+| D4 | 2026-10-19 | P2a | `onnxruntime-node` + Core ML EP PROMOTED for eye inference (wasm ~2fps baseline beaten; ≥15 fps bar met) |
+| D5 | 2026-10-19 | P2b | Browser driver = ChromeDevTools primary + Cua fallback; persistent browser-level ws connection (≤1 Allow/launch); real logged-in profile is primary, JevVoice-owned profile = zero-dialog option |
+| D6 | 2026-10-19 | PROGRAM | Permissions: all grants ONCE during onboarding, no recurring prompts (user directive) — applies to TCC, Chrome consent, Sky per-app elicitations |
+| D7 | 2026-10-19 | P2c | Codex app-server + Sky CU host PROMOTED (console session) as **TC lane** with p50 ≤30 s budget; client owns per-app elicitation policy; locked/background sessions → jevbench verification |
+| D8 | 2026-10-19 | PROGRAM | Eye tracking adopts the **visionOS input model**: gaze = targeting only (hover-highlight + steady dot), selection via separate channel (voice/click), deciders get resolved-target identity not raw coords, dwell accessibility-only (user directive: "copy Apple") |
