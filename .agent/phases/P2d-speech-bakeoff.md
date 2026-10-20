@@ -257,7 +257,7 @@ default. Current product decision: **HOLD, no production ASR selected**.
       audio; WER/latency/RAM instrumentation; dry-run on library clips
 - [x] M3 runs + report: corpus × engines × iterations, partials
       diagnosis, REPORT.md + verdict; Surprises filled
-- [ ] M4 acceptance + judge + commit
+- [x] M4 acceptance + judge + commit
 
 ## Surprises & findings (fill during execution)
 
@@ -302,7 +302,8 @@ default. Current product decision: **HOLD, no production ASR selected**.
 ## Outcomes & Retrospective
 
 G4 independent review PASS (agent b827626b, including verifier-risk
-recheck); G7 milestone commit is next. Run 20261020T034959348218Z produced 162 scored release
+recheck); milestone commit 425bba6 landed on ship/v1-p2d. Acceptance
+and handoff record G7 closure. Run 20261020T034959348218Z produced 162 scored release
 rows plus 3 excluded warm-ups: 15 confirmed commands and 3 real library
 clips, 3 repetitions, 3 variants. All engine processes exited 0 and were
 reaped; all 15 source WAV hashes remained unchanged. Independent Python
@@ -357,6 +358,7 @@ is results/G4-review.md. Unverified product/resource limitations remain.
   observed up to 600.2 MiB. Shared Apple ASR inventory = 162235114 bytes,
   exclusive en_US footprint unknown. Recheck steady combined app+tracker
   resources before certifying RAM/disk ratios or packaging bars.
-- **Gate state**: M1-M3 complete; G4 independent judge PASS including
-  attribution-risk recheck; G7 authorized milestone commit is next.
-  No production files changed.
+- **Gate state**: M1-M4 complete as a measured SPIKE with an
+  accuracy-blocked product conclusion; G4 independent judge PASS
+  including attribution-risk recheck; G7 milestone 425bba6 committed.
+  Acceptance 8/8 records the relayed verdict. No production files changed.

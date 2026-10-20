@@ -564,3 +564,23 @@ still pending. Next: stage only explicit owned file paths, milestone
 commit, then evidence/acceptance handoff commit. No production source
 changes or audio staging. User's 160-section non-owned baseline stays
 unchanged. Do not confuse spike acceptance with approval of an ASR.
+
+## 2026-10-19 — P2d G7 milestone committed; acceptance handoff
+
+After final independent PASS and checks, committed 425bba6 on
+ship/v1-p2d: 58 explicit owned file paths, no production sources,
+no audio/build caches/credentials. G4 acceptance 1-7 relayed from
+judge b827626b; G7 milestone evidence now completes 8/8.
+This follow-up acceptance/handoff commit records final phase closure.
+User's non-owned baseline remains intact; no push or merge requested.
+
+P2d is accepted as a benchmark SPIKE, NOT a production ASR choice.
+Current product decision remains HOLD: do not promote the speed-only
+Apple candidate until meaningful entity/intent errors are addressed
+and checked on previously unseen/confusable cases. No claim of zero
+possible recognition mistakes, no forced correction or always-ask
+shortcut. The GitHub->GateHub error is not fixed by this milestone.
+
+P3 inherits the accuracy-first gate, turn-tagged local transcript
+display fix, one-brain dispatch, real Fn/microphone validation, and
+measured clarification burden. No next-phase implementation started.

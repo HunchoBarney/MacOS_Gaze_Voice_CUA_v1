@@ -7,6 +7,8 @@ known action-changing errors block promotion, regardless of speed.
 First-partial target misses, accuracy errors and resource attribution
 gaps are explicit in `results/REPORT.md`. Independent G4 review passed
 (including the verifier hardening recheck); no production ASR changed.
+Milestone: `425bba6` on `ship/v1-p2d`. Spike acceptance does not approve
+an ASR default or claim the accuracy error is fixed.
 
 ## Run The Comparison
 
