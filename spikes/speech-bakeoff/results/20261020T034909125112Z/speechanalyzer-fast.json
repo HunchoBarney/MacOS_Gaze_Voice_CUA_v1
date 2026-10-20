@@ -1,0 +1,180 @@
+{
+  "partials_probe" : [
+
+  ],
+  "probe" : {
+    "build" : "release",
+    "date" : "2026-10-20T03:49:09Z",
+    "engine" : "speechanalyzer-fast",
+    "fluidaudio_pin" : "0.17.5",
+    "microphone_authorization" : "3",
+    "network" : "local assets only; no downloads or SFSpeechRecognizer fallback; XPC network activity not independently observed",
+    "os" : "Version 26.2 (Build 25C56)",
+    "pid" : "79830",
+    "schema" : "2",
+    "speech_authorization" : "0; not requested by this benchmark",
+    "timing" : "monotonic; scheduled end, 160 ms chunk availability"
+  },
+  "resources" : {
+    "speechanalyzer-fast" : {
+      "first_inference_ms" : 3442.325250029564,
+      "load_cold_ms" : 3193.3961669802666,
+      "note" : "fresh-process load with existing caches; RSS excludes system\/XPC services",
+      "rss_baseline_mb" : 14.84375,
+      "rss_load_peak_mb" : 18.40625,
+      "rss_peak_mb" : 19.734375,
+      "rss_transcribe_peak_mb" : 19.734375,
+      "warm_reuse_ms" : 0.0007500052452087402
+    }
+  },
+  "rows" : [
+    {
+      "clip" : "p01",
+      "engine" : "speechanalyzer-fast",
+      "eou_kind" : "last finalized segment; NOT an EOU detector",
+      "eou_ms" : 3439.73412501812,
+      "events" : [
+        {
+          "audio_ms" : 2240,
+          "t_ms" : 2336.4698330163956,
+          "text" : "Read",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 2240,
+          "t_ms" : 2337.177583038807,
+          "text" : "Read my",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 2240,
+          "t_ms" : 2337.247375011444,
+          "text" : "Read my latest",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 3040,
+          "t_ms" : 3101.2416250109673,
+          "text" : "Read my latest email",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 3360,
+          "t_ms" : 3396.5453749895096,
+          "text" : "Read my latest email.",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 3360,
+          "t_ms" : 3439.73412501812,
+          "text" : "Read my latest email.",
+          "type" : "segment_final"
+        },
+        {
+          "audio_ms" : 3360,
+          "t_ms" : 3442.321624994278,
+          "text" : "Read my latest email.",
+          "type" : "final"
+        }
+      ],
+      "feed_lag_ms" : 10.459666013717651,
+      "final_ms_after_audio_end" : 82.3252500295639,
+      "first_partial_after_onset_ms" : 2136.4698330163956,
+      "first_partial_ms" : 2336.4698330163956,
+      "input_duration_ms" : 3360,
+      "iter" : -1,
+      "kind" : "clip",
+      "last_partial_ms" : 3396.5453749895096,
+      "partial_count" : 5,
+      "partial_flicker" : 4.25,
+      "prepare_ms" : 31.023375034332275,
+      "reference" : "read my latest email",
+      "reference_words" : 4,
+      "rss_load_mb" : 18.40625,
+      "rss_transcribe_mb" : 19.734375,
+      "source_sha256" : "615880aa1f302c4f9eea70374195b2f11c41141c5e309a430c6eae4caa1dc4dc",
+      "status" : "ok",
+      "transcript_final" : "Read my latest email.",
+      "trim_end_ms" : 4400,
+      "trim_start_ms" : 1040,
+      "variant" : "volatile+fastResults",
+      "wall_ms" : 3442.325250029564,
+      "wer_final" : 0,
+      "word_edits" : 0
+    },
+    {
+      "clip" : "p01",
+      "engine" : "speechanalyzer-fast",
+      "eou_kind" : "last finalized segment; NOT an EOU detector",
+      "eou_ms" : 3407.744083046913,
+      "events" : [
+        {
+          "audio_ms" : 2080,
+          "t_ms" : 2149.2527920007706,
+          "text" : "Read",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 2080,
+          "t_ms" : 2149.3719580173492,
+          "text" : "Read my",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 2080,
+          "t_ms" : 2149.4091670513153,
+          "text" : "Read my latest",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 3040,
+          "t_ms" : 3066.7822920084,
+          "text" : "Read my latest email",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 3360,
+          "t_ms" : 3383.4654170274734,
+          "text" : "Read my latest email.",
+          "type" : "partial"
+        },
+        {
+          "audio_ms" : 3360,
+          "t_ms" : 3407.744083046913,
+          "text" : "Read my latest email.",
+          "type" : "segment_final"
+        },
+        {
+          "audio_ms" : 3360,
+          "t_ms" : 3413.5621670484543,
+          "text" : "Read my latest email.",
+          "type" : "final"
+        }
+      ],
+      "feed_lag_ms" : 10.705125033855438,
+      "final_ms_after_audio_end" : 53.57187503576279,
+      "first_partial_after_onset_ms" : 1949.2527920007706,
+      "first_partial_ms" : 2149.2527920007706,
+      "input_duration_ms" : 3360,
+      "iter" : 0,
+      "kind" : "clip",
+      "last_partial_ms" : 3383.4654170274734,
+      "partial_count" : 5,
+      "partial_flicker" : 4.25,
+      "prepare_ms" : 32.669209003448486,
+      "reference" : "read my latest email",
+      "reference_words" : 4,
+      "rss_load_mb" : 18.40625,
+      "rss_transcribe_mb" : 16.890625,
+      "source_sha256" : "615880aa1f302c4f9eea70374195b2f11c41141c5e309a430c6eae4caa1dc4dc",
+      "status" : "ok",
+      "transcript_final" : "Read my latest email.",
+      "trim_end_ms" : 4400,
+      "trim_start_ms" : 1040,
+      "variant" : "volatile+fastResults",
+      "wall_ms" : 3413.571875035763,
+      "wer_final" : 0,
+      "word_edits" : 0
+    }
+  ]
+}

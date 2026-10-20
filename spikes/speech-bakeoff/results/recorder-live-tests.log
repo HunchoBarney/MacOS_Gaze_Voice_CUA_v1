@@ -1,0 +1,63 @@
+Waiting for the Jarvis desktop test lock…
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Compiling bakeoff Bakeoff.swift
+[4/7] Emitting module bakeoff
+[4/8] Write Objects.LinkFileList
+[5/8] Linking bakeoff
+[6/8] Applying bakeoff
+[7/9] Write Objects.LinkFileList
+[8/9] Linking speech-bakeoffPackageTests
+Build complete! (11.69s)
+Test Suite 'All tests' started at 2026-10-19 20:13:03.080.
+Test Suite 'All tests' passed at 2026-10-19 20:13:03.083.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.003) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite RecorderTests started.
+◇ Test durationGuardRejectsTheObservedPointOneSecondFiles() started.
+✔ Test durationGuardRejectsTheObservedPointOneSecondFiles() passed after 0.001 seconds.
+◇ Test converterEndOfStreamBugReproducesWithRealSpeech() started.
+Negative control: old tap converted 6s of real speech into 0.0853125s
+✔ Test converterEndOfStreamBugReproducesWithRealSpeech() passed after 0.029 seconds.
+◇ Test completedFileRoundTripPreservesRealSpeechDuration() started.
+✔ Test completedFileRoundTripPreservesRealSpeechDuration() passed after 0.082 seconds.
+◇ Test legacyManifestRemainsReadableAndIsNotSilentlyReset() started.
+✔ Test legacyManifestRemainsReadableAndIsNotSilentlyReset() passed after 0.001 seconds.
+◇ Test manifestWriteErrorsPropagateAndCorruptionIsNotIgnored() started.
+✔ Test manifestWriteErrorsPropagateAndCorruptionIsNotIgnored() passed after 0.010 seconds.
+◇ Test longerPromptsGetEnoughRecordingTime() started.
+✔ Test longerPromptsGetEnoughRecordingTime() passed after 0.001 seconds.
+◇ Test nativeMicCapturesFullFilesAcrossThreeStarts() started.
+LIVE capture 1: 2.0s, peak -39.25938629455523dB, AE478867-3B92-4E80-A329-14A44FAB5C71.wav
+LIVE capture 2: 2.0s, peak -40.370501974708986dB, 09D27718-EBD2-4CEB-9440-B7BD92E976CB.wav
+LIVE capture 3: 2.0s, peak -37.379732328622886dB, B5845D03-B6EB-48F1-82AE-A2B8F5027C33.wav
+✔ Test nativeMicCapturesFullFilesAcrossThreeStarts() passed after 7.715 seconds.
+✔ Suite RecorderTests passed after 7.840 seconds.
+✔ Test run with 7 tests in 1 suite passed after 7.840 seconds.
+PASS clean error: record
+PASS clean error: record --only
+PASS clean error: record --bad
+PASS clean error: mic-check --bad
+Recording 1 remaining phrase(s). Enter starts; recording stops automatically.
+Speak only after REC appears. Enter keeps the clip; p plays it; r retries; q saves progress and quits.
+
+p01 [inbox] - 6 second window
+  Say: "read my latest email"
+  Enter when ready, or q to quit: 
+  REC 0/6s  [######]
+
+
+
+  REC 1/6s  [#####]
+  REC 2/6s  [#####]
+  REC 3/6s  [#####]
+  REC 4/6s  [######]
+  REC 5/6s  [####]
+  REC 6/6s  [####]
+  Saved 6.00s; peak -38 dB; ok.
+  Finished the phrase correctly? Enter=keep, p=listen, r=retry, q=quit: 
+PASS PTY capture: full 6s WAV, buffered keys ignored, quit leaves original files and manifest unchanged
+verification lane green

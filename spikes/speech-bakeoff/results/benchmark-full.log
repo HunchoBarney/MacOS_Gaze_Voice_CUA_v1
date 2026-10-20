@@ -1,0 +1,8 @@
+Waiting for the Jarvis desktop test lock…
+START speechanalyzer
+END speechanalyzer exit 0 rows 55
+START parakeet
+END parakeet exit 0 rows 110
+START speechanalyzer-fast
+END speechanalyzer-fast exit 0 rows 165
+RESULT /Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/speech-bakeoff/results/20261020T034959348218Z

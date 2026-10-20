@@ -1,0 +1,5 @@
+.build/
+__pycache__/
+corpus/recordings/
+corpus/library/*.wav
+*.pcm

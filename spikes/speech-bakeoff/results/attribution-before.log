@@ -1,0 +1,37 @@
+F.F..FF..
+======================================================================
+FAIL: test_changed_probe_event_is_rejected (test_metrics.ReportTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/speech-bakeoff/Tests/test_metrics.py", line 30, in test_changed_probe_event_is_rejected
+    VERIFY.verify_attribution(data)
+AssertionError: AssertionError not raised
+
+======================================================================
+FAIL: test_duplicate_probe_cannot_replace_a_missing_timeline (test_metrics.ReportTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/speech-bakeoff/Tests/test_metrics.py", line 36, in test_duplicate_probe_cannot_replace_a_missing_timeline
+    VERIFY.verify_attribution(data)
+AssertionError: AssertionError not raised
+
+======================================================================
+FAIL: test_missing_process_record_is_rejected (test_metrics.ReportTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/speech-bakeoff/Tests/test_metrics.py", line 24, in test_missing_process_record_is_rejected
+    VERIFY.verify_attribution(data)
+AssertionError: AssertionError not raised
+
+======================================================================
+FAIL: test_process_pid_must_match_engine_probe (test_metrics.ReportTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/JarvisMacOSv1-empryo-staging-20260928/spikes/speech-bakeoff/Tests/test_metrics.py", line 43, in test_process_pid_must_match_engine_probe
+    VERIFY.verify_attribution(data)
+AssertionError: AssertionError not raised
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.056s
+
+FAILED (failures=4)

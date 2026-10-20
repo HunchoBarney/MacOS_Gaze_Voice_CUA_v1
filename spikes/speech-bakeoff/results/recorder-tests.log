@@ -1,0 +1,47 @@
+Waiting for the Jarvis desktop test lock…
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[1/7] Write swift-version--58304C5D6DBC2206.txt
+[3/10] Compiling bakeoff Bakeoff.swift
+[4/10] Compiling bakeoff Audio.swift
+[5/10] Emitting module bakeoff
+[6/15] Compiling bakeoff Parakeet.swift
+[7/15] Compiling bakeoff MicCapture.swift
+[8/15] Compiling bakeoff Record.swift
+[9/15] Compiling bakeoff Run.swift
+[10/15] Compiling bakeoff Speech.swift
+[10/15] Write Objects.LinkFileList
+[11/15] Linking bakeoff
+[12/15] Applying bakeoff
+[14/17] Compiling RecorderTests RecorderTests.swift
+[15/17] Emitting module RecorderTests
+[16/19] Compiling speech_bakeoffPackageTests runner.swift
+[17/19] Emitting module speech_bakeoffPackageTests
+[17/19] Write Objects.LinkFileList
+[18/19] Linking speech-bakeoffPackageTests
+Build complete! (31.31s)
+Test Suite 'All tests' started at 2026-10-19 20:10:49.955.
+Test Suite 'All tests' passed at 2026-10-19 20:10:49.964.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.009) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite RecorderTests started.
+◇ Test durationGuardRejectsTheObservedPointOneSecondFiles() started.
+✔ Test durationGuardRejectsTheObservedPointOneSecondFiles() passed after 0.003 seconds.
+◇ Test converterEndOfStreamBugReproducesWithRealSpeech() started.
+Negative control: old tap converted 6s of real speech into 0.0853125s
+✔ Test converterEndOfStreamBugReproducesWithRealSpeech() passed after 0.034 seconds.
+◇ Test completedFileRoundTripPreservesRealSpeechDuration() started.
+✔ Test completedFileRoundTripPreservesRealSpeechDuration() passed after 0.104 seconds.
+◇ Test legacyManifestRemainsReadableAndIsNotSilentlyReset() started.
+✔ Test legacyManifestRemainsReadableAndIsNotSilentlyReset() passed after 0.001 seconds.
+◇ Test manifestWriteErrorsPropagateAndCorruptionIsNotIgnored() started.
+✔ Test manifestWriteErrorsPropagateAndCorruptionIsNotIgnored() passed after 0.014 seconds.
+◇ Test longerPromptsGetEnoughRecordingTime() started.
+✔ Test longerPromptsGetEnoughRecordingTime() passed after 0.001 seconds.
+➜ Test nativeMicCapturesFullFilesAcrossThreeStarts() skipped.
+✔ Suite RecorderTests passed after 0.161 seconds.
+✔ Test run with 7 tests in 1 suite passed after 0.163 seconds.
+verification lane green

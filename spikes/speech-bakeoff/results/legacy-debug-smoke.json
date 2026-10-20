@@ -1,0 +1,78 @@
+{
+  "probe" : {
+    "date" : "2026-10-20T00:43:29Z",
+    "speech_locale" : "en_US supported=true installed=true",
+    "parakeet_models_root" : "\/Users\/karanvirkang\/Library\/Application Support\/JevVoice\/Models",
+    "fluidaudio_pin" : "0.17.5",
+    "os" : "Version 26.2 (Build 25C56)",
+    "parakeet_models_bytes" : "1385967076"
+  },
+  "partials_probe" : [
+
+  ],
+  "resources" : {
+    "parakeet" : {
+      "disk_bytes" : 1385967076,
+      "rss_peak_mb" : 437.234375,
+      "load_cold_ms" : 151455.0712890625,
+      "rss_baseline_mb" : 10.171875
+    },
+    "speechanalyzer" : {
+      "note" : "en_US supported=true installed=true",
+      "rss_peak_mb" : 20.5625,
+      "load_cold_ms" : 3831.55810546875,
+      "rss_baseline_mb" : 10.203125
+    }
+  },
+  "rows" : [
+    {
+      "transcript_final" : "Diff means comparing what is net new. So what is the difference between the old code and the net new code and analyzing if there's any bugs or problems in that difference.",
+      "partial_count" : 39,
+      "kind" : "clip",
+      "clip" : "lib03",
+      "last_partial_ms" : 43323.93505859375,
+      "status" : "ok",
+      "variant" : "eou160+ultra",
+      "wall_ms" : 46094.232177734375,
+      "tail_contains" : true,
+      "final_ms_after_audio_end" : 2410.221923828125,
+      "iter" : 0,
+      "engine" : "parakeet",
+      "partial_flicker" : 4.2631578947368425,
+      "first_partial_ms" : 29100.697265625
+    },
+    {
+      "transcript_final" : "So what is the difference between the old code and the neck new code and analyzing if there's any bugs or problems in that difference?",
+      "eou_ms" : 17258.18115234375,
+      "partial_count" : 43,
+      "kind" : "clip",
+      "clip" : "lib03",
+      "last_partial_ms" : 16972.447021484375,
+      "status" : "ok",
+      "variant" : "progressiveTranscription",
+      "wall_ms" : 17278.02099609375,
+      "tail_contains" : true,
+      "final_ms_after_audio_end" : 335.052001953125,
+      "iter" : 0,
+      "engine" : "speechanalyzer",
+      "partial_flicker" : 4.904761904761905,
+      "first_partial_ms" : 5532.0302734375
+    },
+    {
+      "transcript_final" : "Diff means comparing what is net new. So what is the difference between the old code and the net new code and analyzing if there's any bugs or problems in that difference.",
+      "partial_count" : 39,
+      "kind" : "clip",
+      "clip" : "lib03",
+      "last_partial_ms" : 19080.564208984375,
+      "status" : "ok",
+      "variant" : "eou160+ultra",
+      "wall_ms" : 20733.940185546875,
+      "tail_contains" : true,
+      "final_ms_after_audio_end" : 1376.14404296875,
+      "iter" : 0,
+      "engine" : "parakeet",
+      "partial_flicker" : 4.2631578947368425,
+      "first_partial_ms" : 2477.72314453125
+    }
+  ]
+}

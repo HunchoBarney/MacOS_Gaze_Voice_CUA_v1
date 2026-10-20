@@ -1,0 +1,20 @@
+{
+  "note": "Hero-job command utterances. User reads each prompt once for `bakeoff record`; ground truth = prompt text. Shaped after the four hero jobs: inbox/messages, browser, gaze+command, calendar/reminders/notes.",
+  "phrases": [
+    { "id": "p01", "job": "inbox",    "prompt": "read my latest email" },
+    { "id": "p02", "job": "inbox",    "prompt": "reply to Sarah saying I'll be there in ten minutes" },
+    { "id": "p03", "job": "inbox",    "prompt": "how many unread messages do I have" },
+    { "id": "p04", "job": "inbox",    "prompt": "send a slack message to the team channel saying standup is moved to eleven" },
+    { "id": "p05", "job": "browser",  "prompt": "open github and check my notifications" },
+    { "id": "p06", "job": "browser",  "prompt": "search for flights to new york on friday" },
+    { "id": "p07", "job": "browser",  "prompt": "close this tab" },
+    { "id": "p08", "job": "browser",  "prompt": "summarize this page for me" },
+    { "id": "p09", "job": "gaze",     "prompt": "open this" },
+    { "id": "p10", "job": "gaze",     "prompt": "click the blue button" },
+    { "id": "p11", "job": "gaze",     "prompt": "scroll down" },
+    { "id": "p12", "job": "calendar", "prompt": "what time is my next meeting" },
+    { "id": "p13", "job": "calendar", "prompt": "add lunch with the investors tomorrow at noon" },
+    { "id": "p14", "job": "reminders","prompt": "remind me to call the dentist at three" },
+    { "id": "p15", "job": "notes",    "prompt": "note: follow up with the design review on monday" }
+  ]
+}

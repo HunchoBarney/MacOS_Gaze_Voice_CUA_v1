@@ -378,3 +378,189 @@ mic capture, eou_ms per-engine mapping, mixed-outcome verdict path,
 corpus-power caveat, rss_* field check, FluidAudio fetch fallback).
 Corpus = recorded utterances per user choice (option b). Branch
 ship/v1-p2d. Implementing M1-M3 inline; G4 judge still required.
+
+## 2026-10-19 — P2d recorder repair: reproduced converter EOS truncation
+
+User reported 0/15 usable clips, then the fixed-window replacement was
+still glitchy. The earlier buffered-Enter diagnosis was not established.
+Negative control with real FluidAudio fixture speech proves the actual
+tap bug: a reused AVAudioConverter receives endOfStream per microphone
+buffer; 6s of real speech becomes 0.0853125s of output. This matches the
+original 15 files, all 0.1s. Their files and manifest have been preserved.
+
+Replaced the tap with AVAudioRecorder native file capture followed by
+offline 16 kHz conversion. Check native and normalized file durations,
+not a timer. No unchecked Sendable capture box. Explicit permission
+preflight, bounded capture, longer windows for long prompts, line-based
+meter, interactive-terminal requirement, flushed keys during capture,
+speaker confirmation/playback/retry/quit. Resume skips accepted clips;
+retakes use UUID filenames, legacy manifest peak is optional, decode
+errors propagate, and writes are atomic. Stop/quit does not discard
+previously accepted progress. Stopped only the stale spike recorder
+PID 76917 before testing to avoid competing microphone owners.
+
+Verification runner gained speech scope (ExecPlan owned paths amended).
+Command: JARVIS_RECORDER_LIVE=1 python3 scripts/with-desktop-lock.py
+scripts/verification-lane.sh speech. Evidence:
+spikes/speech-bakeoff/results/recorder-live-tests.log.
+7 Swift Testing checks pass, including three real 2.00s mic captures;
+real-file resample round-trip; legacy manifest read; manifest error
+handling; prompt-length windows; observed-short-file rejection and the
+EOS negative control. PTY front-door test also passes: 6.00s actual WAV,
+extra buffered Enters cannot truncate/accept it, four bad CLI invocations
+exit 1 cleanly, quit preserves original manifest/recordings bytewise.
+The PTY run starts from a temporary cwd and uses the rebuilt debug CLI.
+The non-live run is in results/recorder-tests.log.
+
+Microphone test artifacts (native and normalized WAVs) remain local in
+ignored corpus/recordings/. No audio uploaded/staged; no commits made.
+README documents single-phrase verification first:
+./spikes/speech-bakeoff/.build/debug/bakeoff record --only p01
+Then record (without --only) resumes remaining clips. The human still
+needs to speak/confirm the corpus; these diagnostic captures are NOT
+speech/WER benchmark evidence. P2d remains incomplete, 0/8 acceptance,
+no engine-selection verdict or app-pipeline fix proven by this repair.
+
+## 2026-10-19 — P2d corpus complete; corrected release measurement running
+
+User finished 15/15. Independently verified all entries are ok and
+speaker-confirmed, all source files are 16 kHz mono, durations 6-10s
+(102s total). Original WAVs are unchanged and remain ignored.
+
+Pre-measurement review found invalid smoke-harness assumptions:
+audio-end moved after model processing (hides backlog); Apple retained
+only last final segment; median per-command WER hides long-command
+errors; empty hypotheses could trap WER; first-partial callbacks were
+timestamped after an actor hop; client RSS was compared without Apple's
+XPC memory. Corrected these and documented the method BEFORE measuring
+the recorded corpus. Old debug rows archived as legacy-debug-smoke.json.
+
+Benchmark now uses monotonic scheduled-end timing, 160ms end-of-chunk
+availability, common energy-delimited input without changing WAVs,
+source SHA-256, complete segment assembly, corpus-weighted word edits,
+and synchronous event tracing. Assets load only from local paths;
+missing Apple assets fail rather than download. New variant adds
+Apple volatileResults+fastResults, same model locale. Model resource
+sampling separates load and inference; parent observes shared XPC RSS
+and inventory bytes, with attribution gaps explicit.
+
+Release test initially invoked executable CLI with Swift Testing args
+instead of running the suite. Split thin CLI and testable BakeoffCore;
+release verification now passes: 10 executed Swift checks (plus 1
+explicitly skipped microphone check), 4 Python metadata guards.
+Command: scripts/verification-lane.sh speech-release via desktop lock.
+Log: spikes/speech-bakeoff/results/benchmark-release-tests.log.
+Baseline scope check: 0 new non-owned paths / 0 changed non-owned
+diff sections (160 compared). No production files changed.
+
+Smoke run 20261020T034909125112Z: Apple fast-results correctly
+transcribed p01; warm simulated final 53.57ms, first partial 2149ms
+(the 300ms target is NOT met by this row). Not a winner verdict.
+Full run 20261020T034959348218Z started under desktop lock:
+python3 spikes/speech-bakeoff/bench.py. Parent shell 92f8ee, log
+results/benchmark-full.log; engine JSONs checkpoint after each row.
+Expected matrix: 162 scored rows + 3 first-inference warm-ups, covering
+15 recorded commands + 3 library clips, 3 iterations, 3 variants.
+Do not start a second concurrent benchmark if resuming.
+
+Read-only app-path inspection found a concrete display-wiring gap:
+main.swift:599-613 binds local partials only to LocalCommandRouter (or
+clears the callbacks in STT-only mode); the displayed partial event
+instead comes from remote transcriptDelta in RealtimeVoiceLane:716-720.
+P3 must connect turn-tagged local partials into VoiceController's
+display path, independently of command speculation. Physical Fn
+integration, model-ready drops and turn races remain unproven here.
+
+Next after the run: report.py + --check, independent verify.py,
+verify_scope.py; fill measured handoff/evidence. Fresh-context G4 is
+still pending; do not flip acceptance without a judge. No subagents
+or commits have been authorized in this continuation.
+
+## 2026-10-19 — P2d M1-M3 measured and verified; G4/G7 pending
+
+Full run 20261020T034959348218Z finished normally: 162/162 scored
+release rows ok plus 3 excluded warm-ups. Three engine processes
+exited 0 and were reaped (no benchmark process remains).
+Command results (45 rows/variant; 97 reference words per repetition):
+
+- standard SpeechAnalyzer: final p50/p95 209.5/1025.6ms, WER 5.15%,
+  first-partial p50 2631ms.
+- Parakeet EOU+Ultra: final p50/p95 150.0/389.1ms, WER 4.12%,
+  first-partial p50 1831ms.
+- SpeechAnalyzer fast-results: final p50/p95 84.4/213.1ms, WER 5.15%,
+  first-partial p50 2119ms.
+
+Directional pick = speechanalyzer-fast by the documented priority and
+engineering tolerances. Not a product/accuracy promotion. All engines
+missed the first-partial 300ms target (0/45 each); fast final <=200ms
+41/45. Timings are energy-delimited file replay (onset proxy, 200ms
+padding), not physical Fn times. Early debug smoke was not a fair
+release comparison. Apple GitHub->GateHub is a meaningful entity
+error; literal WER also counts numeral/hyphen differences. Accuracy
+audit lists exact error pairs. ContextualStrings vocabulary is only
+a prospective P3 experiment, not measured or secretly tuned.
+
+Resource gap stays explicit: fast client peak 20.9 MiB excludes
+localspeechrecognition (observed shared peak 600.2 MiB). Parakeet
+client load peak 447.6 MiB and model bytes 856362338. Shared Apple ASR
+inventory bytes 162235114, exclusive locale footprint unknown.
+Do not certify total RAM/disk ratios from client RSS alone.
+
+Verification:
+- CLI `bakeoff report`, report.py --check, verify.py all PASS;
+  independent recomputation covers WER, fixed-end timing, coverage,
+  source/binary hashes and all 15 original audio hashes.
+- Final serialized release lane with JARVIS_RECORDER_LIVE=1 PASS:
+  11 Swift tests + 4 Python guards, 3 real 2s microphone restarts,
+  PTY front-door 6s capture, buffered Enter protection, clean CLI
+  errors and quit preserving all existing WAVs/manifest bytewise.
+  Log: results/benchmark-final-tests.log.
+- verify_hygiene.py PASS (no tracked audio or credential-shaped strings);
+  verify_scope.py PASS: 0 new non-owned paths / 0 changed non-owned
+  diff sections vs 160-section baseline. Scoped diff --check clean.
+
+REPORT.md, README, phase Decision Log/Outcomes/Handoff finalized as
+review-ready. Acceptance evidence filled explicitly UNJUDGED; passes
+remain false (0/8), schema valid. G4 fresh-context judge has NOT run;
+G7 commit NOT made or staged. Need user go-ahead for subagent review
+and milestone commit; don't call the whole phase accepted yet.
+No production files edited, no audio uploaded or committed. Next
+implementation after acceptance: P3 local display wiring + one-brain,
+with real Fn/mic validation and entity/intent correctness gates.
+
+## 2026-10-19 — P2d final G4 PASS, accuracy hold, G7 authorized
+
+User corrected the speed-first recommendation: known accuracy errors
+are unacceptable UX. Added explicit POST-RUN product gate rather than
+rewriting the experiment's predeclared rule or raw data. Historical
+performance-only pick remains; current product decision is HOLD,
+no production ASR selected. Known action-changing entity/slot errors
+block promotion. Future correction must use existing + unseen
+confusables, no gold-answer forcing/blind renaming, and count real
+clarification burden. No guarantee of perfect ASR, no accuracy fix
+or production switch claimed. Accuracy-policy regression fails before
+and passes after (results/accuracy-policy-before.log / after.log).
+
+User explicitly authorized independent judge, fixes, and commit only
+after PASS. Fresh-context jarvis-judge b827626b returned PASS on
+P2d-1..7 with one non-blocking verifier-attribution risk. Hardened
+verify.py to require exactly one successful/reaped process per engine,
+unique matching PIDs, and exact key/event/input-duration matching for
+every partial-probe timeline. Four tampered-real-metadata regression
+cases fail before and pass after; results/attribution-before.log and
+attribution-after.log. Latest serialized release lane: 10 non-live
+Swift checks pass, 1 live test skipped, 9 Python guards pass; earlier
+11-check live run retained. verify.py, report.py --check, scope and
+hygiene all pass; measured source/binary/audio hashes unchanged.
+
+Same independent judge verified the delta and returned final PASS,
+explicitly resolving risk 1. Remaining resource/network/physical-Fn
+limitations are disclosed, not blocking this SPIKE and not production
+readiness. Captures in results/G4-review-initial.md (summary) and
+results/G4-review.md (final response capture).
+
+Orchestrator relayed judge verdicts: acceptance 7/8, G7 commit meta
+still pending. Next: stage only explicit owned file paths, milestone
+commit, then evidence/acceptance handoff commit. No production source
+changes or audio staging. User's 160-section non-owned baseline stays
+unchanged. Do not confuse spike acceptance with approval of an ASR.

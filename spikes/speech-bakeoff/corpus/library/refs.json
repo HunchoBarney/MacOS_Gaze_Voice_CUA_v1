@@ -1,0 +1,20 @@
+{
+  "note": "Held-out library clips copied from FluidAudio's own test fixtures (real speech, 17-21s, longer-form). No full ground-truth transcripts exist in the FluidAudio repo — its tests assert only on tail phrases, so these clips are LATENCY + tail-phrase checks, not WER. Wavs copied by `bakeoff setup-corpus`, gitignored.",
+  "clips": [
+    {
+      "id": "lib01",
+      "source": "FluidAudio Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/Fixtures/01-validation-request-21.4s.wav",
+      "tail": "help them out"
+    },
+    {
+      "id": "lib02",
+      "source": "FluidAudio Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/Fixtures/02-release-readiness-19.8s.wav",
+      "tail": "cutting a release"
+    },
+    {
+      "id": "lib03",
+      "source": "FluidAudio Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/Fixtures/03-diff-explanation-16.9s.wav",
+      "tail": "in that difference"
+    }
+  ]
+}
