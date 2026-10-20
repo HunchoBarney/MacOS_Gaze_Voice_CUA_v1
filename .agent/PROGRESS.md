@@ -368,3 +368,13 @@ Two user-directed plan updates committed as program docs:
 
 Decision Log index backfilled D4–D8 (P2a/P2b verdicts, permissions-
 once, TC lane, visionOS model). Next: P2d (SpeechAnalyzer vs Parakeet).
+
+## 2026-10-19 — P2d plan drafted + inline G1 review (judge subagent unavailable)
+
+Drafted .agent/phases/P2d-speech-bakeoff.md + acceptance P2d.json (8
+criteria). G1 judge subagent hung again (same as P2c) — performed the
+plan review inline: 6 findings, all fixed (TCC fallback for bare-CLI
+mic capture, eou_ms per-engine mapping, mixed-outcome verdict path,
+corpus-power caveat, rss_* field check, FluidAudio fetch fallback).
+Corpus = recorded utterances per user choice (option b). Branch
+ship/v1-p2d. Implementing M1-M3 inline; G4 judge still required.

@@ -1,0 +1,69 @@
+{
+  "phase": "P2d",
+  "criteria": [
+    {
+      "id": "P2d-1",
+      "behavior": "spikes/speech-bakeoff/ is self-contained: standalone SwiftPM package, FluidAudio pinned EXACT 0.17.5 (same as app), no edits to app Package.swift/Sources/Tests/bench, .gitignore covers recorded audio, dirty-baseline captured at M1 before spike writes",
+      "check": "`ls spikes/speech-bakeoff` shows Package.swift + Sources + corpus/phrases.json + results/; `grep -n 'FluidAudio' spikes/speech-bakeoff/Package.swift` shows exact 0.17.5; `git diff HEAD -- Package.swift Package.resolved Sources Tests bench` empty; `cat spikes/speech-bakeoff/.gitignore` includes recordings+wav paths; results/dirty-baseline.txt exists with mtime <= earliest spike file; python3 one-liner diffs `git status --porcelain` + `git diff` vs baseline showing 0 NEW non-owned hunks",
+      "expected": "Standalone package, same pinned dep, zero production edits, audio untracked",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2d-2",
+      "behavior": "corpus = user-recorded utterances (option b): >=10 usable recorded clips each with ground-truth prompt text from corpus/phrases.json (>=15 phrases shaped around hero jobs), plus held-out library clips with reference texts; recording provenance (device, sample rate, timestamp) stored in manifest; user-voice wavs NOT committed",
+      "check": "`python3 -c \"import json,glob; m=json.load(open('spikes/speech-bakeoff/corpus/manifest.json')); print(len(m['recordings']), [r['status'] for r in m['recordings']].count('ok'))\"` shows >=10 ok; `git ls-files spikes/speech-bakeoff | grep -c 'wav$'` == 0; phrases.json has >=15 entries; library clips listed with reference_text fields",
+      "expected": "Real recorded corpus with ground truth; nothing voice-identifying in git",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2d-3",
+      "behavior": "both engines run IDENTICAL audio: every corpus clip produces a row per engine with first_partial_ms, last_partial_ms, eou_ms, final_ms_after_audio_end, partial_count, transcript_final, wer_final, status — from the same chunked-file feeding path; cold+warm load times recorded; >=3 warm iterations per clip; p50 computed",
+      "check": "`python3 -c \"import json; d=json.load(open('spikes/speech-bakeoff/results/results.json')); rows=[r for r in d['rows'] if r.get('kind')=='clip']; print(len(rows), sorted(set(r['engine'] for r in rows)), sorted(rows[0].keys()))\"` shows rows for both engines and fields incl. first_partial_ms/final_ms_after_audio_end/wer_final/rss_load_mb; meta records cold+warm load times; statuses honest (blocked_env allowed but labeled)",
+      "expected": "Symmetric rows for both engines with full latency+WER fields",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2d-4",
+      "behavior": "RAM + disk measured per engine: peak RSS delta for model load and for transcribe (mach/proc API), model bytes on disk per engine (Parakeet dir sizes; SpeechAnalyzer via its documented asset location or explicit 'not measurable' finding)",
+      "check": "`python3 -c \"import json; d=json.load(open('spikes/speech-bakeoff/results/results.json')); print(d.get('resources') or d.get('meta',{}).get('resources'))\"` shows per-engine rss_load/rss_transcribe/disk_bytes entries",
+      "expected": "Resource rows populated for both engines",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2d-5",
+      "behavior": "live-partials diagnosis answers engine-vs-pipeline: chunked simulation demonstrates whether each engine emits mid-utterance partials (timestamps relative to chunk timeline); the finding is labeled [verified]/[documented] and names where the P3 fix lives (engine config, app routing, or both)",
+      "check": "REPORT.md contains the diagnosis section with labeled claims; `python3 -c \"import json; d=json.load(open('spikes/speech-bakeoff/results/results.json')); print([r for r in d['rows'] if r.get('kind')=='partials_probe'])\"` non-empty with per-engine partial timelines",
+      "expected": "Labeled diagnosis naming the fix locus — no hand-waving",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2d-6",
+      "behavior": "REPORT.md carries the predeclared verdict: PICK <engine> / HYBRID (named roles) / INCONCLUSIVE (named blocker), with the latency/WER/RAM tables it was computed from; every verdict-relevant claim cites row data; bars referenced (first partial <=300ms target, final <=200ms ideal) with actuals — misses reported, not hidden",
+      "check": "verdict text in REPORT.md + phase Decision Log cites the rule + rows; recompute p50s from results.json rows matches report; `grep -n 'PICK\\|HYBRID\\|INCONCLUSIVE' spikes/speech-bakeoff/results/REPORT.md` hits",
+      "expected": "Verdict recorded with numbers against the declared rule",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2d-7",
+      "behavior": "hygiene: no secrets in spike files; SpeechAnalyzer server-fallback status recorded (local-first requirement); mic TCC + Speech authorization discoveries recorded; owned-paths check passes",
+      "check": "`grep -rnoE 'sk-[A-Za-z0-9]+|Bearer [A-Za-z0-9._-]+' spikes/speech-bakeoff` empty; results.json records speech authorization mode + whether server fallback was needed/disabled; `python3 scripts/check-owned-paths.py P2d` OK",
+      "expected": "No secrets; authorization + fallback facts recorded",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P2d-8",
+      "behavior": "fresh-context judge returns VERDICT: PASS; commits land on ship/v1-p2d containing only owned paths",
+      "check": "judge report; `git log --name-only --format=` on phase commits shows only owned paths",
+      "expected": "Judge PASS + clean commits",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}
