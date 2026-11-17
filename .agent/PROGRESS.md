@@ -12876,3 +12876,13 @@ jarvis-v1-agent, which is now the sole worktree on main@45865ef clean.
 Safety net: 5 git stashes hold every deleted worktree's uncommitted state
 (stash@{0} staging p2d, stash@{1-4} capy/jarvis trees) — recoverable via
 `git stash list`. C1 acceptance still OPEN: live G6 speech check pending.
+
+2026-11-17 — Repository maintenance, not a phase acceptance. Release builds
+are bound to the pushed tag, with a strict tracker check before signing and
+another on the extracted asset before publication. The CI entry point is
+`make test`; empty bench selections and zero-row reports now fail closed.
+Private replay inputs are external to Git, and the unused local EOU
+forwarder is removed. See RETENTION.md for observed candidate identities
+and retirement conditions. The isolated source run passed 1,488 Swift tests
+(29 skipped) and 27 P3 verifier tests; no tagged release, install, provider
+benchmark, physical qualification or acceptance change was performed.

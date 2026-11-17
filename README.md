@@ -38,7 +38,7 @@ speech/TTS; consult `Package.swift` before changing that dependency.
 
 ```sh
 make setup       # check the local toolchain; no credentials or downloads
-make test        # default suite; live checks are normally skipped
+make test        # CI lane: Swift + P3 evidence, tracker typecheck/Vitest, tooling
 make local       # daily driver: build → sign → install to ~/jarvis-local,
                  # relaunch, then wait for the tracker API's /ready
 make run         # alias for `make local`
@@ -49,8 +49,11 @@ make check-tracker   # report which tracker path a staged app resolves
 make dist        # package the bundle as a zip
 ```
 
-`make local` requires `node` (and `pnpm` via corepack) for the tracker
-checkout; `SKIP_TRACKER_DEPS=1` skips that when the tracker isn't wanted.
+`make test` and `make local` use Node (CI: 24.11.0) and Corepack to
+install the tracker dependencies pinned by the pnpm lockfile. Source tests
+don't download models or qualify a signed app. `SKIP_TRACKER_DEPS=1`
+skips tracker preparation only: `make local` still launches the app and
+requires HTTP 200 from the tracker's `/ready` endpoint.
 
 Computer control requires the exact pinned Cua runtime and compatible
 SDK/source contracts; an arbitrary installed driver is not interchangeable.
@@ -69,6 +72,16 @@ payload (built `dist/` + `node_modules`), warns and skips otherwise
 `make bundle-tracker` is the strict verified path and `make check-tracker`
 reports which resolution a staged app would use. Boot output lands in
 `~/Library/Application Support/JevVoice/tracker.log`.
+
+For P3 replay, restore the private index and audio under the ignored
+`.context/c1-local/p3-audio/`, or point `JARVIS_P3_RECORDINGS_ROOT` at
+an authorized external directory. The wrapper also accepts
+`--recordings-root PATH`. Replay requires the matching recorded release
+build; it's not a physical mic check. The interactive recorder still writes
+to its ignored phase-owned directory. Keep recordings and replay reports private.
+
+For signed candidate and rollback identities, see the
+[retention inventory](.agent/RETENTION.md).
 
 ## Use the app
 

@@ -16,14 +16,6 @@ final class CallbackCell<Value: Sendable>: Sendable {
     func call(_ value: Value) { get()?(value) }
 }
 
-final class VoidCallbackCell: Sendable {
-    private let storage: Mutex<(@Sendable () -> Void)?>
-    init(_ body: (@Sendable () -> Void)? = nil) { storage = Mutex(body) }
-    func set(_ body: (@Sendable () -> Void)?) { storage.withLock { $0 = body } }
-    func get() -> (@Sendable () -> Void)? { storage.withLock { $0 } }
-    func call() { get()?() }
-}
-
 /// Unstructured work may outlive a timeout (CoreML cannot always cancel);
 /// only the first completion can resume the caller or publish its result.
 private final class VoiceDeadlineCompletion<Value: Sendable>: Sendable {

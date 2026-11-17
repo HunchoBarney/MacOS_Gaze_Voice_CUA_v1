@@ -11,9 +11,7 @@ import XCTest
 final class RealtimeVoiceLaneTests: XCTestCase {
 
     private func recordedPCM() async throws -> Data {
-        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(".agent/results/P3/audio")
+        let directory = privateReplayInputs
         let manifest = directory.appendingPathComponent("manifest.json")
         guard FileManager.default.fileExists(atPath: manifest.path) else {
             throw XCTSkip("Private confirmed recording unavailable")

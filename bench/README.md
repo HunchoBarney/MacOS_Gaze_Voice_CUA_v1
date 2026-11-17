@@ -38,12 +38,17 @@ BENCH_SET=all bench/run-suite.sh        # both sets (inside jevbench)
 BENCH_STUB=1 bench/run-suite.sh         # stub backend, no app needed
 
 python3 bench/run.py --task calc.open --runs 1 --verbose
-python3 bench/run.py --tag browser --set local-safe
+python3 bench/run.py --tag app-launch --set local-safe
 python3 bench/run.py --dry-run          # reset+verify only, no injection
 python3 bench/report.py bench/results/results-<UTCdate>.jsonl
 ```
 
 ## What a real run needs
+
+An unmatched tag, human-only selection, or a filter excluded by `--set`
+exits 2 before credentials, reset scripts, or result files are touched.
+The report also rejects an input with no rows; diagnostic rows from a
+nonempty dry run remain reportable.
 
 - The app installed and running so the Cua daemon socket exists
   (`~/Library/Application Support/JevVoice/cua.socket`) — `make local`.

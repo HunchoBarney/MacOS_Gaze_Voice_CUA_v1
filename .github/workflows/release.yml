@@ -10,14 +10,20 @@ permissions:
 jobs:
   release:
     runs-on: macos-26
+    outputs:
+      version: ${{ steps.asset.outputs.version }}
+      sha256: ${{ steps.asset.outputs.sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Check tag matches Info.plist version
+      - name: Check tagged commit and version
         run: |
+          test "$GITHUB_REF_TYPE" = tag
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "${GITHUB_REF}^{commit}")"
           VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
           if [ "v$VERSION" != "${GITHUB_REF_NAME}" ]; then
             echo "Tag ${GITHUB_REF_NAME} does not match Info.plist version $VERSION" >&2
@@ -25,26 +31,52 @@ jobs:
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      - name: Build app and zip
-        run: make dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.0'
+      - name: Stage the required tracker, sign and archive
+        run: scripts/verification-lane.sh release-dist
 
-      - name: Compute checksum
-        run: echo "SHA256=$(shasum -a 256 "build/Jev-Voice-${VERSION}.zip" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Verify the exact archive before publishing
+        id: asset
+        run: |
+          zip="build/Jev-Voice-${VERSION}.zip"
+          unpacked="$(mktemp -d)"
+          ditto -x -k "$zip" "$unpacked"
+          app="$unpacked/Jev Voice.app"
+          codesign --verify --deep --strict "$app"
+          python3 scripts/check-packaged-tracker.py "$app"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          sha="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
+          [[ "$sha" =~ ^[0-9a-f]{64}$ ]]
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" "build/Jev-Voice-${VERSION}.zip" \
+          gh release create "${GITHUB_REF_NAME}" "build/Jev-Voice-${VERSION}.zip" --verify-tag \
             --title "Jev Voice ${VERSION}" \
             --generate-notes
 
+  cask:
+    needs: release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Update cask version and checksum
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          SHA256: ${{ needs.release.outputs.sha256 }}
         run: |
           sed -i '' -E "s/^  version \".*\"$/  version \"${VERSION}\"/" Casks/jev-voice.rb
           sed -i '' -E "s/^  sha256 .*$/  sha256 \"${SHA256}\"/" Casks/jev-voice.rb
+          sed -i '' -E "s|^  url .*|  url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/v#{version}/Jev-Voice-#{version}.zip\"|" Casks/jev-voice.rb
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/jev-voice.rb
-          git commit -m "cask: jev-voice ${VERSION}" || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "cask: jev-voice ${VERSION}"
           git push origin HEAD:main

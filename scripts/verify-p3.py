@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
 from pathlib import Path
 import re
 import statistics
@@ -16,6 +17,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / ".agent/results/P3"
 MANIFEST = ROOT / "Tests/Fixtures/P3/manifest.json"
+REPLAY_RECORDINGS = ROOT / ".context/c1-local/p3-audio"
 INTEGRATION_CASES = {
     f"-[VoiceOneBrainTests {name}]" for name in (
         "testAmbiguousMultiwordAskReplyNeverRequestsReasoning",
@@ -273,10 +275,17 @@ def replay(args):
     # Replay evidence and physical evidence are different artifacts — a shared
     # --out default previously let `replay` clobber live.json with replay output.
     output = ROOT / (args.out or ".agent/results/P3/replay.json")
-    if not args.recordings_root:
-        raise Blocked("--recordings-root is required")
-    directory = Path(args.recordings_root).resolve()
-    assert directory.is_dir(), "recording directory missing"
+    if args.recordings_root:
+        directory = Path(args.recordings_root).resolve()
+        if not directory.is_dir():
+            raise Blocked("the directory supplied via --recordings-root does not exist")
+    else:
+        directory = REPLAY_RECORDINGS
+        if not (directory / "manifest.json").is_file():
+            raise Blocked(
+                "P3 recordings missing or incomplete; restore the private replay index and audio "
+                "under .context/c1-local/p3-audio or pass --recordings-root with a local recordings directory"
+            )
     binary = ROOT / ".build/release/JevVoice"
     build = read(RESULTS / "build.json")
     assert binary.is_file() and sha(binary) == build["artifact_sha256"], "release artifact not current"
@@ -601,7 +610,8 @@ def coverage(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("scope", "accuracy", "contracts", "hygiene", "replay", "live", "remote", "coverage", "record-build", "record-install", "installation", "frontdoor"))
-    parser.add_argument("--recordings-root")
+    parser.add_argument("--recordings-root", default=os.environ.get("JARVIS_P3_RECORDINGS_ROOT"),
+                        help="private replay inputs (default: JARVIS_P3_RECORDINGS_ROOT or .context/c1-local/p3-audio)")
     parser.add_argument("--out")
     args = parser.parse_args()
     try:

@@ -162,8 +162,11 @@ def main(argv=None):
               file=sys.stderr)
         return 2
     outdir = Path(args.outdir) if args.outdir else results_path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
     rows = load_rows(results_path)
+    if not rows:
+        print("harness error: no result rows in %s" % results_path, file=sys.stderr)
+        return 2
+    outdir.mkdir(parents=True, exist_ok=True)
     corpus = {}
     try:
         for t in load_corpus(args.tasks_dir):  # fs checks off: report-only
