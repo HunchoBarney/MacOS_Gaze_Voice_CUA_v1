@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 @MainActor
 final class SettingsNavigation: ObservableObject {
@@ -29,6 +30,35 @@ struct SettingsView: View {
     @State private var apiKeySaved = false
     @State private var openAIKeyDraft = ""
     @State private var openAIKeySaved = false
+    /// Tracker-side settings — optimistic local copies, read back from
+    /// `/snapshot.settings` when the card appears. `eyeSettingsTouched`
+    /// marks a user edit so a late read can't overwrite a newer choice.
+    @State private var eyeDotScale = 1.0
+    /// Tracker default is ON — an unset `dwell_lock` leaves the runtime's
+    /// `anchorEnabled = true` in charge (electron/main.cjs checks the tray
+    /// item with `!== false`). Mirroring that keeps an un-read-back card
+    /// from claiming the anchor is off while the tracker is locking.
+    @State private var eyeDwellLock = true
+    /// Gaze-cursor visibility — default hidden (Vision Pro-style); this
+    /// mirrors the tracker's `gaze_dot_visible` setting.
+    @State private var eyeDotVisible = false
+    @State private var eyeSettingsTouched = false
+    /// Dwell auto-click — app-side UserDefaults; the service reloads on
+    /// the write (`DwellPolicy.modeKey`, values are `DwellPolicy.Mode`
+    /// raws). Defaults match `DwellPolicy.load()`.
+    @State private var dwellMode = DwellPolicy.load().mode.rawValue
+    /// Tracker launch geometry — written straight to UserDefaults; the
+    /// spawn code maps the keys to the tracker's launch flags
+    /// (--display-size-inch, --gaze-projection-mode, --camera-fov), so
+    /// changes only take effect on the next tracker start. 0/"" = unset,
+    /// which leaves the tracker's own default in charge.
+    @State private var trackerDisplaySize = UserDefaults.standard.object(forKey: "trackerDisplaySizeInch") as? Double ?? 0
+    @State private var trackerProjectionMode = UserDefaults.standard.string(forKey: "trackerProjectionMode") ?? ""
+    @State private var trackerCameraFov = UserDefaults.standard.integer(forKey: "trackerCameraFovDeg")
+    /// The spend gauge — injected from the @MainActor shell (its shared
+    /// singleton is MainActor-isolated, so a property default can't
+    /// reach it from a nonisolated view init).
+    @ObservedObject var spend: SpendCounter
 
     var body: some View {
         HStack(spacing: 0) {
@@ -99,6 +129,10 @@ struct SettingsView: View {
 
     private var voiceSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
+            OnboardingChecklistCard(afterFix: {
+                controller.refreshPermissions()
+                input.refresh()
+            })
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Voice", systemImage: "bolt.horizontal.circle").font(.headline)
@@ -111,9 +145,28 @@ struct SettingsView: View {
                         Text(openAIKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("Held audio streams to OpenAI's realtime speech model — it hears, decides and speaks back in one live session. Interrupt it by holding Fn again. ChatGPT sign-in can't start realtime sessions; this needs an API key. Stored in macOS Keychain.")
+                    Text("OpenAI handles live speech and replies. Jev and native Mac controls handle your tasks. Your key is stored in macOS Keychain.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Speak replies aloud", isOn: $config.ttsEnabled)
+                    Toggle("Hands-free conversation", isOn: $config.handsFreeEnabled)
+                    if config.handsFreeEnabled {
+                        HStack {
+                            Label(controller.handsFreeLabel, systemImage: "waveform")
+                            Spacer()
+                            Button(controller.handsFreeListening ? "Pause" : "Resume") {
+                                if controller.handsFreeListening { controller.pauseHandsFree() }
+                                else { controller.resumeHandsFree() }
+                            }
+                        }
+                        Text(controller.handsFreeDetail).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Toggle("Use TypeSafe for unfamiliar requests", isOn: $config.semanticAppSuggestions)
+                    Text("Enabled by default using your saved TypeSafe key. "
+                         + "Sends unfamiliar final request text, app names/identities "
+                         + "and default browser/mail app roles to TypeSafe. "
+                         + "Clear requests to open or focus an app run without another approval. "
+                         + "Unclear targets ask which app. Other requests keep the existing workflow.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             VoiceCard {
@@ -146,7 +199,7 @@ struct SettingsView: View {
                             Text("Selected microphone unavailable").tag(config.microphoneUID)
                         }
                     }.labelsHidden()
-                    Text("The microphone stays ready while the app is active. Only Fn-held audio is transcribed; idle audio is discarded. Changing input ends the current hold.")
+                    Text("While hands-free listening is on, microphone audio goes to OpenAI. Pause listening to stop sending audio. Fn is an optional manual turn. Changing input ends the current capture.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text(controller.microphoneReadiness).font(.caption).foregroundStyle(.secondary)
                     HStack {
@@ -187,12 +240,44 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("App", systemImage: "app").font(.headline)
+                    Toggle("Launch at login", isOn: $config.launchAtLogin)
+                    Text(loginServiceStatusText)
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let error = config.launchAtLoginError {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                    }
+                    Divider()
+                    Text("Model calls today: \(spend.today)")
+                        .font(.callout)
+                    Text("Realtime turns, command calls, and chooser rounds — counted locally, never sent anywhere.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// The login-item row reports what ServiceManagement actually holds —
+    /// never just the toggle's desired state.
+    private var loginServiceStatusText: String {
+        switch config.loginServiceStatus {
+        case .enabled:
+            return "Registered — Jev Voice opens when you log in."
+        case .requiresApproval:
+            return "Needs approval — allow Jev Voice in System Settings → General → Login Items."
+        case .notRegistered:
+            return "Not registered — Jev Voice won't start at login."
+        case .notFound:
+            return "Unavailable outside an installed app bundle."
+        @unknown default:
+            return ""
         }
     }
 
     private var commandSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
-            TextProviderCard()
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Jev connection", systemImage: "bolt").font(.headline)
@@ -209,20 +294,139 @@ struct SettingsView: View {
             }
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("Cua computer control", systemImage: "cursorarrow.motionlines").font(.headline)
+                    Label("Computer control", systemImage: "cursorarrow.motionlines").font(.headline)
                     Text(cuaSetup.message).font(.caption).foregroundStyle(.secondary)
-                    Text("This check opens its own disposable TextEdit document and verifies a Jev-selected insertion. Voice migration is still in progress.")
+                    Text("This check opens its own disposable TextEdit document and verifies a Jev-selected insertion.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
-                        Button("Test Cua + Jev") { cuaSetup.verify(apiKey: config.apiKey) }.disabled(cuaSetup.busy)
+                        Button("Test computer control") { cuaSetup.verify(apiKey: config.apiKey) }.disabled(cuaSetup.busy)
                         Button("Test browser") { cuaSetup.verify(apiKey: config.apiKey, browser: true) }.disabled(cuaSetup.busy)
                         if cuaSetup.busy { ProgressView().controlSize(.small); Button("Cancel") { cuaSetup.cancel() } }
                     }
                     Toggle("Show agent cursor", isOn: $config.agentCursorEnabled)
                     Text(config.agentCursorEnabled
-                         ? "The Cua cursor glides to each action it can place. Accessibility-only actions still act directly — the driver cannot draw a pointer for a call that has no on-screen point."
+                         ? "The agent cursor glides to each action it can place. Accessibility-only actions still act directly — the driver cannot draw a pointer for a call that has no on-screen point."
                          : "Actions dispatch directly to the target without an animated cursor. Every click follows this rule — the mode never mixes.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Interface sounds", isOn: $config.sounds)
+                    Toggle("Persistent number chips", isOn: $config.persistentNumbers)
+                }
+            }
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Eye tracking", systemImage: "eye").font(.headline)
+                    Toggle("Track my eyes", isOn: $config.gazeTracking)
+                    Text("Launches the bundled tracker so gaze verbs — “click”, “what is this” — act where you're looking. Off leaves the tracker closed and those verbs decline.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("Dot size", selection: Binding(
+                        get: { eyeDotScale },
+                        set: { value in
+                            eyeSettingsTouched = true
+                            eyeDotScale = value
+                            Task { try? await TrackerControl.post(action: "dot_scale", value: value) }
+                        })) {
+                        Text("Small").tag(0.8)
+                        Text("Default").tag(1.0)
+                        Text("Large").tag(1.25)
+                    }.pickerStyle(.segmented)
+                    Toggle("Show gaze dot", isOn: Binding(
+                        get: { eyeDotVisible },
+                        set: { value in
+                            eyeSettingsTouched = true
+                            eyeDotVisible = value
+                            Task { try? await TrackerControl.post(action: "gaze_dot", value: value) }
+                        }))
+                    Text("Off is the Vision Pro posture — the thing you're looking at highlights itself instead of a dot chasing your eyes. Turn it on while you dial in accuracy.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Dwell lock", isOn: Binding(
+                        get: { eyeDwellLock },
+                        set: { value in
+                            eyeSettingsTouched = true
+                            eyeDwellLock = value
+                            Task { try? await TrackerControl.post(action: "dwell_lock", value: value) }
+                        }))
+                    Picker("Dwell auto-click", selection: Binding(
+                        get: { dwellMode },
+                        set: { value in
+                            guard let mode = DwellPolicy.Mode(rawValue: value) else { return }
+                            var policy = DwellPolicy.load()
+                            policy.mode = mode
+                            policy.save()
+                            dwellMode = policy.mode.rawValue
+                            Task { @MainActor in GazeService.shared.reloadPolicy() }
+                        })) {
+                        Text("Off").tag(DwellPolicy.Mode.off.rawValue)
+                        Text("Safe").tag(DwellPolicy.Mode.safe.rawValue)
+                        Text("All").tag(DwellPolicy.Mode.all.rawValue)
+                    }.pickerStyle(.segmented)
+                    Text("Holding your gaze clicks for you — Safe only on verified controls, All adds windows and text hits, Off keeps gaze verbs voice-only. Denied phrases never fire.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Tap Fn to click what I'm looking at", isOn: $config.tapToGazeClick)
+                    Text("A Fn tap while your eyes are on a target clicks it directly — no voice turn needed. Off keeps Fn taps as ordinary captures.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Dot size and dwell lock are tracker-side settings — read back when this opens, applied on change.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup("Tracker geometry") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Display size", selection: Binding(
+                                get: { trackerDisplaySize },
+                                set: { value in
+                                    trackerDisplaySize = value
+                                    if value > 0 {
+                                        UserDefaults.standard.set(value, forKey: "trackerDisplaySizeInch")
+                                    } else {
+                                        UserDefaults.standard.removeObject(forKey: "trackerDisplaySizeInch")
+                                    }
+                                })) {
+                                Text("Auto").tag(0.0)
+                                Text("24″").tag(24.0)
+                                Text("27″").tag(27.0)
+                                Text("32″").tag(32.0)
+                            }
+                            Picker("Projection", selection: Binding(
+                                get: { trackerProjectionMode },
+                                set: { value in
+                                    trackerProjectionMode = value
+                                    if value.isEmpty {
+                                        UserDefaults.standard.removeObject(forKey: "trackerProjectionMode")
+                                    } else {
+                                        UserDefaults.standard.set(value, forKey: "trackerProjectionMode")
+                                    }
+                                })) {
+                                Text("Auto").tag("")
+                                Text("Binocular (screen)").tag("binocular-screen")
+                                Text("Legacy").tag("legacy")
+                            }
+                            Picker("Camera FOV", selection: Binding(
+                                get: { trackerCameraFov },
+                                set: { value in
+                                    trackerCameraFov = value
+                                    if value > 0 {
+                                        UserDefaults.standard.set(value, forKey: "trackerCameraFovDeg")
+                                    } else {
+                                        UserDefaults.standard.removeObject(forKey: "trackerCameraFovDeg")
+                                    }
+                                })) {
+                                Text("Auto").tag(0)
+                                Text("60°").tag(60)
+                                Text("90°").tag(90)
+                                Text("120°").tag(120)
+                            }
+                            Text("Launch flags for the tracker — Auto leaves the key unset. Changes apply on the next tracker start.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.padding(.top, 6)
+                    }.font(.callout)
+                }
+                .task {
+                    guard let status = try? await TrackerControl().status() else { return }
+                    // A read that resolved after the user edited must not
+                    // paint over the newer choice.
+                    guard !eyeSettingsTouched else { return }
+                    if let scale = status.dotScale {
+                        eyeDotScale = [0.8, 1.0, 1.25].min(by: { abs($0 - scale) < abs($1 - scale) }) ?? scale
+                    }
+                    if let lock = status.dwellLock { eyeDwellLock = lock }
+                    if let visible = status.dotVisible { eyeDotVisible = visible }
                 }
             }
             PlannerCard(auth: config.codexAuth, config: config)
@@ -241,6 +445,15 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Reset remembered permissions") { CuaStandingGrants.reset() }.controlSize(.small)
                     Text("Capabilities you approve — like browser page access or menu focus per app — are remembered so they are never re-asked. Reset to be asked again.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            VoiceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("On-device", systemImage: "cpu").font(.headline)
+                    Text("Local recognition supplies the transcript for every voice turn. Commands are admitted only after the whole hold is finalized.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("If speech is unavailable or a target is uncertain, Jev asks or refuses rather than running a second transcription path.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -274,7 +487,7 @@ private struct PlannerCard: View {
                     }
                 }
                 if !auth.binaryAvailable {
-                    Text("The bundled codex runtime is missing — rebuild the app bundle to sign in.")
+                    Text("The bundled agent runtime is missing — rebuild the app bundle to sign in.")
                         .font(.caption).foregroundStyle(.orange)
                 } else if let code = auth.signInCode {
                     Text("A sign-in page opened in your browser — enter code \(code) there. It's on your clipboard.")
@@ -284,9 +497,6 @@ private struct PlannerCard: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Text("Signs in Codex for delegated agents. Multi-step voice requests plan through your text provider or OpenAI key — no sign-in needed.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Toggle("Planner", isOn: $config.plannerEnabled)
-                Text("When off, turns skip the planning step and act directly.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

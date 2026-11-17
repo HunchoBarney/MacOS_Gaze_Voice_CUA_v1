@@ -1,0 +1,18 @@
+{
+  "status": "failed",
+  "started_at": "2026-11-16T17:20:55.045226+00:00",
+  "before_free_bytes": 2946248704,
+  "source_sha256": {
+    "Sources/JevVoice/Drive/DriveCandidates.swift": "1380598e38d54f0aa10b27a908f63a45a61d53d6d5bd917b6ff8c5579f356d8b",
+    "Sources/JevVoice/Drive/JevChooser.swift": "a020ad2a288beaf2c32b6f7dd2139055f219d7d61f667fd3f972d32e0ce2c322",
+    "Tests/JevVoiceAppTests/JevChooserTests.swift": "15bc537cd89a9a9b6077190d108a027ab4537cc38e74c32ae053952adbf8b13b"
+  },
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "JevChooserTests.testC1WindowPrimitiveRequestRetainsArgumentsScopeAndAuthorityBoundary|JevChooserTests.testCandidateSupportUsesUnfinishedValidityAndRetainsRawGates"
+  ],
+  "exit_code": 75,
+  "finished_at": "2026-11-16T17:20:55.174472+00:00",
+  "log_sha256": "a92e4c1a27627fbfa77dd06ed867afe306549e148a74af35c87fd3000b0a56c7"
+}

@@ -1,11 +1,12 @@
 import Foundation
 import JevVoiceCore
+import OSLog
 
 /// Custom OpenAI-compatible provider written into the agent's config.toml.
 /// `envKey` names the environment variable codex reads the API key from —
 /// the key itself is only ever placed in the child process environment.
 /// `usesSystemAuth` means codex's builtin provider authenticates through the
-/// user's own `~/.codex/auth.json` (ChatGPT login) seeded into the agent's
+/// user's own `~/.codex/auth.json` (ChatGPT login) symlinked into the agent's
 /// CODEX_HOME — no custom provider table is emitted at all.
 public struct CodexModelProvider: Sendable, Equatable {
     public var name: String
@@ -23,7 +24,7 @@ public struct CodexModelProvider: Sendable, Equatable {
         self.envKey = envKey; self.model = model
         self.usesSystemAuth = false
     }
-    /// The user's own codex login — auth.json is copied into the agent's
+    /// The user's own codex login — auth.json is symlinked into the agent's
     /// CODEX_HOME at spawn. `model` may be empty → codex's account default.
     public static func chatGPT(model: String = "") -> CodexModelProvider {
         CodexModelProvider(name: "openai", baseURL: "https://api.openai.com/v1",
@@ -34,19 +35,24 @@ public struct CodexModelProvider: Sendable, Equatable {
     }
 }
 
-/// A streamable-HTTP MCP server entry for config.toml (`[mcp_servers.<name>]`).
-/// Loopback URLs are injected, never hardcoded — L5 owns the actual servers.
+/// A stdio MCP server entry for config.toml (`[mcp_servers.<name>]`). The
+/// agent's codex spawns `command args` per session; `envVars` names codex
+/// forwards from its own environment to the child — so a key rides the
+/// process tree and never lands in a file.
 /// `default_tools_approval_mode = "approve"` is emitted for every server:
-/// these are our own loopback surfaces and ComputerUseGate IS the consent
+/// these are our own surfaces and CuaPolicy IS the consent
 /// layer — codex's per-call gate would auto-refuse everything under
 /// `approval_policy = "never"` (openai/codex#24135).
 public struct CodexMCPServer: Sendable, Equatable {
     public var name: String
-    public var url: String
-    /// When set, the bearer token is read by codex from this process env var.
-    public var bearerTokenEnvVar: String?
-    public init(name: String, url: String, bearerTokenEnvVar: String? = nil) {
-        self.name = name; self.url = url; self.bearerTokenEnvVar = bearerTokenEnvVar
+    public var command: String
+    public var args: [String]
+    public var envVars: [String]
+    public var cwd: String?
+    public init(name: String, command: String, args: [String] = [],
+                envVars: [String] = [], cwd: String? = nil) {
+        self.name = name; self.command = command; self.args = args
+        self.envVars = envVars; self.cwd = cwd
     }
 }
 
@@ -68,11 +74,11 @@ public actor CodexRuntimeBridge {
         public var codexBinary: URL
         public var provider: CodexModelProvider
         public var mcpServers: [CodexMCPServer]
-        /// Extra child-process env — API key under `provider.envKey`, MCP
-        /// bearer tokens under each server's `bearerTokenEnvVar`.
+        /// Extra child-process env — API key under `provider.envKey`,
+        /// plus any keys a stdio MCP server picks up via `env_vars`.
         public var environment: [String: String]
-        /// Per-agent overrides — installed by the coordinator when each agent
-        /// gets its own loopback MCP endpoints + bearer tokens. Nil keeps the
+        /// Per-agent overrides — each agent gets its own stdio MCP server
+        /// spec (same binary, different --agent slug). Nil keeps the
         /// shared `mcpServers`/`environment` behavior.
         public var mcpServersFor: (@Sendable (CompanionAgent) -> [CodexMCPServer])?
         public var environmentFor: (@Sendable (CompanionAgent) -> [String: String])?
@@ -93,14 +99,21 @@ public actor CodexRuntimeBridge {
     private struct Session {
         var client: CodexProtocolClient
         var threadID: String
-        var activeTurnID: String?
+        /// Turn ids accepted by turn/start and not yet finished — ordered,
+        /// most recent last. Concurrent sends (chat + a routine tick)
+        /// share the thread, so a single last-write-wins id used to leave
+        /// every earlier turn uninterruptible.
+        var activeTurnIDs: [String] = []
         /// Recently finished turn ids — `turn/completed` can land before
-        /// `send` writes activeTurnID back, so a nil-match alone can't
-        /// catch the finish and the id would latch as "active" forever.
+        /// `send` writes the id back, so a bare "still listed" check can't
+        /// catch the finish and it would latch as in-flight forever.
         /// Bounded: oldest entries fall out.
         var completedTurns: [String] = []
         var forwarder: Task<Void, Never>
     }
+
+    private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice",
+                                    category: "codex-bridge")
 
     private var configuration: Configuration
     private var sessions: [String: Session] = [:]
@@ -151,29 +164,41 @@ public actor CodexRuntimeBridge {
     /// the reply from `events` filtered on `agentSlug`.
     @discardableResult
     public func send(to agent: CompanionAgent, message: String) async throws -> String {
-        var session = try await self.session(for: agent)
+        let session = try await self.session(for: agent)
         let turnID = try await session.client.startTurn(threadID: session.threadID, text: message)
-        session.activeTurnID = turnID
         // Write back only while this is still the registered session — a
-        // concurrent sessionEnded/stop must not be resurrected. Merge the
-        // registered session's completed-turn ledger too: turn/completed
-        // landing between startTurn and this write-back means the turn is
-        // already done — latching it active would let a later interrupt
-        // fire at a dead turn.
-        if sessions[agent.slug]?.client === session.client {
-            session.completedTurns = sessions[agent.slug]?.completedTurns ?? []
-            if session.completedTurns.contains(turnID) {
-                session.activeTurnID = nil
-            }
-            sessions[agent.slug] = session
+        // concurrent sessionEnded/stop must not be resurrected. Consult
+        // the registered session's completed-turn ledger too:
+        // turn/completed landing between startTurn and this write-back
+        // means the turn already finished — latching it in-flight would
+        // let a later interrupt fire at a dead turn.
+        if sessions[agent.slug]?.client === session.client,
+           sessions[agent.slug]?.completedTurns.contains(turnID) != true {
+            sessions[agent.slug]?.activeTurnIDs.append(turnID)
         }
         return turnID
     }
 
-    /// Interrupts the agent's most recent turn, if one is still running.
-    public func interrupt(slug: String) async throws {
-        guard let session = sessions[slug], let turnID = session.activeTurnID else { return }
+    /// Interrupts the agent's most recent in-flight turn. Returns false —
+    /// instead of silently no-opping — when the agent has no live turn, so
+    /// the caller can answer "nothing is running" honestly.
+    @discardableResult
+    public func interrupt(slug: String) async throws -> Bool {
+        guard let session = sessions[slug], let turnID = session.activeTurnIDs.last else {
+            return false
+        }
         try await session.client.interruptTurn(threadID: session.threadID, turnID: turnID)
+        // The interrupt is accepted — turn/completed (status "interrupted")
+        // closes the ledger on the forwarder, but drop the id now so a
+        // second stop doesn't aim at an already-dying turn.
+        sessions[slug]?.activeTurnIDs.removeAll { $0 == turnID }
+        return true
+    }
+
+    /// Slugs with at least one in-flight turn — the only honest target set
+    /// for a no-hint "stop".
+    public func activeTurnSlugs() -> [String] {
+        sessions.filter { !$0.value.activeTurnIDs.isEmpty }.keys.sorted()
     }
 
     /// Thread the agent is currently bound to, if a session is live.
@@ -228,6 +253,13 @@ public actor CodexRuntimeBridge {
         // which carries the provider's API key.
         var environment = configuration.environment
         environment.merge(configuration.environmentFor?(agent) ?? [:]) { _, new in new }
+        // The base env and any values captured inside the environmentFor
+        // closure are launch-time snapshots — a key entered mid-session
+        // (Settings → Keychain) would never reach a child spawned after
+        // boot. Re-read the credentials this configuration transports
+        // live at spawn; a non-empty live value wins, an empty one can't
+        // be told from "never set" so the snapshot stands.
+        environment.merge(liveCredentials()) { _, new in new }
         environment["CODEX_HOME"] = agent.codexHomePath
         let client = CodexProtocolClient(executable: configuration.codexBinary,
                                        environment: environment,
@@ -266,7 +298,7 @@ public actor CodexRuntimeBridge {
                                                         sandbox: "workspace-write")
             }
             let session = Session(client: client, threadID: threadID,
-                                  activeTurnID: nil, forwarder: forwarder)
+                                  forwarder: forwarder)
             try Task.checkCancellation()
             sessions[slug] = session
             return session
@@ -277,15 +309,13 @@ public actor CodexRuntimeBridge {
         }
     }
 
-    /// Records the finished turn and clears it when it was the active one.
+    /// Records the finished turn and drops it from the in-flight set.
     /// The ledger matters because turn/completed can land BEFORE send's
     /// write-back — without it the id would latch active and a later
     /// interrupt() would fire turn/interrupt at a dead turn.
     private func turnEnded(slug: String, client: CodexProtocolClient, turnID: String) {
         guard sessions[slug]?.client === client else { return }
-        if sessions[slug]?.activeTurnID == turnID {
-            sessions[slug]?.activeTurnID = nil
-        }
+        sessions[slug]?.activeTurnIDs.removeAll { $0 == turnID }
         sessions[slug]?.completedTurns.append(turnID)
         if let turns = sessions[slug]?.completedTurns, turns.count > 16 {
             sessions[slug]?.completedTurns = Array(turns.suffix(16))
@@ -300,9 +330,31 @@ public actor CodexRuntimeBridge {
         sessions.removeValue(forKey: slug)
     }
 
+    /// The credentials this configuration transports, read live at spawn.
+    /// Covers the provider's env_key and the TYPESAFE_API_KEY the jev-drive
+    /// MCP server picks up via env_vars — both live in Config (Keychain-
+    /// backed) so mid-session entry lands without a relaunch. Keys with no
+    /// live source (or an empty live value) pass through untouched.
+    private func liveCredentials() -> [String: String] {
+        var live: [String: String] = [:]
+        for key in [configuration.provider.envKey, "TYPESAFE_API_KEY"] where !key.isEmpty {
+            let value: String?
+            switch key {
+            case "OPENAI_API_KEY": value = Config.shared.openAIAPIKey
+            case "TYPESAFE_API_KEY": value = Config.shared.apiKey
+            default: value = ProcessInfo.processInfo.environment[key]
+            }
+            if let value, !value.isEmpty { live[key] = value }
+        }
+        return live
+    }
+
     /// config.toml — Clicky parity: custom provider authenticated via env_key,
     /// never ask for approval, workspace-scoped writes plus loopback network
-    /// for the computer-use/jev-use MCP servers.
+    /// for the computer-use/jev-use MCP servers. For system-auth providers the
+    /// user's login is LINKED into the isolated CODEX_HOME — see
+    /// `linkSystemAuth`; without it every turn on the preferred ChatGPT
+    /// sign-in path failed auth.
     private func writeConfig(for agent: CompanionAgent) throws {
         let home = URL(fileURLWithPath: agent.codexHomePath, isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -310,20 +362,40 @@ public actor CodexRuntimeBridge {
                                    mcpServers: configuration.mcpServersFor?(agent) ?? configuration.mcpServers)
         try toml.write(to: home.appendingPathComponent("config.toml"),
                        atomically: true, encoding: .utf8)
-        // System-auth providers ride the user's own codex login — seed a
-        // fresh copy of auth.json each spawn so a token refresh in one
-        // agent's home can't strand the others on a rotated credential.
         if configuration.provider.usesSystemAuth {
-            let source = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex/auth.json")
-            let dest = home.appendingPathComponent("auth.json")
-            try? FileManager.default.removeItem(at: dest)
-            // Missing auth.json still spawns (the existing contract); a
-            // copy that EXISTS but fails is fatal — otherwise the session
-            // connects unauthenticated and every turn dies silently.
-            if FileManager.default.fileExists(atPath: source.path) {
-                try FileManager.default.copyItem(at: source, to: dest)
-            }
+            Self.linkSystemAuth(into: home, source: FileManager.default
+                .homeDirectoryForCurrentUser.appendingPathComponent(".codex/auth.json"))
+        } else {
+            // Env-key provider: a stale auth link/file left by an earlier
+            // system-auth spawn would silently override the configured key.
+            try? FileManager.default.removeItem(
+                at: home.appendingPathComponent("auth.json"))
+        }
+    }
+
+    /// auth.json is SYMLINKED — never copied — into agent homes. A copy
+    /// stranded every other home on a rotated credential the next refresh,
+    /// and widened the login's blast radius per duplicate; a link keeps one
+    /// credential on disk so rotation lands in the real file and refresh
+    /// propagates through it. Missing source → leave absent: the turn fails
+    /// auth honestly, exactly as an unlinked home did. An existing real
+    /// file or a link to the wrong target is replaced (migrated); a link
+    /// failure logs and the spawn proceeds — codex reports the miss at
+    /// turn time.
+    static func linkSystemAuth(into home: URL, source: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: source.path) else { return }
+        let link = home.appendingPathComponent("auth.json")
+        // A dangling symlink reads as "no file" — check the link itself.
+        let existing = try? fm.destinationOfSymbolicLink(atPath: link.path)
+        if existing == source.path { return }
+        if existing != nil || fm.fileExists(atPath: link.path) {
+            try? fm.removeItem(at: link)
+        }
+        do {
+            try fm.createSymbolicLink(at: link, withDestinationURL: source)
+        } catch {
+            Self.log.error("auth.json link failed in \(home.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -353,12 +425,16 @@ public actor CodexRuntimeBridge {
             toml += """
 
             [mcp_servers.\(tomlString(server.name))]
-            url = \(tomlString(server.url))
+            command = \(tomlString(server.command))
+            args = [\(server.args.map(tomlString).joined(separator: ", "))]
             default_tools_approval_mode = "approve"
 
             """
-            if let envVar = server.bearerTokenEnvVar {
-                toml += "bearer_token_env_var = \(tomlString(envVar))\n"
+            if !server.envVars.isEmpty {
+                toml += "env_vars = [\(server.envVars.map(tomlString).joined(separator: ", "))]\n"
+            }
+            if let cwd = server.cwd {
+                toml += "cwd = \(tomlString(cwd))\n"
             }
         }
         return toml

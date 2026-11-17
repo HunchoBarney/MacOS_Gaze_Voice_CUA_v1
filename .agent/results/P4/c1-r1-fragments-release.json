@@ -1,0 +1,21 @@
+{
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-package-release"
+  ],
+  "source_snapshot": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r2-candidate-source-r5/manifest.json",
+  "source_snapshot_sha256": "1413591ea058bad5f00a917849ad47365d3000ef68d5f6ee6938b695158d8b28",
+  "retired_generated": [
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/release/ModuleCache",
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/release/index",
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/release/JevVoice.dSYM"
+  ],
+  "before_free_bytes": 3762810880,
+  "status": "passed",
+  "started_at": "2026-11-16T16:08:25.459423+00:00",
+  "exit_code": 0,
+  "finished_at": "2026-11-16T16:11:44.857217+00:00",
+  "after_free_bytes": 2495025152,
+  "log_sha256": "8179386cf967082beac3457cb982a0ac3df5b4b7503c65432a6355d1c291fd4e",
+  "unsigned_binary_sha256": "719ca80ae46f36518f231f711248d6b84215d942d35574b7ca1adb399b3cbd33"
+}

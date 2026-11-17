@@ -23,10 +23,16 @@ cask "jev-voice" do
 
   zap trash: "~/Library/Preferences/com.chriswozniczek.jevvoice.plist"
 
+  # NOTE: this cask describes the upstream jev-voice-control distribution; the
+  # local build path is `make local` (see README). Caveats below match the
+  # current app, not the published zip.
   caveats <<~EOS
-    Jev Voice lives in the menu bar (no Dock icon). Press Option+Space to talk.
-    Grant Microphone, Speech Recognition and Accessibility permissions when prompted,
-    then set your TypeSafe API key in the popover's Settings (gear icon).
+    Jev Voice lives in the menu bar (no Dock icon). Hold Fn/Globe to talk.
+    Voice streams to OpenAI's realtime API — set an OpenAI API key in
+    Settings → Voice (stored in Keychain); a ChatGPT sign-in won't work.
+    Grant Microphone, Accessibility and Screen Recording when prompted
+    (Camera too if you enable eye tracking), then set your TypeSafe API key
+    in Settings → Commands.
     If macOS still reports the app "Not Opened" (ad-hoc signature), run:
       xattr -dr com.apple.quarantine "#{appdir}/Jev Voice.app"
   EOS

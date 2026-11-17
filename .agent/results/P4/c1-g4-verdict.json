@@ -1,0 +1,20 @@
+{
+  "review_kind": "independent_source_candidate_G4",
+  "reviewer_agent_id": "dbbf6534",
+  "reviewer_profile": "jarvis-judge",
+  "verdict": "PASS",
+  "prior_verdict": "FAIL",
+  "corrected_blocker": "Stale scroll report links and evidence hashes",
+  "reviewed_executable_sha256": "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+  "reviewed_source_manifest_sha256": "9be6bf2bf0c70075f1448b129f97b62406644cb8bab7be3391042d8fac2c0cc8",
+  "record": ".agent/results/P4/c1-g4-review.md",
+  "phase_acceptance": false,
+  "physical_input_proven": false,
+  "remaining_gates": [
+    "Physical Fn/pill and microphone-to-insertion",
+    "Normal-controller direct scroll and blocked MCP scroll coverage",
+    "Warm latency goals and ASR replay regression",
+    "Wispr comparison",
+    "C3 portable release qualification"
+  ]
+}

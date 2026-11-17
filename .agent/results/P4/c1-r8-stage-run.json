@@ -1,0 +1,17 @@
+{
+  "started_at": "2026-11-17T03:35:23.576074+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-package-stage",
+    "--label",
+    "final-r8",
+    "--snapshot",
+    ".agent/results/P4/c1-r8-source-4/manifest.json"
+  ],
+  "source_snapshot_sha256": "7499a5078d365df471bfad91ffdc1da9be7186d9440d9eee0af75317992e31b5",
+  "source_snapshot": ".agent/results/P4/c1-r8-source-4/manifest.json",
+  "status": "passed",
+  "exit_code": 0,
+  "finished_at": "2026-11-17T03:36:53.755373+00:00",
+  "log_sha256": "7255ea9220a3bd05d4b784571bdb8e7b238a768920568b9f2cd5a9571615742d"
+}

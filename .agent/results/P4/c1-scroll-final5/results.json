@@ -1,0 +1,63 @@
+{
+  "drive_requests": 1,
+  "api_request_count": null,
+  "gui_autospawn_proven": false,
+  "fn_microphone_proven": false,
+  "standing_grant_checked": true,
+  "resources_clean": true,
+  "daemon_window_change_timeout_ms": 100,
+  "daemon_window_change_poll_ms": 25,
+  "rows": [
+    {
+      "case": "c1-owned-scroll-0",
+      "goal": "scroll down",
+      "caller_deadline_seconds": 30,
+      "completion_hints_sent": false,
+      "status": "blocked",
+      "verified": false,
+      "strict_success": false,
+      "false_done": false,
+      "cancelled_by_harness": false,
+      "actor_pid": 63459,
+      "kind": "qualification",
+      "requested_window_id": 62105,
+      "result_text": "Blocked: The model call failed: Jev API error 400: {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} Recent steps: the decider failed \u2014 http(status: 400, body: \"{\\\"detail\\\":{\\\"error_type\\\":\\\"max_tokens_exceeded\\\"}}\")",
+      "is_error": false,
+      "wall_ms": 1206.8499169999996,
+      "actual_state": {
+        "scroll_before": 0.0,
+        "scroll_after": 0.0,
+        "decoy_unchanged": true,
+        "content_unchanged": true,
+        "verified_elapsed_ms": 3152.883916
+      },
+      "visual_trace": [],
+      "visual_trace_collection_ms": 2223.5654589999995,
+      "visual_trace_required": false,
+      "visual_trace_complete": false
+    }
+  ],
+  "variant": "c1",
+  "template_resource_recovery": null,
+  "canonical_app": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-final-zfuec7b7/Jev Voice.app",
+  "execution_app": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-final-zfuec7b7/Jev Voice.app",
+  "prepared_execution_app": null,
+  "execution_manifest_verified": false,
+  "source_matches_current_tree": true,
+  "subject": "signed-product",
+  "binary_sha256": "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+  "driver_sha256": "36bf56344711e5c12d281c2ec30034ce55eeefb72218b83e0e098a7c2d12cbc5",
+  "driver_inode": 118273726,
+  "harness_sha256": "e12877283e240a714b53a0584e3e31e780cee4b46c41c43232eeb79371b6e202",
+  "receipt_sha256": "a8a8f44c9d9f2b5865b7237302758003c6ed94287e27f14c29ed2b8ca40ed8a2",
+  "local_tool_calls": {
+    "start_session": 1,
+    "list_windows": 1,
+    "end_session": 1
+  },
+  "owned_document_processes_remaining": [],
+  "owned_document_windows_remaining": [],
+  "owned_browser_processes_remaining": [],
+  "owned_native_processes_remaining": [],
+  "execution_lease_closed": true
+}

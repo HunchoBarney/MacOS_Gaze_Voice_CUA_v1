@@ -1,0 +1,47 @@
+{
+  "status": "blocked_or_failed",
+  "physical_input": false,
+  "human_confirmed": false,
+  "entry": "signed packaged MCP drive_until; production DriveLoop and bundled Cua",
+  "clock": "MCP request to response; independent AX witness completion reported separately",
+  "gaze": "controlled unavailable endpoint; bound-window fallback only",
+  "jev_limit": null,
+  "billed_provider_calls": 0,
+  "binary_sha256": "db36d3a487c6f8cffc984c2ede8fd5ac9af92944446e3c16e2c4a8b29091fdb8",
+  "harness_sha256": "7ffa5394af73f7246838c53eaaecdb45afff18e1fb7615840aa79ba87de05168",
+  "rows": [
+    {
+      "case": "c1-owned-scroll-0",
+      "goal": "scroll down",
+      "caller_deadline_seconds": 30,
+      "completion_hints_sent": false,
+      "status": "stuck",
+      "verified": true,
+      "strict_success": false,
+      "false_done": false,
+      "cancelled_by_harness": false,
+      "actor_pid": 34577,
+      "kind": "qualification",
+      "requested_window_id": 62677,
+      "result_text": "Stuck: low_confidence. scroll down; the immediate action is uncertain \u2014 re-observing; escalate \u2014 lowConfidenceTwice",
+      "is_error": false,
+      "wall_ms": 2984.9270829999987,
+      "actual_state": {
+        "scroll_before": 0.0,
+        "scroll_after": 0.21046643913538113,
+        "decoy_unchanged": true,
+        "content_unchanged": true,
+        "verified_elapsed_ms": 5085.8661660000025
+      },
+      "visual_trace": [],
+      "visual_trace_collection_ms": 2847.562958000001,
+      "visual_trace_required": false,
+      "visual_trace_complete": false
+    }
+  ],
+  "documents_before": 1,
+  "error_type": "AssertionError",
+  "error": "",
+  "documents_after": 1,
+  "documents_restored": true
+}

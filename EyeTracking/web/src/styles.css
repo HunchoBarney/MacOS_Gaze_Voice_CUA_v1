@@ -24,19 +24,42 @@ body,
   user-select: none;
 }
 
+/* Dwell fill + fast-scale are animated custom properties — registering them
+   makes the conic-gradient ring and the speed scale interpolate instead of
+   snapping. (Fallback: without @property the ring jumps to full at 50%; a
+   rotating masked ring would be the fallback cue.) */
+@property --dwell-fill {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+@property --dot-fast {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
 .gaze-dot {
   position: absolute;
-  left: -13px;
-  top: -13px;
-  width: 26px;
-  height: 26px;
+  left: -9px;
+  top: -9px;
+  width: 18px;
+  height: 18px;
   border-radius: 999px;
-  background: #ef233c;
+  background: radial-gradient(circle at 38% 34%, #ffffff, #dce4f4 68%, #b8c6e8);
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.92),
-    0 6px 18px rgba(0, 0, 0, 0.35);
-  transition: opacity 160ms ease;
+    0 0 0 1.5px rgba(24, 40, 88, 0.55),
+    0 2px 10px rgba(0, 0, 0, 0.30);
+  transition:
+    opacity 160ms ease,
+    --dot-fast 180ms ease;
   will-change: transform, opacity;
+}
+
+/* Moving fast: the render loop flags the dot so it reads as in-flight. */
+.gaze-dot.fast {
+  --dot-fast: 1.04;
 }
 
 .gaze-dot::before,
@@ -49,23 +72,43 @@ body,
   opacity: 0;
 }
 
+/* Dwell-lock cue: a geometric fill ring that sweeps once on entry, then
+   rests as a hairline — the dot settled on a stable fixation. */
+.gaze-dot.dwell::before {
+  opacity: 1;
+  inset: -4px;
+  background: conic-gradient(from -90deg, rgba(110, 150, 255, 0.85) var(--dwell-fill), transparent var(--dwell-fill));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: dwell-fill 500ms ease-out forwards;
+}
+
+@keyframes dwell-fill {
+  from {
+    --dwell-fill: 0%;
+  }
+  to {
+    --dwell-fill: 100%;
+  }
+}
+
 .gaze-click-label {
   position: absolute;
   left: 50%;
   bottom: calc(100% + 12px);
-  min-width: 58px;
   transform: translateX(-50%);
-  border: 2px solid rgba(255, 255, 255, 0.95);
-  border-radius: 6px;
-  padding: 3px 8px 4px;
-  background: rgba(20, 24, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: rgba(20, 28, 48, 0.62);
   color: #ffffff;
-  font-size: 14px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1;
+  letter-spacing: 0.02em;
   text-align: center;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
   white-space: nowrap;
 }
@@ -75,7 +118,8 @@ body,
 }
 
 .gaze-dot.single-click-effect .gaze-click-label {
-  background: rgba(0, 112, 72, 0.94);
+  background: rgba(0, 112, 72, 0.62);
+  border-color: rgba(0, 208, 132, 0.5);
   animation: gaze-click-label-pop 840ms ease-out;
 }
 
@@ -89,8 +133,8 @@ body,
 }
 
 .gaze-dot.double-click-effect .gaze-click-label {
-  min-width: 66px;
-  background: rgba(0, 92, 124, 0.95);
+  background: rgba(0, 92, 124, 0.62);
+  border-color: rgba(0, 210, 255, 0.5);
   animation: gaze-click-label-pop 1240ms ease-out;
 }
 
@@ -109,13 +153,13 @@ body,
 
 @keyframes gaze-single-click-core {
   0% {
-    background: #00d084;
+    background: radial-gradient(circle at 38% 34%, #d9ffe9, #00d084 68%, #00915c);
     box-shadow:
-      0 0 0 3px rgba(255, 255, 255, 1),
+      0 0 0 1.5px rgba(0, 96, 60, 0.55),
       0 0 18px rgba(0, 208, 132, 0.92);
   }
   100% {
-    background: #ef233c;
+    background: radial-gradient(circle at 38% 34%, #ffffff, #dce4f4 68%, #b8c6e8);
   }
 }
 
@@ -152,13 +196,13 @@ body,
 @keyframes gaze-double-click-core {
   0%,
   38% {
-    background: #00d2ff;
+    background: radial-gradient(circle at 38% 34%, #ddf6ff, #00d2ff 68%, #0091c8);
     box-shadow:
-      0 0 0 3px rgba(255, 255, 255, 1),
+      0 0 0 1.5px rgba(0, 96, 140, 0.55),
       0 0 22px rgba(0, 210, 255, 0.95);
   }
   100% {
-    background: #ef233c;
+    background: radial-gradient(circle at 38% 34%, #ffffff, #dce4f4 68%, #b8c6e8);
   }
 }
 
@@ -180,6 +224,12 @@ body,
   width: 140px;
   height: 112px;
   pointer-events: none;
+  opacity: 1;
+  transition: opacity 600ms ease;
+}
+
+.camera-marker.faded {
+  opacity: 0;
 }
 
 .camera-arrow-shape {
@@ -247,49 +297,187 @@ body,
   background: #ef233c;
   box-shadow:
     0 0 16px rgba(239, 35, 60, 0.72);
-  animation: calibration-target-progress 2000ms linear forwards;
-  transform-origin: center;
 }
 
-@keyframes calibration-target-progress {
-  0% {
-    background-color: #ef233c;
-    box-shadow:
-      0 0 16px rgba(239, 35, 60, 0.72);
-    transform: scale(0.18);
-  }
-  45% {
-    background-color: #ffd60a;
-    box-shadow:
-      0 0 18px rgba(255, 214, 10, 0.72);
-    transform: scale(0.58);
-  }
-  100% {
-    background-color: #00d084;
-    box-shadow:
-      0 0 20px rgba(0, 208, 132, 0.78);
-    transform: scale(1);
-  }
+/* Accuracy-test target: a fixed, calm dot — the user stares, no progress
+   animation implying a capture. */
+.calibration-target.accuracy > div {
+  animation: none;
+  background: #ffd60a;
+  transform: scale(0.55);
+  box-shadow:
+    0 0 14px rgba(255, 214, 10, 0.85);
 }
 
+.accuracy-progress {
+  position: fixed;
+  left: 50%;
+  top: 6%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+/* Calibration field: deep slate, not pure black — max-contrast fields cause
+   pupil instability and strain (visual-fatigue research); a lifted dark field
+   still isolates attention while staying comfortable for ~20s. */
+.calibration-scrim {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(22, 25, 35, 0.94) 0%, rgba(13, 15, 22, 0.97) 100%);
+}
+
+/* Thin top progress rail — informational, not distracting. */
+.calibration-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.calibration-progress > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4f8cff, #7fd0ff);
+  transform-origin: left center;
+  transition: transform 120ms linear;
+}
+
+/* Parked-protocol target (Tobii): soft luminous orb + ring. On arrival the
+   eye rests on the full-size target for ~350ms, then the ring contracts —
+   the shrink cue pulls foveation exactly onto the collection point. */
+.pursuit-target {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
+.pursuit-ring {
+  position: absolute;
+  left: -22px;
+  top: -22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 2px solid rgba(160, 190, 255, 0.55);
+  box-shadow: 0 0 18px rgba(90, 130, 255, 0.18);
+  transition: transform 340ms cubic-bezier(0.25, 0.7, 0.3, 1), border-color 300ms ease;
+}
+
+/* Rest first, then shrink: the delay lets the eye settle before the cue. */
+.pursuit-target.dwell .pursuit-ring {
+  transform: scale(0.36);
+  border-color: rgba(140, 230, 180, 0.9);
+  transition-delay: 340ms;
+}
+
+.pursuit-dot {
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: radial-gradient(circle, #fdf6ec 0%, #dfe9ff 70%, #bcd0ff 100%);
+  box-shadow:
+    0 0 14px rgba(200, 220, 255, 0.85),
+    0 0 34px rgba(110, 150, 255, 0.4);
+  animation: pursuit-breathe 2400ms ease-in-out infinite;
+}
+
+.pursuit-target.dwell .pursuit-dot {
+  animation-play-state: paused;
+}
+
+@keyframes pursuit-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.14); }
+}
+
+/* Faint ghost at the next waypoint while the orb glides — the eye sees where
+   it's heading, so the arrival needs no saccadic search. */
+.pursuit-ghost {
+  position: fixed;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(170, 195, 255, 0.28);
+  box-shadow: 0 0 8px rgba(120, 155, 255, 0.2);
+}
+
+.pursuit-target.verify .pursuit-ring {
+  border-color: rgba(120, 220, 255, 0.6);
+}
+
+.pursuit-target.verify .pursuit-dot {
+  box-shadow:
+    0 0 14px rgba(180, 235, 255, 0.8),
+    0 0 34px rgba(90, 200, 255, 0.4);
+}
+
+/* Countdown: a single thin numeral over the scrim — no boxed circle. Each
+   tick remounts the span so it fades+settles in rather than swapping hard. */
 .calibration-countdown {
   position: fixed;
   left: 50%;
   top: 50%;
-  width: 160px;
-  height: 160px;
   transform: translate(-50%, -50%);
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.72);
   color: #ffffff;
-  font-size: 92px;
-  font-weight: 800;
+  font-size: 120px;
+  font-weight: 200;
   line-height: 1;
-  box-shadow:
-    0 0 0 3px rgba(255, 255, 255, 0.9),
-    0 16px 40px rgba(0, 0, 0, 0.35);
+  text-shadow:
+    0 2px 28px rgba(0, 0, 0, 0.5),
+    0 0 3px rgba(0, 0, 0, 0.6);
+}
+
+.calibration-countdown > span {
+  display: block;
+  animation: countdown-tick 340ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes countdown-tick {
+  from {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.calibration-exit {
+  position: fixed;
+  top: 22px;
+  right: 26px;
+  width: 40px;
+  height: 40px;
+  /* The overlay root is pointer-events:none — clicks must reach this button. */
+  pointer-events: auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.calibration-exit:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
 }
 
 .calibration-notice {
@@ -298,74 +486,35 @@ body,
   bottom: 8%;
   transform: translateX(-50%);
   max-width: min(80vw, 560px);
-  padding: 12px 18px;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.88);
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(20, 28, 48, 0.62);
   color: #fff;
-  font-size: 16px;
+  font-size: 14px;
+  line-height: 1.4;
   text-align: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
-.calibration-arrow {
+/* Pursuit pose hold: sampling pauses while the head is tilted. Top pill in
+   the same calm register as the bottom notice — not the amber warning the
+   drift-notice uses. */
+.pose-hint {
   position: fixed;
+  top: 28px;
   left: 50%;
-  top: 50%;
-  width: 232px;
-  height: 96px;
-  transform-origin: 0 50%;
-  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.5));
-}
-
-.calibration-arrow-shape {
-  position: absolute;
-  inset: 2px;
-  background: #ffffff;
-  clip-path: polygon(0 31%, 64% 31%, 64% 8%, 100% 50%, 64% 92%, 64% 69%, 0 69%);
-}
-
-.calibration-arrow-shape::before {
-  content: "";
-  position: absolute;
-  inset: 5px;
-  background: #ef233c;
-  clip-path: inherit;
-}
-
-.calibration-arrow-shape::after {
-  content: "";
-  position: absolute;
-  inset: 17px 29px 41px 29px;
-  background: rgba(255, 255, 255, 0.2);
-  clip-path: polygon(0 31%, 61% 31%, 61% 11%, 100% 50%, 61% 89%, 61% 69%, 0 69%);
-}
-
-.calibration-center-arrows {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  width: 640px;
-  height: 106px;
-  transform: translate(-50%, -50%);
-}
-
-.calibration-center-arrows .calibration-arrow {
-  position: absolute;
-  top: 50%;
-  transform-origin: 50% 50%;
-}
-
-.calibration-center-arrow-left {
-  left: calc(50% - 292px);
-  transform: translate(0, -50%);
-}
-
-.calibration-center-arrow-right {
-  left: calc(50% + 60px);
-  transform: translate(0, -50%);
-}
-
-.calibration-center-arrow-right .calibration-arrow-shape {
-  transform: scaleX(-1);
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(20, 28, 48, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.85);
+  font: 500 13px/1.4 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .preview {
@@ -441,4 +590,175 @@ body,
 
 .status.info {
   border-left: 4px solid #14b8a6;
+}
+
+/* Non-modal drift warning — visible but never steals input (the overlay stays
+   click-through; recalibration is triggered by the ⌘⇧G global hotkey). */
+.drift-notice {
+  position: fixed;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(30, 27, 20, 0.82);
+  border: 1px solid rgba(245, 197, 66, 0.45);
+  color: #f5d88a;
+  font: 500 13px/1.4 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* First-run invite: one calm card over the scrim, never a takeover. The
+   overlay root is pointer-events:none, so the card opts back in itself. */
+.onboarding-card {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100vw - 48px));
+  padding: 26px 26px 22px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(24, 30, 46, 0.72);
+  color: #fff;
+  text-align: center;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.onboarding-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.onboarding-card p {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: rgba(235, 240, 255, 0.75);
+}
+
+.onboarding-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.onboarding-actions button {
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.onboarding-actions button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.onboarding-actions button.primary {
+  background: #4f8cff;
+  border-color: transparent;
+}
+
+.onboarding-actions button.primary:hover {
+  background: #3f7df2;
+}
+
+/* "Calibrated" flash: a moment of confirmation, then it fades away. */
+.calibrated-card {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(20, 28, 48, 0.66);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 500;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: none;
+  animation: calibrated-fade 1600ms ease forwards;
+}
+
+.calibrated-check {
+  color: #4ade80;
+  font-size: 18px;
+  line-height: 1;
+}
+
+@keyframes calibrated-fade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes gaze-click-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pursuit-dot {
+    animation: none;
+  }
+
+  .pursuit-target.dwell .pursuit-ring {
+    transition: none;
+  }
+
+  /* Dwell cue rests as a static hairline instead of sweeping. */
+  .gaze-dot.dwell::before {
+    animation: none;
+    --dwell-fill: 100%;
+  }
+
+  /* Click bursts collapse to a single short fade. */
+  .gaze-dot.single-click-effect,
+  .gaze-dot.double-click-effect {
+    animation: none;
+  }
+
+  .gaze-dot.single-click-effect::before,
+  .gaze-dot.double-click-effect::before,
+  .gaze-dot.double-click-effect::after {
+    animation: gaze-click-fade 200ms ease-out forwards;
+  }
+
+  .gaze-dot.single-click-effect .gaze-click-label,
+  .gaze-dot.double-click-effect .gaze-click-label {
+    animation: gaze-click-fade 200ms ease-out forwards;
+  }
+
+  .calibration-countdown > span {
+    animation: none;
+  }
 }

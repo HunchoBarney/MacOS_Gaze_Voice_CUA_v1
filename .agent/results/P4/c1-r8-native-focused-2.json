@@ -1,0 +1,20 @@
+{
+  "started_at": "2026-11-17T01:52:34.144964+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "FastLaneExecutorTests.testR8|FastLaneExecutorTests.testC1Scroll|FastLaneExecutorTests.testC1UncertainScroll|FastLaneExecutorTests.testR7PinnedScroll|FastLaneExecutorTests.testConversationScroll"
+  ],
+  "g2": "b30bbce0 PASS",
+  "scope": "R8 native core only; remaining continuous/default/VAD implementation pending",
+  "sha256": {
+    "Sources/JevVoice/Drive/NativeWindowObservation.swift": "99656dd88c1ef06417e4215f8265ddb656859f2319c050e648614ba10f00528a",
+    "Sources/JevVoice/Drive/FastLaneExecutor.swift": "16c9aa100103f270420bc0dd46dd2fe0100b064ad0bcda244c09dd41100b0532",
+    "Sources/JevVoice/Drive/DriveLoop.swift": "adb97ff05d7af81989109ed9e3cf143c44c7487f89333180df05023ae6a13355",
+    "Sources/JevVoice/Support/VoiceCommandTrace.swift": "5cc39e20fd5829ad5e980eccf0f9cdf12daf0a89b3fde2bb9b05abcf674e0328",
+    "Tests/JevVoiceAppTests/FastLaneExecutorTests.swift": "e58be29b4e5e8a6e28ad7d1e7797a3e050956c9b77b9dbf3620e9efecaef700e"
+  },
+  "exit_code": 0,
+  "finished_at": "2026-11-17T01:58:59.585484+00:00",
+  "log_sha256": "f5f52d4d9fa3841fb37b401e4e21001b5926360ce77954902f59e0bb86eac591"
+}

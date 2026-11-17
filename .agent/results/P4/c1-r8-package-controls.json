@@ -1,0 +1,13 @@
+{
+  "started_at": "2026-11-17T03:37:09.628029+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "p12-resources"
+  ],
+  "source_snapshot_sha256": "7499a5078d365df471bfad91ffdc1da9be7186d9440d9eee0af75317992e31b5",
+  "source_snapshot": ".agent/results/P4/c1-r8-source-4/manifest.json",
+  "status": "passed",
+  "exit_code": 0,
+  "finished_at": "2026-11-17T03:37:20.735564+00:00",
+  "log_sha256": "a9e5fcae846752c60314e7c46a8b75c8c9ef084317c3e70e2173dcd4d0de53cb"
+}

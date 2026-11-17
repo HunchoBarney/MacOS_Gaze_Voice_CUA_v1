@@ -43,10 +43,15 @@ def real_walls(rows):
             and isinstance(r.get("wall_ms"), (int, float))
             and not isinstance(r.get("wall_ms"), bool)]
 
+def successful(row):
+    """A passing end-state alone does not prove a command actually completed."""
+    return (row.get("verified") is True and row.get("is_error") is False
+            and row.get("status") in ("done", "already"))
+
 
 def task_stats(rows, task):
     n = len(rows)
-    succ = sum(1 for r in rows if r.get("verified"))
+    succ = sum(1 for r in rows if successful(r))
     walls = real_walls(rows)
     p50, p95 = percentile(walls, 50), percentile(walls, 95)
     budget = (task or {}).get("budget") or {}
@@ -69,7 +74,7 @@ def task_stats(rows, task):
 
 def rollup(rows, tier):
     n = len(rows)
-    succ = sum(1 for r in rows if r.get("verified"))
+    succ = sum(1 for r in rows if successful(r))
     p50 = percentile(real_walls(rows), 50)
     bar = TIER_BARS_MS.get(tier)
     return {"runs": n, "successes": succ,
@@ -117,7 +122,7 @@ def write_report(path, baseline, rows_by_task):
     for tid, rows in rows_by_task.items():
         seen = {}
         for r in rows:
-            if r.get("verified"):
+            if successful(r):
                 continue
             key = (r.get("status", "?"), r.get("verdict", "?"))
             seen.setdefault(key, [0, ""])
@@ -187,7 +192,7 @@ def main(argv=None):
         s["tasks"] = tids
         tiers[tier] = s
     n = len(rows)
-    succ = sum(1 for r in rows if r.get("verified"))
+    succ = sum(1 for r in rows if successful(r))
     env_files = sorted(outdir.glob("env-*.json"))
     baseline = {
         "generated_at": datetime.now(timezone.utc)

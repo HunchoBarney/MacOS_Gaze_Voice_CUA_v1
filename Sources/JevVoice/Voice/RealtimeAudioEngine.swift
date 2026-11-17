@@ -2,18 +2,42 @@ import AVFoundation
 import Foundation
 import OSLog
 
-/// Where decoded model audio can be rendered. When the duplex engine owns
-/// playback its render callback is the echo reference for AEC.
-protocol RealtimeRenderSink: AnyObject {
-    func enqueue(_ pcm: Data)
-    func flush()
-    var consumedMs: Double { get }
-    /// Ms of enqueued audio the sink discarded and will never render —
-    /// ring overflow, failed conversion. The player's drain ledger needs
-    /// it separate from consumedMs: dropped audio resolves a turn's wait
-    /// but must not count toward the truncation position the user heard.
-    var droppedMs: Double { get }
-    var onDrained: (@Sendable () -> Void)? { get set }
+enum VoicePlaybackChannel: Sendable, CaseIterable, Hashable {
+    case realtime, system, local
+}
+
+struct VoicePlaybackRoute: Sendable {
+    let id: UUID
+    let isReady: @Sendable () -> Bool
+    let schedule: @Sendable (Data, @escaping @Sendable () -> Void) -> Void
+    let play: @Sendable () -> Void
+    let stop: @Sendable () -> Void
+}
+
+struct VoicePlaybackOutputs: Sendable {
+    let realtime: VoicePlaybackRoute
+    let system: VoicePlaybackRoute
+    let local: VoicePlaybackRoute
+
+    func route(for channel: VoicePlaybackChannel) -> VoicePlaybackRoute {
+        switch channel {
+        case .realtime: realtime
+        case .system: system
+        case .local: local
+        }
+    }
+}
+
+protocol VoicePlaybackRouting: Sendable {
+    var playbackChannel: VoicePlaybackChannel { get }
+    var playbackRoutingAvailable: Bool { get }
+    var playbackActive: Bool { get }
+    func setPlaybackRoute(_ route: VoicePlaybackRoute?)
+}
+
+extension VoicePlaybackRouting {
+    var playbackRoutingAvailable: Bool { true }
+    var playbackActive: Bool { false }
 }
 
 /// Owns one converter and bounded stream per recording. The Speech framework's
@@ -35,8 +59,15 @@ final class ConvertedAudioFeed: @unchecked Sendable {
     private var audibleSeconds = 0.0
     private var outputSeconds = 0.0
     private var bufferCount = 0
+    private var emittedFrames = 0
     private var peakRMS: Float = 0
     private var hasFloatSamples = false
+    /// Local speech tee — every converted chunk is handed here too, so a
+    /// LocalTranscriber (attached at composition) hears the same PCM the
+    /// socket does. Fire-and-forget: invoked inside the conversion lock
+    /// on the audio tap thread, so the sink must stay cheap. Set it
+    /// before the feed starts streaming.
+    var localSpeechSink: (@Sendable (AVAudioPCMBuffer) -> Void)?
 
     init(input: AVAudioFormat, output: AVAudioFormat) throws {
         guard let converter = AVAudioConverter(from: input, to: output) else {
@@ -82,10 +113,16 @@ final class ConvertedAudioFeed: @unchecked Sendable {
             outputSeconds += Double(output.frameLength) / outputFormat.sampleRate
             if case .dropped = continuation.yield(output) {
                 continuation.finish(throwing: VoiceError("Speech processing could not keep up. Recording stopped without submitting incomplete speech."))
+            } else {
+                emittedFrames += 1
             }
+            localSpeechSink?(output)
         }
     }
     func level() -> Float { lock.lock(); defer { lock.unlock() }; return meter }
+    func emittedFrameCount() -> Int {
+        conversionLock.lock(); defer { conversionLock.unlock() }; return emittedFrames
+    }
     func firstBufferTime() -> Double? { lock.lock(); defer { lock.unlock() }; return firstBufferAt }
     func audioSummary() -> (input: Double, audible: Double, converted: Double, peakRMS: Float,
                             hasFloatSamples: Bool, bufferCount: Int, sampleRate: Double,
@@ -114,9 +151,12 @@ final class ConvertedAudioFeed: @unchecked Sendable {
                 continuation.finish(throwing: error ?? VoiceError("Speech audio finalization failed.") as NSError); return
             }
             outputSeconds += Double(output.frameLength) / outputFormat.sampleRate
-            if output.frameLength > 0,
-               case .dropped = continuation.yield(output) {
-                continuation.finish(throwing: VoiceError("Speech processing could not finish the audio.")); return
+            if output.frameLength > 0 {
+                if case .dropped = continuation.yield(output) {
+                    continuation.finish(throwing: VoiceError("Speech processing could not finish the audio.")); return
+                }
+                emittedFrames += 1
+                localSpeechSink?(output)
             }
             if status == .endOfStream { continuation.finish(); return }
         }
@@ -164,40 +204,20 @@ final class RealtimePlayer: @unchecked Sendable {
     private var playing = false
     private var primeWork: DispatchWorkItem?
     private var configObserver: NSObjectProtocol?
-    /// When set (the VPIO duplex backend is live), decoded audio renders
-    /// through the sink instead of playerNode — the sink's render callback
-    /// is the AEC echo reference. Weak: MicrophoneInput owns the engine.
-    private weak var sink: RealtimeRenderSink?
-    /// consumedMs is cumulative for the sink's lifetime — playedMs is the
-    /// delta from this base, snapped at attach and at every interrupt.
-    private var sinkBaseMs = 0.0
-    /// Same base for the sink's drop ledger.
-    private var sinkBaseDroppedMs = 0.0
-    /// playedMs + sink-discarded ms — what the drain check waits on. Kept
-    /// separate from playedMs so conversation.item.truncate still reports
-    /// the audio the user actually heard while dropped frames can't hold
-    /// the turn open forever.
-    private var resolvedMs = 0.0
-    /// Stall detection for the sink path: resolvedMs at the last observed
-    /// advance, and the uptime the current freeze began. A write the sink
-    /// discarded without ledgering it (a failed convert never reaches
-    /// consumedMs or droppedMs) would otherwise leave resolvedMs short of
-    /// scheduledMs forever — playbackIdle stays false and turn end waits
-    /// out the 25s drainDeadline. Frozen counters with audio outstanding
-    /// can't be real playback, so the gap resolves after 2s.
-    private var sinkProgressMs = 0.0
-    private var sinkStallBegan = 0.0
-    /// 25ms poll that keeps playedMs tracking sink.consumedMs while audio
-    /// is outstanding — the sink has no per-buffer completion to hook.
-    private var drainPoll: DispatchSourceTimer?
+    private var playbackRoute: VoicePlaybackRoute?
     /// Raised whenever the queue fully drains — used to settle a turn.
     var onPlaybackIdle: (@Sendable () -> Void)?
+    var onPlaybackUnavailable: (@Sendable () -> Void)?
+    var generationToken: UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return generation
+    }
     /// True when nothing is scheduled or everything scheduled already played —
     /// response.done arrives before the speaker finishes, so turn-end must
     /// wait on this or the UI closes mid-sentence.
     var playbackIdle: Bool {
         lock.lock(); defer { lock.unlock() }
-        return scheduledMs == 0 || resolvedMs >= scheduledMs - 0.5
+        return scheduledMs == 0 || playedMs >= scheduledMs - 0.5
     }
 
     init() {
@@ -216,95 +236,31 @@ final class RealtimePlayer: @unchecked Sendable {
         }
     }
 
-    func attachSink(_ sink: RealtimeRenderSink?) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.sink?.onDrained = nil
-            self.sink = sink
-            self.lock.lock()
-            self.sinkBaseMs = sink?.consumedMs ?? 0
-            self.sinkBaseDroppedMs = sink?.droppedMs ?? 0
-            self.sinkProgressMs = self.resolvedMs
-            self.sinkStallBegan = 0
-            self.lock.unlock()
-            sink?.onDrained = { [weak self] in
-                self?.queue.async { self?.sampleSinkProgress() }
-            }
-            // Whichever route plays next starts unprimed — the prebuffer
-            // rebuilds on the first delta of the next stream.
-            self.primeWork?.cancel(); self.primeWork = nil
-            self.lock.lock(); self.playing = false; self.lock.unlock()
-            if sink != nil {
-                // Two live output routes would double the echo reference —
-                // the VPIO unit is the only speaker path while attached.
-                self.engine.stop()
-                self.running = false
-            } else {
-                self.stopDrainPoll()
-            }
-        }
-    }
-
-    /// The sink's own drain signal is only a hint — the counters are the
-    /// truth, so an in-flight write that hasn't landed yet can't fake a
-    /// drain; the poll keeps running until the numbers actually settle.
-    private func sampleSinkProgress() {
-        guard let sink else { stopDrainPoll(); return }
-        let consumed = sink.consumedMs
-        let dropped = sink.droppedMs
-        lock.lock()
-        let wasDrained = scheduledMs == 0 || resolvedMs >= scheduledMs - 0.5
-        playedMs = max(playedMs, consumed - sinkBaseMs)
-        resolvedMs = max(resolvedMs, playedMs + (dropped - sinkBaseDroppedMs))
-        if resolvedMs != sinkProgressMs {
-            sinkProgressMs = resolvedMs
-            sinkStallBegan = 0
-        } else if scheduledMs > resolvedMs + 0.5 {
-            if sinkStallBegan == 0 {
-                sinkStallBegan = ProcessInfo.processInfo.systemUptime
-            } else if ProcessInfo.processInfo.systemUptime - sinkStallBegan > 2 {
-                Self.log.notice("player_sink_stall resolved=\(self.resolvedMs, privacy: .public) scheduled=\(self.scheduledMs, privacy: .public)")
-                resolvedMs = scheduledMs
-                sinkStallBegan = 0
-            }
-        } else {
-            sinkStallBegan = 0
-        }
-        let drained = scheduledMs > 0 && resolvedMs >= scheduledMs - 0.5
-        if drained { resolvedMs = scheduledMs }
-        lock.unlock()
-        if drained { stopDrainPoll() }
-        if drained, !wasDrained { onPlaybackIdle?() }
-    }
-
-    private func startDrainPoll() {
-        guard drainPoll == nil else { return }
-        let poll = DispatchSource.makeTimerSource(queue: queue)
-        poll.schedule(deadline: .now() + .milliseconds(25), repeating: .milliseconds(25))
-        poll.setEventHandler { [weak self] in self?.sampleSinkProgress() }
-        drainPoll = poll
-        poll.resume()
-    }
-
-    private func stopDrainPoll() {
-        drainPoll?.cancel()
-        drainPoll = nil
-    }
-
     /// Warms the output engine only — priming owns play(), or a prewarm
     /// would defeat the jitter buffer.
     func ensureRunning() {
         queue.async { [weak self] in self?.ensureRunningLocked() }
     }
 
-    func enqueue(_ pcm: Data, itemID: String) {
+    func setPlaybackRoute(_ route: VoicePlaybackRoute?) {
+        _ = interrupt()
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.engine.stop()
+            self.running = false
+            self.playbackRoute = route
+        }
+    }
+
+    func enqueue(_ pcm: Data, itemID: String, owner: UInt64? = nil) {
         // An odd-length delta would copy one byte past the int16 buffer —
         // untrusted wire input gets a hard bound, not a heap write.
         guard pcm.count.isMultiple(of: 2), !pcm.isEmpty else { return }
+        let expected = owner ?? generationToken
         queue.async { [weak self] in
             guard let self else { return }
             self.lock.lock()
-            if self.droppingUntilDone || self.interruptedItemIDs.contains(itemID) {
+            if self.generation != expected || self.droppingUntilDone || self.interruptedItemIDs.contains(itemID) {
                 self.lock.unlock(); return
             }
             if self.currentItemID != itemID {
@@ -313,14 +269,13 @@ final class RealtimePlayer: @unchecked Sendable {
             }
             let gen = self.generation
             self.lock.unlock()
-            self.ensureRunningLocked()
+            guard self.ensureRunningLocked() else { self.onPlaybackUnavailable?(); return }
             let frames = AVAudioFrameCount(pcm.count / MemoryLayout<Int16>.size)
             let ms = Double(frames) / 24.0
-            if let sink = self.sink {
+            if let route = self.playbackRoute {
                 self.lock.lock(); self.scheduledMs += ms; self.lock.unlock()
-                sink.enqueue(pcm)
-                self.sampleSinkProgress()
-                self.startDrainPoll()
+                route.schedule(pcm) { [weak self] in self?.completedBuffer(generation: gen, milliseconds: ms) }
+                self.maybeStartPlayback()
                 return
             }
             guard let buffer = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: frames),
@@ -331,39 +286,45 @@ final class RealtimePlayer: @unchecked Sendable {
             }
             self.lock.lock(); self.scheduledMs += ms; self.lock.unlock()
             self.player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                guard let self else { return }
-                self.lock.lock()
-                // A buffer discarded by interrupt() still fires this handler
-                // after the counters reset — the epoch keeps it inert.
-                guard self.generation == gen else { self.lock.unlock(); return }
-                self.playedMs += ms
-                self.resolvedMs = max(self.resolvedMs, self.playedMs)
-                let drained = self.playedMs >= self.scheduledMs - 0.5
-                // Queue empty → next stream re-primes the jitter buffer.
-                if drained { self.playing = false }
-                self.lock.unlock()
-                if drained { self.onPlaybackIdle?() }
+                self?.completedBuffer(generation: gen, milliseconds: ms)
             }
             self.maybeStartPlayback()
         }
     }
 
-    private func ensureRunningLocked() {
+    private func completedBuffer(generation expected: UInt64, milliseconds: Double) {
+        lock.lock()
+        guard generation == expected else { lock.unlock(); return }
+        playedMs += milliseconds
+        let drained = playedMs >= scheduledMs - 0.5
+        if drained { playing = false }
+        lock.unlock()
+        if drained { onPlaybackIdle?() }
+    }
+
+    @discardableResult
+    private func ensureRunningLocked() -> Bool {
+        if let route = playbackRoute {
+            guard route.isReady() else { running = false; return false }
+            running = true
+            lock.lock(); let resume = playing; lock.unlock()
+            if resume { route.play() }
+            return true
+        }
         // `running` is our cache — the engine's own state is the truth, so a
         // config change or a device loss still gets a real restart attempt.
-        // Sink-attached playback owns no local engine at all.
-        guard sink == nil else { return }
         if !running || !engine.isRunning {
             do {
                 try engine.start()
                 running = true
             } catch {
                 Self.log.notice("player_start_failed \(error.localizedDescription, privacy: .public)")
-                return
+                return false
             }
         }
         lock.lock(); let resume = playing; lock.unlock()
         if resume { player.play() }
+        return true
     }
 
     /// Jitter prebuffer: the first play() of a stream waits until ~120ms
@@ -371,7 +332,6 @@ final class RealtimePlayer: @unchecked Sendable {
     /// buffer instead of crackling. The deadline releases replies shorter
     /// than the threshold rather than holding them forever.
     private func maybeStartPlayback() {
-        guard sink == nil else { return }
         lock.lock()
         let buffered = scheduledMs - playedMs
         if playing || buffered <= 0 { lock.unlock(); return }
@@ -422,45 +382,33 @@ final class RealtimePlayer: @unchecked Sendable {
     /// is still outstanding: its unseen items keep dripping deltas, so ALL
     /// audio drops until responseDidFinish().
     @discardableResult
-    func interrupt(untilResponseDone: Bool = false) -> (itemID: String?, playedMs: Int) {
-        // The 25ms drain poll can lag the speaker by a whole interval —
-        // snap the sink's counters synchronously or the truncate point
-        // under-reports what the user actually heard.
-        if let sink {
-            let consumed = sink.consumedMs, dropped = sink.droppedMs
-            lock.lock()
-            playedMs = max(playedMs, consumed - sinkBaseMs)
-            resolvedMs = max(resolvedMs, playedMs + (dropped - sinkBaseDroppedMs))
-            lock.unlock()
-        }
+    func interrupt(untilResponseDone: Bool = false, owner: UInt64? = nil) -> (itemID: String?, playedMs: Int) {
         lock.lock()
+        guard owner == nil || owner == generation else { lock.unlock(); return (nil, 0) }
         let item = currentItemID
         let played = max(0, Int((playedMs - itemStartPlayedMs).rounded(.down)))
-        scheduledMs = 0; playedMs = 0; resolvedMs = 0; itemStartPlayedMs = 0
-        sinkProgressMs = 0; sinkStallBegan = 0
+        scheduledMs = 0; playedMs = 0; itemStartPlayedMs = 0
         currentItemID = nil
         if let item { interruptedItemIDs.insert(item) }
         droppingUntilDone = droppingUntilDone || untilResponseDone
         generation += 1
+        let interruptedGeneration = generation
         playing = false
-        lock.unlock()
         queue.async { [weak self] in
             guard let self else { return }
-            self.primeWork?.cancel(); self.primeWork = nil
-            // The sink's ring carries the same unplayed audio interrupt()
-            // drops locally — flush it before re-basing the consumed clock.
-            self.sink?.flush()
             self.lock.lock()
-            self.sinkBaseMs = self.sink?.consumedMs ?? 0
-            self.sinkBaseDroppedMs = self.sink?.droppedMs ?? 0
+            let current = self.generation == interruptedGeneration
             self.lock.unlock()
-            self.stopDrainPoll()
+            guard current else { return }
+            self.primeWork?.cancel(); self.primeWork = nil
             self.player.stop()
+            self.playbackRoute?.stop()
             // interrupt() only halts the node — running stays true, so the
             // next enqueue's ensureRunningLocked must see false or it never
             // calls play() again and every reply goes to a dead node.
             self.running = false
         }
+        lock.unlock()
         return (item, played)
     }
 
@@ -469,10 +417,8 @@ final class RealtimePlayer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             self.engine.stop()
+            self.playbackRoute?.stop()
             self.running = false
-            self.sink?.onDrained = nil
-            self.sink = nil
-            self.stopDrainPoll()
             self.primeWork?.cancel(); self.primeWork = nil
             self.droppingUntilDone = false
             self.interruptedItemIDs.removeAll()

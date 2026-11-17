@@ -21,10 +21,10 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Jev Voice needs microphone access to hear your voice commands.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Jev Voice transcribes your commands on-device using Speech Recognition.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Jev Voice uses automation to control volume and system features.</string>
+	<string>Jev Voice sends your speech to OpenAI so you can talk to your Mac and dictate.</string>
+	<key>JevVoiceInputProvider</key>
+	<string>openai-realtime</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Jev Voice uses the camera for eye tracking, so you can aim at things with your eyes. Video stays on this Mac.</string>
 </dict>
 </plist>

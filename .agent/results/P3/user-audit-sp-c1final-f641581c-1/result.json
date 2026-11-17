@@ -1,0 +1,150 @@
+{
+  "captured_binding_matches" : true,
+  "decoy_unchanged" : true,
+  "desktop_ownership_release_safe" : true,
+  "driver_inventory_prewarm" : {
+    "attempts" : 0,
+    "cancelled" : 0,
+    "completed" : 0,
+    "failed" : 0,
+    "pending" : 0,
+    "reads_dispatched" : 0,
+    "settled_elapsed_ms" : 0
+  },
+  "elapsed_ms" : 1407.6864582020789,
+  "exact_insertion" : true,
+  "executable_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+  "focus_diagnostics" : {
+    "accessibility_trusted" : true,
+    "document_matches" : true,
+    "focused_element_matches" : true,
+    "focused_role" : "AXTextArea",
+    "has_document" : true,
+    "last_ax_error" : -25212,
+    "stage" : "matched"
+  },
+  "human_confirmed" : false,
+  "no_model_rounds" : true,
+  "normal_controller_no_audit_binding" : true,
+  "observed_window" : 61753,
+  "outcomes" : [
+    "done"
+  ],
+  "physical_input" : false,
+  "status" : "passed",
+  "task_literal_matches" : true,
+  "task_window" : 61753,
+  "trace" : [
+    {
+      "monotonic" : 1594112.7909295,
+      "stage" : "contextBegin",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.2597622918,
+      "stage" : "contextEnd",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.2843302917,
+      "stage" : "admissionLocal",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.284669375,
+      "stage" : "localBegin",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.2855167917,
+      "stage" : "coordinatorBegin",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.2862315418,
+      "stage" : "keyBegin",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.2862525834,
+      "stage" : "keyEnd",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.2862750418,
+      "stage" : "gazeBegin",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.2996824167,
+      "stage" : "gazeEnd",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.3000728334,
+      "stage" : "referentBegin",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.3007612084,
+      "stage" : "referentEnd",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.3016009585,
+      "stage" : "workCreated",
+      "task" : "72D019DC-FEC5-4DF5-9508-04C057D94889",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.3024403334,
+      "stage" : "localEnd",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.3615677084,
+      "stage" : "executorBegin",
+      "task" : "72D019DC-FEC5-4DF5-9508-04C057D94889",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.3620650833,
+      "stage" : "resolveBegin",
+      "task" : "72D019DC-FEC5-4DF5-9508-04C057D94889",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.3638312083,
+      "stage" : "resolveEnd",
+      "task" : "72D019DC-FEC5-4DF5-9508-04C057D94889",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.8935856668,
+      "stage" : "nativeTextInsertionBegin",
+      "task" : "72D019DC-FEC5-4DF5-9508-04C057D94889",
+      "tool" : "typeText",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.8959463751,
+      "stage" : "nativeTextInsertionEnd",
+      "task" : "72D019DC-FEC5-4DF5-9508-04C057D94889",
+      "tool" : "typeText",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    },
+    {
+      "monotonic" : 1594113.9056114585,
+      "stage" : "executorEnd",
+      "task" : "72D019DC-FEC5-4DF5-9508-04C057D94889",
+      "turn" : "50669100-18C5-4989-B284-BD95588E6576"
+    }
+  ],
+  "tracker_startup_state" : "renderer_started",
+  "tracker_startup_wait_ms" : 5835.0850832648575,
+  "type_dispatches" : 1,
+  "typing_proof" : [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count" : 1
+}

@@ -1,0 +1,85 @@
+{
+  "baseline_candidate": "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+  "git_head": "4b263b35175cda5f90589758f1cbaef31fd75e51",
+  "files": [
+    {
+      "path": "Sources/JevVoice/Voice/VoiceController.swift",
+      "existed": true,
+      "sha256": "c654863b1095d316501c03b8fdc5ef93e16c4e3783a935c0d36697ab4126ddd9"
+    },
+    {
+      "path": "Sources/JevVoice/UI/VoiceStyle.swift",
+      "existed": true,
+      "sha256": "498fe537186f0f04e59879863645e7d6db6fb9958bbef024efd075975334c653"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/FastLaneExecutor.swift",
+      "existed": true,
+      "sha256": "2ee705b82c0ce4625170d49f33729fb2654991be98f5d947541687602bb50bfd"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/NativeWindowObservation.swift",
+      "existed": true,
+      "sha256": "ac060ab45495d338bc81b283229eb02f445b62412efafbb5afbb5de525eadbfd"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/DriveLoop.swift",
+      "existed": true,
+      "sha256": "9f30c3c12b128f039b3c9db25945cbe9274dcc5f028999b4e4c4df0a8d39cea7"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/VoiceTaskCoordinator.swift",
+      "existed": true,
+      "sha256": "16ebf4483598c4e201692aaaf2b37ce41e9c92563dca54668f5f436e497de2c2"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/JevChooser.swift",
+      "existed": true,
+      "sha256": "d044c8f04a9cde51c059a8e1c3504c33b770b2929be14ed4244853c60365d270"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/JevObservationPayload.swift",
+      "existed": false
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/VoiceLaneAuditTests.swift",
+      "existed": true,
+      "sha256": "6dcfbe0b1c6de5c813b90714e2121b138986ea603d829a57e5fdb93cc39ea8c7"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/RealtimeVoiceLaneTests.swift",
+      "existed": true,
+      "sha256": "6289567b50e6a176b25d4c623231313b3522621982f8e403998e63dff472e298"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/FastLaneExecutorTests.swift",
+      "existed": true,
+      "sha256": "50c2d0bd8b0ebf04fb76316d03e2456d8694e43cc2a37967859f0bc1ce46ba1c"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/JevChooserTests.swift",
+      "existed": true,
+      "sha256": "ee14484cb639ba0433438279863da9b9f71a4938c6edcd2152a7c2762739d7d7"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/JevObservedGoalTests.swift",
+      "existed": true,
+      "sha256": "65af1c7b068c8aa18c1fac2add5e94e57de05757507fea7452884e1745ec981e"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/JevExactReplacementTests.swift",
+      "existed": true,
+      "sha256": "a4afea4d3627caa8f2777e971ff5198419306b1dcdffb823df7487f4a625ab1c"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/JevNativeChoiceDiagnosticTests.swift",
+      "existed": true,
+      "sha256": "958d268545a4f5b36edbd2f7004c89b94e841a35cd09a849677aef5310c23c60"
+    },
+    {
+      "path": "scripts/verification-lane.sh",
+      "existed": true,
+      "sha256": "3a6cef33993c5b603b518be31398461caeff133cae5bd61b451da34a71dd8332"
+    }
+  ]
+}

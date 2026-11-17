@@ -1,0 +1,19 @@
+{
+  "started_at": "2026-11-16T19:04:38.204831+00:00",
+  "command": [
+    "python3",
+    "scripts/with-desktop-lock.py",
+    "python3",
+    ".agent/results/P4/c1-scroll.py",
+    "--receipt",
+    ".agent/results/P12/c1-final-r6-stage.json",
+    "--label",
+    "r6-support"
+  ],
+  "receipt_sha256": "a8615e1c716849c33acbd6583eb0cb0e64daeccc03d66db240e34f74de00ff58",
+  "g4": "PASS42753e08",
+  "status": "failed",
+  "exit_code": 1,
+  "finished_at": "2026-11-16T19:05:04.726235+00:00",
+  "log_sha256": "5f3d8e263b549ca1abfd07771c11de6de9cacca777779d41e36c3889a9015d1f"
+}

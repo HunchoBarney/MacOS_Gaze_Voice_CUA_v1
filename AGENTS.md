@@ -7,6 +7,14 @@ of truth for "done"** — goals, locked decisions, phase DAG, release bars.
 resuming anything, write it before stopping phase work (a Stop hook
 enforces the write).
 
+**`.agent/SHIP-PLAN.md`** is the current delivery sequence and next
+candidate scope. **`.agent/REUSE.md`** records the open-source-first
+decisions. Read both before starting new phase work.
+**`.agent/COMPETITIVE.md`** defines matched dictation/category comparisons.
+Latest routing: direct grounded actions, Jev as primary semantic chooser,
+Cua/native execution, Terra API only when needed. The user has authorized
+that API choice; no replacement-model tournament is part of the plan.
+
 Phase work lives in `.agent/phases/P<n>-*.md` (self-contained ExecPlans
 with explicit owned paths) and is judged against
 `.agent/acceptance/P<n>.json` — default-FAIL criteria only a
@@ -22,6 +30,17 @@ remembered ones.
 
 ## Gates and worktrees (summary — PLANS.md owns the rules)
 
+- **Open source first:** reuse existing repository code and platform APIs,
+  then maintained free open-source projects before implementing a missing
+  subsystem from scratch. Record the license, exact required capability,
+  candidate/version and any concrete gap in the phase's G2 reuse decision.
+  Build only the minimum product adapter or necessary gap; no duplicate
+  SDK, driver, speech engine, runtime or harness when a suitable one exists.
+- The new speed goals in PROGRAM are unproven goals, not measured results.
+  Preserve final-utterance accuracy, exactly-once authority and independent
+  outcomes. Never count partial feedback as completed dictation.
+- No helper agents without the user's explicit request. A reviewer role
+  in a plan is not itself permission to spawn one.
 - Gate loop per phase: G1 user plan approval → G2 implementer/judge
   contract → G3 serialized build+tests → G4 fresh-context `jarvis-judge`
   PASS → G5 live bench + budgets → G6 human try (UX phases) → G7 handoff
@@ -34,6 +53,9 @@ remembered ones.
   `scripts/verification-lane.sh` (swift test → EyeTracking typecheck →
   vitest). Writers don't compile a half-frozen tree.
 - Owned-paths enforcement: `python3 scripts/check-owned-paths.py P<n>`.
+- Sign/review coherent candidates; reuse valid evidence and run checks for
+  changed dependencies. Final physical Fn/pill qualification stays on the
+  frozen artifact, rather than repeating it after every internal patch.
 
 ## Commands
 

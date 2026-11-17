@@ -12,44 +12,18 @@ extension AgentStore: AgentRosterProviding {}
 /// Runtime seam — `AgentRuntime` satisfies it. `events` is deliberately NOT
 /// here: the bridge stream is single-consumer, owned by `AgentRuntime.start`,
 /// and fanned out to this model through `onAgentEvent` — a second iterator
-/// would steal half the events (replies, consent asks, turn states).
+/// would steal half the events (replies, turn states).
 protocol AgentRuntimeHandling: Sendable {
     @discardableResult func send(to agent: CompanionAgent, message: String) async throws -> String
-    func interrupt(slug: String) async throws
+    /// False when the agent had no live turn to interrupt.
+    @discardableResult func interrupt(slug: String) async throws -> Bool
 }
 
 extension AgentRuntime: AgentRuntimeHandling {
     @discardableResult func send(to agent: CompanionAgent, message: String) async throws -> String {
         try await send(message, to: agent)
     }
-    func interrupt(slug: String) async throws {
-        try await bridge.interrupt(slug: slug)
-    }
 }
-
-/// Consent seam — a subset of `ConsentGating` (`ComputerUseGate` conforms
-/// with no extra members). The coordinator binds the real gate; until then
-/// cards render empty.
-protocol ConsentCoordinating: Sendable {
-    func pending() -> [ConsentRequest]
-    func approve(_ request: ConsentRequest)
-    func deny(_ request: ConsentRequest)
-}
-
-extension ComputerUseGate: ConsentCoordinating {}
-
-/// Asks the gate alone can't see: agent-emitted <COMPUTER_USE_REQUEST>
-/// markers and gate asks preserved past their turn's end live on the
-/// runtime's `pendingAsks`, and only `resolveConsent` routes a marker
-/// approval so it arms the agent's next turn. The bound runtime conforms;
-/// it is preferred over `consent` whenever both exist.
-@MainActor
-protocol AgentConsentAsking: Sendable {
-    var pendingAsks: [ConsentRequest] { get }
-    func resolveConsent(_ request: ConsentRequest, approved: Bool)
-}
-
-extension AgentRuntime: AgentConsentAsking {}
 
 /// A turn's final message decoded per mirror/10-message-protocol.md. `body`
 /// is the visible reply with EVERY bracketed marker block removed — raw
@@ -60,13 +34,12 @@ struct AgentFinalMessage: Equatable {
     var nextActions: [String] = []
     var doneTitle: String?
     var artifacts: [String] = []
-    var computerUseAsks: [String] = []
     var hasStructuredBlocks: Bool {
         summary != nil || doneTitle != nil || !nextActions.isEmpty || !artifacts.isEmpty
     }
 
     private static let tags = ["SUMMARY", "NEXT_ACTIONS", "DONE_TITLE", "ARTIFACTS",
-                               "ROUTINE", "COMPUTER_USE_REQUEST"]
+                               "ROUTINE"]
 
     static func parse(_ text: String) -> AgentFinalMessage {
         var parsed = AgentFinalMessage(body: stripMarkers(text))
@@ -74,7 +47,6 @@ struct AgentFinalMessage: Equatable {
         parsed.doneTitle = blocks(in: text, tag: "DONE_TITLE").first
         parsed.nextActions = bullets(blocks(in: text, tag: "NEXT_ACTIONS").first ?? "")
         parsed.artifacts = bullets(blocks(in: text, tag: "ARTIFACTS").first ?? "")
-        parsed.computerUseAsks = AgentMarkers.computerUseRequests(in: text)
         return parsed
     }
 
@@ -156,28 +128,11 @@ struct AgentChatMessage: Identifiable, Equatable {
     var final: AgentFinalMessage?
 }
 
-struct ConsentDisplay: Identifiable, Equatable {
-    enum Resolution: String, Equatable { case pending, approved, denied, expired }
-    var request: ConsentRequest
-    var resolution: Resolution
-    var id: String { request.id }
-    /// ConsentRequest isn't Equatable — compare the fields the card shows.
-    static func == (a: ConsentDisplay, b: ConsentDisplay) -> Bool {
-        a.resolution == b.resolution && a.request.id == b.request.id
-            && a.request.agentSlug == b.request.agentSlug
-            && a.request.turnID == b.request.turnID
-            && a.request.summary == b.request.summary
-            && a.request.reason == b.request.reason
-            && a.request.state == b.request.state
-    }
-}
-
 /// Transcript state for one agent — messages plus live turn bookkeeping.
 struct AgentChat: Equatable {
     var messages: [AgentChatMessage] = []
     var busy = false
     var activity: String?
-    var consents: [ConsentDisplay] = []
     /// "turnID:itemID" → index into messages for the streaming agent row.
     var streamingItems: [String: Int] = [:]
 }
@@ -193,9 +148,6 @@ final class AgentsViewModel: ObservableObject {
     /// opens the persisted store — see `rosterProvider()`.
     private var roster: (any AgentRosterProviding)?
     private var runtime: (any AgentRuntimeHandling)?
-    private var consent: (any ConsentCoordinating)?
-    private var asks: (any AgentConsentAsking)?
-    private static let resolvedConsentLimit = 12
     /// Token deltas coalesce off the published path: each streamed item's
     /// text accrues here and lands in `chats` on a short timer — one render
     /// per tick instead of one per token. Any other event flushes first so
@@ -204,34 +156,21 @@ final class AgentsViewModel: ObservableObject {
     private var deltaFlushTask: Task<Void, Never>?
 
     /// Defaults to the persisted roster so the UI shows real agents before
-    /// the coordinator binds the live store; runtime/consent stay unbound
-    /// until `bind` is called at integration.
+    /// the coordinator binds the live store; runtime stays unbound until
+    /// `bind` is called at integration.
     init(roster: (any AgentRosterProviding)? = nil,
-         runtime: (any AgentRuntimeHandling)? = nil,
-         consent: (any ConsentCoordinating)? = nil,
-         asks: (any AgentConsentAsking)? = nil) {
+         runtime: (any AgentRuntimeHandling)? = nil) {
         self.roster = roster
         self.runtime = runtime
-        self.consent = consent
-        self.asks = asks
     }
 
-    /// Coordinator entry point — rebinds the live store/gate after the
-    /// shared instances exist. Events reach `handle` through the runtime's
+    /// Coordinator entry point — rebinds the live store after the shared
+    /// instances exist. Events reach `handle` through the runtime's
     /// `onAgentEvent` fan-out, never a second stream consumer.
     func bind(roster: (any AgentRosterProviding)? = nil,
-              runtime: (any AgentRuntimeHandling)? = nil,
-              consent: (any ConsentCoordinating)? = nil,
-              asks: (any AgentConsentAsking)? = nil) {
+              runtime: (any AgentRuntimeHandling)? = nil) {
         if let roster { self.roster = roster }
-        if let consent { self.consent = consent }
         if let runtime, self.runtime == nil { self.runtime = runtime }
-        if let asks { self.asks = asks }
-        // The runtime's pendingAsks cover marker + post-turn asks the bare
-        // gate can't see — prefer it whenever the bound runtime conforms.
-        if self.asks == nil, let bound = runtime ?? self.runtime {
-            self.asks = bound as? (any AgentConsentAsking)
-        }
     }
 
     /// The bound roster, or the persisted agents.json materialized off the
@@ -256,7 +195,6 @@ final class AgentsViewModel: ObservableObject {
         } else if selection == nil {
             selection = agents.first?.slug
         }
-        refreshConsents()
     }
 
     /// Published transcript merged with any deltas still inside the
@@ -271,6 +209,30 @@ final class AgentsViewModel: ObservableObject {
     /// `chat(for:)` copy back would commit the queue early AND double it
     /// on the next flush.
     private func storedChat(for slug: String) -> AgentChat { chats[slug] ?? AgentChat() }
+
+    /// Transcript bound — long sessions used to grow `messages` forever,
+    /// making every render re-walk the whole history. Pruning shifts
+    /// `streamingItems` indices, so the map is re-based with the drop.
+    static let messageCap = 500
+
+    private static func capped(_ transcript: AgentChat) -> AgentChat {
+        var transcript = transcript
+        let overflow = transcript.messages.count - messageCap
+        guard overflow > 0 else { return transcript }
+        transcript.messages.removeFirst(overflow)
+        // Indices below the cut point to evicted rows — drop them so a
+        // streaming item can't re-anchor to the wrong message.
+        transcript.streamingItems = transcript.streamingItems.reduce(into: [:]) { out, pair in
+            let shifted = pair.value - overflow
+            if shifted >= 0 { out[pair.key] = shifted }
+        }
+        return transcript
+    }
+
+    /// Every `chats[slug]` write passes through the cap.
+    private func commit(_ transcript: AgentChat, slug: String) {
+        chats[slug] = Self.capped(transcript)
+    }
 
     private static func applying(_ deltas: [(key: String, turnID: String, delta: String)],
                                  to transcript: AgentChat) -> AgentChat {
@@ -304,7 +266,7 @@ final class AgentsViewModel: ObservableObject {
         let queued = queuedDeltas
         queuedDeltas.removeAll()
         for (slug, deltas) in queued {
-            chats[slug] = Self.applying(deltas, to: chats[slug] ?? AgentChat())
+            commit(Self.applying(deltas, to: chats[slug] ?? AgentChat()), slug: slug)
         }
     }
 
@@ -315,7 +277,7 @@ final class AgentsViewModel: ObservableObject {
         var transcript = self.storedChat(for: slug)
         let messageID = UUID().uuidString
         transcript.messages.append(AgentChatMessage(id: messageID, role: .user, text: text))
-        chats[slug] = transcript
+        commit(transcript, slug: slug)
         guard let runtime else {
             appendNote(slug: slug, "\(agent.name) isn't connected to a runtime yet.")
             return
@@ -328,7 +290,7 @@ final class AgentsViewModel: ObservableObject {
                 var transcript = self.storedChat(for: slug)
                 if let index = transcript.messages.firstIndex(where: { $0.id == messageID }) {
                     transcript.messages[index].turnID = turnID
-                    chats[slug] = transcript
+                    commit(transcript, slug: slug)
                 }
             } catch {
                 appendNote(slug: slug,
@@ -338,65 +300,7 @@ final class AgentsViewModel: ObservableObject {
     }
 
     func interrupt(slug: String) {
-        Task { try? await runtime?.interrupt(slug: slug) }
-    }
-
-    func resolve(_ display: ConsentDisplay, approved: Bool) {
-        guard let slug = display.request.agentSlug else { return }
-        var transcript = self.storedChat(for: slug)
-        guard let index = transcript.consents.firstIndex(
-            where: { $0.id == display.id && $0.resolution == .pending }) else { return }
-        transcript.consents[index].resolution = approved ? .approved : .denied
-        chats[slug] = transcript
-        // Marker asks only resolve through the runtime — approving arms the
-        // agent's NEXT turn; a bare gate.approve would mint a stray nil-turn
-        // one-shot instead. resolveConsent covers both ask kinds.
-        if let asks { asks.resolveConsent(display.request, approved: approved) }
-        else if approved { consent?.approve(display.request) } else { consent?.deny(display.request) }
-    }
-
-    /// Reconciles displayed asks with the ask source: new pendings appear,
-    /// locally-pending asks the source no longer reports flip to `expired`
-    /// (resolved elsewhere or superseded by a turn change).
-    func refreshConsents() {
-        // pendingAsks already merges gate asks with agent marker asks — the
-        // gate alone would expire every post-turn ask that is still live.
-        let pending = (asks?.pendingAsks ?? consent?.pending() ?? []).filter { $0.agentSlug != nil }
-        for request in pending {
-            var transcript = self.storedChat(for: request.agentSlug!)
-            let display = ConsentDisplay(request: request, resolution: .pending)
-            if let index = transcript.consents.firstIndex(where: { $0.id == request.id }) {
-                // Same ask still pending — republishing an identical card
-                // every poll tick re-renders the chat for nothing.
-                guard transcript.consents[index] != display else { continue }
-                transcript.consents[index] = display
-            } else {
-                transcript.consents.append(display)
-            }
-            chats[request.agentSlug!] = transcript
-        }
-        let live = Set(pending.map(\.id))
-        for slug in Array(chats.keys) {
-            var transcript = chats[slug]!, changed = false
-            for index in transcript.consents.indices
-                where transcript.consents[index].resolution == .pending && !live.contains(transcript.consents[index].id) {
-                transcript.consents[index].resolution = .expired
-                changed = true
-            }
-            let resolved = transcript.consents.filter { $0.resolution != .pending }
-            if resolved.count > Self.resolvedConsentLimit {
-                // Trim only resolved cards — a pending ask ahead of them in
-                // the array must never be dropped to enforce the cap.
-                var drop = resolved.count - Self.resolvedConsentLimit
-                transcript.consents.removeAll { display in
-                    guard display.resolution != .pending, drop > 0 else { return false }
-                    drop -= 1
-                    return true
-                }
-                changed = true
-            }
-            if changed { chats[slug] = transcript }
-        }
+        Task { _ = try? await runtime?.interrupt(slug: slug) }
     }
 
     func handle(_ event: AgentCodexEvent) {
@@ -432,10 +336,7 @@ final class AgentsViewModel: ObservableObject {
                         id: key, role: .agent, text: parsed.body, turnID: turnID, final: parsed))
                 }
                 transcript.activity = nil
-                chats[slug] = transcript
-                // A fresh COMPUTER_USE_REQUEST lands in the gate about now —
-                // pull it rather than waiting for the next poll tick.
-                if !parsed.computerUseAsks.isEmpty { refreshConsents() }
+                commit(transcript, slug: slug)
                 transcript = self.storedChat(for: slug)
                 changed = false
             } else if type == "userMessage", let text = item["text"]?.string {
@@ -488,13 +389,13 @@ final class AgentsViewModel: ObservableObject {
         default:
             changed = false
         }
-        if changed { chats[slug] = transcript }
+        if changed { commit(transcript, slug: slug) }
     }
 
     private func appendNote(slug: String, _ text: String) {
         var transcript = self.storedChat(for: slug)
         transcript.messages.append(AgentChatMessage(id: UUID().uuidString, role: .note, text: text))
-        chats[slug] = transcript
+        commit(transcript, slug: slug)
     }
 }
 

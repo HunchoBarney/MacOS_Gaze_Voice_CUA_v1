@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "harness_sha256": "1a76193853c60db093551fa088211897f89b1333d559acb84c1aa94d4016c928",
+  "label": "c1finalr2",
+  "platform": "macOS-26.2-arm64-arm-64bit",
+  "repeats": 3,
+  "signed_sha256": "eac804975c9504c4dfc6aada473ed087f0c90535e855cbae9de0510a0eae52a8",
+  "app": "/private/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-final-r2-m6mkvqfs/Jev Voice.app",
+  "status": "passed",
+  "physical_input": false,
+  "human_confirmed": false,
+  "phase_accepted": false,
+  "documents_before": 0,
+  "rows": [
+    {
+      "report": ".agent/results/P3/user-audit-sp-c1finalr2-1371dffe-1/result.json",
+      "profiled": false,
+      "exit": 0,
+      "status": "passed",
+      "elapsed_ms": 2730.7672917377204,
+      "closed_fixtures": 2,
+      "documents_after": 0,
+      "exact_insertion": true,
+      "decoy_unchanged": true,
+      "no_model_rounds": true,
+      "trace": [
+        {
+          "monotonic": 1595069.7916988335,
+          "stage": "contextBegin",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.4124307502,
+          "stage": "contextEnd",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.4799247084,
+          "stage": "admissionLocal",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.4832436251,
+          "stage": "localBegin",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.4853470419,
+          "stage": "coordinatorBegin",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.4885584167,
+          "stage": "keyBegin",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.4885865,
+          "stage": "keyEnd",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.4922810835,
+          "stage": "gazeBegin",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.5396432918,
+          "stage": "gazeEnd",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.54055025,
+          "stage": "referentBegin",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.5412215001,
+          "stage": "referentEnd",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.544012875,
+          "stage": "workCreated",
+          "task": "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.5453195418,
+          "stage": "localEnd",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.7106752084,
+          "stage": "executorBegin",
+          "task": "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.711310625,
+          "stage": "resolveBegin",
+          "task": "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595070.7181295,
+          "stage": "resolveEnd",
+          "task": "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595072.0762325001,
+          "stage": "nativeTextInsertionBegin",
+          "task": "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+          "tool": "typeText",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595072.0942340002,
+          "stage": "nativeTextInsertionEnd",
+          "task": "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+          "tool": "typeText",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        },
+        {
+          "monotonic": 1595072.1123230418,
+          "stage": "executorEnd",
+          "task": "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+          "turn": "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+        }
+      ]
+    },
+    {
+      "report": ".agent/results/P3/user-audit-sp-c1finalr2-ddb82399-2/result.json",
+      "profiled": false,
+      "exit": 0,
+      "status": "passed",
+      "elapsed_ms": 2946.5682085137814,
+      "closed_fixtures": 2,
+      "documents_after": 0,
+      "exact_insertion": true,
+      "decoy_unchanged": true,
+      "no_model_rounds": true,
+      "trace": [
+        {
+          "monotonic": 1595121.4046754583,
+          "stage": "contextBegin",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.022643875,
+          "stage": "contextEnd",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.0559479168,
+          "stage": "admissionLocal",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.0569524167,
+          "stage": "localBegin",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.058793375,
+          "stage": "coordinatorBegin",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.0604043752,
+          "stage": "keyBegin",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.0604257502,
+          "stage": "keyEnd",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.0604573751,
+          "stage": "gazeBegin",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.1086043334,
+          "stage": "gazeEnd",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.1089588334,
+          "stage": "referentBegin",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.1098812919,
+          "stage": "referentEnd",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.1117789585,
+          "stage": "workCreated",
+          "task": "C9DA2F51-671D-4634-9A1D-C48EBD99A046",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.112399375,
+          "stage": "localEnd",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.27246625,
+          "stage": "executorBegin",
+          "task": "C9DA2F51-671D-4634-9A1D-C48EBD99A046",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.2731544168,
+          "stage": "resolveBegin",
+          "task": "C9DA2F51-671D-4634-9A1D-C48EBD99A046",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595122.2746825835,
+          "stage": "resolveEnd",
+          "task": "C9DA2F51-671D-4634-9A1D-C48EBD99A046",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595123.7304810002,
+          "stage": "nativeTextInsertionBegin",
+          "task": "C9DA2F51-671D-4634-9A1D-C48EBD99A046",
+          "tool": "typeText",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595123.7393824167,
+          "stage": "nativeTextInsertionEnd",
+          "task": "C9DA2F51-671D-4634-9A1D-C48EBD99A046",
+          "tool": "typeText",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        },
+        {
+          "monotonic": 1595123.775496125,
+          "stage": "executorEnd",
+          "task": "C9DA2F51-671D-4634-9A1D-C48EBD99A046",
+          "turn": "BDEBDC4A-8D21-4D98-B487-DB17B4E57ECC"
+        }
+      ]
+    },
+    {
+      "report": ".agent/results/P3/user-audit-sp-c1finalr2-33b32fed-3/result.json",
+      "profiled": false,
+      "exit": 0,
+      "status": "passed",
+      "elapsed_ms": 3315.653416560963,
+      "closed_fixtures": 2,
+      "documents_after": 0,
+      "exact_insertion": true,
+      "decoy_unchanged": true,
+      "no_model_rounds": true,
+      "trace": [
+        {
+          "monotonic": 1595157.1368975001,
+          "stage": "contextBegin",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.7575292918,
+          "stage": "contextEnd",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.7896994585,
+          "stage": "admissionLocal",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.7903607085,
+          "stage": "localBegin",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.7913695418,
+          "stage": "coordinatorBegin",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.7926372918,
+          "stage": "keyBegin",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.7926595835,
+          "stage": "keyEnd",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.79268625,
+          "stage": "gazeBegin",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.8134025417,
+          "stage": "gazeEnd",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.8164567917,
+          "stage": "referentBegin",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.8176636668,
+          "stage": "referentEnd",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.8299144167,
+          "stage": "workCreated",
+          "task": "22D35600-973C-44FF-B6C7-EF32E90C33A0",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.8309722084,
+          "stage": "localEnd",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.9039333751,
+          "stage": "executorBegin",
+          "task": "22D35600-973C-44FF-B6C7-EF32E90C33A0",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.9040897083,
+          "stage": "resolveBegin",
+          "task": "22D35600-973C-44FF-B6C7-EF32E90C33A0",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595157.9054709584,
+          "stage": "resolveEnd",
+          "task": "22D35600-973C-44FF-B6C7-EF32E90C33A0",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595160.163261875,
+          "stage": "nativeTextInsertionBegin",
+          "task": "22D35600-973C-44FF-B6C7-EF32E90C33A0",
+          "tool": "typeText",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595160.1778706252,
+          "stage": "nativeTextInsertionEnd",
+          "task": "22D35600-973C-44FF-B6C7-EF32E90C33A0",
+          "tool": "typeText",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        },
+        {
+          "monotonic": 1595160.2555540001,
+          "stage": "executorEnd",
+          "task": "22D35600-973C-44FF-B6C7-EF32E90C33A0",
+          "turn": "D379F0B4-85C1-4C29-BCA0-37CD78AA76CE"
+        }
+      ]
+    }
+  ]
+}

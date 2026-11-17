@@ -1,0 +1,838 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Compiling JevVoice JevVisualDecision.swift
+[4/7] Emitting module JevVoice
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:269:14: warning: no 'async' operations occur within 'await' expression
+ 267 |          },
+ 268 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 269 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 270 |          },
+ 271 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1568:13: warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+1566 |     struct DriveCaptureSource: CaptureSource {
+1567 |         typealias ImageCall = @Sendable (String, [String: JSONValue]) async throws -> CuaToolResult
+1568 |         let observe: Call
+     |             |- warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+     |             `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+1569 |         let window: WindowRef
+1570 |         let session: String
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:101:90: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+ 99 | 
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+    |                                                                                          `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:102:94: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+    |                                                                                              `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+104 |         self.configuration = configuration
+[5/12] Compiling JevVoice CuaDriveServer.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/ComputerControl/CuaDriveServer.swift:326:62: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+324 |                                  granted: { standingGrant() },
+325 |                                  explicitConsent: false,
+326 |                                  scopedCall: imageClient.map { _ in
+    |                                                              `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+327 |                                      { try await driver.callScoped($0, arguments: $1, origin: $2) }
+328 |                                  },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:269:14: warning: no 'async' operations occur within 'await' expression
+ 267 |          },
+ 268 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 269 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 270 |          },
+ 271 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[6/12] Compiling JevVoice JevChooser.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/ComputerControl/CuaDriveServer.swift:326:62: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+324 |                                  granted: { standingGrant() },
+325 |                                  explicitConsent: false,
+326 |                                  scopedCall: imageClient.map { _ in
+    |                                                              `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+327 |                                      { try await driver.callScoped($0, arguments: $1, origin: $2) }
+328 |                                  },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:269:14: warning: no 'async' operations occur within 'await' expression
+ 267 |          },
+ 268 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 269 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 270 |          },
+ 271 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[7/12] Compiling JevVoice JevDecider.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/ComputerControl/CuaDriveServer.swift:326:62: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+324 |                                  granted: { standingGrant() },
+325 |                                  explicitConsent: false,
+326 |                                  scopedCall: imageClient.map { _ in
+    |                                                              `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+327 |                                      { try await driver.callScoped($0, arguments: $1, origin: $2) }
+328 |                                  },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:269:14: warning: no 'async' operations occur within 'await' expression
+ 267 |          },
+ 268 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 269 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 270 |          },
+ 271 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[8/12] Compiling JevVoice VisualGoalProof.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1391:41: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1389 |                 return try await self.observedDriverCall(tool, args, turn: traceTurn, work: traceWork, readOnly: true)
+1390 |             },
+1391 |             scopedCall: imageClient.map { _ in
+     |                                         `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1392 |                 { [weak self] tool, args, origin in
+1393 |                     guard let self else { throw DriverConnectionError.closed }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:269:14: warning: no 'async' operations occur within 'await' expression
+ 267 |          },
+ 268 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 269 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 270 |          },
+ 271 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[9/12] Compiling JevVoice VoiceTaskCoordinator.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1391:41: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1389 |                 return try await self.observedDriverCall(tool, args, turn: traceTurn, work: traceWork, readOnly: true)
+1390 |             },
+1391 |             scopedCall: imageClient.map { _ in
+     |                                         `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1392 |                 { [weak self] tool, args, origin in
+1393 |                     guard let self else { throw DriverConnectionError.closed }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:269:14: warning: no 'async' operations occur within 'await' expression
+ 267 |          },
+ 268 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 269 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 270 |          },
+ 271 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[9/14] Write Objects.LinkFileList
+[10/14] Linking JevVoice
+[11/14] Applying JevVoice
+[13/38] Emitting module JevVoiceAppTests
+[14/38] Compiling JevVoiceAppTests AgentAskChannelTests.swift
+[15/38] Compiling JevVoiceAppTests AgentCursorTests.swift
+[16/38] Compiling JevVoiceAppTests AgentMarkersTests.swift
+[17/38] Compiling JevVoiceAppTests AgentStoreTests.swift
+[18/38] Compiling JevVoiceAppTests AgentsModelTests.swift
+[19/38] Compiling JevVoiceAppTests AppResolverTests.swift
+[20/38] Compiling JevVoiceAppTests BrowserActuationTests.swift
+[21/38] Compiling JevVoiceAppTests CodexRuntimeBridgeTests.swift
+[22/38] Compiling JevVoiceAppTests ConsentAskWatchTests.swift
+[23/38] Compiling JevVoiceAppTests ConsentRadialTests.swift
+[24/38] Compiling JevVoiceAppTests CuaDependencyPinTests.swift
+[25/38] Compiling JevVoiceAppTests CuaDriveServerTests.swift
+[26/38] Compiling JevVoiceAppTests CuaDriveSessionTests.swift
+[27/38] Compiling JevVoiceAppTests CuaPolicyTests.swift
+[28/38] Compiling JevVoiceAppTests DriveLoopTests.swift
+[29/38] Compiling JevVoiceAppTests DriveSessionCursorTests.swift
+[30/38] Compiling JevVoiceAppTests DriverConnectionPoolTests.swift
+[31/38] Compiling JevVoiceAppTests DriverConnectionTests.swift
+[32/38] Compiling JevVoiceAppTests DriverDaemonHostTests.swift
+[33/38] Compiling JevVoiceAppTests DwellClickTests.swift
+[34/38] Compiling JevVoiceAppTests FastLaneExecutorTests.swift
+[35/38] Compiling JevVoiceAppTests FastLaneTests.swift
+[36/38] Compiling JevVoiceAppTests FnInputMonitorReleaseTests.swift
+[37/82] Compiling JevVoiceAppTests JevNativeObservationTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[38/82] Compiling JevVoiceAppTests JevObservedGoalTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[39/82] Compiling JevVoiceAppTests JevProgressLiveTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[40/82] Compiling JevVoiceAppTests JevVisionTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[41/82] Compiling JevVoiceAppTests LedgerLatencyTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[42/82] Compiling JevVoiceAppTests LedgerSpendTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[43/82] Compiling JevVoiceAppTests LiveWorkflowTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[44/82] Compiling JevVoiceAppTests LocalSpeechTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[45/82] Compiling JevVoiceAppTests MicrophoneInputTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[46/82] Compiling JevVoiceAppTests NativeSpeechTailReplayTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[47/82] Compiling JevVoiceAppTests NativeWindowWitnessTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[48/82] Compiling JevVoiceAppTests PolicyDenyListTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[49/82] Compiling JevVoiceAppTests PolicyScopedGrantsTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[50/82] Compiling JevVoiceAppTests PolicyTypedPayloadTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[51/82] Compiling JevVoiceAppTests RealtimeVoiceLaneTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[52/82] Compiling JevVoiceAppTests RoutineSchedulerTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[53/82] Compiling JevVoiceAppTests ScreenGeometryTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[54/82] Compiling JevVoiceAppTests SemanticRequestBudgetTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[55/82] Compiling JevVoiceAppTests TargetOverlayTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[56/82] Compiling JevVoiceAppTests TaskLoopTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[57/82] Compiling JevVoiceAppTests TrackerArgumentsTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[58/82] Compiling JevVoiceAppTests TrackerContractTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevObservedGoalTests.swift:137:67: warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+135 |     func run(_ fixture: Fixture, criteria: [String] = [], model: String = "jev-1.14.0",
+136 |              extraState: [String: JSONValue] = [:]) async -> TaskLoopResult {
+137 |         let choose = JevChooser.make(model: model, infer: fixture.infer)
+    |                                                                   `- warning: converting non-Sendable function value to '@Sendable (JSONValue, [String : Question]) async throws -> (SystemOneResponse, Double)' may introduce data races
+138 |         let decider = JevDecider(choose: { state, candidates in
+139 |             let choice = try await choose(state, candidates)
+[59/104] Compiling JevVoiceAppTests FnInputStateTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[60/104] Compiling JevVoiceAppTests FocusedTextTargetTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[61/104] Compiling JevVoiceAppTests GazeCandidateFeedTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[62/104] Compiling JevVoiceAppTests GazeLaneTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[63/104] Compiling JevVoiceAppTests GazeRefusalStateTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[64/104] Compiling JevVoiceAppTests GazeServiceTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[65/104] Compiling JevVoiceAppTests GazeStreamTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[66/104] Compiling JevVoiceAppTests GazeWiringTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[67/104] Compiling JevVoiceAppTests IntelligenceChooserTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[68/104] Compiling JevVoiceAppTests IntelligenceCommandRouterTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[69/104] Compiling JevVoiceAppTests IntelligenceCommandSpotterTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[70/104] Compiling JevVoiceAppTests IntentRouterTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[71/104] Compiling JevVoiceAppTests IntentScorerTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[72/104] Compiling JevVoiceAppTests JevAdaptiveFixtures.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[73/104] Compiling JevVoiceAppTests JevAdaptiveLiveTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[74/104] Compiling JevVoiceAppTests JevAdaptiveTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[75/104] Compiling JevVoiceAppTests JevAdaptiveWorkflowTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[76/104] Compiling JevVoiceAppTests JevChooserTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[77/104] Compiling JevVoiceAppTests JevDeciderTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[78/104] Compiling JevVoiceAppTests JevEditableValueTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[79/104] Compiling JevVoiceAppTests JevIntegrationTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[80/104] Compiling JevVoiceAppTests JevLiveIntegrationTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:361:48: warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+359 |             let calls = LockedBox<[String]>([]), captures = LockedBox(0)
+360 |             let selection: (@Sendable () async -> NSRange?)? =
+361 |                 variant == "missing_selection" ? nil : { NSRange(location: 7, length: 0) }
+    |                                                `- warning: converting non-Sendable function value to '@Sendable () async -> NSRange?' (aka '@Sendable () async -> Optional<_NSRange>') may introduce data races
+362 |             let driver = directNativeLoop(calls: calls, focusCalls: captures, current: LockedBox(true),
+363 |                 value: LockedBox("before "), typedValue: variant == "wrong_value" ? "corrupted \(payload)" : nil,
+[81/104] Compiling JevVoiceAppTests TrackerControlTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[82/104] Compiling JevVoiceAppTests TrackerFlowTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[83/104] Compiling JevVoiceAppTests TrackerHostLockTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[84/104] Compiling JevVoiceAppTests TrackerHostTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[85/104] Compiling JevVoiceAppTests TrackerWedgeSignatureTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[86/104] Compiling JevVoiceAppTests UXConfigDefaultsTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[87/104] Compiling JevVoiceAppTests UXOnboardingTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[88/104] Compiling JevVoiceAppTests VoiceAccuracyTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[89/104] Compiling JevVoiceAppTests VoiceAgentBridgeTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[90/104] Compiling JevVoiceAppTests VoiceCommandTraceTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[91/104] Compiling JevVoiceAppTests VoiceLaneAuditTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[92/104] Compiling JevVoiceAppTests VoiceNormalQualificationTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[93/104] Compiling JevVoiceAppTests VoiceOneBrainTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[94/104] Compiling JevVoiceAppTests VoiceRemoteTrialTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[95/104] Compiling JevVoiceAppTests VoiceSemanticLiveTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[96/104] Compiling JevVoiceAppTests VoiceSemanticTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[97/104] Compiling JevVoiceAppTests VoiceTaskContractTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[98/104] Compiling JevVoiceAppTests VoiceTaskCoordinatorLaneTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[99/104] Compiling JevVoiceAppTests VoiceTaskCoordinatorOverlayTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[100/104] Compiling JevVoiceAppTests VoiceToolResultTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[101/104] Compiling JevVoiceAppTests VoiceTrialReportTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[102/104] Compiling JevVoiceAppTests VoiceTurnEvidenceTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceCommandTraceTests.swift:94:78: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 92 |     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
+ 93 |         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
+ 94 |         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
+    |                                                                              `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+ 95 |         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
+ 96 |         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[102/104] Write Objects.LinkFileList
+[103/104] Linking JevVoicePackageTests
+Build complete! (45.57s)
+Test Suite 'Selected tests' started at 2026-11-10 01:53:17.072.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-10 01:53:17.076.
+Test Suite 'JevVisionTests' started at 2026-11-10 01:53:17.076.
+Test Case '-[JevVoiceAppTests.JevVisionTests testAbsentTargetIgnoresEvenValidBoxWithoutAnotherVote]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testAbsentTargetIgnoresEvenValidBoxWithoutAnotherVote]' passed (0.018 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testAlwaysVisualDeciderReadsOneCombinedFrameNotTwoSnapshots]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testAlwaysVisualDeciderReadsOneCombinedFrameNotTwoSnapshots]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testBindingRejectsSwappedAssetAndImageWithClonedFrameNonce]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testBindingRejectsSwappedAssetAndImageWithClonedFrameNonce]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testCaptureRefusesSecureSurfaceBeforeProvidingImageToModel]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testCaptureRefusesSecureSurfaceBeforeProvidingImageToModel]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testCaptureRejectsTransportRewrittenSessionBeforeImageSubmission]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testCaptureRejectsTransportRewrittenSessionBeforeImageSubmission]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testChangedPixelsAndImpossibleVotesCannotDefeatIdleGuard]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testChangedPixelsAndImpossibleVotesCannotDefeatIdleGuard]' passed (0.065 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testCombinedCaptureProvidesFreshAXAndImageFromOneRead]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testCombinedCaptureProvidesFreshAXAndImageFromOneRead]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testDaemonRestartCannotQualifyAsSameScopeFreshVisualGoal]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testDaemonRestartCannotQualifyAsSameScopeFreshVisualGoal]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testDriveLoopProductionSeamUsesScopedCaptureAndFreshVerifier]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testDriveLoopProductionSeamUsesScopedCaptureAndFreshVerifier]' passed (0.017 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testEditableVoteCannotOverrideContradictoryControlIdentity]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testEditableVoteCannotOverrideContradictoryControlIdentity]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testEnabledVisualDecisionLeavesGroundedAXPathAlone]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testEnabledVisualDecisionLeavesGroundedAXPathAlone]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testFailedSubjectProofCannotReanchorTaskToDifferentSubject]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testFailedSubjectProofCannotReanchorTaskToDifferentSubject]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testForeignFrameCannotReachImageInference]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testForeignFrameCannotReachImageInference]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testFramePreservesCaptureIdentityAndUsesImageNotScreenCoordinates]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testFramePreservesCaptureIdentityAndUsesImageNotScreenCoordinates]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testFrameRejectsForeignMissingUnusableAndMismatchedCapture]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testFrameRejectsForeignMissingUnusableAndMismatchedCapture]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testGoalProofRetainsOriginalSubjectAcrossEarlierActions]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testGoalProofRetainsOriginalSubjectAcrossEarlierActions]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testLegitimateTextHoleChecksActualFieldBeforeAsking]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testLegitimateTextHoleChecksActualFieldBeforeAsking]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testLoopRefusesForgedVisualRequestsBeforeConsentOrInput]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testLoopRefusesForgedVisualRequestsBeforeConsentOrInput]' passed (0.015 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testMissingTextCannotSolicitAnAnswerBeforeTargetAuthorization]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testMissingTextCannotSolicitAnAnswerBeforeTargetAuthorization]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativeImageSelectionKeepsTokenAndCaptureWithoutPixels]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativeImageSelectionKeepsTokenAndCaptureWithoutPixels]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativeSelectionNeedsCapabilitySameSnapshotAndSemanticMatch]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativeSelectionNeedsCapabilitySameSnapshotAndSemanticMatch]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testNextVisualInputCannotMoveToAnotherSubjectInSameWindow]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testNextVisualInputCannotMoveToAnotherSubjectInSameWindow]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testNoApplicableAXStepRequestsNewVisualEvidence]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testNoApplicableAXStepRequestsNewVisualEvidence]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testOnDemandPixelsReplaceAXWithSameCaptureSnapshot]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testOnDemandPixelsReplaceAXWithSameCaptureSnapshot]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testOpaqueWindowProducesCaptureBoundImagePointNotDesktopPoint]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testOpaqueWindowProducesCaptureBoundImagePointNotDesktopPoint]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testPaddingRetainsExactDriverCoordinatesAndRejectsBlankMargin]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testPaddingRetainsExactDriverCoordinatesAndRejectsBlankMargin]' passed (0.012 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testPresenceAndLocationCannotGrantPermission]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testPresenceAndLocationCannotGrantPermission]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testPreviewUsesDemandDrivenImageButNeverVerifiesOrActs]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testPreviewUsesDemandDrivenImageButNeverVerifiesOrActs]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testRecoveredGroundedAXDoesNotKeepRequestingImages]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testRecoveredGroundedAXDoesNotKeepRequestingImages]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testSamePublicSessionWithNewEpochCannotQualifyFreshGoal]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testSamePublicSessionWithNewEpochCannotQualifyFreshGoal]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testSubjectMismatchStopsBeforeFurtherDecisionsOrInput]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testSubjectMismatchStopsBeforeFurtherDecisionsOrInput]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testSufficientAXDoesNotRequestPixels]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testSufficientAXDoesNotRequestPixels]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testTenStepOpaqueWorkflowContinuesOnlyWithSemanticVisualProgress]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testTenStepOpaqueWorkflowContinuesOnlyWithSemanticVisualProgress]' passed (0.033 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testUnidentifiableTargetCannotBecomeHarmlessClick]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testUnidentifiableTargetCannotBecomeHarmlessClick]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualDecisionIsOptInAndEmptyAXRequestsPixels]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualDecisionIsOptInAndEmptyAXRequestsPixels]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualDenyRuleCannotDisappearWithMissingAXLabels]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualDenyRuleCannotDisappearWithMissingAXLabels]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualFrameReachesVisualBrainWithoutAXChooser]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualFrameReachesVisualBrainWithoutAXChooser]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotCompleteFromForgeryOfferedButtonOrChangedSubject]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotCompleteFromForgeryOfferedButtonOrChangedSubject]' passed (0.028 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotIgnoreExplicitMissingNativePostconditions]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotIgnoreExplicitMissingNativePostconditions]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotProveHiddenOrByteExactOutcomesFromPixels]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotProveHiddenOrByteExactOutcomesFromPixels]' passed (0.018 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotReuseOriginCaptureAsFreshVerification]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalCannotReuseOriginCaptureAsFreshVerification]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalNeedsFreshIndependentProofBeforeDone]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualGoalNeedsFreshIndependentProofBeforeDone]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualPurchaseCannotLoseTheCanonicalProtectedActionMarker]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualPurchaseCannotLoseTheCanonicalProtectedActionMarker]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualTypingChoosesLaterLiteralAndPreservesEveryByte]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testVisualTypingChoosesLaterLiteralAndPreservesEveryByte]' passed (0.002 seconds).
+Test Suite 'JevVisionTests' passed at 2026-11-10 01:53:17.437.
+	 Executed 44 tests, with 0 failures (0 unexpected) in 0.356 (0.361) seconds
+Test Suite 'JevVoicePackageTests.xctest' passed at 2026-11-10 01:53:17.437.
+	 Executed 44 tests, with 0 failures (0 unexpected) in 0.356 (0.361) seconds
+Test Suite 'Selected tests' passed at 2026-11-10 01:53:17.437.
+	 Executed 44 tests, with 0 failures (0 unexpected) in 0.356 (0.365) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+verification lane green

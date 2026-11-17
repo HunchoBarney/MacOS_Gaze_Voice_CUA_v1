@@ -1,0 +1,16 @@
+Waiting for the Jarvis desktop test lock…
+{
+  "qualification": false,
+  "purpose": "inspect production preview/chooser requests against real captured owned-window data",
+  "boundary": "cached release diagnostic, separate document identity; not signed-app G5",
+  "workload": "unchanged 300-line document content and scroll-down goal",
+  "signed_driver_source": "65155dbeae7cee3f8f3ce24968dc5c24951df235800f0d4836bfd22c7022adf3",
+  "test_executable_sha256": "1671e9f537f65a5856bd72daa89edf6cc820675ca6c5803c15417b2ba1d3eb35",
+  "harness_sha256": "62b2cb037fc32feaeb2d3ed9faeab057bb67b4c2956f3238b2bddec31aa9f272",
+  "documents_before": 1,
+  "captured": false,
+  "test_exit": 75,
+  "content_unchanged": true,
+  "documents_after": 2,
+  "documents_restored": false
+}

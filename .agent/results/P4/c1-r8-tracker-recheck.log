@@ -1,0 +1,36 @@
+Test Suite 'Selected tests' started at 2026-11-16 18:35:56.524.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-16 18:35:56.527.
+Test Suite 'TrackerHostLockTests' started at 2026-11-16 18:35:56.527.
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testLockNeverClaimsAUsersPause]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testLockNeverClaimsAUsersPause]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testLockPausesRunningTracker]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/TrackerHostLockTests.swift:72: error: -[JevVoiceAppTests.TrackerHostLockTests testLockPausesRunningTracker] : XCTAssertEqual failed: ("2") is not equal to ("1")
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testLockPausesRunningTracker]' failed (0.085 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testLockWithUnreachableTrackerLeavesNoClaim]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testLockWithUnreachableTrackerLeavesNoClaim]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testRelockLandingMidResumeReparks]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/TrackerHostLockTests.swift:245: error: -[JevVoiceAppTests.TrackerHostLockTests testRelockLandingMidResumeReparks] : XCTAssertEqual failed: ("2") is not equal to ("1")
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/TrackerHostLockTests.swift:260: error: -[JevVoiceAppTests.TrackerHostLockTests testRelockLandingMidResumeReparks] : XCTAssertEqual failed: ("4") is not equal to ("3") - re-lock mid-resume must loop back into the park
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testRelockLandingMidResumeReparks]' failed (0.032 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testRespawnWhileLockedReparks]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/TrackerHostLockTests.swift:151: error: -[JevVoiceAppTests.TrackerHostLockTests testRespawnWhileLockedReparks] : XCTAssertEqual failed: ("3") is not equal to ("2") - the respawned tracker must be re-parked under the still-locked screen
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testRespawnWhileLockedReparks]' failed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testTrackerStartingWhileLockedParksOnRunning]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testTrackerStartingWhileLockedParksOnRunning]' passed (0.061 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testUnlockLandingMidParkLeavesNoPark]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testUnlockLandingMidParkLeavesNoPark]' passed (0.027 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testUnlockResumesWhatLockPaused]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/TrackerHostLockTests.swift:88: error: -[JevVoiceAppTests.TrackerHostLockTests testUnlockResumesWhatLockPaused] : XCTAssertEqual failed: ("3") is not equal to ("2")
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testUnlockResumesWhatLockPaused]' failed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testUnlockWithoutParkIsQuiet]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostLockTests testUnlockWithoutParkIsQuiet]' passed (0.000 seconds).
+Test Suite 'TrackerHostLockTests' failed at 2026-11-16 18:35:56.746.
+	 Executed 9 tests, with 5 failures (0 unexpected) in 0.218 (0.219) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-16 18:35:56.746.
+	 Executed 9 tests, with 5 failures (0 unexpected) in 0.218 (0.219) seconds
+Test Suite 'Selected tests' failed at 2026-11-16 18:35:56.746.
+	 Executed 9 tests, with 5 failures (0 unexpected) in 0.218 (0.223) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

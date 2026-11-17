@@ -1,0 +1,20 @@
+Waiting for the Jarvis desktop test lock…
+43:203: execution error: TextEdit got an error: Can’t get path of text. (-1728)
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 170, in <module>
+    main()
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 117, in main
+    real.wait_for(lambda: body(target) == text, 8, "owned document readiness")
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-realapps.py", line 45, in wait_for
+    result = probe()
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 117, in <lambda>
+    real.wait_for(lambda: body(target) == text, 8, "owned document readiness")
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 32, in body
+    return apple(f'''tell application "TextEdit"
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 24, in apple
+    value = subprocess.check_output(["osascript", "-"], input=script, text=True, timeout=20)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 424, in check_output
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['osascript', '-']' returned non-zero exit status 1.

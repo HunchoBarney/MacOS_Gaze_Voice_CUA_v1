@@ -1,0 +1,69 @@
+{
+  "phase": "P3",
+  "criteria": [
+    {
+      "id": "P3-1",
+      "behavior": "P3 works in isolated ship/v1-p3 worktree, preserves inherited tracked and untracked refactor bytes outside owned paths, and does not commit or discard unrelated state.",
+      "check": "python3 scripts/verify-p3.py scope -> PASS against .agent/results/P3/inherited-baseline.json/diff; git branch --show-current -> ship/v1-p3; check-owned-paths.py P3 -> OK. verify-p3.py must compare untracked file hashes, not merely status names.",
+      "expected": "Original checkout unchanged; zero unexplained non-owned deltas; inherited baseline and build status explicit.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P3-2",
+      "behavior": "One UUID-scoped final admission decision per turn; partials never actuate. Accuracy guard preserves critical fields and refuses/clarifies ambiguity without forced name substitutions. At least 50 clear paraphrases execute exactly once; negative/confusable/negated/stale cases never execute the wrong action.",
+      "check": "scripts/verification-lane.sh p3 -> real integrated caller tests plus VoiceTurnTests/VoiceAccuracyTests. python3 scripts/verify-p3.py accuracy validates .agent/results/P3/unit-evidence.json schema1 against frozen Tests/Fixtures/P3/manifest.json: exactly50 clear,14 negative,4 boundary rows with actual executor counters, exact intended slots and no missing/duplicate cases.",
+      "expected": "50/50 clear cases autonomously dispatch exactly once with zero extra clarification;14/14 negative cases have zero dispatch and specified clarify/refuse;4/4 boundary cases match expected authority. Typed critical-field/ask-nonce contract in implementation-contract.md section1 enforced.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P3-3",
+      "behavior": "Production capture accepts only after local readiness, uses one provider and bounded ordered PCM per turn, displays matching local partials, and makes one WHOLE-HOLD final after Fn-up/drain. Internal EOU is provisional; later correction/negation retained. The release-anchored safety watchdog is min(8, max(2, 1.2 + 0.3 * sealedCapturedSeconds)) seconds and covers drain/refinement and the same gate-finalization window; it is not a relaxed latency target. Warm final <=200ms is reported separately, and dispatch/effect budgets in P3-7 remain unchanged. >30s capture never silently truncates. Lost audio/failed refinement invalidates admission.",
+      "check": "Serialized p3 tests exercise production LocalSpeechSession/LocalTranscriber/RealtimeVoiceLane/controller seams with delayed readiness, rapid Fn cycles, overflow, cancellation and stale callbacks. python3 scripts/verify-p3.py replay reads existing real WAVs through the production adapter; no synthetic speech or model mocks counted as acoustic evidence.",
+      "expected": "Local-only display and final source proven in adapter/integration tests; real replay recorded separately from physical Fn proof; no silent frame loss.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P3-4",
+      "behavior": "Local hits/ambiguity/failed capture/dictation create no reasoning response. One safe miss commits owning audio/transcript once and binds server response.created to a local request ticket with connection generation, turn UUID and input identity. Raw decoder retains response/call IDs; old/unbound/outcome-only responses cannot actuate. Exactly one executor permit per reasoning or typed turn, not per call ID.",
+      "check": "Raw server JSON -> production RealtimeVoiceClient decoder/envelope -> lane -> executor tests assert ownership and frame counts for hit/miss/blocked/cancel/reconnect/typed/outcome-only purposes. Include old response with fresh call ID during new miss, both duplicate decoding paths, response-created ambiguity and unknown/unbound IDs. implementation-contract.md section3 is binding.",
+      "expected": "No commit/response on local hit; one initial reasoning response per miss; duplicate and cross-turn tools blocked; zero image/cloud-transcription sends.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P3-5",
+      "behavior": "Realtime typed tool catalog and handlers match versioned CONTRACTS section 3; unknown/malformed/unsupported capabilities fail closed; stable task IDs own replies; no raw gaze coordinates. Old speculative classifier/spotter/chooser, local-claim ledger and gpt-4o/-mini paths are retired with migrated regression coverage.",
+      "check": "python3 scripts/verify-p3.py contracts validates contract-review.json against CONTRACTS.md section3 v1 and implementation-contract.md section4: exact9 schemas/handlers, argument bounds, started/completed statuses, stable task/ask/agent identity and named unavailable capabilities including knowledge helpers. Source/consumer audit includes P5/P6/P7/P11; malformed args and raw gaze coordinates must never invoke an executor.",
+      "expected": "No executable legacy competing paths or arbitrary argument execution; no fake success for unavailable executors; cross-phase schema amendment explicit.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P3-6",
+      "behavior": "Baseline failures separated from regressions; full Swift and EyeTracking checks pass through the serialized lane after production integration. New guards have demonstrated failing-before/passing-after controls; secrets/audio remain out of artifacts.",
+      "check": "scripts/verification-lane.sh all -> PASS; python3 scripts/verify-p3.py hygiene -> PASS; .agent/results/P3 contains baseline, negative-control and final logs with artifact/source IDs. If inherited baseline fails, diagnose and amend scope or report blocked rather than hiding failure.",
+      "expected": "Full regression and hygiene evidence; no baseline rollback, test deletion masquerading as fixes, new secret values, or committed recordings.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P3-7",
+      "behavior": "Real local-ASR replay and physical packaged-app Fn/microphone trials distinguish acoustic correctness, intent/critical-slot correctness, clarification burden, turn ownership and actual effect latency. Any new ASR promotion requires frozen real unseen/confusable speech, not the 15 tuning/regression recordings alone.",
+      "check": "Use replay, live and separate remote predicates with schema1 artifacts in implementation-contract.md section5 and the approved normal-voice-qualification/PLAN.md amendment. Replay: all15 regression +20 confirmed held-out real recordings through production adapter, explicit missing IDs exit2 BLOCKED. Physical: actual normal GUI VoiceController/RealtimeVoiceLane, real Fn/pill/microphone,4 Calculator paraphrases x5 warm trials plus4 controls, separate1 cold+2 warmups; unchanged local-autonomy>=95% separately from20/20 final tasks. Require current source/build/reviewed signed install, raw journal and independent OS window witnesses, full immutable attempt ledger, no retries and human confirmation. verify-p3.py live reads normal-live.json pointing to a bound normal_app_voice_physical report; local-only/typed diagnostics cannot satisfy it. Known-app qualification permits only its fresh five-request Jev budget; out-of-scope OpenAI requests are blocked, not counted as coverage. Separate remote evidence still requires fresh authorization and actual production server exchanges.",
+      "expected": "Zero wrong/duplicate critical actions. All20 clear physical trials and4 controls correct; Fn-up->actual dispatch p50<=300ms and Fn-up->verified effect p50<500ms with failures/timeouts retained. Acoustic clear autonomy>=95%, extra clarification<=5%, expected ambiguous cases zero actuation, for incumbent as well as replacement. Final/first-partial targets reported honestly; no missing G5/G6 labeled PASS.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P3-8",
+      "behavior": "Fresh-context judge returns PASS on implemented acceptance with concrete evidence; human/live gaps cannot be called complete. Handoff records provider/accuracy status and inherited-baseline dependency. Commits only after explicit authorization, owned paths only.",
+      "check": "Judge report and current phase Progress/Outcomes/Handoff; python3 scripts/check-acceptance.py --green .agent/acceptance/P3.json only after all substantive criteria met; named-path commit receipt if user authorizes G7.",
+      "expected": "Independent review and truthful gate closure; no production-ASR promotion on speed-only evidence or fabricated human try.",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}

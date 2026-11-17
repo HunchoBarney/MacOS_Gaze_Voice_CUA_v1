@@ -1,0 +1,24 @@
+{"app": "native-d114-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2715996160}
+{"app": "native-d114-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2707714048}
+{"app": "native-d115-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2689146880}
+{"app": "native-d115-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2684518400}
+{"app": "native-d116-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2675470336}
+{"app": "native-d116-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2665459712}
+{"app": "native-d117-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2671296512}
+{"app": "native-d117-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2669436928}
+{"app": "native-d118-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2654945280}
+{"app": "native-d118-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2641219584}
+{"app": "native-d119-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2630991872}
+{"app": "native-d119-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2648981504}
+{"app": "native-d120-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2640261120}
+{"app": "native-d120-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2641076224}
+{"app": "native-d121-candidate-stage/before.app", "shared_resources": 5, "free_bytes": 2619572224}
+{"app": "native-d121-candidate-stage/after.app", "shared_resources": 5, "free_bytes": 2611449856}
+{"app": "jev-vision-ab-d14-admission/after.app", "shared_resources": 5, "free_bytes": 2609209344}
+{"app": "jev-vision-ab-d15-trace-baseline/before.app", "shared_resources": 5, "free_bytes": 2603917312}
+{"app": "jev-vision-ab-d15-trace-baseline/after.app", "shared_resources": 5, "free_bytes": 2589515776}
+{"app": "jev-vision-ab-d16-baseline/before.app", "shared_resources": 5, "free_bytes": 1525755904}
+{"app": "jev-vision-ab-d16-baseline/after.app", "shared_resources": 5, "free_bytes": 2490519552}
+{"app": "signed-baselines/before.app", "shared_resources": 5, "free_bytes": 3456991232}
+{"app": "signed-baselines/after.app", "shared_resources": 5, "free_bytes": 4769443840}
+{"app": "c1-review-c292e120/Jev Voice.app", "shared_resources": 4, "free_bytes": 5989019648}

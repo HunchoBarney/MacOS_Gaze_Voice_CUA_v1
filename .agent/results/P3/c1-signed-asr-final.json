@@ -1,0 +1,1437 @@
+{
+  "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+  "clear_correct" : 9,
+  "clear_total" : 9,
+  "extra_clarifications" : 0,
+  "failed_available_cases" : 0,
+  "holdout_count" : 20,
+  "manifest_sha256" : "ae530888cc0dc04ffb736adc82b039d2a89f3ba7a60d3dca6ca3840494df3ae0",
+  "missing" : [
+
+  ],
+  "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+  "physical_effects_verified" : false,
+  "preparation_ms" : 3129.264499992132,
+  "regression_count" : 15,
+  "remote_live_verified" : false,
+  "rows" : [
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p01",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "scope" : "latest"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594180.4552838334,
+        "capture_start" : 1594174.0238945,
+        "first_frame" : 1594174.091514375,
+        "first_partial_callback" : 1594176.836135375,
+        "fn_up" : 1594180.104924875
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 4,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "615880aa1f302c4f9eea70374195b2f11c41141c5e309a430c6eae4caa1dc4dc",
+      "status" : "ok",
+      "transcript_sha256" : "02c1ce6bb59266cef6ca1906de1909e206245d9728d0021027e2d83089486130",
+      "turn_id" : "94FD8447-ADED-45A5-BCAC-A9BA4020473A",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p02",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "minutes" : 10,
+        "recipient" : "person.sarah"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594188.7512470002,
+        "capture_start" : 1594180.4914489167,
+        "first_frame" : 1594180.4932806252,
+        "first_partial_callback" : 1594183.27160775,
+        "fn_up" : 1594188.50378925
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 11,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "6437ec96b8e1542d28366b575f7b4ebe55353567c960060a0c9f968e97df44d8",
+      "status" : "ok",
+      "transcript_sha256" : "0815fed59d02ddb108ae1badc66b7e12f79aa93ebb575bc230e3a1b6f0be21d2",
+      "turn_id" : "D2AC12CC-6AFB-4283-B1EF-7981FDCB5C36",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "question",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p03",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "scope" : "unread"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594195.9653720418,
+        "capture_start" : 1594188.7565902919,
+        "first_frame" : 1594188.758357625,
+        "first_partial_callback" : 1594191.3548437085,
+        "fn_up" : 1594195.7686730002
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 7,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "f3eb88641ae8c728b1fb1c4ae2ccd27942d6553f1ff51294400f5745cf3c363e",
+      "status" : "ok",
+      "transcript_sha256" : "597230bc46647ceae24f35dfb8437a15318de5d5256faa2ae58a8d7aa70105d4",
+      "turn_id" : "374D8F2F-58CE-403C-855F-9CC5A5350920",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p04",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "app" : "slack",
+        "channel" : "team",
+        "hour" : 11
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594206.1703700835,
+        "capture_start" : 1594195.96924475,
+        "first_frame" : 1594195.9739927917,
+        "first_partial_callback" : 1594197.5779864583,
+        "fn_up" : 1594205.9844004584
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 14,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "0ebbbc62a51a5963fa4d8de2e4eba3a2f8bb2b7b029d8d3e640da8b2bf15bf81",
+      "status" : "ok",
+      "transcript_sha256" : "3bfcf8de26c3a76cdf50f667b4aa336338c453b41ace656a8c27886070b614e5",
+      "turn_id" : "E8849BAC-2536-4624-B564-7B0181D63C7F",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 3
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+        "target_id" : "site.github"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p05",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "target" : "site.github"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594212.4026230834,
+        "capture_start" : 1594206.1726185835,
+        "first_frame" : 1594206.1736246669,
+        "first_partial_callback" : 1594207.6658175418,
+        "fn_up" : 1594212.1840086668
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 6,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "454fc6d28d9468fe82a3fd666c04919d5849a0c7776afc1c59a14c21b1cd4848",
+      "status" : "ok",
+      "transcript_sha256" : "802d95acdf54c96e337b3f8e01f907c30653d2235ea1cdc58f5b2a345425b871",
+      "turn_id" : "503B6A1C-BF3C-48A6-967B-C03A94957190",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "browser_request",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p06",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "day" : "friday",
+        "destination" : "new york"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594219.5811914168,
+        "capture_start" : 1594212.4073637917,
+        "first_frame" : 1594212.4096115,
+        "first_partial_callback" : 1594214.0492082501,
+        "fn_up" : 1594219.4195798752
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 8,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "36e2224d29dd176519737d7e64c66515faced9451b4b644573a1b6bca6199e94",
+      "status" : "ok",
+      "transcript_sha256" : "c172ecc229d16025782b753efaa95c2b46d5a8a5b4c1ec698b94bfa810a0d82c",
+      "turn_id" : "6674FD1B-DC20-4EAB-A015-94606B84B89A",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "hotkey",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "keys" : "cmd+w"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p07",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "keys" : [
+          "cmd",
+          "w"
+        ]
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594225.7190528752,
+        "capture_start" : 1594219.5825576251,
+        "first_frame" : 1594219.583845375,
+        "first_partial_callback" : 1594221.7341540419,
+        "fn_up" : 1594225.588542625
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 3,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "576f0fa8ae0342fa6ece85a973000d495d3ed4d9cb28103ffd15b2e6b4188e47",
+      "status" : "ok",
+      "transcript_sha256" : "d1176e83e6558c83973a1b78f71c9d53dbf095e0ea178ef9c34282c057395c91",
+      "turn_id" : "BBBAE459-4876-4517-AA94-55FC68C1FD23",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "screen_question",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p08",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "scope" : "page"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594231.8597715418,
+        "capture_start" : 1594225.7213011668,
+        "first_frame" : 1594225.7229625417,
+        "first_partial_callback" : 1594226.9357379584,
+        "fn_up" : 1594231.7265730833
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 5,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "d64043f4832016ca0083cff158fae91c614e00af922e21c9a059ce92b6d1db94",
+      "status" : "ok",
+      "transcript_sha256" : "49134cef23e9dc631052d0a879bc6797b66c144a859f962d7c047b25a38db22f",
+      "turn_id" : "D3A282C5-7C36-4BDD-95C8-A9ACE9346CAB",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p09",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594237.9981517917,
+        "capture_start" : 1594231.8611760417,
+        "first_frame" : 1594231.8620886668,
+        "first_partial_callback" : 1594234.145953125,
+        "fn_up" : 1594237.8723898334
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "413457fe6550ce0e3121f7ad09047ed53c64404c2f8b013fa9a4b155e0b28075",
+      "status" : "ok",
+      "transcript_sha256" : "80f6ad0f1076fcc98f1124e3bbf4920efd4f2f40b806174379e9b1db50514ce1",
+      "turn_id" : "79650EFB-78D0-44EB-9A8F-988A70E5F6F2",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p10",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "label" : "blue button"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594244.292859375,
+        "capture_start" : 1594237.9993491252,
+        "first_frame" : 1594238.0002907084,
+        "first_partial_callback" : 1594240.2750939585,
+        "fn_up" : 1594244.00301275
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 4,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "cbef64dd3bd47c8e9b76942f1f90fb689ca80ab69f2878f4aa3f837922ff3d13",
+      "status" : "ok",
+      "transcript_sha256" : "4f5b1224fdcfb6afa17336a8e0f5e7fcd0a49750a1efd5accb4650fa13784377",
+      "turn_id" : "A715DE3C-D0E0-48BF-848C-B19C1D46CF93",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "scroll",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "direction" : "down",
+        "pages" : "1"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p11",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "direction" : "down",
+        "pages" : 1
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594250.4280541667,
+        "capture_start" : 1594244.295835125,
+        "first_frame" : 1594244.3005028751,
+        "first_partial_callback" : 1594246.599354,
+        "fn_up" : 1594250.3027125
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "411fc716587e2df118f2e1652d5c712fad923acfb640a2e36261621c6f8dccd8",
+      "status" : "ok",
+      "transcript_sha256" : "37e2d4414dcaec327a20b2566f39d69924f86e01ada95a218d1e9aa1f352b826",
+      "turn_id" : "68ACA99A-FBB8-4F24-BA62-2D7CC93D2C0C",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "question",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p12",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "scope" : "next"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594256.5843482085,
+        "capture_start" : 1594250.4294737917,
+        "first_frame" : 1594250.430798625,
+        "first_partial_callback" : 1594251.907633125,
+        "fn_up" : 1594256.4360060417
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 6,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "96eeec882c953e8a8e2bf0356707973d4ef90bfaf03e84e1a8b0c0bccdc5d252",
+      "status" : "ok",
+      "transcript_sha256" : "2c8327e5da85c4a44f8b3f229cdcd162feb3744fc1866533464bced65f376940",
+      "turn_id" : "9A3F26DA-4AC4-493E-A374-08874D76C3E0",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p13",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "day" : "tomorrow",
+        "hour" : 12,
+        "title" : "lunch with the investors"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594263.7638624585,
+        "capture_start" : 1594256.5858322917,
+        "first_frame" : 1594256.5871381252,
+        "first_partial_callback" : 1594258.2157730835,
+        "fn_up" : 1594263.5887420834
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 8,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "af027d5c777910fac562688e6fcc144973414c0e8c67c519054feaf8be5ef779",
+      "status" : "ok",
+      "transcript_sha256" : "34481f61a0dc605d24ad271fcf8f6c37c68a788e46d69344c4bfe9d29fec7f46",
+      "turn_id" : "43644C85-1751-4265-B7E7-96AABA6AD0C0",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p14",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "action" : "call the dentist",
+        "hour" : 3
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594271.4611462085,
+        "capture_start" : 1594263.7703566668,
+        "first_frame" : 1594263.7729784583,
+        "first_partial_callback" : 1594265.5649687918,
+        "fn_up" : 1594270.7801240417
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 8,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "d21260765fcc9e7bb6c255392a04eb185ff5468528ddb2b05f293ccbe3a31ac1",
+      "status" : "ok",
+      "transcript_sha256" : "bd7226aab1a4c2a4050595bc4ee885ffa71addbb613373edf4beef2ee30eefdd",
+      "turn_id" : "C58CC2D8-C866-439D-ABDC-C0A41D430822",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "p15",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "action" : "follow up with the design review",
+        "day" : "monday"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594279.6638995002,
+        "capture_start" : 1594271.4656521252,
+        "first_frame" : 1594271.4774277501,
+        "first_partial_callback" : 1594274.1354853334,
+        "fn_up" : 1594279.4881769584
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 9,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "6645819b93d2436dc531be6f2a231258fa2d1259d7c9e296761001d73c27fd9e",
+      "status" : "ok",
+      "transcript_sha256" : "23d0477596586ae0fbbcec85fb0cb8525b26102e7e3dc0f89bb5cd41219ad7c8",
+      "turn_id" : "D379A474-0B22-4C61-83F3-42C1E97F2C15",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+        "target_id" : "site.github"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h01",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "target" : "site.github"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594285.8151954168,
+        "capture_start" : 1594279.6685072917,
+        "first_frame" : 1594279.6711560835,
+        "first_partial_callback" : 1594283.0813359583,
+        "fn_up" : 1594285.6760447084
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "8e87aa0033cada214d9fbc459530bda453d532e5413a89d184155830098d79c5",
+      "status" : "ok",
+      "transcript_sha256" : "5e485c74d99b62114478822dd6548b13c89a0ee9ecd00f088f197b3c83e3e493",
+      "turn_id" : "B283C5BC-6288-4879-8B73-ECDF2A54220A",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h02",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "target" : "site.gatehub"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594292.0003493752,
+        "capture_start" : 1594285.8168263335,
+        "first_frame" : 1594285.8183925834,
+        "first_partial_callback" : 1594287.1312894167,
+        "fn_up" : 1594291.8280470418
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "338ef1dc0994226869217723e039ffbcfcbc8af38566cf5087a934353d329a94",
+      "status" : "ok",
+      "transcript_sha256" : "2d750256b9ccb037627e9daf7f93681d5b8507efbfb8021d26c3d68ffc8ad515",
+      "turn_id" : "A2C03FF1-AD32-4857-956A-8ABD9D117FD5",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 2
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "open",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "target_id" : "com.apple.Notes"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h03",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "target" : "com.apple.Notes"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594298.14137075,
+        "capture_start" : 1594292.0046477502,
+        "first_frame" : 1594292.0066205,
+        "first_partial_callback" : 1594294.9340995417,
+        "fn_up" : 1594298.0103767083
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "3ccee5c8768e2cccbad245ab25a27948cc103f92e7a5d50bc019b9de03bd9266",
+      "status" : "ok",
+      "transcript_sha256" : "07c6661f2c9dbcb64ee85d0b27f14c7908c66612f7d4b3006d3bcb6c754437cf",
+      "turn_id" : "3DB7F667-51B4-429A-836F-EF69C26B4BF2",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h04",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "target" : "app.notion"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594304.2914145833,
+        "capture_start" : 1594298.1430143751,
+        "first_frame" : 1594298.1441434168,
+        "first_partial_callback" : 1594299.6293650002,
+        "fn_up" : 1594304.1501304167
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "f8480e35a41c23171ee42a0f9a6610b6e5468400d4cb23e8d41cef7c703c7ec2",
+      "status" : "ok",
+      "transcript_sha256" : "6c8965faa772688761ceb57e82590ad873f66c3927fb6d07073f91489a2367a6",
+      "turn_id" : "A7459C68-A82C-4D8C-996F-36F36A5DA4D7",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h05",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "recipient" : "person.sarah"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594310.7709570834,
+        "capture_start" : 1594304.2928872919,
+        "first_frame" : 1594304.2941768751,
+        "first_partial_callback" : 1594306.2799464585,
+        "fn_up" : 1594310.2952219169
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 5,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "b14de741720cad2d511b7478847e1cc2934e55ca0cd4bead38dc7cb60b56c0a9",
+      "status" : "ok",
+      "transcript_sha256" : "6a192da999a1e6822644a582838e4d2f4d6d63c116f83507e2fdb72b6982ba5f",
+      "turn_id" : "82502ABB-0A35-4B64-BE29-A5D05EBA8CDF",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h06",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "recipient" : "person.zara"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594316.9631170835,
+        "capture_start" : 1594310.7741247085,
+        "first_frame" : 1594310.7781346668,
+        "first_partial_callback" : 1594312.6155947917,
+        "fn_up" : 1594316.7862377919
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 5,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "f82cd4e2276f77ae17bd6f1c0c14ab618fa29ab22c770e40643dc8c1cf70135f",
+      "status" : "ok",
+      "transcript_sha256" : "0a142c363c8877fdba70dbe3f532701b32be2b725cfde10c757f9bfe3f96d2aa",
+      "turn_id" : "17A18B8F-1455-4AA4-AE24-0E076BD8FD49",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h07",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "duration_minutes" : 15
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594323.3159440835,
+        "capture_start" : 1594316.9657891667,
+        "first_frame" : 1594316.9691529167,
+        "first_partial_callback" : 1594318.4441242085,
+        "fn_up" : 1594322.9757963335
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 6,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "76e8331874e392d043a5f9b42215f98a581e071aa94cd3a29865fea229fc6bf1",
+      "status" : "ok",
+      "transcript_sha256" : "bd24b4d4d06df6af9324fa33f1540c6d250e84ef9a55b247d82f218e3fbf6cf6",
+      "turn_id" : "2E914DEC-CA4F-44E8-8D33-EAB316B3D960",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 1
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "remote",
+      "actual_route" : "remote",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h08",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "remote",
+      "expected_slots" : {
+        "duration_minutes" : 50
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594329.4721306667,
+        "capture_start" : 1594323.3197177085,
+        "first_frame" : 1594323.324059125,
+        "first_partial_callback" : 1594325.022381375,
+        "fn_up" : 1594329.3342642917
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsupported_remote",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 6,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "4e36a5809dba84cb839c53097639568ce7e3a896ff057aecaa1e02e37ed0dd5b",
+      "status" : "ok",
+      "transcript_sha256" : "d5a4813a571541c3e3d081eff290e3f0e7052654cc21bcd571bcb4c2ac574dfd",
+      "turn_id" : "C9977472-967D-4305-B747-26D56950E21C",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "refuse",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h09",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "refuse",
+      "expected_slots" : {
+        "negated" : true
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594335.7163455833,
+        "capture_start" : 1594329.4741141251,
+        "first_frame" : 1594329.4756027502,
+        "first_partial_callback" : 1594330.7926530417,
+        "fn_up" : 1594335.4851088335
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsafe",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 4,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "fad51cfa19981808741b5b7e5257fc66edea6aee74b85b8321396a5d808109ca",
+      "status" : "ok",
+      "transcript_sha256" : "9548f790e686cfb16eee4ae100d1b7b7c326c8979c4b9ad97cae178705298446",
+      "turn_id" : "60ABB92E-7BE6-4580-8C8C-D5BF52D91F3C",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h10",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "negated" : false
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594342.0808442084,
+        "capture_start" : 1594335.7172962085,
+        "first_frame" : 1594335.7204468334,
+        "first_partial_callback" : 1594337.3573662085,
+        "fn_up" : 1594341.7306642502
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsafe",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "402f6adb18292065651fd0da1f3d2050c049fd48f1bf7556120e72e6df2163dd",
+      "status" : "ok",
+      "transcript_sha256" : "405ae9df1f2babe4b14a3ce47c31122e35902b6729d8515a8d2b7adb98a0e96a",
+      "turn_id" : "75080AD4-518E-4AE0-A865-E5E000125E75",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "cancel",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "task_id" : "00000000-0000-0000-0000-000000000001"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h11",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "task_id" : "00000000-0000-0000-0000-000000000001"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594348.230012875,
+        "capture_start" : 1594342.0865539168,
+        "first_frame" : 1594342.0895804167,
+        "first_partial_callback" : 1594343.428138125,
+        "fn_up" : 1594348.0923350835
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 3,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "7fd189de21579c437d834dfc8ba463f079a64e5342e5d8813ad8d0d7b7401dac",
+      "status" : "ok",
+      "transcript_sha256" : "c1a42039b6c8cc7ce9c6c6c89192b1bc2a05e7490dc5e971b92c3ff0a6339a27",
+      "turn_id" : "C778B108-1057-49B2-BE42-D28A60B3FA5E",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h12",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "literal_target" : "Cancel"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594354.3753082918,
+        "capture_start" : 1594348.2316542917,
+        "first_frame" : 1594348.2330732085,
+        "first_partial_callback" : 1594350.5063719167,
+        "fn_up" : 1594354.2423320417
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "b871acf2e929e21fd85f7335b9618f262eb992af61ae884c28f7dc5feac9ea8c",
+      "status" : "ok",
+      "transcript_sha256" : "212e41ac0877d93610df14ace4dbac5a391388c5e8974e32f939ea8da59dc029",
+      "turn_id" : "BC891F2A-5671-4C72-9A00-FA3C705B9209",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "type",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "text" : "stop"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h13",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "text" : "stop"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594360.5508865418,
+        "capture_start" : 1594354.376644375,
+        "first_frame" : 1594354.377877125,
+        "first_partial_callback" : 1594356.194076125,
+        "fn_up" : 1594360.3857922917
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 4,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "5caddad2c5ae6e431cd781234e1e6adbc1c2608e7bb328a69d62a09b8b5dae86",
+      "status" : "ok",
+      "transcript_sha256" : "9f8d83eb3e3580d36400071304402db6f6c2badbe71a1070aa6f3ae14b296eab",
+      "turn_id" : "5FFCCAA9-E4AA-4005-B086-DBD2575B20B0",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "cancel",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "task_id" : "00000000-0000-0000-0000-000000000001"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h14",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "task_id" : "00000000-0000-0000-0000-000000000001"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594366.6927434583,
+        "capture_start" : 1594360.5543714168,
+        "first_frame" : 1594360.5572057501,
+        "first_partial_callback" : 1594361.8952852918,
+        "fn_up" : 1594366.5628235834
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 1,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "22ddbac1296527bb7f7f07f647cb40f1158d0fc0bdc46dd6cacad3d4d4261e89",
+      "status" : "ok",
+      "transcript_sha256" : "8dfd80ba047e575b1a31bffa865145de0b7e909ecc2e6c61955e4c98f7b254bf",
+      "turn_id" : "631681FA-A945-4FD9-A7EC-9234165C9B45",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "open",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "target_id" : "com.apple.calculator"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h15",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "target" : "com.apple.calculator"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594372.8799732085,
+        "capture_start" : 1594366.6933522501,
+        "first_frame" : 1594366.6944726252,
+        "first_partial_callback" : 1594368.54266175,
+        "fn_up" : 1594372.7021384584
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "ec009cadda93d753ff9011c88b9b19bb04b51dec8aa45873ffa320cc5ce7082c",
+      "status" : "ok",
+      "transcript_sha256" : "4a142718b14343094f0d6c2452c441c29da8fc90bf4df8a81869670767307328",
+      "turn_id" : "523DDA57-0A0E-4A5B-B975-EBF91B709E93",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h16",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "contradiction" : true
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594383.3062742501,
+        "capture_start" : 1594372.883419,
+        "first_frame" : 1594372.8881218333,
+        "first_partial_callback" : 1594374.4137914167,
+        "fn_up" : 1594382.8885957084
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "unsafe",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 7,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "d7db66b8c93fad264e9f4756d7a19dce61123bd7924a47f2b52e415e43d0df4b",
+      "status" : "ok",
+      "transcript_sha256" : "31219852b2b2e5c1ce544da6f69931caad536ccf6c840f0ab19ae894fddae410",
+      "turn_id" : "E206DB9A-A315-4DF7-94CE-9C55BB124BF1",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "scroll",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "direction" : "down",
+        "pages" : "1"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h17",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "direction" : "down"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594389.5284539168,
+        "capture_start" : 1594383.3095838751,
+        "first_frame" : 1594383.311906875,
+        "first_partial_callback" : 1594384.6625599167,
+        "fn_up" : 1594389.3226415834
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "3904a9e1de1d41fb6901a50f6a0c07c320e4cfdfb8638e36208fedc79b56627e",
+      "status" : "ok",
+      "transcript_sha256" : "37e2d4414dcaec327a20b2566f39d69924f86e01ada95a218d1e9aa1f352b826",
+      "turn_id" : "847384FF-2137-4E7C-9D76-7E0C4743665A",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 1,
+      "actual_intent" : "scroll",
+      "actual_route" : "local",
+      "actual_slots" : {
+        "direction" : "up",
+        "pages" : "1"
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h18",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : true,
+      "effect_count" : 0,
+      "expected_route" : "local",
+      "expected_slots" : {
+        "direction" : "up"
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594395.6937004584,
+        "capture_start" : 1594389.5307511669,
+        "first_frame" : 1594389.5377113752,
+        "first_partial_callback" : 1594391.0310230835,
+        "fn_up" : 1594395.5384359166
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "clear_autonomous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 2,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "0a285de40886345bf2487593ec4c18fa5e5da773eceeb0905594593a18845b78",
+      "status" : "ok",
+      "transcript_sha256" : "8d044d33799d5825d12cbeb8d702377ee9e0b5639d59900c0d81713fe44f0102",
+      "turn_id" : "59375FF5-7333-41FA-A5BE-DF6F8E69D93D",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h19",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "ordinal" : 1
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594401.8286066668,
+        "capture_start" : 1594395.6948276667,
+        "first_frame" : 1594395.6965471667,
+        "first_partial_callback" : 1594397.4944089167,
+        "fn_up" : 1594401.700625
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 4,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "80db3bdeae83268fed8ddac268914a0fb92f7c7c3ff171c57c79c2931dc9cb6c",
+      "status" : "ok",
+      "transcript_sha256" : "39ea8734b4a09a5e72691b02de041ff66b12101fd424a50fc6a8f055744b64a3",
+      "turn_id" : "3CA57564-272E-4B28-9EE8-4603783E247F",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    },
+    {
+      "actual_dispatches" : 0,
+      "actual_intent" : "blocked",
+      "actual_route" : "clarify",
+      "actual_slots" : {
+
+      },
+      "artifact_sha256" : "c292e12024dc04bfc6a924b0d7f6ceb41a2c1c23ed38ffcba8f404750f9264eb",
+      "case_id" : "h20",
+      "config" : "FluidAudio0.17.5\/ms160\/eou1280\/whole-hold-Ultra",
+      "critical_slots_match" : false,
+      "effect_count" : 0,
+      "expected_route" : "clarify",
+      "expected_slots" : {
+        "ordinal" : 3
+      },
+      "generation" : 1,
+      "marks" : {
+        "authoritative_final" : 1594407.9779082085,
+        "capture_start" : 1594401.8300245835,
+        "first_frame" : 1594401.8318810419,
+        "first_partial_callback" : 1594403.6252877084,
+        "fn_up" : 1594407.8420955834
+      },
+      "model_assets_sha256" : "3ccd3e79189a8fa5a798fff5a03b64943570437c2489fdb2cd05a0d0f4b4dd42",
+      "population" : "expected_ambiguous",
+      "provider" : "parakeet-eou-ultra",
+      "provider_source_sha256" : "21e280469bf2c5273707b36aaa6c8463608bdb2612d5e7fc540a4613d312d910",
+      "reference_words" : 4,
+      "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+      "schema_version" : 1,
+      "source" : "recorded",
+      "source_sha256" : "d4d007079f584c7ad8f4bca228289029ae913f04ce7f5a07454359571498acd5",
+      "status" : "ok",
+      "transcript_sha256" : "9dc9c6b8bd222386e8d2d06a402e5e0c8f53999664023dc7a6645236b91df9ae",
+      "turn_id" : "110BFBFD-06E6-4662-9469-D18CFFF1AA17",
+      "verification_kind" : "production-admission-boundary-not-physical",
+      "verification_passed" : true,
+      "word_edits" : 0
+    }
+  ],
+  "run_id" : "311BDC3A-E7F1-446B-9620-17B172001E94",
+  "schema_version" : 1,
+  "wrong_critical_actions" : 0
+}

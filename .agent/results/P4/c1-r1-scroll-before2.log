@@ -1,0 +1,72 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling JevVoiceAppTests FastLaneExecutorTests.swift
+[4/5] Emitting module JevVoiceAppTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking JevVoicePackageTests
+Build complete! (7.54s)
+Test Suite 'Selected tests' started at 2026-11-15 22:07:19.149.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 22:07:19.151.
+Test Suite 'FastLaneExecutorTests' started at 2026-11-15 22:07:19.151.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollAcknowledgementWithoutViewportEvidenceIsUnverified]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift:112: error: -[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollAcknowledgementWithoutViewportEvidenceIsUnverified] : XCTAssertNotEqual failed: ("done") is equal to ("done")
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift:113: error: -[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollAcknowledgementWithoutViewportEvidenceIsUnverified] : XCTAssertFalse failed
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift:112: error: -[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollAcknowledgementWithoutViewportEvidenceIsUnverified] : XCTAssertNotEqual failed: ("done") is equal to ("done")
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift:113: error: -[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollAcknowledgementWithoutViewportEvidenceIsUnverified] : XCTAssertFalse failed
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollAcknowledgementWithoutViewportEvidenceIsUnverified]' failed (0.838 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollCannotFollowGazeOutsideCapturedWindow]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift:135: error: -[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollCannotFollowGazeOutsideCapturedWindow] : XCTAssertNotEqual failed: ("Optional(JevVoice.DriveStatus.done)") is equal to ("Optional(JevVoice.DriveStatus.done)")
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift:136: error: -[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollCannotFollowGazeOutsideCapturedWindow] : XCTAssertFalse failed
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testC1ScrollCannotFollowGazeOutsideCapturedWindow]' failed (0.110 seconds).
+Test Suite 'FastLaneExecutorTests' failed at 2026-11-15 22:07:20.099.
+	 Executed 2 tests, with 6 failures (0 unexpected) in 0.948 (0.948) seconds
+Test Suite 'JevObservedGoalTests' started at 2026-11-15 22:07:20.099.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testAlreadyTrueGoalRequiresFreshSemanticReadWithoutMutation]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testAlreadyTrueGoalRequiresFreshSemanticReadWithoutMutation]' passed (0.017 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testAvailableButtonAndSecureValueCannotBecomeProof]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testAvailableButtonAndSecureValueCannotBecomeProof]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testButtonWithoutActionMetadataIsNotDeclaredOutcomeEvidence]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testButtonWithoutActionMetadataIsNotDeclaredOutcomeEvidence]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testCancellationDuringTargetedSupportCannotClaimDone]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testCancellationDuringTargetedSupportCannotClaimDone]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testChangedSubjectWithSameOutcomeTextInvalidatesProof]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testChangedSubjectWithSameOutcomeTextInvalidatesProof]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedCompletionAliasDriftCannotMintProofFromDifferentModel]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedCompletionAliasDriftCannotMintProofFromDifferentModel]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedEvidenceCannotReplaceWeakCompletionWithStrongFactSupport]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedEvidenceCannotReplaceWeakCompletionWithStrongFactSupport]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedEvidenceRejectsForgedFactIdentity]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedEvidenceRejectsForgedFactIdentity]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedEvidenceUsesRealFactChoiceWhenInitialSelectionIsNone]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testFocusedEvidenceUsesRealFactChoiceWhenInitialSelectionIsNone]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testForgedFactIDDoesNotAuthorizeCompletion]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testForgedFactIDDoesNotAuthorizeCompletion]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testGoalOnlyRequestCompletesThroughActualProductionPipeline]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testGoalOnlyRequestCompletesThroughActualProductionPipeline]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testHighCompletionSelectionAndSupportUseOneActualModelResponse]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testHighCompletionSelectionAndSupportUseOneActualModelResponse]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testNativeHierarchyChangeInvalidatesFreshProofWithoutChangingFieldValue]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testNativeHierarchyChangeInvalidatesFreshProofWithoutChangingFieldValue]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testNativeProofRejectsSameTitleDocumentSwitchWithoutWeakeningScores]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testNativeProofRejectsSameTitleDocumentSwitchWithoutWeakeningScores]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testProductionSnapshotIdentitySurvivesFocusedEvidenceAndCannotBeForgedByExtras]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testProductionSnapshotIdentitySurvivesFocusedEvidenceAndCannotBeForgedByExtras]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testSemanticProofCannotOverrideDeclaredOrBlankCriteria]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testSemanticProofCannotOverrideDeclaredOrBlankCriteria]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testStateBearingIdentifierBecomesOutcomeEvidence]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testStateBearingIdentifierBecomesOutcomeEvidence]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testUncertainBroadCompletionGetsFocusedObservedEvidenceCheck]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testUncertainBroadCompletionGetsFocusedObservedEvidenceCheck]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testUnchangedOutcomeWithTickingContextStillFailsClosed]' started.
+Test Case '-[JevVoiceAppTests.JevObservedGoalTests testUnchangedOutcomeWithTickingContextStillFailsClosed]' passed (0.004 seconds).
+Test Suite 'JevObservedGoalTests' passed at 2026-11-15 22:07:20.192.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.091 (0.093) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-15 22:07:20.192.
+	 Executed 21 tests, with 6 failures (0 unexpected) in 1.039 (1.041) seconds
+Test Suite 'Selected tests' failed at 2026-11-15 22:07:20.192.
+	 Executed 21 tests, with 6 failures (0 unexpected) in 1.039 (1.043) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

@@ -20,6 +20,11 @@ public actor RoutineScheduler {
 
     private let fire: @Sendable (String, Routine) async -> Void
     private let firstRunImmediate: Bool
+    /// lastRunAt lives in a defaults sidecar keyed by routine id — Routine
+    /// is a Codable value decoded from agents.json, and recording each run
+    /// back on it would churn the roster (and reschedule the timer) on
+    /// every fire. Injectable so tests get an isolated suite.
+    private let lastRunDefaults: UserDefaults
     /// Timers live on the main runloop. The registry, not actor state, owns
     /// the Timer objects — Timer isn't Sendable, so every hop carries a
     /// UUID token and all create/invalidate executes on MainActor.
@@ -31,8 +36,10 @@ public actor RoutineScheduler {
     private var inFlight: Set<String> = []
 
     public init(firstRunImmediate: Bool = true,
+                lastRunDefaults: UserDefaults = .standard,
                 fire: @escaping @Sendable (String, Routine) async -> Void) {
         self.firstRunImmediate = firstRunImmediate
+        self.lastRunDefaults = lastRunDefaults
         self.fire = fire
     }
 
@@ -54,9 +61,24 @@ public actor RoutineScheduler {
             unschedule(entryKey)
         }
         for (entryKey, pair) in wanted where entries[entryKey] == nil {
+            let interval = TimeInterval(pair.routine.everyMinutes) * 60
             schedule(key: entryKey, slug: pair.slug, routine: pair.routine,
-                     interval: TimeInterval(pair.routine.everyMinutes) * 60)
+                     interval: interval, fireNow: isDue(pair.routine, interval: interval))
         }
+    }
+
+    /// Relaunch must not refire routines that already ran inside their
+    /// cadence — a routine is due only when `now − lastRunAt >= interval`
+    /// (a closed app just runs late, never stacked). Never-run routines
+    /// keep the firstRunImmediate behavior.
+    private func isDue(_ routine: Routine, interval: TimeInterval) -> Bool {
+        guard let last = lastRunDefaults.object(forKey: Self.lastRunKey(routine.id)) as? Date
+        else { return firstRunImmediate }
+        return Date().timeIntervalSince(last) >= interval
+    }
+
+    private static func lastRunKey(_ routineID: String) -> String {
+        "jevvoice.routineLastRunAt.\(routineID)"
     }
 
     public func stopAll() {
@@ -101,10 +123,13 @@ public actor RoutineScheduler {
 
     /// One fire per entry at a time — ticks for a retired or replaced entry
     /// drop instead of dispatching a stale routine, and a tick arriving
-    /// while the previous send still runs coalesces into it.
+    /// while the previous send still runs coalesces into it. lastRunAt is
+    /// recorded at dispatch — the cadence measures from when the routine
+    /// actually ran, not when the send finished.
     private func dispatch(entryKey: String, token: UUID, slug: String, routine: Routine) {
         guard entries[entryKey]?.token == token, !inFlight.contains(entryKey) else { return }
         inFlight.insert(entryKey)
+        lastRunDefaults.set(Date(), forKey: Self.lastRunKey(routine.id))
         let fire = self.fire
         Task { [weak self] in
             await fire(slug, routine)

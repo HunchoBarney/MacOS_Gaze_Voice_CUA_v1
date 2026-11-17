@@ -1,0 +1,24 @@
+{
+  "created_at": "2026-11-17T04:46:34.154620+00:00",
+  "purpose": "regenerable caches only; preserve live app CoreML cache and all model/source/candidate assets",
+  "before_free_bytes": 1075134464,
+  "removed": [
+    {
+      "path": "/Users/karanvirkang/Library/Caches/Aside/Default/Cache",
+      "allocated_bytes_before": 606179328
+    },
+    {
+      "path": "/Users/karanvirkang/Library/Caches/Aside/Default/Code Cache",
+      "allocated_bytes_before": 266567680
+    },
+    {
+      "path": "/Users/karanvirkang/Library/Caches/bakeoff/com.apple.e5rt.e5bundlecache",
+      "allocated_bytes_before": 261144576
+    },
+    {
+      "path": "/Users/karanvirkang/Library/Caches/com.apple.dt.xctest.tool/com.apple.e5rt.e5bundlecache",
+      "allocated_bytes_before": 523554816
+    }
+  ],
+  "after_free_bytes": 2748674048
+}

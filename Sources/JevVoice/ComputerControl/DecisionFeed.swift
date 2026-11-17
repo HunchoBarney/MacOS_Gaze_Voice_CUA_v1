@@ -41,6 +41,4 @@ final class DecisionFeed: ObservableObject {
         entries.append(Entry(at: Date(), kind: kind, text: trimmed))
         if entries.count > limit { entries.removeFirst(entries.count - limit) }
     }
-
-    func clear() { entries.removeAll() }
 }

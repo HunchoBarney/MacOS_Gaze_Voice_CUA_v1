@@ -1,0 +1,2 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-16 21:12:48.596 Df JevVoice[78761:1c3df54] [com.chriswozniczek.jevvoice.voice:microphone] input_ready first_frames=4800 startup_recoveries=0

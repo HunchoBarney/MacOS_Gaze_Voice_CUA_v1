@@ -33,12 +33,19 @@ Required properties:
   that keep or kill the idea, and the documented fallback.
 - **Done is defined by `acceptance/P<n>.json`**, not by vibes. Every
   criterion maps to at least one milestone check.
+- **Reuse before building.** New/reopened plans name the existing code,
+  platform facility and maintained FOSS candidates. G2 records the adopted
+  version/license and minimum glue, or the specific gap requiring custom
+  implementation. Follow `.agent/REUSE.md`; don't build another framework
+  where an appropriate package already exists.
 
 Mandatory sections (from `_TEMPLATE.md`): Purpose · Context · Owned
 paths · Non-goals · Milestones · Acceptance mapping · Progress ·
 Surprises & Discoveries · Decision Log · Outcomes & Retrospective ·
 Handoff. Progress/Surprises/Decision Log/Outcomes are updated as work
 happens — they are the handoff, not paperwork after the fact.
+New/reopened plans also carry a Reuse decision and explicit G1/G2 status.
+Documentation authorization is not source implementation authorization.
 
 ## 2. Acceptance files — default FAIL
 
@@ -87,6 +94,12 @@ Rules:
 A gate is not a courtesy: skipping one is how green tests shipped a
 broken product twice.
 
+G4 can establish source readiness for a milestone while G5/G6 remains
+open; it is not whole-phase PASS. The final judge consumes hash-bound
+live/human evidence before the remaining criteria can pass. Reuse the
+unchanged source review rather than rerunning it for a report-only edit.
+Never self-award a fresh-context verdict.
+
 ## 4. Roles
 
 | Role | Profile | Model | Tools | Job |
@@ -97,6 +110,11 @@ broken product twice.
 | Research/explore | `subagent_explore` | `swe` | read-only + web | Spike support, reference-codebase analysis |
 | Verification lane | one serialized runner | — | exec | `scripts/verification-lane.sh` owns builds/tests; writers never build a half-frozen tree |
 | User | — | — | — | G1 approvals, G6 hands-on, merges, release |
+
+These are roles, not automatic permission to launch helper agents.
+Use subagents only when the user explicitly asks; otherwise perform
+authorized work directly and keep independent-review gates pending until
+an authorized reviewer is available. Do not substitute self-review.
 
 Model pins live in `.devin/agents/*.md` (`model:` frontmatter). Short
 names resolve to the latest family release via the Devin router.
@@ -115,6 +133,50 @@ names resolve to the latest family release via the Devin router.
   run in the primary checkout on their `ship/v1-<phase>` branch.
 - Commits are per milestone, staged by name (never `git add -A` on a
   shared tree). User merges; agents never push or force anything.
+- Existing inherited dirt is preserved and named in the baseline. An
+  empty staged set passing `check-owned-paths.py` does not prove that the
+  unstaged phase delta is owned. Compare the actual phase delta to its
+  owned list; use `--all` only with the documented clean-baseline scope.
+  Never clear inherited user files to manufacture a clean G7.
+
+## Shipping cadence and bounded verification
+
+`.agent/SHIP-PLAN.md` groups delivery into C1/C2/C3 and records the
+implementation-readiness handoff rule. Every new consumer lists the
+upstream contract/source hash, reviewed seam and still-open upstream
+criteria before coding. All final dependency gates remain mandatory.
+
+`.agent/COMPETITIVE.md` defines the mandatory Wispr quality comparison
+and per-category correctness/p50/p95 scorecard. Use its frozen populations,
+clocks and uncertainty/claim rules; the older minimum release bars alone
+cannot establish leadership. Keep comparison work bounded and staged so
+it does not delay C1 for a broad replacement-model search.
+The user selected Jev primary, Cua/native execution and Terra API recovery;
+that provider choice is settled, while implementation/run contracts remain
+subject to the applicable gates.
+
+- Start each investigation with a falsifiable case, at most three
+  hypotheses, and a time/command budget. Reproduce before fixing.
+- Use existing fixtures/harness/LatencyLedger. First make the probe able
+  to fail; do not spend weeks building a second measurement system.
+- Run the affected checks through the serialized lane during development.
+  Full required checks, independent review and signing occur at coherent
+  milestone/candidate boundaries, not after every small edit.
+- After three unsuccessful focused attempts, review the cause or route.
+  Do not keep increasing retries, deadlines or prompt special cases.
+- Reuse valid evidence. Repeat/broaden only for a changed dependency,
+  concrete risk, statistical shortfall or mandatory gate.
+- Prepare the required physical Fn/pill/gaze population once for the final
+  candidate. Record a population amendment before collecting results.
+- Freeze task membership before model/performance comparisons. Preserve
+  failed rows and separate source, synthetic, packaged, physical and
+  provider evidence.
+- Report both PROGRAM release bars and new speed goals. No cold/warm
+  relabeling, partial-text substitution, signed/unsigned substitution or
+  confidence-as-permission shortcut.
+- A new verification-lane mode or bench injector is a phase deliverable,
+  not a command presumed to exist. Until implemented, reviewed and shown
+  to select a nonempty intended population, its criterion stays false.
 
 ## 6. Task brief template (every implementer spawn)
 

@@ -1,0 +1,53 @@
+EEEEEE
+======================================================================
+ERROR: testActualRetainedBaseMatchesEveryRecordedIdentity (test_c1_manifest.RetainedBaseTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/test_c1_manifest.py", line 27, in testActualRetainedBaseMatchesEveryRecordedIdentity
+    app, sha, fields = self.candidate.choose_base(self.stage, "final-r10", True)
+AttributeError: module 'candidate_stage' has no attribute 'choose_base'
+
+======================================================================
+ERROR: testChangedReceiptAndWrongAppAreRejected (test_c1_manifest.RetainedBaseTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/test_c1_manifest.py", line 54, in testChangedReceiptAndWrongAppAreRejected
+    receipt = self.candidate.RETAINED_BASE_RECEIPT
+AttributeError: module 'candidate_stage' has no attribute 'RETAINED_BASE_RECEIPT'
+
+======================================================================
+ERROR: testMissingOrChangedRetainedProvenanceIsRejected (test_c1_manifest.RetainedBaseTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/test_c1_manifest.py", line 96, in testMissingOrChangedRetainedProvenanceIsRejected
+    fields = self.candidate.retained_base_metadata()
+AttributeError: module 'candidate_stage' has no attribute 'retained_base_metadata'
+
+======================================================================
+ERROR: testPresentPartialAndDanglingDailyAreRejected (test_c1_manifest.RetainedBaseTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/test_c1_manifest.py", line 44, in testPresentPartialAndDanglingDailyAreRejected
+    self.candidate.choose_base(self.stage, "final-r10", True)
+AttributeError: module 'candidate_stage' has no attribute 'choose_base'
+
+======================================================================
+ERROR: testRealCloneRejectsCorruptedBinaryAndSignatureWithoutChangingBase (test_c1_manifest.RetainedBaseTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/test_c1_manifest.py", line 69, in testRealCloneRejectsCorruptedBinaryAndSignatureWithoutChangingBase
+    source = self.candidate.RETAINED_BASE_APP
+AttributeError: module 'candidate_stage' has no attribute 'RETAINED_BASE_APP'
+
+======================================================================
+ERROR: testRetainedFlagCannotSelectAnotherLabel (test_c1_manifest.RetainedBaseTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/test_c1_manifest.py", line 36, in testRetainedFlagCannotSelectAnotherLabel
+    self.candidate.choose_base(self.stage, "final-r8", True)
+AttributeError: module 'candidate_stage' has no attribute 'choose_base'
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.011s
+
+FAILED (errors=6)

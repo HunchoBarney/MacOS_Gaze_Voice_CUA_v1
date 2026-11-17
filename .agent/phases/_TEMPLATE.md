@@ -18,6 +18,14 @@ named file — never in chat history.
 - Related phases / handoffs to read: `.agent/phases/P<m>-*.md` → Handoff
 - Research: <links or `development/JevVoice/research-notes.md` §…>
 
+## Reuse decision
+
+Read `.agent/REUSE.md` before writing a new subsystem. Name the existing
+code/platform API and maintained FOSS candidates; record version/license,
+adoption or exact rejection reason, and minimum custom glue. G2 must
+resolve this decision before implementation. Installed versions do not
+change merely because upstream has a newer release.
+
 ## Owned paths
 
 Files this phase may create or modify — the complete list:
@@ -56,7 +64,11 @@ riskiest seam is proven early.
 ## Gates
 
 - G1 approved by user on <date> · G2 contract accepted <date>
+- Until those decisions exist, state pending; plan-writing authorization
+  and self-checks are not implementation approval or independent review.
 - G5 budgets this phase must hit: <LatencyLedger spans / RSS / CPU>
+- Report applicable PROGRAM speed-goal IDs separately from measured
+  achievement and existing release bars.
 - G6 human checklist (UX phases): <steps>
 
 ## Progress

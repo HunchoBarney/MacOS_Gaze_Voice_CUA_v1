@@ -10,6 +10,10 @@ enum SpeechEvent {
     /// Streaming / final text of the model's spoken reply.
     case assistantDelta(String)
     case assistant(String)
+    /// A tool result's verbatim `say` — the lane suppressed the second
+    /// model turn, so the controller voices it through the TTS seam and
+    /// fills the card's detail from it directly.
+    case toolSay(String)
     /// The model finished responding for this hold (after any tool calls).
     case turnEnded
 }

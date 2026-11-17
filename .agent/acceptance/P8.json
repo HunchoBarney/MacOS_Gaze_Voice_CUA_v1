@@ -1,0 +1,53 @@
+{
+  "phase": "P8",
+  "criteria": [
+    {
+      "id": "P8-1",
+      "behavior": "Production camera inference uses the reviewed node/Core ML runtime and measured detector fallback.",
+      "check": "Run scripts/verification-lane.sh p8 after M1 implements the mode; inspect actual production imports/process wiring and .agent/results/P8/contract-review.md.",
+      "expected": "Nonempty runtime/host suites pass; node/model versions and licenses are pinned. Backend/readiness reports describe the runtime actually executing, not only the spike.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P8-2",
+      "behavior": "IPC, bounded frame queues and process/camera recovery reject invalid and stale output.",
+      "check": "Run p8 cases for no-face, late frame, utility crash, invalid resource/tensor, camera loss and old generation; inspect source-review.md and recovery.json.",
+      "expected": "No stale gaze target is admitted; resources and queues remain bounded; errors/fallback are observable and cannot claim native readiness incorrectly.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P8-3",
+      "behavior": "Calibration persists with compatible camera/model/display identity and target feedback remains truthful.",
+      "check": "Inspect calibration/recovery cases and real-app feedback after restart, wake and display changes in .agent/results/P8/recovery.json.",
+      "expected": "Valid calibration survives; incompatible state is rejected with a drift/recalibration remedy. Hover/confidence does not actuate a target.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P8-4",
+      "behavior": "The complete real-camera pipeline meets active FPS, wake and first-calibration requirements on M1/8GB.",
+      "check": "Run the planned p8-live lane under scripts/with-desktop-lock.py after live authorization; inspect qualification.json, frame/recovery rows and frozen calibration-attempt population.",
+      "expected": ">=15fps camera-to-target, wake <=5s, >=80% first-try calibration; actual camera/human evidence and sample counts, not seeded model-inference rates.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P8-5",
+      "behavior": "Speech, app, driver and tracker together satisfy resource and recovery requirements.",
+      "check": "Inspect combined-runtime resource series, queue/frame-age observations, failure controls and manifest in P8 qualification evidence.",
+      "expected": "PROGRAM steady RSS <=2.5GB and idle CPU <=10% with declared normal configuration; no hidden tracking disablement. Supplemental footprint is distinguished from RSS.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P8-6",
+      "behavior": "Independent review and a complete cross-worktree handoff support production promotion.",
+      "check": "Inspect P8 source/final judge verdict, serialized integration checks, signed runtime/model identities and human calibration checklist.",
+      "expected": "Authorized independent PASS with no unresolved finding; source, fixture, camera and physical evidence are not conflated. Prior runtime remains recoverable.",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}

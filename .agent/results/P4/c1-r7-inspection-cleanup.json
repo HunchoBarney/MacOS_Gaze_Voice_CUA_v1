@@ -1,0 +1,20 @@
+[
+  {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r7-native-inspection/owned-scroll.txt",
+    "exit_code": 0,
+    "count": "1",
+    "error": ""
+  },
+  {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r7-native-inspection-2/owned-scroll.txt",
+    "exit_code": 0,
+    "count": "1",
+    "error": ""
+  },
+  {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r7-token-scroll-probe/owned-scroll.txt",
+    "exit_code": 0,
+    "count": "0",
+    "error": ""
+  }
+]

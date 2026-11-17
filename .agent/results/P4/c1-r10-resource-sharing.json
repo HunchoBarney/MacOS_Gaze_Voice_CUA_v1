@@ -1,0 +1,244 @@
+{
+  "started_at": "2026-11-17T06:03:50.698966+00:00",
+  "runner_sha256": "7ba1d2f0a078c67a90ea71d6d6d912b5c7b6f55b6d106127377b210832aad367",
+  "reused_helper_sha256": "4fc653e7a5d92199c5016c0aceafc8c31c8ec12811b968c5dcabbac9bf7480d1",
+  "source_app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r5-z6nt6jh4/Jev Voice.app",
+  "targets": {
+    "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app": "60a17df6d1380953cde91700e1ba88fafceb63937a564f88b37af8e39b85c7a3",
+    "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app": "dc79dbf4b805456e139e016b59fa427a15b265e12d53ded7a1d450a4614f1f25"
+  },
+  "protected": {
+    "/Users/karanvirkang/jarvis-local/Jev Voice.app": "f6abbe98113d7f9362ab98bc48a32e1fa94df6ddb3b376ab27dc56939fa4adf1",
+    "/private/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-before-tjbmt7hv/Jev Voice.app": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+    "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r5-z6nt6jh4/Jev Voice.app": "7e813283b9d3c596d8049858d52873e80dbd7d9e983a74a80b6570b8f2ebf721"
+  },
+  "before_free_bytes": 1700511744,
+  "apps": [
+    {
+      "app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app",
+      "files": [
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app/Contents/Resources/CodexRuntime/codex",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-g1j2p2ak",
+          "swapped": true,
+          "sha256": "79236c57a5d22308aa2be7607d0ec3cff3565d63acb3a075672c8500948ce4be",
+          "metadata": {
+            "size": 240152160,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794886543075534888,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794886580859037905,
+            1794886543075701680
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 240123904
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app/Contents/Resources/CodexRuntime/bin/codex",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-kp42cbm_",
+          "swapped": true,
+          "sha256": "bda90f6f38272af02b9e4b38c2cf23d1ad593b1bd35594f6f10186ccca01604d",
+          "metadata": {
+            "size": 240152160,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794886539061147089,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794886580926068677,
+            1794886539485030431
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 240123904
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app/Contents/Resources/CodexRuntime/bin/codex-code-mode-host",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-2_7kluqb",
+          "swapped": true,
+          "sha256": "87237c9fbe797d92b7be8e6bffd9675c5868a4b3cceb3305f4b4c4e9afb92ac5",
+          "metadata": {
+            "size": 65012992,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794886539484872555,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794886580926068677,
+            1794886539485030431
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 64996608
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app/Contents/Resources/EyeTracker/bin/node",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-ohpecaa8",
+          "swapped": true,
+          "sha256": "7eb2e13ce65dea8fdf50383754b6df2590ffc6f7ac7491c099fb8fc45d511aea",
+          "metadata": {
+            "size": 236775040,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794886544643648209,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794886582984234398,
+            1794886544643826293
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 236709504
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app/Contents/Resources/EyeTracker/dist/models/gaze_1x3x160x160.onnx",
+          "skipped": "already_shared"
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r8-emv9taxw/Jev Voice.app/Contents/Resources/EyeTracker/node_modules/.pnpm/electron@42.4.1/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+          "skipped": "different_version_or_signature"
+        }
+      ],
+      "committed": true,
+      "free_bytes": 2477654016
+    },
+    {
+      "app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app",
+      "files": [
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app/Contents/Resources/CodexRuntime/codex",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-rc3jzic2",
+          "swapped": true,
+          "sha256": "57844a7f416e8ea90a191ae32faae5c1d127e18b63d450fdcafbd1fdbacc5b94",
+          "metadata": {
+            "size": 240152160,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794891891711608960,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794891916036187939,
+            1794891891711736003
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 240123904
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app/Contents/Resources/CodexRuntime/bin/codex",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-zzpih1sv",
+          "swapped": true,
+          "sha256": "2e08828cf244a5776076b7fd43ccbd6816f5c625ac10263fad6bce075020fde0",
+          "metadata": {
+            "size": 240152160,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794891888788433725,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794891916077706946,
+            1794891889112425791
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 240123904
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app/Contents/Resources/CodexRuntime/bin/codex-code-mode-host",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-9t350gjd",
+          "swapped": true,
+          "sha256": "4a6b4c794dfd25423ec5b5fb7c55de23b9b1e79de65c7d4cea18d645971177c0",
+          "metadata": {
+            "size": 65012992,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794891889112303331,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794891916077706946,
+            1794891889112425791
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 64996608
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app/Contents/Resources/EyeTracker/bin/node",
+          "temporary": "/Users/karanvirkang/jarvis-local/.c1-r10-sharing-rg4jf9_5/resource-i3zzi7dj",
+          "swapped": true,
+          "sha256": "aad9547dfa82d28653bf52f8068706cfcf3dbe7ec14d2d62337111673df7dd8f",
+          "metadata": {
+            "size": 236775040,
+            "mode": 33261,
+            "uid": 501,
+            "gid": 20,
+            "flags": 0,
+            "mtime_ns": 1794891892735798274,
+            "xattrs": {
+              "com.apple.provenance": "656b63122d0314385323f982be7e6e3be440dddb498801317c92ba56aeec2d76"
+            },
+            "acl_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parent_times": [
+            1794891917488444756,
+            1794891892735920900
+          ],
+          "shared_bytes_before": 0,
+          "shared_bytes_after": 236709504
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app/Contents/Resources/EyeTracker/dist/models/gaze_1x3x160x160.onnx",
+          "skipped": "already_shared"
+        },
+        {
+          "path": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app/Contents/Resources/EyeTracker/node_modules/.pnpm/electron@42.4.1/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+          "skipped": "different_version_or_signature"
+        }
+      ],
+      "committed": true,
+      "free_bytes": 3255332864
+    }
+  ],
+  "complete": true,
+  "purpose": "Share physical extents; retain every signed byte, path, metadata and app signature.",
+  "after_free_bytes": 3254734848,
+  "finished_at": "2026-11-17T06:04:52.906871+00:00"
+}

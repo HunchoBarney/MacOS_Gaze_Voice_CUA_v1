@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-11-16T02:58:47.555195+00:00",
+  "free_before_bytes": 5182025728,
+  "retired": [
+    {
+      "label": "after",
+      "archive": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-retired-after.zip",
+      "binary_sha256": "db03d7c877acdcb1408d42fee09564cb74e859d373a1a8b24ce4a2eecf0d8eb9",
+      "full_bundle_preserved": false,
+      "source_snapshot": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-performance-after/manifest.json",
+      "resource_hashes_preserved_in_receipt": true
+    },
+    {
+      "label": "after-r2",
+      "archive": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-retired-after-r2.zip",
+      "binary_sha256": "d18677cff5b2b690f871c5a46e741299c4b620728a4901a328eed8fb03087b01",
+      "full_bundle_preserved": false,
+      "source_snapshot": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-performance-after-r2/manifest.json",
+      "resource_hashes_preserved_in_receipt": true
+    },
+    {
+      "label": "after-r3",
+      "archive": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-retired-after-r3.zip",
+      "binary_sha256": "2b41d8fb3a18455631b4454d8b2b32d0c606d006949a39c8adc7b28ebd2e2245",
+      "full_bundle_preserved": false,
+      "source_snapshot": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-performance-after-r3/manifest.json",
+      "resource_hashes_preserved_in_receipt": true
+    }
+  ],
+  "free_after_bytes": 8585691136,
+  "baseline_final_rollback_unchanged": true
+}

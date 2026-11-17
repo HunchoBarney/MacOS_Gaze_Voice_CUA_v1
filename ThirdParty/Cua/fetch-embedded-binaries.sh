@@ -33,7 +33,7 @@ fetch() { # url dest
   curl -fL --retry 3 --retry-delay 2 -o "$2" "$1"
 }
 
-# --- cua-driver: the pinned v0.34.0 release build, embedded so TCC grants
+# --- cua-driver: the manifest-pinned release build, embedded so TCC grants
 # attribute to Jev Voice instead of the standalone CuaDriver app. The
 # installed app copy satisfies the pin offline; otherwise fetch the release
 # tarball and extract the signed app-bundle binary (the bare top-level
@@ -48,10 +48,9 @@ if ! { [ -f "$DRIVER_OUT" ] && [ "$(sha256 "$DRIVER_OUT")" = "$DRIVER_SHA" ]; };
     TARBALL="$CACHE/$(basename "$(field cua-driver url)")"
     fetch "$(field cua-driver url)" "$TARBALL"
     verify "$TARBALL" "$(field cua-driver tarball_sha256)" "cua-driver tarball"
-    rm -rf "$CACHE/cua-driver"
-    mkdir -p "$CACHE/cua-driver"
-    tar -xzf "$TARBALL" -C "$CACHE/cua-driver" "$(field cua-driver member)"
-    cp "$CACHE/cua-driver/$(field cua-driver member)" "$DRIVER_OUT"
+    DRIVER_EXTRACT="$(mktemp -d "$CACHE/cua-driver.XXXXXX")"
+    tar -xzf "$TARBALL" -C "$DRIVER_EXTRACT" "$(field cua-driver member)"
+    cp "$DRIVER_EXTRACT/$(field cua-driver member)" "$DRIVER_OUT"
   fi
 fi
 verify "$DRIVER_OUT" "$DRIVER_SHA" "cua-driver"

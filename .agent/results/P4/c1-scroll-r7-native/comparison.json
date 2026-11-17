@@ -1,0 +1,47 @@
+{
+  "status": "blocked_or_failed",
+  "physical_input": false,
+  "human_confirmed": false,
+  "entry": "signed packaged MCP drive_until; production DriveLoop and bundled Cua",
+  "clock": "MCP request to response; independent AX witness completion reported separately",
+  "gaze": "controlled unavailable endpoint; bound-window fallback only",
+  "jev_limit": null,
+  "billed_provider_calls": 0,
+  "binary_sha256": "6b035fac125308d0c6079cf6e1e4387c5139a14f77e5336870b1fdf1fe85b6a1",
+  "harness_sha256": "7ffa5394af73f7246838c53eaaecdb45afff18e1fb7615840aa79ba87de05168",
+  "rows": [
+    {
+      "case": "c1-owned-scroll-0",
+      "goal": "scroll down",
+      "caller_deadline_seconds": 30,
+      "completion_hints_sent": false,
+      "status": "blocked",
+      "verified": false,
+      "strict_success": false,
+      "false_done": false,
+      "cancelled_by_harness": false,
+      "actor_pid": 48641,
+      "kind": "qualification",
+      "requested_window_id": 62862,
+      "result_text": "Blocked: Scroll input was sent, but I couldn't verify the viewport moved. Recent steps: Scroll request sent to TextEdit's window.; Scroll input was sent, but I couldn't verify the viewport moved.",
+      "is_error": false,
+      "wall_ms": 1199.924040999999,
+      "actual_state": {
+        "scroll_before": 0.0,
+        "scroll_after": 0.0,
+        "decoy_unchanged": true,
+        "content_unchanged": true,
+        "verified_elapsed_ms": 4649.113082999999
+      },
+      "visual_trace": [],
+      "visual_trace_collection_ms": 2812.2735,
+      "visual_trace_required": false,
+      "visual_trace_complete": false
+    }
+  ],
+  "documents_before": 1,
+  "error_type": "AssertionError",
+  "error": "",
+  "documents_after": 1,
+  "documents_restored": true
+}

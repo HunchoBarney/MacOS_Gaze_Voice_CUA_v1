@@ -13,15 +13,52 @@ struct OverlayView: View {
         if case .error(let text) = controller.status { return text }
         if case .awaitingAnswer(let prompt) = controller.status { return prompt }
         if controller.status == .done { return controller.resultMessage }
+        if controller.status == .idle, let outcome = latestOutcome {
+            return "\(outcome.label) — \(outcome.message)"
+        }
         return controller.detail
     }
     private var showsActions: Bool {
         controller.status == .reviewTranscript || controller.status == .awaitingConfirm || isError
     }
     private var isError: Bool { if case .error = controller.status { return true }; return false }
+    /// The most recently settled computer-control task — surfaced on the
+    /// idle card while VoiceWindows lingers the panel on a fresh outcome.
+    /// `lastActivity` is the settle-time proxy (see VoiceWindows).
+    private var latestOutcome: VoiceTaskCoordinator.Work? {
+        controller.cuaTasks.filter { $0.outcome != nil }.max { $0.lastActivity < $1.lastActivity }
+    }
+    /// Idle-card presentation of the settled task: verdict glyph, status
+    /// word, and the work row's own outcome line.
+    private var statusSymbol: String {
+        if controller.status == .idle, let outcome = latestOutcome {
+            switch outcome.outcome {
+            case .done?, .alreadyDone?: return "checkmark.circle.fill"
+            case .cancelled?: return "xmark.circle"
+            default: return "exclamationmark.circle.fill"
+            }
+        }
+        return controller.status.symbol
+    }
+    private var statusTint: Color {
+        if isError { return .orange }
+        if controller.status == .idle, let outcome = latestOutcome {
+            switch outcome.outcome {
+            case .done?, .alreadyDone?: return .mint
+            case .cancelled?: return .white.opacity(0.6)
+            default: return .orange
+            }
+        }
+        return .mint
+    }
+    private var statusTitle: String {
+        if controller.handsFreeEnabled, controller.captureState == .idle { return controller.handsFreeLabel }
+        if controller.status == .idle, let outcome = latestOutcome { return outcome.statusText }
+        return controller.status.title
+    }
     /// Every parked approval/question gets a row — capped at 3 with an
     /// overflow count — each Confirm is id-scoped to its own ask.
-    private var approvalRows: [CuaVoiceRuntime.Work] {
+    private var approvalRows: [VoiceTaskCoordinator.Work] {
         Array(controller.pendingTaskApprovals.prefix(3))
     }
     private var questionRows: [VoiceController.PendingQuestionItem] {
@@ -36,14 +73,21 @@ struct OverlayView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if showText {
-                Text(controller.transcript)
+                Text(controller.partialLive ? controller.transcript + "…" : controller.transcript)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(.white.opacity(controller.partialLive ? 0.55 : 0.95))
                     .lineLimit(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if !message.isEmpty {
                 Text(message).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(3)
+            }
+            // Spoken-error parity: when the failure was voiced, the line
+            // the user heard stays visible as the card's detail — an error
+            // must never be audible-but-unreadable.
+            if isError, !controller.detail.isEmpty, controller.detail != message {
+                Text(controller.detail).font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55)).lineLimit(2)
             }
             if showText || !message.isEmpty { Divider().overlay(Color.white.opacity(0.08)) }
             HStack(spacing: 12) {
@@ -53,11 +97,19 @@ struct OverlayView: View {
                 } else if [.starting, .finishing, .thinking, .executing, .stopping].contains(controller.status) {
                     ProgressView().controlSize(.small).tint(.white).scaleEffect(0.85)
                 } else {
-                    Image(systemName: controller.status.symbol)
-                        .foregroundStyle(isError ? Color.orange : Color.mint)
+                    Image(systemName: statusSymbol)
+                        .foregroundStyle(statusTint)
                 }
-                Text(controller.status.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Text(statusTitle).font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Spacer(minLength: 4)
+                if controller.handsFreeEnabled {
+                    Button(controller.handsFreeListening ? "Pause" : "Resume") {
+                        if controller.handsFreeListening { controller.pauseHandsFree() }
+                        else { controller.resumeHandsFree() }
+                    }
+                    .buttonStyle(.plain).font(.system(size: 11))
+                    .accessibilityLabel(controller.handsFreeListening ? "Pause hands-free voice" : "Resume hands-free voice")
+                }
                 if controller.status == .listening {
                     Text("fn").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.6))
                         .padding(.horizontal, 6).padding(.vertical, 3)
@@ -80,8 +132,8 @@ struct OverlayView: View {
             ForEach(approvalRows) { task in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(task.request).font(.caption2).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
-                    if let operation = task.approval {
-                        Text(operation).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    if let prompt = task.askPrompt {
+                        Text(prompt).font(.caption).fixedSize(horizontal: false, vertical: true)
                     }
                     HStack {
                         Button("Confirm") { controller.approveTask(task.id, approved: true) }
@@ -106,7 +158,7 @@ struct OverlayView: View {
                     } else if controller.status == .reviewTranscript {
                         Button("Review transcript", action: openReview).buttonStyle(.borderedProminent).tint(.mint).foregroundStyle(.black)
                     } else if isError {
-                        Button("Open settings", action: openSettings).buttonStyle(.bordered)
+                        Button("Dismiss", action: controller.cancelCaptureAttempt).buttonStyle(.bordered)
                     }
                     Spacer()
                 }.controlSize(.small)
@@ -133,14 +185,14 @@ struct CuaTasksView: View {
         if !controller.cuaTasks.isEmpty || !controller.pendingQuestions.isEmpty {
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { Text("Cua tasks").font(.headline); Spacer(); Button("Stop All", action: controller.stopAll) }
+                    HStack { Text("Computer control tasks").font(.headline); Spacer(); Button("Stop All", action: controller.stopAll) }
                     ForEach(controller.cuaTasks) { task in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Button(task.label) { controller.selectTask(task.id) }.buttonStyle(.plain)
-                                Text(task.status).font(.caption).foregroundStyle(.secondary)
+                                Text(task.statusText).font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                if task.approval != nil { Button("Confirm operation") { controller.approveTask(task.id, approved: true) } }
+                                if task.awaitingApproval { Button("Confirm operation") { controller.approveTask(task.id, approved: true) } }
                                 if task.active { Button("Stop") { controller.cancelTask(task.id) } }
                                 if controller.canRetryTask(task.id) {
                                     Button("Retry") { controller.retryTask(task.id) }
@@ -199,7 +251,7 @@ struct ActivityView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(!canRunCommand)
                     }
-                    Text("Runs through the same Cua path as a spoken command — same targeting, verification, and confirmation rules.")
+                    Text("Runs through the same computer-control path as a spoken command — same targeting, verification, and confirmation rules.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -255,7 +307,8 @@ struct ActivityView: View {
             }
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Label(controller.status.title, systemImage: controller.status.symbol).font(.headline)
+                    Label(controller.handsFreeEnabled ? controller.handsFreeLabel : controller.status.title,
+                          systemImage: controller.status.symbol).font(.headline)
                     if case .error(let message) = controller.status {
                         Text(message).foregroundStyle(.orange)
                     } else if !controller.detail.isEmpty { Text(controller.detail).foregroundStyle(.secondary) }

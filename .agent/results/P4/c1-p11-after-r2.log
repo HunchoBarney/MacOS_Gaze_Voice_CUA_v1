@@ -1,0 +1,187 @@
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.31s)
+Test Suite 'Selected tests' started at 2026-11-15 16:43:08.543.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 16:43:08.545.
+Test Suite 'DwellPolicyTests' started at 2026-11-15 16:43:08.545.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testAllAddsTheFloorsButNeverChrome]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testAllAddsTheFloorsButNeverChrome]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1EveryOptedInDelayIsAtLeastOneSecond]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1EveryOptedInDelayIsAtLeastOneSecond]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1UnmarkedSafeAndMalformedConsentStayOff]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1UnmarkedSafeAndMalformedConsentStayOff]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDefaultsRoundTrip]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDefaultsRoundTrip]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDelayBand]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDelayBand]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedAppExemptsEveryCandidate]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedAppExemptsEveryCandidate]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedCuaPolicyPhrases]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedCuaPolicyPhrases]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedLabelsNeverFire]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedLabelsNeverFire]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyCorpusIncludesContextFields]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyCorpusIncludesContextFields]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyDefeatsObfuscation]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyDefeatsObfuscation]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyNormalizesSeparators]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyNormalizesSeparators]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testEmptyNormalizedTokenIsInert]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testEmptyNormalizedTokenIsInert]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testModeDefaultAndUnknown]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testModeDefaultAndUnknown]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testMultiplierAdaptsInsideClamp]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testMultiplierAdaptsInsideClamp]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testOffFiresNothing]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testOffFiresNothing]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSafeReachesVerifiedKindsOnly]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSafeReachesVerifiedKindsOnly]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSecureFieldsNeverFire]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSecureFieldsNeverFire]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testTrafficLightCloseDeniedByID]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testTrafficLightCloseDeniedByID]' passed (0.001 seconds).
+Test Suite 'DwellPolicyTests' passed at 2026-11-15 16:43:08.578.
+	 Executed 18 tests, with 0 failures (0 unexpected) in 0.030 (0.032) seconds
+Test Suite 'EyeSettingsFlowTests' started at 2026-11-15 16:43:08.578.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testDwellModeWriteReloads]' started.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testDwellModeWriteReloads]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testSettingsPostsCarryActionAndValue]' started.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testSettingsPostsCarryActionAndValue]' passed (0.038 seconds).
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testSettingsSliceDecodes]' started.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testSettingsSliceDecodes]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testTrackerGeometryRoundTrip]' started.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testTrackerGeometryRoundTrip]' passed (0.058 seconds).
+Test Suite 'EyeSettingsFlowTests' passed at 2026-11-15 16:43:08.691.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.112 (0.113) seconds
+Test Suite 'EyesMenuFlowTests' started at 2026-11-15 16:43:08.691.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testFreshBootSnapshotReadsStarting]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testFreshBootSnapshotReadsStarting]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testFreshPreviewMissReadsNoFace]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testFreshPreviewMissReadsNoFace]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testInFlightCalibrationReadsCalibrating]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testInFlightCalibrationReadsCalibrating]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testMissingCalibrationReadsNeedsCalibration]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testMissingCalibrationReadsNeedsCalibration]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testPausedReadsPaused]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testPausedReadsPaused]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testQuietFeedAfterAFaceReadsNoGaze]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testQuietFeedAfterAFaceReadsNoGaze]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testRunningCalibratedReadsTracking]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testRunningCalibratedReadsTracking]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testUnreachableTrackerThrowsForTheMenu]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testUnreachableTrackerThrowsForTheMenu]' passed (2.011 seconds).
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testUnstampedSilentTrackerReadsNoGaze]' started.
+Test Case '-[JevVoiceAppTests.EyesMenuFlowTests testUnstampedSilentTrackerReadsNoGaze]' passed (0.003 seconds).
+Test Suite 'EyesMenuFlowTests' passed at 2026-11-15 16:43:10.729.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 2.037 (2.038) seconds
+Test Suite 'GazeDwellTests' started at 2026-11-15 16:43:10.729.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAcquireSwitchAbortsOldHold]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAcquireSwitchAbortsOldHold]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAmbiguousPauses]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAmbiguousPauses]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testDeniedNeverFires]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testDeniedNeverFires]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testEngagedReleaseIsAbort]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testEngagedReleaseIsAbort]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFeedLossEndsHold]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFeedLossEndsHold]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFiresOncePerAcquire]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFiresOncePerAcquire]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testQuickReleaseIsNotAbort]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testQuickReleaseIsNotAbort]' passed (0.001 seconds).
+Test Suite 'GazeDwellTests' passed at 2026-11-15 16:43:10.736.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.006 (0.006) seconds
+Test Suite 'GazeServiceTests' started at 2026-11-15 16:43:10.736.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testColdCommitIsNil]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testColdCommitIsNil]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testDwellFiresThroughActuation]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/GazeServiceTests.swift:137: error: -[JevVoiceAppTests.GazeServiceTests testDwellFiresThroughActuation] : XCTAssertEqual failed: ("[]") is not equal to ("["ax:42:7:axel_9"]")
+Test Case '-[JevVoiceAppTests.GazeServiceTests testDwellFiresThroughActuation]' failed (1.901 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testDwellSuppressed]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testDwellSuppressed]' passed (1.110 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testFeedGateCadence]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testFeedGateCadence]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testPolicyReloadsOnDefaultsChange]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testPolicyReloadsOnDefaultsChange]' passed (0.028 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testReferentContext]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testReferentContext]' passed (0.518 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testServiceScoresAndCommits]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testServiceScoresAndCommits]' passed (0.302 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testStaleSinkReportsOutageDuration]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testStaleSinkReportsOutageDuration]' passed (0.759 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testStopClearsState]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testStopClearsState]' passed (0.392 seconds).
+Test Case '-[JevVoiceAppTests.GazeServiceTests testStopRetiresRingAndCallsTeardown]' started.
+Test Case '-[JevVoiceAppTests.GazeServiceTests testStopRetiresRingAndCallsTeardown]' passed (0.315 seconds).
+Test Suite 'GazeServiceTests' failed at 2026-11-15 16:43:16.065.
+	 Executed 10 tests, with 1 failure (0 unexpected) in 5.326 (5.329) seconds
+Test Suite 'TrackerCommandFlowTests' started at 2026-11-15 16:43:16.065.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testAmbiguousPhrasesNeverReachTheTracker]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testAmbiguousPhrasesNeverReachTheTracker]' passed (0.016 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testBarePauseAndResumeStayMediaKeys]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testBarePauseAndResumeStayMediaKeys]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testDisableEyeTrackingFlipsTheSwitch]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testDisableEyeTrackingFlipsTheSwitch]' passed (0.045 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testEnableEyeTrackingFlipsTheSwitch]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testEnableEyeTrackingFlipsTheSwitch]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testPauseTrackingPostsTheToggle]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testPauseTrackingPostsTheToggle]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRecalibratePostsToControl]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRecalibratePostsToControl]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRefusedVerbReadsTheLiveSnapshot]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRefusedVerbReadsTheLiveSnapshot]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRefusedVerbWhileTrackerBoots]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRefusedVerbWhileTrackerBoots]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRefusedVerbWithDeadTrackerIsHonest]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testRefusedVerbWithDeadTrackerIsHonest]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testResumeTrackingPostsTheSameToggle]' started.
+Test Case '-[JevVoiceAppTests.TrackerCommandFlowTests testResumeTrackingPostsTheSameToggle]' passed (0.003 seconds).
+Test Suite 'TrackerCommandFlowTests' passed at 2026-11-15 16:43:16.154.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.088 (0.089) seconds
+Test Suite 'TrackerControlFlowTests' started at 2026-11-15 16:43:16.154.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testClosedPortIsUnreachable]' started.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testClosedPortIsUnreachable]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testControlPostWireBytes]' started.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testControlPostWireBytes]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testMalformedSnapshotBodyIsUnreachable]' started.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testMalformedSnapshotBodyIsUnreachable]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testNonEnumActionIsRejected]' started.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testNonEnumActionIsRejected]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testNonSuccessStatusRefusesTheBody]' started.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testNonSuccessStatusRefusesTheBody]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testSilentSocketTimesOutAsUnreachable]' started.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testSilentSocketTimesOutAsUnreachable]' passed (2.009 seconds).
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testSnapshotDecodesTheWholeWireShape]' started.
+Test Case '-[JevVoiceAppTests.TrackerControlFlowTests testSnapshotDecodesTheWholeWireShape]' passed (0.009 seconds).
+Test Suite 'TrackerControlFlowTests' passed at 2026-11-15 16:43:18.183.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 2.028 (2.029) seconds
+Test Suite 'TrackerEnableFlowTests' started at 2026-11-15 16:43:18.183.
+Test Case '-[JevVoiceAppTests.TrackerEnableFlowTests testFeatureSwitchPersists]' started.
+Test Case '-[JevVoiceAppTests.TrackerEnableFlowTests testFeatureSwitchPersists]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.TrackerEnableFlowTests testUserRequestedStartRunsAFullAttempt]' started.
+Test Case '-[JevVoiceAppTests.TrackerEnableFlowTests testUserRequestedStartRunsAFullAttempt]' passed (0.105 seconds).
+Test Case '-[JevVoiceAppTests.TrackerEnableFlowTests testUserRequestedStartWhileRunningIsQuiet]' started.
+Test Case '-[JevVoiceAppTests.TrackerEnableFlowTests testUserRequestedStartWhileRunningIsQuiet]' passed (0.002 seconds).
+Test Suite 'TrackerEnableFlowTests' passed at 2026-11-15 16:43:18.293.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.109 (0.110) seconds
+Test Suite 'UXConfigDefaultsTests' started at 2026-11-15 16:43:18.293.
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testNewFlagDefaults]' started.
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testNewFlagDefaults]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testNewFlagsPersist]' started.
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testNewFlagsPersist]' passed (0.016 seconds).
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testRetiredFlagsCannotTurnOffFinalOnlyAdmission]' started.
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testRetiredFlagsCannotTurnOffFinalOnlyAdmission]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testSemanticAssistExplicitOptOutPersistsAcrossReloads]' started.
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testSemanticAssistExplicitOptOutPersistsAcrossReloads]' passed (0.016 seconds).
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testSemanticAssistIsEnabledWhenPreferenceIsUnset]' started.
+Test Case '-[JevVoiceAppTests.UXConfigDefaultsTests testSemanticAssistIsEnabledWhenPreferenceIsUnset]' passed (0.006 seconds).
+Test Suite 'UXConfigDefaultsTests' passed at 2026-11-15 16:43:18.355.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.061 (0.062) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-15 16:43:18.355.
+	 Executed 73 tests, with 1 failure (0 unexpected) in 9.797 (9.810) seconds
+Test Suite 'Selected tests' failed at 2026-11-15 16:43:18.355.
+	 Executed 73 tests, with 1 failure (0 unexpected) in 9.797 (9.812) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

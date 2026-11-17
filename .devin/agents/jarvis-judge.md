@@ -1,7 +1,7 @@
 ---
 name: jarvis-judge
 description: Read-only skeptical reviewer for Jarvis phases. Reviews the phase ExecPlan's acceptance.json criteria against the real tree, cites file:line evidence, and returns a terminal PASS or FAIL verdict. Never fixes anything.
-model: gpt
+model: swe-2-max
 allowed-tools:
   - read
   - grep

@@ -1,0 +1,53 @@
+{
+  "phase": "P9",
+  "criteria": [
+    {
+      "id": "P9-1",
+      "behavior": "Only independently verified traces become validated, versioned programs in an atomic private store.",
+      "check": "Run scripts/verification-lane.sh p9 after M1 implements it; inspect SkillProgram/store/compiler source and contract-review.md.",
+      "expected": "Nonempty suites reject unverified traces, unknown schema/actions and unsupported postconditions. Reused recording/storage facilities and minimum custom scope are documented.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P9-2",
+      "behavior": "Parameters and locators are rebound to the current account/document/page without stale-coordinate authority.",
+      "check": "Run p9 negative cases for malformed/injected parameters, changed account/page/layout, ambiguous locator and historical point fallback.",
+      "expected": "No arbitrary code or unintended input. A point is only a hint requiring fresh validated grounding; invalid preconditions stop before mutation.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P9-3",
+      "behavior": "Replay retains live consent, cancellation and independent result verification.",
+      "check": "Inspect .agent/results/P9/integration.json and p9 cases for changed/canceled approval, interrupted execution and uncertain partial outcome.",
+      "expected": "No replayed approval, duplicate mutation or unverified Done. An uncertain partial run is checked/handed back rather than blindly restarted.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P9-4",
+      "behavior": "Failing skills retire safely and general task execution remains available.",
+      "check": "Run p9 retirement/store-recovery cases and inspect integration records for two consecutive failures, fresh revalidation and safe pre-mutation fallback.",
+      "expected": "Retired skills cannot be selected automatically; reason and failure count persist. No app requires a preinstalled skill to receive generic control.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P9-5",
+      "behavior": "Repeated tasks meet the replay release bar through the real public route.",
+      "check": "Run SHIP-PLAN's desktop-lock benchmark with tag p9 using the reviewed injector; inspect qualification.json, paired first/repeat rows, oracles and manifest.",
+      "expected": "Strict success >=95%, p50 <=3s and PROGRAM Wilson bar; zero critical violations. Report the internal <=2s budget, S-WORKFLOW, p95, requests, cost and resources honestly.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P9-6",
+      "behavior": "Independent review and complete replay handoff support phase acceptance.",
+      "check": "Inspect authorized source/final verdicts, integrated checks, source/runtime/skill bindings, normal-product evidence and phase handoff.",
+      "expected": "PASS with no unresolved finding or falsely inferred physical evidence; rollback/retirement and stored-data limits are recorded.",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}

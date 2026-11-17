@@ -1,0 +1,14 @@
+{
+  "started_at": "2026-11-16T18:38:58.181004+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "VoiceLaneAuditTests|RealtimeVoiceLaneTests|VoiceTurnEvidenceTests|VoiceTaskCoordinatorLaneTests|JevChooserTests|JevObservedGoalTests|JevExactReplacementTests|JevAdaptiveTests|JevDeciderTests|FastLaneExecutorTests|TaskLoop|DriveSessionCursorTests|GazeLaneTests|GazeRefusalStateTests"
+  ],
+  "source_snapshot_sha256": "b8593a83376211c00471cfbea5ce7a32752807d18f482873451982daa9743e09",
+  "capture_sha256": "8c833213f680a31db70c26045ff44957d44d197b7bdbb1b1b183bf7fc6033aff",
+  "status": "passed",
+  "exit_code": 0,
+  "finished_at": "2026-11-16T18:52:06.513554+00:00",
+  "log_sha256": "86589fd275fda5b4770f42831bec0aed4f5641b89f696c1018d1bd86f40346a0"
+}

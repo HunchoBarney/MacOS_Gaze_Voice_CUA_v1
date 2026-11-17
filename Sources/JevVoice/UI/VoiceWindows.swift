@@ -30,6 +30,13 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
     private var subscriptions: Set<AnyCancellable> = []
     private var refreshQueued = false
     private var previousStatus: VoiceController.Status = .idle
+    /// Settled-task ids already granted an idle linger — each fresh outcome
+    /// gets one showing, never a re-show on later refresh ticks.
+    private var lingeredOutcomeIDs: Set<UUID> = []
+    private var outcomeLingerTask: Task<Void, Never>?
+    /// Seconds a fresh task outcome stays on the idle card — long enough
+    /// to read, short enough not to feel stuck.
+    private static let outcomeLinger: TimeInterval = 4.5
 
     init(controller: VoiceController, microphones: MicrophoneCatalog, input: FnInputMonitor) {
         self.controller = controller; self.microphones = microphones; self.input = input
@@ -67,7 +74,8 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
             window.minSize = NSSize(width: 740, height: 520)
             window.contentView = NSHostingView(rootView: SettingsView(controller: controller, config: controller.config,
                 microphones: microphones, input: input, navigation: navigation,
-                collapse: { [weak self] in self?.settingsWindow?.close() })
+                collapse: { [weak self] in self?.settingsWindow?.close() },
+                spend: SpendCounter.shared)
                 .environmentObject(agents)
                 .environment(\.openAgents) { [weak self] in self?.showAgents() })
             window.delegate = self
@@ -110,7 +118,27 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
     private func refreshOverlay() {
         let status = controller.status
         defer { previousStatus = status }
-        guard status != .idle, !controller.isMicrophoneTest else { panel.orderOut(nil); return }
+        // A task that settles while the card is idle is otherwise never
+        // seen — hold the panel on the fresh outcome before ordering out.
+        // Every settled row is consumed so only a NEWER outcome re-arms;
+        // the card always renders the newest settled one.
+        if status == .idle, !controller.isMicrophoneTest,
+           controller.cuaTasks.contains(where: { $0.outcome != nil && !lingeredOutcomeIDs.contains($0.id) }) {
+            for work in controller.cuaTasks where work.outcome != nil {
+                lingeredOutcomeIDs.insert(work.id)
+            }
+            outcomeLingerTask?.cancel()
+            outcomeLingerTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.outcomeLinger * 1e9))
+                guard !Task.isCancelled else { return }
+                self?.outcomeLingerTask = nil
+                self?.queueRefresh()
+            }
+        }
+        guard status != .idle || outcomeLingerTask != nil || controller.handsFreeEnabled,
+              !controller.isMicrophoneTest else {
+            panel.orderOut(nil); return
+        }
         if status == .starting && previousStatus != .starting || targetScreen == nil {
             targetScreen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         }

@@ -9,11 +9,20 @@ declare global {
         path: string,
         payload: unknown
       ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
+      writeReport: (
+        path: string,
+        payload: unknown
+      ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
       ready: () => void;
       setOverlayRegions: (regions: OverlayRegion[]) => void;
+      setModalInteractive: (interactive: boolean) => void;
       publishBackendMessage: (payload: BackendMessage) => void;
       onBackendMessage: (callback: (payload: BackendMessage) => void) => () => void;
-      sendCalibrationCapture: (target: [number, number], validation: boolean) => void;
+      onRecalibrate: (callback: () => void) => () => void;
+      setPaused: (paused: boolean) => void;
+      getSettings: () => Promise<UserSettings>;
+      setSettings: (patch: Partial<UserSettings>) => void;
+      reportState: (state: SharedStateReport) => void;
     };
   }
 }
@@ -25,8 +34,34 @@ export interface OverlayRegion {
   height: number;
 }
 
+export type CalibrationTier = "full" | "standard" | "quick";
+
+export interface UserSettings {
+  version?: number;
+  dot_scale?: number;
+  // Vision Pro-style default: no gaze cursor. The element-level feedback
+  // (intent halo, dwell chips) carries the "where you're pointing" cue;
+  // true re-enables the dot for users who want it.
+  gaze_dot_visible?: boolean;
+  dwell_lock?: boolean;
+  show_camera_marker_on_start?: boolean;
+  diagnostics?: {
+    preview?: boolean;
+    status?: boolean;
+    inference_time?: boolean;
+  };
+}
+
+export interface SharedStateReport {
+  paused?: boolean;
+  calibration_status?: string;
+  settings?: UserSettings;
+}
+
 export interface RendererConfig {
   calibrate: boolean;
+  accuracyTest: boolean;
+  calibrationTier: CalibrationTier;
   displayIndex: number;
   requestedDisplayIndex: number;
   displayCount: number;
@@ -40,18 +75,20 @@ export interface RendererConfig {
   cameraScreenX: number;
   cameraScreenY: number;
   enableInferenceTime: boolean;
+  debug?: boolean;
+  showCameraMarker?: boolean;
   runtime: RuntimeName;
   webInference: WebInferenceConfig | null;
 }
 
-export type RuntimeName = "python" | "onnxweb" | "litert";
+export type RuntimeName = "onnxweb";
 export type GazeProjectionMode = "legacy" | "binocular-screen" | "binocular-convergence";
 export type AcceleratorName = "webgpu" | "wasm";
 export type WebAccelerator = AcceleratorName;
 export type WebInferenceWorkerMode = "off" | "ort-proxy" | "dedicated";
 
 export interface WebInferenceConfig {
-  runtime: Exclude<RuntimeName, "python">;
+  runtime: RuntimeName;
   webInferenceWorker: WebInferenceWorkerMode;
   webAccelerator: "auto" | "webgpu" | "wasm";
   detector: "retinaface" | "yolo";
@@ -67,16 +104,12 @@ export interface WebInferenceConfig {
   displayHeight: number;
   calibrationFile: string;
   detectorModel: string;
-  retinafaceModel: string;
-  yoloModel: string;
-  gazeModel: string;
   lipMotionModel: string;
   detectorModelUrl: string;
-  retinafaceModelUrl: string;
   gazeModelUrl: string;
   lipMotionModelUrl: string;
   onnxWasmBaseUrl: string;
-  liteRtWasmBaseUrl: string;
+  appearanceModelUrl?: string;
   assetBaseUrl?: string;
   smoothingAlpha: number;
   smoothingAlphaY: number;
@@ -88,6 +121,7 @@ export interface WebInferenceConfig {
   disableIrisDistance: boolean;
   previewFps: number;
   gazeMaxFps: number;
+  wasmThreads?: number;
   hidePreview: boolean;
   flipX: boolean;
   flipY: boolean;
@@ -118,7 +152,7 @@ export type BackendMessage =
       tracking_source?: "detector" | "iris";
       held_reason?: string;
       filter_velocity_deg_s?: number;
-      gaze_state?: "fixation" | "saccade";
+      gaze_state?: "fixation" | "saccade" | "dwell";
       head_face_width_ratio?: number;
       eye_position_weight_x?: number;
       eye_position_weight_y?: number;
@@ -130,14 +164,33 @@ export type BackendMessage =
       capture_ms?: number;
       preview_ms?: number;
       frame_interval_ms?: number;
+      // Wall-clock (Date.now) at emit — comparable across worker/page realms
+      // for capture-time velocity and true sample age, unlike performance.now.
+      captured_at_ms?: number;
       processed_fps?: number;
       dropped_frames?: number;
       main_thread_long_tasks?: number;
-      yaw_deg: number;
-      pitch_deg: number;
+      // Metric head pose vs the session straight-ahead (Kabsch mesh fit).
+      // Absent when the fit degenerated — the head-tilt gate must see absent
+      // as "no data" and not gate, never as a gaze-angle substitute.
+      yaw_deg?: number;
+      pitch_deg?: number;
       mouth_detected?: boolean;
       mouth_open?: boolean;
       mouth_open_probability?: number | null;
+    }
+  | {
+      type: "gaze";
+      // Liveness heartbeat while no face is visible — it exists only to
+      // keep the store's gaze.updated_at fresh so the host's wedge watch
+      // never mistakes a healthy-but-empty pipeline for a dead one. It is
+      // deliberately NOT a gaze sample: no x_norm/y_norm are carried, the
+      // store exposes `away: true`, and the UI must not read it as
+      // presence, move the cursor, or re-arm the gaze-stale timer.
+      away: true;
+      held_reason: string;
+      confidence?: number;
+      captured_at_ms?: number;
     }
   | {
       type: "status";
@@ -183,8 +236,34 @@ export type BackendMessage =
       count?: number;
       path?: string;
       message?: string;
+      verdict?: VerifyVerdict;
       geometry?: {
         eye_position_weight_x: number;
         eye_position_weight_y: number;
       } | null;
+    }
+  | {
+      type: "cursor_idle";
+      x_norm: number;
+      y_norm: number;
+    }
+  | {
+      type: "menu_action";
+      action: string;
+      value?: unknown;
     };
+
+// Verify-sweep outcome: normalized-screen error stats for the pending fit,
+// bucketed by target region (center / edge / corner) so edge regressions are
+// visible instead of averaged away.
+export interface VerifyVerdict {
+  median: number;
+  p90: number;
+  max: number;
+  samples: number;
+  regions: {
+    center?: number;
+    edge?: number;
+    corner?: number;
+  };
+}

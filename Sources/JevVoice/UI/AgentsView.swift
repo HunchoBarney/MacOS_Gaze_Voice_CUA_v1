@@ -62,7 +62,7 @@ struct AgentsView: View {
             if let agent = selected {
                 AgentChatView(model: model, agent: agent)
             } else {
-                Text(model.agents.isEmpty ? "Agents you found appear here." : "Select an agent.")
+                Text(model.agents.isEmpty ? "Agents Jev creates for you appear here." : "Select an agent.")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .windowBackgroundColor))
@@ -98,6 +98,6 @@ struct AgentsView: View {
                         in: RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
-        .help(agent.workspacePath)
+        .help("Files this helper creates live in its own private workspace.")
     }
 }

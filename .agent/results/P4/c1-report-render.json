@@ -1,0 +1,35 @@
+{
+  "method": "Chrome CDP explicit CSS viewport",
+  "prior_failure": {
+    "viewport": 390,
+    "document": 431,
+    "cause": "long unbroken error text",
+    "correction": "native CSS overflow-wrap:anywhere"
+  },
+  "rows": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 2000,
+      "viewport": 390,
+      "document": 390,
+      "main": 390
+    },
+    {
+      "name": "laptop",
+      "width": 1440,
+      "height": 1600,
+      "viewport": 1440,
+      "document": 1440,
+      "main": 1200
+    },
+    {
+      "name": "wide",
+      "width": 3440,
+      "height": 1600,
+      "viewport": 3440,
+      "document": 3440,
+      "main": 1200
+    }
+  ]
+}

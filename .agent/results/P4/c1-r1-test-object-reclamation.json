@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-16T15:09:14.858766+00:00",
+  "before_free_bytes": 3227590656,
+  "retired_generated_path": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/release/JevVoiceAppTests.build",
+  "reason": "completed and linked test objects only; cached XCTest executable retained for read-only capture",
+  "after_free_bytes": 3226140672
+}

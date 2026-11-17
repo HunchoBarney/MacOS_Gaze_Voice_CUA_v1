@@ -1,0 +1,84 @@
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (1.16s)
+Test Suite 'Selected tests' started at 2026-11-15 18:59:50.861.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 18:59:50.865.
+Test Suite 'CuaDependencyPinTests' started at 2026-11-15 18:59:50.865.
+Test Case '-[JevVoiceAppTests.CuaDependencyPinTests testRequestedReleasePinMatchesRuntimeAndPublisherManifest]' started.
+Test Case '-[JevVoiceAppTests.CuaDependencyPinTests testRequestedReleasePinMatchesRuntimeAndPublisherManifest]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.CuaDependencyPinTests testWrongExecutableStillFailsClosed]' started.
+Test Case '-[JevVoiceAppTests.CuaDependencyPinTests testWrongExecutableStillFailsClosed]' passed (0.014 seconds).
+Test Suite 'CuaDependencyPinTests' passed at 2026-11-15 18:59:50.891.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.025 (0.026) seconds
+Test Suite 'DriverDaemonHostTests' started at 2026-11-15 18:59:50.891.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentAllowlistDropsAmbientVars]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentAllowlistDropsAmbientVars]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentDefaultsWindowChangeTail]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentDefaultsWindowChangeTail]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentForcesTelemetryOff]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentForcesTelemetryOff]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentPinsEmbeddedIdentity]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentPinsEmbeddedIdentity]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentRespectsHostOverrides]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testDaemonEnvironmentRespectsHostOverrides]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testInvalidateMatchingStopsBoundDaemon]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testInvalidateMatchingStopsBoundDaemon]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testInvalidateMismatchedTokenNoOps]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testInvalidateMismatchedTokenNoOps]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testProxyProcessUsesSafeChildEnvironmentWithoutLaunching]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testProxyProcessUsesSafeChildEnvironmentWithoutLaunching]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testRestartDriverSwallowsMintFailure]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testRestartDriverSwallowsMintFailure]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testRestartDriverTearsDownAndRemints]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testRestartDriverTearsDownAndRemints]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testRestartDriverWithNoDaemonMints]' started.
+Test Case '-[JevVoiceAppTests.DriverDaemonHostTests testRestartDriverWithNoDaemonMints]' passed (0.000 seconds).
+Test Suite 'DriverDaemonHostTests' passed at 2026-11-15 18:59:50.898.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+Test Suite 'LedgerSpendTests' started at 2026-11-15 18:59:50.898.
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testBumpCountsPerKindAndTotal]' started.
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testBumpCountsPerKindAndTotal]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testDayRollover]' started.
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testDayRollover]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testMissingFileReadsZero]' started.
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testMissingFileReadsZero]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testPersistedShapeAndReload]' started.
+Test Case '-[JevVoiceAppTests.LedgerSpendTests testPersistedShapeAndReload]' passed (0.004 seconds).
+Test Suite 'LedgerSpendTests' passed at 2026-11-15 18:59:50.918.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.019 (0.020) seconds
+Test Suite 'TrackerHostTests' started at 2026-11-15 18:59:50.918.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testBootTimeDeathDoesNotRespawn]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testBootTimeDeathDoesNotRespawn]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testDeliberateKillDoesNotRespawn]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testDeliberateKillDoesNotRespawn]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testExitWithNoOwnedChildIsIgnored]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testExitWithNoOwnedChildIsIgnored]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testOwnedRunningExitClaimsRespawn]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testOwnedRunningExitClaimsRespawn]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testOwnedRunningExitWithSpentBudgetFails]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testOwnedRunningExitWithSpentBudgetFails]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testRetireSpawnKeepsAdoptedTrackerAlive]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testRetireSpawnKeepsAdoptedTrackerAlive]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testRetireSpawnKillsUnadoptedSpawn]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testRetireSpawnKillsUnadoptedSpawn]' passed (0.612 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testStaleExitPidIsIgnored]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testStaleExitPidIsIgnored]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.TrackerHostTests testStaleStartLeavesStoppedStanding]' started.
+Test Case '-[JevVoiceAppTests.TrackerHostTests testStaleStartLeavesStoppedStanding]' passed (0.391 seconds).
+Test Suite 'TrackerHostTests' passed at 2026-11-15 18:59:51.931.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 1.012 (1.013) seconds
+Test Suite 'JevVoicePackageTests.xctest' passed at 2026-11-15 18:59:51.932.
+	 Executed 26 tests, with 0 failures (0 unexpected) in 1.063 (1.067) seconds
+Test Suite 'Selected tests' passed at 2026-11-15 18:59:51.932.
+	 Executed 26 tests, with 0 failures (0 unexpected) in 1.063 (1.071) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+......
+----------------------------------------------------------------------
+Ran 6 tests in 15.625s
+
+OK
+verification lane green

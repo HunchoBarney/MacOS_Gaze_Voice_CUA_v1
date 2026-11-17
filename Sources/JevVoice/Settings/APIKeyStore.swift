@@ -44,10 +44,18 @@ struct KeychainAPIKeyStore: APIKeyStore {
             kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: false,
         ]
+        query.merge(Self.authenticationPolicy(allowUserInteraction: allowUserInteraction)) { _, policy in policy }
+        return query
+    }
+
+    static func authenticationPolicy(allowUserInteraction: Bool) -> [String: Any] {
+        var query: [String: Any] = [:]
         if !allowUserInteraction {
             let context = LAContext()
             context.interactionNotAllowed = true
             query[kSecUseAuthenticationContext as String] = context
+            // Legacy file-based macOS Keychain may ignore LAContext alone.
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
         }
         return query
     }

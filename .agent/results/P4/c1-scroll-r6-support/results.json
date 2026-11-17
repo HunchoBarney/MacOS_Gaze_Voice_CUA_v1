@@ -1,0 +1,63 @@
+{
+  "drive_requests": 1,
+  "api_request_count": null,
+  "gui_autospawn_proven": false,
+  "fn_microphone_proven": false,
+  "standing_grant_checked": true,
+  "resources_clean": true,
+  "daemon_window_change_timeout_ms": 100,
+  "daemon_window_change_poll_ms": 25,
+  "rows": [
+    {
+      "case": "c1-owned-scroll-0",
+      "goal": "scroll down",
+      "caller_deadline_seconds": 30,
+      "completion_hints_sent": false,
+      "status": "stuck",
+      "verified": true,
+      "strict_success": false,
+      "false_done": false,
+      "cancelled_by_harness": false,
+      "actor_pid": 34577,
+      "kind": "qualification",
+      "requested_window_id": 62677,
+      "result_text": "Stuck: low_confidence. scroll down; the immediate action is uncertain \u2014 re-observing; escalate \u2014 lowConfidenceTwice",
+      "is_error": false,
+      "wall_ms": 2984.9270829999987,
+      "actual_state": {
+        "scroll_before": 0.0,
+        "scroll_after": 0.21046643913538113,
+        "decoy_unchanged": true,
+        "content_unchanged": true,
+        "verified_elapsed_ms": 5085.8661660000025
+      },
+      "visual_trace": [],
+      "visual_trace_collection_ms": 2847.562958000001,
+      "visual_trace_required": false,
+      "visual_trace_complete": false
+    }
+  ],
+  "variant": "c1",
+  "template_resource_recovery": null,
+  "canonical_app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r6-rbcx83ar/Jev Voice.app",
+  "execution_app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r6-rbcx83ar/Jev Voice.app",
+  "prepared_execution_app": null,
+  "execution_manifest_verified": false,
+  "source_matches_current_tree": true,
+  "subject": "signed-product",
+  "binary_sha256": "db36d3a487c6f8cffc984c2ede8fd5ac9af92944446e3c16e2c4a8b29091fdb8",
+  "driver_sha256": "d0ad3ff5aeee576c0fb03b2eafa5a7f43769061a9fb2f9f97875bae2b158d252",
+  "driver_inode": 119050739,
+  "harness_sha256": "e12877283e240a714b53a0584e3e31e780cee4b46c41c43232eeb79371b6e202",
+  "receipt_sha256": "a45cb84f959e2e508fcdf714269aab10f6cf6910e86cb86a1e92f0f41748c2c1",
+  "local_tool_calls": {
+    "start_session": 1,
+    "list_windows": 1,
+    "end_session": 1
+  },
+  "owned_document_processes_remaining": [],
+  "owned_document_windows_remaining": [],
+  "owned_browser_processes_remaining": [],
+  "owned_native_processes_remaining": [],
+  "execution_lease_closed": true
+}

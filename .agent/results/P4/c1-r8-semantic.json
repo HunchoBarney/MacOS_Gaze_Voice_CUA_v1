@@ -1,0 +1,15 @@
+{
+  "started_at": "2026-11-17T03:12:15.093054+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "VoiceSemanticTests.testR7LiveSemanticBoundaryProbe",
+    "--skip-build"
+  ],
+  "source_snapshot_sha256": "c9e57f367e5ad9988f8b4e658d6171380c49e1bfa4e1e4655e0cd5889b88ed7e",
+  "source_snapshot": ".agent/results/P4/c1-r8-source-3/manifest.json",
+  "exit_code": 1,
+  "status": "failed",
+  "finished_at": "2026-11-17T03:12:24.885069+00:00",
+  "log_sha256": "8d36a18fbb977f742c6664e5091d0405741ac73b50e63d395785e12c1b156546"
+}

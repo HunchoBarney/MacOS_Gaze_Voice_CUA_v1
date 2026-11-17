@@ -1,0 +1,18 @@
+Test Suite 'Selected tests' started at 2026-11-16 19:12:19.714.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-16 19:12:19.716.
+Test Suite 'VoiceSemanticTests' started at 2026-11-16 19:12:19.716.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceSemanticTests.swift:381: error: -[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe] : XCTAssertEqual failed: ("clarify") is not equal to ("continueScroll") - Keep going.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceSemanticTests.swift:382: error: -[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("down")") - Keep going.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceSemanticTests.swift:383: error: -[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe] : XCTAssertEqual failed: ("false") is not equal to ("true") - Keep going.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe]' failed (5.044 seconds).
+Test Suite 'VoiceSemanticTests' failed at 2026-11-16 19:12:24.760.
+	 Executed 1 test, with 3 failures (0 unexpected) in 5.044 (5.044) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-16 19:12:24.760.
+	 Executed 1 test, with 3 failures (0 unexpected) in 5.044 (5.044) seconds
+Test Suite 'Selected tests' failed at 2026-11-16 19:12:24.760.
+	 Executed 1 test, with 3 failures (0 unexpected) in 5.044 (5.046) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

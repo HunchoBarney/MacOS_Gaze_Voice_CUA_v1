@@ -1,0 +1,17 @@
+{
+  "started_at": "2026-11-17T02:56:14.787101+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "."
+  ],
+  "source_snapshot": ".agent/results/P4/c1-r8-source-2/manifest.json",
+  "source_snapshot_sha256": "5fe5d3d563de181cf7f2fc7642018f87dd1542d73801cbb0157051ea6dd69293",
+  "canonical_vad_pin": "be41b15f2b6c5c73c4824b99963b54bc6d5f58c3af04468132ddfe131c1c8062",
+  "recorded_conversation_resource": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/build/vendor/ConversationVAD",
+  "scope": "Full Swift release G3 after actual legacy-consumer and tracker-lock repairs",
+  "exit_code": 1,
+  "status": "failed",
+  "finished_at": "2026-11-17T03:03:37.313388+00:00",
+  "log_sha256": "0c28b0d07867997045f0c7f540a75e1a6464a861cf91e8f91d38fb6e044c52ed"
+}

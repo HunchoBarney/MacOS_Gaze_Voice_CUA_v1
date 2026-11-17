@@ -1,0 +1,255 @@
+import Foundation
+import ImageIO
+
+public enum JevVisionError: Error, Sendable {
+    case invalidImage, invalidBox, invalidConfidence, missingImage, unreferencedAsset, requestTooLarge
+}
+
+public struct JevBox: Codable, Sendable, Equatable {
+    public let top: Double
+    public let bottom: Double
+    public let left: Double
+    public let right: Double
+
+    public init(top: Double, bottom: Double, left: Double, right: Double) throws {
+        guard [top, bottom, left, right].allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              top < bottom, left < right else { throw JevVisionError.invalidBox }
+        self.top = top
+        self.bottom = bottom
+        self.left = left
+        self.right = right
+    }
+
+    enum CodingKeys: String, CodingKey { case top, bottom, left, right }
+
+    public init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(top: box.decode(Double.self, forKey: .top),
+                      bottom: box.decode(Double.self, forKey: .bottom),
+                      left: box.decode(Double.self, forKey: .left),
+                      right: box.decode(Double.self, forKey: .right))
+    }
+}
+
+public struct JevImageAsset: Encodable, Sendable {
+    public enum Format: String, Sendable { case png, jpeg = "jpg" }
+    public let data: Data
+    public let format: Format
+    public let width: Int
+    public let height: Int
+
+    public init(data: Data, format: Format) throws {
+        guard !data.isEmpty, data.count <= 16 * 1024 * 1024,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) == 1,
+              let type = CGImageSourceGetType(source) as String?,
+              type == (format == .png ? "public.png" : "public.jpeg"),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              (280...1568).contains(width), (280...1568).contains(height),
+              (properties[kCGImagePropertyOrientation] as? Int ?? 1) == 1 else {
+            throw JevVisionError.invalidImage
+        }
+        self.data = data
+        self.format = format
+        self.width = width
+        self.height = height
+    }
+
+    enum CodingKeys: String, CodingKey { case type, format, dataBase64 = "data_base64" }
+
+    public func encode(to encoder: Encoder) throws {
+        var image = encoder.container(keyedBy: CodingKeys.self)
+        try image.encode("image", forKey: .type)
+        try image.encode(format.rawValue, forKey: .format)
+        try image.encode(data.base64EncodedString(), forKey: .dataBase64)
+    }
+}
+
+public enum Question: Encodable, Sendable {
+    case noul(instructions: String, criteria: [String: String]? = nil)
+    case choice(instructions: String, criteria: [String: String?])
+    case score(instructions: String, levels: [String])
+    case box(instructions: String)
+
+    var requiresImage: Bool {
+        if case .box = self { return true }
+        return false
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type, instructions, criteria
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .noul(let instructions, let criteria):
+            try container.encode("noul", forKey: .type)
+            try container.encode(instructions, forKey: .instructions)
+            try container.encodeIfPresent(criteria, forKey: .criteria)
+        case .choice(let instructions, let criteria):
+            try container.encode("choice", forKey: .type)
+            try container.encode(instructions, forKey: .instructions)
+            try container.encode(criteria, forKey: .criteria)
+        case .score(let instructions, let levels):
+            try container.encode("score", forKey: .type)
+            try container.encode(instructions, forKey: .instructions)
+            try container.encode(levels, forKey: .criteria)
+        case .box(let instructions):
+            try container.encode("box", forKey: .type)
+            try container.encode(instructions, forKey: .instructions)
+        }
+    }
+}
+
+public enum Answer: Decodable, Sendable {
+    case noul(Double)
+    case choice(choice: String, confidence: Double, probabilities: [String: Double])
+    /// A "choice" answer carrying no readable confidence AND no probability
+    /// mass — nothing to trust. `JevSelection.read` refuses it; a real 0.0
+    /// still decodes as `.choice` and abstains as low-confidence downstream.
+    /// When the model renames or drops `confidence` but ships
+    /// `probabilities`, the picked option's own mass stands in instead.
+    case untrustedChoice(choice: String, probabilities: [String: Double])
+    case score(score: Double, confidence: Double, probabilities: [String: Double], legend: [String: String])
+    case box(JevBox, confidence: Double?)
+
+    enum CodingKeys: String, CodingKey {
+        case type, noul, choice, confidence, probabilities, legend, score, box
+        /// Drifted key spellings observed from the model.
+        case confidenceScore = "confidence_score"
+        case conf, probability, probs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        // A present-but-wrong-typed field reads as absent — one malformed
+        // scalar must not poison an otherwise-decodable answer.
+        func firstDouble(_ keys: CodingKeys...) -> Double? {
+            for key in keys {
+                guard let value = try? container.decodeIfPresent(Double.self, forKey: key)
+                else { continue }
+                return value
+            }
+            return nil
+        }
+        func probabilityMap() -> [String: Double] {
+            for key in [CodingKeys.probabilities, .probs] {
+                if let map = try? container.decode([String: Double].self, forKey: key) {
+                    return map
+                }
+            }
+            return [:]
+        }
+        switch type {
+        case "noul":
+            self = .noul(try container.decode(Double.self, forKey: .noul))
+        case "choice":
+            let choice = try container.decode(String.self, forKey: .choice)
+            let probabilities = probabilityMap()
+            if let confidence = firstDouble(.confidence, .confidenceScore, .conf, .probability) {
+                self = .choice(choice: choice, confidence: confidence, probabilities: probabilities)
+            } else if !probabilities.isEmpty {
+                // A shipped distribution is the confidence: the pick's own
+                // recorded mass, zero when it carries none — never the old
+                // missing-field death nor a fabricated top-lane value.
+                self = .choice(choice: choice,
+                               confidence: probabilities[choice] ?? 0,
+                               probabilities: probabilities)
+            } else {
+                self = .untrustedChoice(choice: choice, probabilities: probabilities)
+            }
+        case "score":
+            self = .score(
+                score: try container.decode(Double.self, forKey: .score),
+                confidence: firstDouble(.confidence, .confidenceScore, .conf, .probability) ?? 0,
+                probabilities: probabilityMap(),
+                legend: (try? container.decode([String: String].self, forKey: .legend)) ?? [:]
+            )
+        case "box":
+            let confidence = try container.decodeIfPresent(Double.self, forKey: .confidence)
+            guard confidence.map({ $0.isFinite && (0...1).contains($0) }) ?? true else {
+                throw JevVisionError.invalidConfidence
+            }
+            self = .box(try container.decode(JevBox.self, forKey: .box), confidence: confidence)
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type, in: container,
+                debugDescription: "Unknown answer type: \(type)"
+            )
+        }
+    }
+}
+
+public struct Usage: Decodable, Sendable {
+    public let inputTokens: Int
+    public let outputTokens: Int
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+    }
+}
+
+public struct SystemOneResponse: Decodable, Sendable {
+    public let model: String
+    public let answers: [String: Answer]
+    public let usage: Usage?
+    /// Answer keys whose payloads failed `Answer` decoding — dropped so
+    /// one malformed draw can't poison the rest of the response. Every
+    /// consumer reads an absent key as "no draw", the honest abstain.
+    public let malformedAnswers: [String]
+
+    public init(model: String, answers: [String: Answer], usage: Usage?,
+                malformedAnswers: [String] = []) {
+        self.model = model
+        self.answers = answers
+        self.usage = usage
+        self.malformedAnswers = malformedAnswers
+    }
+
+    private enum CodingKeys: String, CodingKey { case model, answers, usage }
+    private struct AnswerKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let nested = try container.nestedContainer(keyedBy: AnswerKey.self, forKey: .answers)
+        var answers: [String: Answer] = [:]
+        var malformed: [String] = []
+        for key in nested.allKeys {
+            if let answer = try? nested.decode(Answer.self, forKey: key) {
+                answers[key.stringValue] = answer
+            } else {
+                malformed.append(key.stringValue)
+            }
+        }
+        self.init(model: try container.decode(String.self, forKey: .model),
+                  answers: answers,
+                  usage: try container.decodeIfPresent(Usage.self, forKey: .usage),
+                  malformedAnswers: malformed.sorted())
+    }
+}
+
+struct SystemOneRequest<State: Encodable>: Encodable {
+    let model: String
+    let state: State
+    let questions: [String: Question]
+    let assets: [String: JevImageAsset]?
+
+    init(model: String, state: State, questions: [String: Question],
+         assets: [String: JevImageAsset]? = nil) {
+        self.model = model
+        self.state = state
+        self.questions = questions
+        self.assets = assets
+    }
+}

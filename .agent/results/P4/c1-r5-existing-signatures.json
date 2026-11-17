@@ -1,0 +1,32 @@
+[
+  {
+    "app": "/Users/karanvirkang/jarvis-local/Jev Voice.app",
+    "exit_code": 0,
+    "output": ""
+  },
+  {
+    "app": "/Users/karanvirkang/jarvis-local/c1-review-c292e120/Jev Voice.app",
+    "exit_code": 0,
+    "output": ""
+  },
+  {
+    "app": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-before-tjbmt7hv/Jev Voice.app",
+    "exit_code": 1,
+    "output": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-before-tjbmt7hv/Jev Voice.app: a sealed resource is missing or invalid\n"
+  },
+  {
+    "app": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-final-r2-m6mkvqfs/Jev Voice.app",
+    "exit_code": 1,
+    "output": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-final-r2-m6mkvqfs/Jev Voice.app: a sealed resource is missing or invalid\n"
+  },
+  {
+    "app": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-final-r3-m3xl0a4e/Jev Voice.app",
+    "exit_code": 0,
+    "output": ""
+  },
+  {
+    "app": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-final-r4-0d6djymc/Jev Voice.app",
+    "exit_code": 0,
+    "output": ""
+  }
+]

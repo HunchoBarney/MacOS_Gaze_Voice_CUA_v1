@@ -1,0 +1,444 @@
+{
+  "windowPosition": [
+    141,
+    64
+  ],
+  "windowSize": [
+    656,
+    422
+  ],
+  "rows": [
+    {
+      "role": "AXScrollArea",
+      "attributes": [
+        "AXHorizontalScrollBar",
+        "AXFrame",
+        "AXMakeScreenRectVisible",
+        "AXParent",
+        "AXChildren",
+        "AXFocused",
+        "AXSize",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXContentSize",
+        "AXHelp",
+        "AXChildrenInNavigationOrder",
+        "AXPosition",
+        "AXWindow",
+        "AXRoleDescription",
+        "AXVerticalScrollBar",
+        "AXContents",
+        "AXIdentifier"
+      ],
+      "position": [
+        141,
+        96
+      ],
+      "size": [
+        656,
+        390
+      ]
+    },
+    {
+      "role": "AXTextArea",
+      "attributes": [
+        "AXFocused",
+        "AXChildrenInNavigationOrder",
+        "AXSelectedText",
+        "AXFrame",
+        "AXInsertionPointLineNumber",
+        "AXPosition",
+        "AXNumberOfCharacters",
+        "AXSharedTextUIElements",
+        "AXSelectedTextRange",
+        "AXHelp",
+        "AXChildren",
+        "AXRole",
+        "AXParent",
+        "AXTopLevelUIElement",
+        "AXSharedCharacterRange",
+        "AXSelectedTextRanges",
+        "AXVisibleCharacterRange",
+        "AXDescription",
+        "AXValue",
+        "AXRoleDescription",
+        "AXSize",
+        "AXIdentifier",
+        "AXWindow",
+        "AXTextInputMarkedRange"
+      ],
+      "position": [
+        141,
+        96
+      ],
+      "size": [
+        656,
+        3900
+      ]
+    },
+    {
+      "role": "AXScrollBar",
+      "attributes": [
+        "AXEnabled",
+        "AXOrientation",
+        "AXFrame",
+        "AXParent",
+        "AXChildren",
+        "AXFocused",
+        "AXSize",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXHelp",
+        "AXChildrenInNavigationOrder",
+        "AXPosition",
+        "AXWindow",
+        "AXRoleDescription",
+        "AXValue",
+        "AXHidden",
+        "AXIdentifier"
+      ],
+      "position": [
+        147,
+        468
+      ],
+      "size": [
+        643,
+        19
+      ],
+      "orientation": "AXHorizontalOrientation",
+      "value": 0.18518517911434174
+    },
+    {
+      "role": "AXScrollBar",
+      "attributes": [
+        "AXEnabled",
+        "AXOrientation",
+        "AXFrame",
+        "AXParent",
+        "AXChildren",
+        "AXFocused",
+        "AXSize",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXHelp",
+        "AXChildrenInNavigationOrder",
+        "AXPosition",
+        "AXWindow",
+        "AXRoleDescription",
+        "AXValue",
+        "AXHidden",
+        "AXIdentifier"
+      ],
+      "position": [
+        779,
+        95
+      ],
+      "size": [
+        19,
+        384
+      ],
+      "orientation": "AXVerticalOrientation",
+      "value": 0
+    },
+    {
+      "role": "AXValueIndicator",
+      "attributes": [
+        "AXRole",
+        "AXWindow",
+        "AXPosition",
+        "AXSize",
+        "AXRoleDescription",
+        "AXFrame",
+        "AXValue",
+        "AXParent",
+        "AXTopLevelUIElement"
+      ],
+      "position": [
+        788,
+        99
+      ],
+      "size": [
+        6,
+        37
+      ]
+    },
+    {
+      "role": "AXButton",
+      "attributes": [
+        "AXRole",
+        "AXWindow",
+        "AXPosition",
+        "AXSize",
+        "AXRoleDescription",
+        "AXFrame",
+        "AXSubrole",
+        "AXParent",
+        "AXTopLevelUIElement"
+      ],
+      "position": [
+        780,
+        96
+      ],
+      "size": [
+        0,
+        0
+      ]
+    },
+    {
+      "role": "AXButton",
+      "attributes": [
+        "AXRole",
+        "AXWindow",
+        "AXPosition",
+        "AXSize",
+        "AXRoleDescription",
+        "AXFrame",
+        "AXSubrole",
+        "AXParent",
+        "AXTopLevelUIElement"
+      ],
+      "position": [
+        780,
+        96
+      ],
+      "size": [
+        0,
+        0
+      ]
+    },
+    {
+      "role": "AXButton",
+      "attributes": [
+        "AXRole",
+        "AXWindow",
+        "AXPosition",
+        "AXSize",
+        "AXRoleDescription",
+        "AXFrame",
+        "AXSubrole",
+        "AXParent",
+        "AXTopLevelUIElement"
+      ],
+      "position": [
+        788,
+        137
+      ],
+      "size": [
+        6,
+        338
+      ]
+    },
+    {
+      "role": "AXButton",
+      "attributes": [
+        "AXRole",
+        "AXWindow",
+        "AXPosition",
+        "AXSize",
+        "AXRoleDescription",
+        "AXFrame",
+        "AXSubrole",
+        "AXParent",
+        "AXTopLevelUIElement"
+      ],
+      "position": [
+        788,
+        99
+      ],
+      "size": [
+        6,
+        0
+      ]
+    },
+    {
+      "role": "AXButton",
+      "attributes": [
+        "AXEnabled",
+        "AXFrame",
+        "AXParent",
+        "AXSize",
+        "AXFocused",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXHelp",
+        "AXPosition",
+        "AXTitle",
+        "AXWindow",
+        "AXRoleDescription",
+        "AXSubrole",
+        "AXEdited"
+      ],
+      "position": [
+        149,
+        72
+      ],
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "role": "AXButton",
+      "attributes": [
+        "AXEnabled",
+        "AXFrame",
+        "AXParent",
+        "AXSize",
+        "AXFocused",
+        "AXChildren",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXHelp",
+        "AXPosition",
+        "AXTitle",
+        "AXWindow",
+        "AXRoleDescription",
+        "AXSubrole"
+      ],
+      "position": [
+        195,
+        72
+      ],
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "role": "AXGroup",
+      "attributes": [
+        "AXRole",
+        "AXHelp",
+        "AXChildrenInNavigationOrder",
+        "AXChildren",
+        "AXWindow",
+        "AXPosition",
+        "AXRoleDescription",
+        "AXSize",
+        "AXFocused",
+        "AXFrame",
+        "AXParent",
+        "AXTopLevelUIElement"
+      ],
+      "position": [
+        196,
+        73
+      ],
+      "size": [
+        14,
+        14
+      ]
+    },
+    {
+      "role": "AXButton",
+      "attributes": [
+        "AXEnabled",
+        "AXFrame",
+        "AXParent",
+        "AXSize",
+        "AXFocused",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXHelp",
+        "AXPosition",
+        "AXTitle",
+        "AXWindow",
+        "AXRoleDescription",
+        "AXSubrole"
+      ],
+      "position": [
+        172,
+        72
+      ],
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "role": "AXMenuButton",
+      "attributes": [
+        "AXEnabled",
+        "AXFrame",
+        "AXDescription",
+        "AXParent",
+        "AXSize",
+        "AXFocused",
+        "AXChildren",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXHelp",
+        "AXPosition",
+        "AXTitle",
+        "AXWindow",
+        "AXRoleDescription"
+      ],
+      "position": [
+        373,
+        71
+      ],
+      "size": [
+        12,
+        18
+      ]
+    },
+    {
+      "role": "AXImage",
+      "attributes": [
+        "AXEnabled",
+        "AXFrame",
+        "AXParent",
+        "AXSize",
+        "AXFocused",
+        "AXRole",
+        "AXTopLevelUIElement",
+        "AXHelp",
+        "AXPosition",
+        "AXTitle",
+        "AXWindow",
+        "AXRoleDescription"
+      ],
+      "position": [
+        222,
+        70
+      ],
+      "size": [
+        18,
+        18
+      ]
+    },
+    {
+      "role": "AXStaticText",
+      "attributes": [
+        "AXFocused",
+        "AXFrame",
+        "AXChildrenInNavigationOrder",
+        "AXSelectedText",
+        "AXInsertionPointLineNumber",
+        "AXPosition",
+        "AXNumberOfCharacters",
+        "AXEnabled",
+        "AXPlaceholderValue",
+        "AXSelectedTextRange",
+        "AXHelp",
+        "AXChildren",
+        "AXRole",
+        "AXParent",
+        "AXTopLevelUIElement",
+        "AXVisibleCharacterRange",
+        "AXValue",
+        "AXSize",
+        "AXRoleDescription",
+        "AXWindow"
+      ],
+      "position": [
+        241,
+        72
+      ],
+      "size": [
+        133,
+        16
+      ]
+    }
+  ]
+}

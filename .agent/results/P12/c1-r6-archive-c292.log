@@ -1,0 +1,24 @@
+Insufficient build space; stopping this build's process group.
+{
+  "label": "review-c292",
+  "original_app": "/Users/karanvirkang/jarvis-local/c1-review-c292e120/Jev Voice.app",
+  "source_receipt": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-delivery-receipt.json",
+  "source_receipt_sha256": "08c980a8abd923fb11c94329746457c591c3c5d211d55ac1e8146392c529ae1e",
+  "archive": "/Users/karanvirkang/jarvis-local/c1-archives/c1-review-c292-c292e12024dc.zip",
+  "tree_manifest": "/Users/karanvirkang/jarvis-local/c1-archives/c1-review-c292-c292e12024dc.tree.json",
+  "tree_sha256": "0f025c89828b739e862c1f496ae2864c0531adf473cbbeaca3749288395f9176",
+  "before_free_bytes": 2252853248,
+  "started_at": "2026-11-16T17:53:29.630894+00:00",
+  "archive_verified": false,
+  "original_removed": false,
+  "restore_command": "ditto -x -k --rsrc /Users/karanvirkang/jarvis-local/c1-archives/c1-review-c292-c292e12024dc.zip /Users/karanvirkang/jarvis-local/c1-review-c292e120",
+  "error": "Native archive interrupted: 75",
+  "after_free_bytes": 1351942144,
+  "finished_at": "2026-11-16T17:54:12.036822+00:00"
+}
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-archive-stage.py", line 201, in <module>
+    main()
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-archive-stage.py", line 167, in main
+    raise RuntimeError("Native archive interrupted: " + str(code))
+RuntimeError: Native archive interrupted: 75

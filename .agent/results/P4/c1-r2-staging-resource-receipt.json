@@ -1,0 +1,18 @@
+{
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-package-stage",
+    "--label",
+    "final-r3",
+    "--snapshot",
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r2-candidate-source-r3/manifest.json"
+  ],
+  "before_free_bytes": 4716085248,
+  "started_at": "2026-11-16T13:52:46.863845+00:00",
+  "status": "passed",
+  "space_amendment": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r2-package-space-amendment.md",
+  "exit_code": 0,
+  "after_free_bytes": 3560833024,
+  "finished_at": "2026-11-16T13:53:42.472472+00:00",
+  "log_sha256": "59e34de35e8e6bf0b0d275f06650673d1d704df0eb6fc52ce4e640d8cf845782"
+}

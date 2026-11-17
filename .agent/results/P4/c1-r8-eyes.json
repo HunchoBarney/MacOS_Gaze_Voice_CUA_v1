@@ -1,0 +1,13 @@
+{
+  "started_at": "2026-11-17T03:12:04.033810+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "eyes"
+  ],
+  "source_snapshot_sha256": "c9e57f367e5ad9988f8b4e658d6171380c49e1bfa4e1e4655e0cd5889b88ed7e",
+  "source_snapshot": ".agent/results/P4/c1-r8-source-3/manifest.json",
+  "exit_code": 0,
+  "status": "passed",
+  "finished_at": "2026-11-17T03:12:14.808653+00:00",
+  "log_sha256": "2f90e737a2b4676f0d47f0ac40e6b6b5900d63f6979e5a74814a726efb20182b"
+}

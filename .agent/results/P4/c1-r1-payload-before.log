@@ -1,0 +1,28 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling JevVoiceAppTests JevChooserTests.swift
+[4/5] Emitting module JevVoiceAppTests
+[4/6] Write Objects.LinkFileList
+[5/6] Linking JevVoicePackageTests
+Build complete! (6.78s)
+Test Suite 'Selected tests' started at 2026-11-15 21:36:38.537.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 21:36:38.543.
+Test Suite 'JevChooserTests' started at 2026-11-15 21:36:38.543.
+Test Case '-[JevVoiceAppTests.JevChooserTests testC1LargeRequestPreservesEveryByteAndSubjectWhileRemovingDuplicates]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevChooserTests.swift:63: error: -[JevVoiceAppTests.JevChooserTests testC1LargeRequestPreservesEveryByteAndSubjectWhileRemovingDuplicates] : XCTAssertLessThan failed: ("137770") is not less than ("65709")
+Test Case '-[JevVoiceAppTests.JevChooserTests testC1LargeRequestPreservesEveryByteAndSubjectWhileRemovingDuplicates]' failed (1.012 seconds).
+Test Case '-[JevVoiceAppTests.JevChooserTests testC1ReferenceMetadataCannotReplaceObservedData]' started.
+Test Case '-[JevVoiceAppTests.JevChooserTests testC1ReferenceMetadataCannotReplaceObservedData]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.JevChooserTests testC1SmallRequestKeepsItsOrdinaryShape]' started.
+Test Case '-[JevVoiceAppTests.JevChooserTests testC1SmallRequestKeepsItsOrdinaryShape]' passed (0.000 seconds).
+Test Suite 'JevChooserTests' failed at 2026-11-15 21:36:39.557.
+	 Executed 3 tests, with 1 failure (0 unexpected) in 1.013 (1.014) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-15 21:36:39.557.
+	 Executed 3 tests, with 1 failure (0 unexpected) in 1.013 (1.014) seconds
+Test Suite 'Selected tests' failed at 2026-11-15 21:36:39.557.
+	 Executed 3 tests, with 1 failure (0 unexpected) in 1.013 (1.020) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

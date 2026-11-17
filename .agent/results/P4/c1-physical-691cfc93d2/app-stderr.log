@@ -1,0 +1,20 @@
+*** Terminating app due to uncaught exception 'com.apple.coreaudio.avfaudio', reason: 'Failed to create tap due to format mismatch, <AVAudioFormat 0xae662db80:  1 ch,  48000 Hz, Float32>'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000019cd3d8ec __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000019c816418 objc_exception_throw + 88
+	2   CoreFoundation                      0x000000019ce0b0f0 -[NSException initWithCoder:] + 0
+	3   AVFAudio                            0x00000002413cc45c _ZN17AVAudioEngineImpl16InstallTapOnNodeEP11AVAudioNodemjP13AVAudioFormatU13block_pointerFvP16AVAudioPCMBufferP11AVAudioTimeE + 1556
+	4   AVFAudio                            0x00000002413a9f18 -[AVAudioNode installTapOnBus:bufferSize:format:block:] + 608
+	5   JevVoice                            0x0000000104a7b8cc $s8JevVoice15MicrophoneInputC7prepare6device11interruptedAC5ReadyVAA0C6DeviceV_yyYbctYaKFAHyYaKXEfU_yScCyAHs5Error_pGXEfU_yyYbcfU_ + 3496
+	6   JevVoice                            0x0000000104a81680 $sIegh_IeyBh_TRTm + 28
+	7   libdispatch.dylib                   0x000000019ca94b5c _dispatch_call_block_and_release + 32
+	8   libdispatch.dylib                   0x000000019caaead4 _dispatch_client_callout + 16
+	9   libdispatch.dylib                   0x000000019ca9d4e8 _dispatch_lane_serial_drain + 740
+	10  libdispatch.dylib                   0x000000019ca9dfc4 _dispatch_lane_invoke + 388
+	11  libdispatch.dylib                   0x000000019caa8474 _dispatch_root_queue_drain_deferred_wlh + 292
+	12  libdispatch.dylib                   0x000000019caa7d6c _dispatch_workloop_worker_thread + 692
+	13  libsystem_pthread.dylib             0x000000019cc4de4c _pthread_wqthread + 292
+	14  libsystem_pthread.dylib             0x000000019cc4cb9c start_wqthread + 8
+)
+libc++abi: terminating due to uncaught exception of type NSException

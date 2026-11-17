@@ -6,6 +6,7 @@
 
 import json
 import os
+import plistlib
 import re
 import subprocess
 import sys
@@ -313,6 +314,70 @@ class ReportCase(unittest.TestCase):
             self.assertTrue(st["meets_budget"])
             self.assertIn("T3", base["tiers"])
             self.assertTrue((Path(d) / "baseline-report.md").is_file())
+
+    def test_only_verified_completed_runs_count_as_success(self):
+        import report as report_mod
+        rows = []
+        for index, (status, error, verified) in enumerate([
+            ("dry_run", False, True), ("error", True, True),
+            ("blocked", False, True), ("needs_input", False, True),
+            ("done", True, True), ("done", False, "false"),
+            ("done", False, True), ("already", False, True),
+        ]):
+            row = make_row("calc.open", index + 1, 10, "", error,
+                           "pass" if verified else "fail", "fixture", status=status)
+            row["verified"] = verified
+            rows.append(row)
+        self.assertEqual(report_mod.task_stats(rows, {})["successes"], 2)
+        self.assertEqual(report_mod.rollup(rows, "T0")["successes"], 2)
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / "rows.jsonl"
+            data.write_text("".join(json.dumps(r) + "\n" for r in rows))
+            self.assertEqual(report_mod.main([str(data), "--outdir", directory]), 0)
+            baseline = json.loads((Path(directory) / "baseline.json").read_text())
+            self.assertEqual(baseline["totals"]["successes"], 2)
+
+
+class SafetyCase(unittest.TestCase):
+    """Never run real OS resets or signing while testing their failure policy."""
+
+    def test_disabled_textedit_reset_never_invokes_osascript(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stub = Path(directory) / "osascript"
+            marker = Path(directory) / "called"
+            stub.write_text('#!/bin/sh\nprintf called > "$CAPTURE_MARKER"\n')
+            stub.chmod(0o700)
+            env = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"],
+                       CAPTURE_MARKER=str(marker))
+            run = subprocess.run(["bash", str(BENCH / "reset/textedit.sh")],
+                                 env=env, capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertFalse(marker.exists(), "even a harmless command stub must not be reached")
+
+    def test_signature_verification_failure_fails_packaging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            commands = base / "commands"
+            commands.mkdir()
+            app = base / "Jev Voice.app"
+            resources = app / "Contents/Resources"
+            resources.mkdir(parents=True)
+            (resources / "cua-driver").write_text("fixture, not executable code")
+            with (app / "Contents/Info.plist").open("wb") as file:
+                plistlib.dump({"CFBundleIdentifier": "fixture.signing"}, file)
+            scripts = {
+                "security": '#!/bin/sh\necho \'1) 123456 "Jev Voice Local Dev"\'\n',
+                "xattr": "#!/bin/sh\nexit 0\n",
+                "codesign": '#!/bin/sh\ncase " $* " in *" --verify "*) exit 17;; esac\nexit 0\n',
+            }
+            for name, body in scripts.items():
+                path = commands / name
+                path.write_text(body)
+                path.chmod(0o700)
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"])
+            run = subprocess.run(["bash", str(REPO_ROOT / "scripts/sign-app.sh"), str(app)],
+                                 env=env, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(run.returncode, 0, "failed strict signature cannot produce a successful package")
 
 
 if __name__ == "__main__":

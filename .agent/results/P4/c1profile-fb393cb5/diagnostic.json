@@ -1,0 +1,12 @@
+{
+  "profiled": true,
+  "not_a_timed_comparison": true,
+  "binary_sha256": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+  "report": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P3/user-audit-c1profile-fb393cb5/result.json",
+  "sample": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1profile-fb393cb5/app-sample.txt",
+  "status": "blocked_or_failed",
+  "documents_restored": true,
+  "sampler_exit_codes": [
+    0
+  ]
+}

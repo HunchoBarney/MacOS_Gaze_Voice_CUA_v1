@@ -1,0 +1,238 @@
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version--58304C5D6DBC2206.txt
+[4/8] Compiling JevVoice GazeService.swift
+[5/8] Emitting module JevVoice
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:278:14: warning: no 'async' operations occur within 'await' expression
+ 276 |          },
+ 277 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 278 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 279 |          },
+ 280 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1616:13: warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+1614 |     struct DriveCaptureSource: CaptureSource {
+1615 |         typealias ImageCall = @Sendable (String, [String: JSONValue]) async throws -> CuaToolResult
+1616 |         let observe: Call
+     |             |- warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+     |             `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+1617 |         let window: WindowRef
+1618 |         let session: String
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:101:90: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+ 99 | 
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+    |                                                                                          `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:102:94: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+    |                                                                                              `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+104 |         self.configuration = configuration
+[6/18] Compiling JevVoice VoiceUserAudit.swift
+[7/18] Compiling JevVoice ContentView.swift
+[8/18] Compiling JevVoice VoiceLiveTrial.swift
+[9/18] Compiling JevVoice VoiceController.swift
+[10/18] Compiling JevVoice LatencyLedger.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+[11/18] Compiling JevVoice SpendCounter.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+[12/18] Compiling JevVoice FastLaneExecutor.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1391:41: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1389 |                 return try await self.observedDriverCall(tool, args, turn: traceTurn, work: traceWork, readOnly: true)
+1390 |             },
+1391 |             scopedCall: imageClient.map { _ in
+     |                                         `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1392 |                 { [weak self] tool, args, origin in
+1393 |                     guard let self else { throw DriverConnectionError.closed }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:278:14: warning: no 'async' operations occur within 'await' expression
+ 276 |          },
+ 277 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 278 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 279 |          },
+ 280 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[13/18] Compiling JevVoice VoiceTaskCoordinator.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1391:41: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1389 |                 return try await self.observedDriverCall(tool, args, turn: traceTurn, work: traceWork, readOnly: true)
+1390 |             },
+1391 |             scopedCall: imageClient.map { _ in
+     |                                         `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1392 |                 { [weak self] tool, args, origin in
+1393 |                     guard let self else { throw DriverConnectionError.closed }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:278:14: warning: no 'async' operations occur within 'await' expression
+ 276 |          },
+ 277 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 278 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 279 |          },
+ 280 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[14/18] Compiling JevVoice main.swift
+[15/18] Compiling JevVoice SettingsView.swift
+[15/20] Write Objects.LinkFileList
+[16/20] Linking JevVoice
+[17/20] Applying JevVoice
+[19/29] Compiling JevVoiceAppTests VoiceTaskCoordinatorLaneTests.swift
+[20/29] Compiling JevVoiceAppTests JevVisionTests.swift
+[21/29] Compiling JevVoiceAppTests VoiceSemanticTests.swift
+[22/29] Compiling JevVoiceAppTests GazeServiceTests.swift
+[23/29] Compiling JevVoiceAppTests GazeWiringTests.swift
+[24/29] Compiling JevVoiceAppTests VoiceLaneAuditTests.swift
+[25/29] Compiling JevVoiceAppTests RealtimeVoiceLaneTests.swift
+[26/29] Emitting module JevVoiceAppTests
+[27/29] Compiling JevVoiceAppTests VoiceTaskCoordinatorOverlayTests.swift
+[28/30] Compiling JevVoiceAppTests VoiceTurnEvidenceTests.swift
+[28/30] Write Objects.LinkFileList
+[29/30] Linking JevVoicePackageTests
+Build complete! (45.82s)
+Test Suite 'Selected tests' started at 2026-11-15 17:05:35.004.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 17:05:35.010.
+Test Suite 'DwellPolicyTests' started at 2026-11-15 17:05:35.010.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testAllAddsTheFloorsButNeverChrome]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testAllAddsTheFloorsButNeverChrome]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1EveryOptedInDelayIsAtLeastOneSecond]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1EveryOptedInDelayIsAtLeastOneSecond]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1UnmarkedSafeAndMalformedConsentStayOff]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1UnmarkedSafeAndMalformedConsentStayOff]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDefaultsRoundTrip]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDefaultsRoundTrip]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDelayBand]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDelayBand]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedAppExemptsEveryCandidate]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedAppExemptsEveryCandidate]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedCuaPolicyPhrases]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedCuaPolicyPhrases]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedLabelsNeverFire]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedLabelsNeverFire]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyCorpusIncludesContextFields]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyCorpusIncludesContextFields]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyDefeatsObfuscation]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyDefeatsObfuscation]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyNormalizesSeparators]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyNormalizesSeparators]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testEmptyNormalizedTokenIsInert]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testEmptyNormalizedTokenIsInert]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testModeDefaultAndUnknown]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testModeDefaultAndUnknown]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testMultiplierAdaptsInsideClamp]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testMultiplierAdaptsInsideClamp]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testOffFiresNothing]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testOffFiresNothing]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSafeReachesVerifiedKindsOnly]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSafeReachesVerifiedKindsOnly]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSecureFieldsNeverFire]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSecureFieldsNeverFire]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testTrafficLightCloseDeniedByID]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testTrafficLightCloseDeniedByID]' passed (0.001 seconds).
+Test Suite 'DwellPolicyTests' passed at 2026-11-15 17:05:35.048.
+	 Executed 18 tests, with 0 failures (0 unexpected) in 0.035 (0.038) seconds
+Test Suite 'EyeSettingsFlowTests' started at 2026-11-15 17:05:35.048.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testDwellModeWriteReloads]' started.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testDwellModeWriteReloads]' passed (0.005 seconds).
+Test Suite 'EyeSettingsFlowTests' passed at 2026-11-15 17:05:35.054.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+Test Suite 'GazeDwellTests' started at 2026-11-15 17:05:35.054.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAcquireSwitchAbortsOldHold]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAcquireSwitchAbortsOldHold]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAmbiguousPauses]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAmbiguousPauses]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testDeniedNeverFires]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testDeniedNeverFires]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testEngagedReleaseIsAbort]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testEngagedReleaseIsAbort]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFeedLossEndsHold]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFeedLossEndsHold]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFiresOncePerAcquire]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFiresOncePerAcquire]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testQuickReleaseIsNotAbort]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testQuickReleaseIsNotAbort]' passed (0.001 seconds).
+Test Suite 'GazeDwellTests' passed at 2026-11-15 17:05:35.060.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.006 (0.006) seconds
+Test Suite 'JevVisionTests' started at 2026-11-15 17:05:35.060.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ExactNativeFactsPreserveWhitespaceAndUnicode]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ExactNativeFactsPreserveWhitespaceAndUnicode]' passed (0.040 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsCannotHideChangedDocument]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsCannotHideChangedDocument]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsStillNeedSubjectEvidence]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsStillNeedSubjectEvidence]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1MultipleLiteralsRequirePermissionForSelectedValue]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:580: error: -[JevVoiceAppTests.JevVisionTests testC1MultipleLiteralsRequirePermissionForSelectedValue] : XCTAssertEqual failed: ("1") is not equal to ("2")
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:581: error: -[JevVoiceAppTests.JevVisionTests testC1MultipleLiteralsRequirePermissionForSelectedValue] : XCTAssertNotNil failed - Authorization must bind the actual selected literal
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1MultipleLiteralsRequirePermissionForSelectedValue]' failed (0.843 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralCannotDischargeUnrelatedOutcomeRequirements]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralCannotDischargeUnrelatedOutcomeRequirements]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralPresenceKeepsRawJudgment]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralPresenceKeepsRawJudgment]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ReferentCannotEraseConflictingIdentityMatches]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:567: error: -[JevVoiceAppTests.JevVisionTests testC1ReferentCannotEraseConflictingIdentityMatches] : failed - A referent pick erased multiple independently matched targets
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ReferentCannotEraseConflictingIdentityMatches]' failed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ScrollNeedsIndependentAuthorizationAcrossLanes]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ScrollNeedsIndependentAuthorizationAcrossLanes]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1SupportedKindCannotEraseIndependentRequirements]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1SupportedKindCannotEraseIndependentRequirements]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativePolicyFailureCannotEscapeThroughOptimisticPixelAnswers]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativePolicyFailureCannotEscapeThroughOptimisticPixelAnswers]' passed (0.021 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testOpenReferentPickBindsIndecisiveMatchWinner]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testOpenReferentPickBindsIndecisiveMatchWinner]' passed (0.009 seconds).
+Test Suite 'JevVisionTests' failed at 2026-11-15 17:05:36.009.
+	 Executed 11 tests, with 3 failures (0 unexpected) in 0.947 (0.949) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-15 17:05:36.009.
+	 Executed 37 tests, with 3 failures (0 unexpected) in 0.993 (0.998) seconds
+Test Suite 'Selected tests' failed at 2026-11-15 17:05:36.009.
+	 Executed 37 tests, with 3 failures (0 unexpected) in 0.993 (1.004) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

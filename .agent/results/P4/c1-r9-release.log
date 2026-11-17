@@ -1,0 +1,293 @@
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+[2/3] Compiling JevVoiceCore JSONValue.swift
+[3/4] Compiling FluidAudio CanaryConfig.swift
+[4/6] Compiling JevVoice AgentMarkers.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/ComputerControl/CuaDriveServer.swift:326:62: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+324 |                                  granted: { standingGrant() },
+325 |                                  explicitConsent: false,
+326 |                                  scopedCall: imageClient.map { _ in
+    |                                                              `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+327 |                                      { try await driver.callScoped($0, arguments: $1, origin: $2) }
+328 |                                  },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:286:14: warning: no 'async' operations occur within 'await' expression
+ 284 |          },
+ 285 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 286 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 287 |          },
+ 288 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/AgentAskChannel.swift:116:17: warning: reference to captured var 'source' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+114 |             }
+115 |             continuation.onTermination = { _ in
+116 |                 source?.cancel()
+    |                 `- warning: reference to captured var 'source' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+117 |                 heartbeat.cancel()
+118 |             }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1039:13: warning: no 'async' operations occur within 'await' expression
+1037 |         _ task: DriveTask,
+1038 |         capturedOwner: @Sendable (DriveTask) async -> AppResolver.App? = { task in
+1039 |             await DriveLoop.capturedForegroundApplication(application: task.application, windowID: task.windowID)
+     |             `- warning: no 'async' operations occur within 'await' expression
+1040 |         }
+1041 |     ) async -> (app: AppResolver.App?, matches: [AppResolver.App]) {
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1718:13: warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+1716 |     struct DriveCaptureSource: CaptureSource {
+1717 |         typealias ImageCall = @Sendable (String, [String: JSONValue]) async throws -> CuaToolResult
+1718 |         let observe: Call
+     |             |- warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+     |             `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+1719 |         let window: WindowRef
+1720 |         let session: String
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/JevVisualDecision.swift:1085:13: warning: immutable value 'resolvedOpP' was never used; consider removing it [#no-usage]
+1083 |         }
+1084 |         let operation: VisualOperation
+1085 |         let resolvedOpP: Double
+     |             `- warning: immutable value 'resolvedOpP' was never used; consider removing it [#no-usage]
+1086 |         let box: JevBox
+1087 |         var boxConfidence: Double? = nil
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/NativeWindowObservation.swift:283:22: warning: treating a forced downcast to 'AXUIElement' as optional will never produce 'nil'
+281 |     private static func elementAttribute(_ element: AXUIElement, _ name: String) -> AXUIElement? {
+282 |         guard let value = attribute(element, name), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+283 |         return value as! AXUIElement
+    |                |     | `- note: use 'as?' to perform a conditional downcast to 'AXUIElement'
+    |                |     `- warning: treating a forced downcast to 'AXUIElement' as optional will never produce 'nil'
+    |                `- note: add parentheses around the cast to silence this warning
+284 |     }
+285 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1479:41: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1477 |                 return try await self.observedDriverCall(tool, args, turn: traceTurn, work: traceWork, readOnly: true)
+1478 |             },
+1479 |             scopedCall: imageClient.map { _ in
+     |                                         `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1480 |                 { [weak self] tool, args, origin in
+1481 |                     guard let self else { throw DriverConnectionError.closed }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1526:71: warning: converting non-Sendable function value to '@Sendable () async -> Bool' may introduce data races
+1524 |             scrollContinuation: work.scrollContinuation,
+1525 |             freshScrollContinuation: work.continuousScroll && work.verifiedScroll == nil,
+1526 |             scrollContinuationIsCurrent: work.scrollAuthorization.map { authorization in
+     |                                                                       `- warning: converting non-Sendable function value to '@Sendable () async -> Bool' may introduce data races
+1527 |                 { await authorization() }
+1528 |             },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1527:19: warning: no 'async' operations occur within 'await' expression
+1525 |             freshScrollContinuation: work.continuousScroll && work.verifiedScroll == nil,
+1526 |             scrollContinuationIsCurrent: work.scrollAuthorization.map { authorization in
+1527 |                 { await authorization() }
+     |                   `- warning: no 'async' operations occur within 'await' expression
+1528 |             },
+1529 |             onVerifiedScroll: { @MainActor [weak work] witness in
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:93:14: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 91 |     /// `prepared == false` so a later `say` retries.
+ 92 |     func prepare() async throws {
+ 93 |         lock.lock()
+    |              `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 94 |         if prepared { lock.unlock(); return }
+ 95 |         if let task = prepareTask {
+
+Foundation.NSLock.lock:2:11: note: 'lock()' declared here
+1 | class NSLock {
+2 | open func lock()}
+  |           `- note: 'lock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:94:28: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 92 |     func prepare() async throws {
+ 93 |         lock.lock()
+ 94 |         if prepared { lock.unlock(); return }
+    |                            `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 95 |         if let task = prepareTask {
+ 96 |             lock.unlock()
+
+Foundation.NSLock.unlock:2:11: note: 'unlock()' declared here
+1 | class NSLock {
+2 | open func unlock()}
+  |           `- note: 'unlock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:96:18: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 94 |         if prepared { lock.unlock(); return }
+ 95 |         if let task = prepareTask {
+ 96 |             lock.unlock()
+    |                  `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 97 |             return try await task.value
+ 98 |         }
+
+Foundation.NSLock.unlock:2:11: note: 'unlock()' declared here
+1 | class NSLock {
+2 | open func unlock()}
+  |           `- note: 'unlock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:101:14: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+ 99 |         let task = Task { [manager] in try await manager.initialize() }
+100 |         prepareTask = task
+101 |         lock.unlock()
+    |              `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+102 |         do {
+103 |             try await task.value
+
+Foundation.NSLock.unlock:2:11: note: 'unlock()' declared here
+1 | class NSLock {
+2 | open func unlock()}
+  |           `- note: 'unlock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:104:18: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+102 |         do {
+103 |             try await task.value
+104 |             lock.lock(); prepared = true; prepareTask = nil; lock.unlock()
+    |                  `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+105 |         } catch {
+106 |             lock.lock(); prepareTask = nil; lock.unlock()
+
+Foundation.NSLock.lock:2:11: note: 'lock()' declared here
+1 | class NSLock {
+2 | open func lock()}
+  |           `- note: 'lock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:104:67: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+102 |         do {
+103 |             try await task.value
+104 |             lock.lock(); prepared = true; prepareTask = nil; lock.unlock()
+    |                                                                   `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+105 |         } catch {
+106 |             lock.lock(); prepareTask = nil; lock.unlock()
+
+Foundation.NSLock.unlock:2:11: note: 'unlock()' declared here
+1 | class NSLock {
+2 | open func unlock()}
+  |           `- note: 'unlock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:106:18: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+104 |             lock.lock(); prepared = true; prepareTask = nil; lock.unlock()
+105 |         } catch {
+106 |             lock.lock(); prepareTask = nil; lock.unlock()
+    |                  `- warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+107 |             throw error
+108 |         }
+
+Foundation.NSLock.lock:2:11: note: 'lock()' declared here
+1 | class NSLock {
+2 | open func lock()}
+  |           `- note: 'lock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Intelligence/LocalVoice.swift:106:50: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+104 |             lock.lock(); prepared = true; prepareTask = nil; lock.unlock()
+105 |         } catch {
+106 |             lock.lock(); prepareTask = nil; lock.unlock()
+    |                                                  `- warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
+107 |             throw error
+108 |         }
+
+Foundation.NSLock.unlock:2:11: note: 'unlock()' declared here
+1 | class NSLock {
+2 | open func unlock()}
+  |           `- note: 'unlock()' declared here
+3 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Settings/APIKeyStore.swift:58:56: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+56 |             query[kSecUseAuthenticationContext as String] = context
+57 |             // Legacy file-based macOS Keychain may ignore LAContext alone.
+58 |             query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+   |                                                        `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]
+59 |         }
+60 |         return query
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:101:90: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+ 99 | 
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+    |                                                                                          `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:102:94: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+    |                                                                                              `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+104 |         self.configuration = configuration
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:74:14: warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 66 |     var afterFix: () -> Void = {}
+ 67 | 
+ 68 |     private let defaults: UserDefaults
+    |                 `- note: mutation of this property is only permitted within the actor
+ 69 | 
+ 70 |     /// Nonisolated so `@StateObject` view initializers (which run
+    :
+ 72 |     /// properties and takes no actor state.
+ 73 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 74 |         self.defaults = defaults
+    |              `- warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 75 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+ 76 |     }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:75:14: warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 32 |     @Published private(set) var rows: [Row] = OnboardingChecklistModel.makeRows()
+ 33 |     /// "Set up later" — persisted; the card stays gone until reset.
+ 34 |     @Published var dismissed: Bool {
+    |                    `- note: mutation of this property is only permitted within the actor
+ 35 |         didSet { defaults.set(dismissed, forKey: Self.dismissedKey) }
+ 36 |     }
+    :
+ 73 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 74 |         self.defaults = defaults
+ 75 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+    |              `- warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 76 |     }
+ 77 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Voice/LocalSpeechSession.swift:537:22: warning: main actor-isolated static property 'finalLog' cannot be accessed from outside of the actor; this is an error in the Swift 6 language mode
+535 |                 observe?(.init(turn: turn.id, stage: "finalization.drain_end", metrics: [
+536 |                     "elapsed_ms": (ProcessInfo.processInfo.systemUptime - drainStarted) * 1000]))
+537 |                 Self.finalLog.notice("finalize generation=\(turn.generation) drain_ms=\((ProcessInfo.processInfo.systemUptime - drainStarted) * 1000)")
+    |                      `- warning: main actor-isolated static property 'finalLog' cannot be accessed from outside of the actor; this is an error in the Swift 6 language mode
+538 |                 try Task.checkCancellation()
+539 |                 return try await provider.finishHold(turn)
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Voice/RealtimeVoiceLane.swift:1237:43: warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1235 |                 }
+1236 |             }
+1237 |         case .itemCreated(let itemID, let isImage):
+     |                                           `- warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1238 |             // Context notes are only real once the server confirms the item —
+1239 |             // recording the id optimistically leaves a phantom we delete
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[#SendableClosureCaptures]: <https://docs.swift.org/compiler/documentation/diagnostics/sendable-closure-captures>
+[4/6] Write Objects.LinkFileList
+[5/6] Linking JevVoice
+Build complete! (192.68s)
+verification lane green

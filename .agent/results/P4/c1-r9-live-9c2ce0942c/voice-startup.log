@@ -1,0 +1,24 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-16 21:41:57.423 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 21:41:57.584 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:microphone] configuration running=true selected_device=true same_format=true
+2026-11-16 21:41:57.584 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:microphone] recovering initial input configuration before readiness
+2026-11-16 21:41:57.741 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:microphone] input_ready first_frames=4800 startup_recoveries=1
+2026-11-16 21:41:57.741 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input elapsed_ms=317.792000
+2026-11-16 21:41:57.741 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=local_prewarm begin
+2026-11-16 21:41:57.741 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=final_models begin
+2026-11-16 21:42:59.078 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=final_models elapsed_ms=61336.829833
+2026-11-16 21:42:59.089 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=partial_models begin
+2026-11-16 21:42:59.232 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 21:43:00.837 Df JevVoice[84041:1c45cba] [com.chriswozniczek.jevvoice.voice:microphone] input_ready first_frames=4800 startup_recoveries=0
+2026-11-16 21:43:00.837 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input elapsed_ms=1605.606250
+2026-11-16 21:43:00.837 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=local_prewarm begin
+2026-11-16 21:43:01.269 Df JevVoice[84041:1c4528d] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=partial_models elapsed_ms=2180.256542
+2026-11-16 21:43:01.277 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=local_prewarm elapsed_ms=440.253250
+2026-11-16 21:43:06.441 Df JevVoice[84041:1c450fd] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 budget_ms=2000.000000 elapsed_before_drain_ms=3.443042
+2026-11-16 21:43:06.443 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 drain_ms=0.407792
+2026-11-16 21:43:06.443 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 start samples=17600 largest_input=0 partial_limit=1280
+2026-11-16 21:43:06.443 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 provisional_pending=false
+2026-11-16 21:43:06.443 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 decoder_layers_begin native_partials=0
+2026-11-16 21:43:06.443 Df JevVoice[84041:1c45538] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 decoder_layers_ms=0.008667
+2026-11-16 21:43:06.654 Df JevVoice[84041:1c45484] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 ultra_ms=211.324500
+2026-11-16 21:43:06.654 Df JevVoice[84041:1c45484] [com.chriswozniczek.jevvoice.voice:local-final] finalize generation=1 ultra_settled_ms=211.637500 cancelled=false

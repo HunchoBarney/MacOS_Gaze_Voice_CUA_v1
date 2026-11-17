@@ -1,0 +1,381 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/7] Emitting module JevVoice
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:278:14: warning: no 'async' operations occur within 'await' expression
+ 276 |          },
+ 277 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 278 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 279 |          },
+ 280 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:951:13: warning: no 'async' operations occur within 'await' expression
+ 949 |         _ task: DriveTask,
+ 950 |         capturedOwner: @Sendable (DriveTask) async -> AppResolver.App? = { task in
+ 951 |             await DriveLoop.capturedForegroundApplication(application: task.application, windowID: task.windowID)
+     |             `- warning: no 'async' operations occur within 'await' expression
+ 952 |         }
+ 953 |     ) async -> (app: AppResolver.App?, matches: [AppResolver.App]) {
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1630:13: warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+1628 |     struct DriveCaptureSource: CaptureSource {
+1629 |         typealias ImageCall = @Sendable (String, [String: JSONValue]) async throws -> CuaToolResult
+1630 |         let observe: Call
+     |             |- warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+     |             `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+1631 |         let window: WindowRef
+1632 |         let session: String
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:101:90: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+ 99 | 
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+    |                                                                                          `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:102:94: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+    |                                                                                              `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+104 |         self.configuration = configuration
+[4/7] Compiling JevVoice FocusedTextTarget.swift
+[4/9] Write Objects.LinkFileList
+[5/9] Linking JevVoice
+[6/9] Applying JevVoice
+[8/10] Emitting module JevVoiceAppTests
+[8/10] Write Objects.LinkFileList
+[9/10] Linking JevVoicePackageTests
+Build complete! (21.70s)
+Test Suite 'Selected tests' started at 2026-11-15 19:18:42.311.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 19:18:42.314.
+Test Suite 'FastLaneExecutorTests' started at 2026-11-15 19:18:42.314.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testAppHintMergeResolvesAppControl]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testAppHintMergeResolvesAppControl]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testAppHintMergeResolvesOpenVerb]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testAppHintMergeResolvesOpenVerb]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundEditingHotkeysDoNotNeedGlobalInventory]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundEditingHotkeysDoNotNeedGlobalInventory]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundEditingShortcutPreservesExcludedScope]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundEditingShortcutPreservesExcludedScope]' passed (0.076 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundLiteralInventoryShortcutRejectsExcludedConditions]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundLiteralInventoryShortcutRejectsExcludedConditions]' passed (0.018 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundLiteralMissingOrWrongCaseReadbackNeverClaimsDone]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundLiteralMissingOrWrongCaseReadbackNeverClaimsDone]' passed (2.845 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundLiteralTypesWithoutGlobalInventory]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundLiteralTypesWithoutGlobalInventory]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundQuotedDangerousPayloadStillRefusesBeforeMutation]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundQuotedDangerousPayloadStillRefusesBeforeMutation]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundQuotedLiteralRetainsWhitespaceAndQuotes]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testBoundQuotedLiteralRetainsWhitespaceAndQuotes]' passed (0.014 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testColdBackgroundOpenRetainsDriverPrimitive]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testColdBackgroundOpenRetainsDriverPrimitive]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testColdPinnedWindowCannotLaunchReplacementApp]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testColdPinnedWindowCannotLaunchReplacementApp]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testColdRequestedFocusUsesNativeForegroundLaunchOnce]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testColdRequestedFocusUsesNativeForegroundLaunchOnce]' passed (0.638 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDeicticCloseOnDeniedWindowRefuses]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDeicticCloseOnDeniedWindowRefuses]' passed (0.019 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDescribeNativeScreenFrameWithoutScreenshotMetadata]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDescribeNativeScreenFrameWithoutScreenshotMetadata]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDescribeSpeaksElementValue]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDescribeSpeaksElementValue]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDisplayScopeResolvesAppOnGazeDisplay]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testDisplayScopeResolvesAppOnGazeDisplay]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testExactNativeForegroundProofAvoidsInventoryRPC]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testExactNativeForegroundProofAvoidsInventoryRPC]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testFirstDomainURL]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testFirstDomainURL]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testForegroundNativeLaunchDoesNotBypassDeny]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testForegroundNativeLaunchDoesNotBypassDeny]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testForegroundUnknownNativeWindowCannotInventOrClaimEffect]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testForegroundUnknownNativeWindowCannotInventOrClaimEffect]' passed (2.045 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testForegroundUntitledOffscreenWindowUsesNativeIdentityNotTitle]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testForegroundUntitledOffscreenWindowUsesNativeIdentityNotTitle]' passed (1.274 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testGazeClickOnDeniedWindowRefuses]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testGazeClickOnDeniedWindowRefuses]' passed (0.024 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testGazeRefusalNamesResumeWhenPaused]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testGazeRefusalNamesResumeWhenPaused]' passed (0.012 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testLocateAmbiguousNamesCandidates]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testLocateAmbiguousNamesCandidates]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testLocateNoMatchBlocksHonestly]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testLocateNoMatchBlocksHonestly]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testLocateRestoresOffscreenWindow]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testLocateRestoresOffscreenWindow]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testMenuOnDeniedWindowTitleRefuses]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testMenuOnDeniedWindowTitleRefuses]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testMenuPostsInvokeMenuPath]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testMenuPostsInvokeMenuPath]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testMenuRefusalAsksWhichMenu]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testMenuRefusalAsksWhichMenu]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeActivationFailureClosesTraceWithoutRetry]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeActivationFailureClosesTraceWithoutRetry]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeErrorObservedProcessStillRequiresVerifiedWindow]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeErrorObservedProcessStillRequiresVerifiedWindow]' passed (0.636 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundProbeKeepsFreshProofAndFinalRechecks]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundProbeKeepsFreshProofAndFinalRechecks]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundProbeRejectsImpossibleCandidateBeforeFocusedRead]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundProbeRejectsImpossibleCandidateBeforeFocusedRead]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundSettlesAsyncActivationBeforeRedundantRaise]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundSettlesAsyncActivationBeforeRedundantRaise]' passed (0.469 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundShortcutRequiresEveryExactProofAndUnqualifiedRequest]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundShortcutRequiresEveryExactProofAndUnqualifiedRequest]' passed (3.138 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundValidatorRequiresIndependentExactProofs]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeForegroundValidatorRequiresIndependentExactProofs]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeLaunchCancelledWhileQueuedNeverDispatches]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeLaunchCancelledWhileQueuedNeverDispatches]' passed (0.016 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeLaunchErrorNeverRetriesBackgroundPrimitive]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeLaunchErrorNeverRetriesBackgroundPrimitive]' passed (2.360 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeProofCannotBypassNamedOrPinnedWindowInventory]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeProofCannotBypassNamedOrPinnedWindowInventory]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeSemanticFocusKeepsTraceScopedToTheRun]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testNativeSemanticFocusKeepsTraceScopedToTheRun]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testOverlayVerbDispatchesConvertedTargets]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testOverlayVerbDispatchesConvertedTargets]' passed (0.020 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testOverlayWithoutSeamBlocksHonestly]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testOverlayWithoutSeamBlocksHonestly]' passed (0.014 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testPinnedOrNamedOpenNeverUsesNativeFallbackToSubstituteWindow]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testPinnedOrNamedOpenNeverUsesNativeFallbackToSubstituteWindow]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testRepeatLastBlocksHonestly]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testRepeatLastBlocksHonestly]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testSnapLeftSetsWindowFrame]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testSnapLeftSetsWindowFrame]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testSpokenQualifierOutranksAppHint]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testSpokenQualifierOutranksAppHint]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testSystemHotkeyPostsDesktopScope]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testSystemHotkeyPostsDesktopScope]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testTypeIntoDeniedFieldRefuses]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testTypeIntoDeniedFieldRefuses]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testVerifiedCapturedOwnerAvoidsResolverButMissingOrChangedOwnerDoesNot]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testVerifiedCapturedOwnerAvoidsResolverButMissingOrChangedOwnerDoesNot]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testVerifiedNativeForegroundEffectDoesNotIssueRedundantDriverRaise]' started.
+Test Case '-[JevVoiceAppTests.FastLaneExecutorTests testVerifiedNativeForegroundEffectDoesNotIssueRedundantDriverRaise]' passed (0.313 seconds).
+Test Suite 'FastLaneExecutorTests' passed at 2026-11-15 19:18:56.440.
+	 Executed 50 tests, with 0 failures (0 unexpected) in 14.117 (14.126) seconds
+Test Suite 'FastLaneTests' started at 2026-11-15 19:18:56.440.
+Test Case '-[JevVoiceAppTests.FastLaneTests testAppControlParse]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testAppControlParse]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testCanonicalBundleQualifierIsExactAndRejectsDuplicateIdentities]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testCanonicalBundleQualifierIsExactAndRejectsDuplicateIdentities]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testCanonicalBundleQualifierResolvesWhenVoiceHUDOwnsFrontmost]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testCanonicalBundleQualifierResolvesWhenVoiceHUDOwnsFrontmost]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testCanonicalOpenSkipsUnrelatedAppInventory]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testCanonicalOpenSkipsUnrelatedAppInventory]' passed (0.636 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testCapturedAppCannotBeReplacedByFreshAliasMatch]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testCapturedAppCannotBeReplacedByFreshAliasMatch]' passed (0.012 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testCapturedApplicationResolutionRequiresExactFreshOwner]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testCapturedApplicationResolutionRequiresExactFreshOwner]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testColdLaunchWaitsForWindow]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testColdLaunchWaitsForWindow]' passed (0.110 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticCloseAndHideMark]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticCloseAndHideMark]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticTokenDoesNotRetargetEditing]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticTokenDoesNotRetargetEditing]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticWindowControlMapping]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticWindowControlMapping]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticWindowVerbsMarkGazeBinding]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testDeicticWindowVerbsMarkGazeBinding]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testDisplayNameOpenStillUsesInventory]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testDisplayNameOpenStillUsesInventory]' passed (0.632 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testForegroundOpenActivatesBeforeWindowEnumeration]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testForegroundOpenActivatesBeforeWindowEnumeration]' passed (0.641 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testFullyQuotedTypePreservesPayloadBytes]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testFullyQuotedTypePreservesPayloadBytes]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testGoogleResolvesToChrome]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testGoogleResolvesToChrome]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testHiddenRaiseRefusesWhenUnhideFails]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testHiddenRaiseRefusesWhenUnhideFails]' passed (1.428 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testMediaKeyPostsAndSettles]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testMediaKeyPostsAndSettles]' passed (0.021 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testMediaKeysParse]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testMediaKeysParse]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testNegationBlocksTheLane]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testNegationBlocksTheLane]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testNewTabVerifiesTabDelta]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testNewTabVerifiesTabDelta]' passed (1.430 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testOpenRequiresRaise]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testOpenRequiresRaise]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testOpenRunningAppRaisesWindow]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testOpenRunningAppRaisesWindow]' passed (0.019 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testParseOpenVerbs]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testParseOpenVerbs]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testPinnedHiddenRaiseDoesNotUnhideAnotherWindow]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testPinnedHiddenRaiseDoesNotUnhideAnotherWindow]' passed (0.015 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testPlayNamedQueryIsSearch]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testPlayNamedQueryIsSearch]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testPlayPronounIsMediaKey]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testPlayPronounIsMediaKey]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testQuitAsksOnceAndDeclines]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testQuitAsksOnceAndDeclines]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testQuitWithStandingGrantDoesNotAsk]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testQuitWithStandingGrantDoesNotAsk]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testRaiseVerbWithoutWindowBlocks]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testRaiseVerbWithoutWindowBlocks]' passed (8.323 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneBareSearch]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneBareSearch]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneCloseWithPackaging]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneCloseWithPackaging]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneEngineSearch]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneEngineSearch]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneMediaKey]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneMediaKey]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneNavigation]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneNavigation]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneNewTabAmbiguity]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneNewTabAmbiguity]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneOpen]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneOpen]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneQuit]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveFastLaneQuit]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveOpenApp]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testResolveOpenApp]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testShowHiddenRunningAppRestoresWindowBeforeRaising]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testShowHiddenRunningAppRestoresWindowBeforeRaising]' passed (0.632 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testTableChordsParse]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testTableChordsParse]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testTypeLanePreservesPayload]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testTypeLanePreservesPayload]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testTypeVerifiesValueHeld]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testTypeVerifiesValueHeld]' passed (0.024 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testUncertainRaiseCannotUseOtherWindowOrMissingVisibility]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testUncertainRaiseCannotUseOtherWindowOrMissingVisibility]' passed (4.098 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testUncertainRaiseVerifiesExactWindowWithoutRetry]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testUncertainRaiseVerifiesExactWindowWithoutRetry]' passed (0.645 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testUncertainRaiseWithoutVisibleExactWindowStaysBlocked]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testUncertainRaiseWithoutVisibleExactWindowStaysBlocked]' passed (2.041 seconds).
+Test Case '-[JevVoiceAppTests.FastLaneTests testWindowlessLaunchSettlesHonestly]' started.
+Test Case '-[JevVoiceAppTests.FastLaneTests testWindowlessLaunchSettlesHonestly]' passed (4.016 seconds).
+Test Suite 'FastLaneTests' passed at 2026-11-15 19:19:21.231.
+	 Executed 46 tests, with 0 failures (0 unexpected) in 24.780 (24.791) seconds
+Test Suite 'FocusedTextTargetTests' started at 2026-11-15 19:19:21.232.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testBrowserCannotUseCanonicalNativeReceiptToConfirmWebAXEcho]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testBrowserCannotUseCanonicalNativeReceiptToConfirmWebAXEcho]' passed (0.012 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCancellationDuringLastFocusValidationCannotDispatch]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCancellationDuringLastFocusValidationCannotDispatch]' passed (0.016 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCancelledOrStaleNativeTargetNeverCallsEitherInserter]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCancelledOrStaleNativeTargetNeverCallsEitherInserter]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCanonicalNativeReceiptCannotOverrideFalseUncertainOrMissingExactProof]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCanonicalNativeReceiptCannotOverrideFalseUncertainOrMissingExactProof]' passed (0.020 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCanonicalNativeReceiptUsesExactFocusedReadbackWithoutLegacyVerifiedFlag]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testCanonicalNativeReceiptUsesExactFocusedReadbackWithoutLegacyVerifiedFlag]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralChecksExactSelectedRangeReplacement]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralChecksExactSelectedRangeReplacement]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralInvalidOrMissingSelectionCannotDispatch]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralInvalidOrMissingSelectionCannotDispatch]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralMissingOrStaleFocusNeverFallsBackToPress]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralMissingOrStaleFocusNeverFallsBackToPress]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralMissingValueNeverSendsUnverifiableText]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralMissingValueNeverSendsUnverifiableText]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralUsesCapturedAppAndFocusWithoutSnapshotOrModel]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralUsesCapturedAppAndFocusWithoutSnapshotOrModel]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralWithoutCapturedWindowCannotRetargetFocusedField]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testDirectNativeLiteralWithoutCapturedWindowCannotRetargetFocusedField]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testFocusedLiteralUsesOneForegroundWindowMutationAndExactReadback]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testFocusedLiteralUsesOneForegroundWindowMutationAndExactReadback]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testFocusedRoleGuardRejectsSecureSubrolesDisabledAndReadOnlyFields]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testFocusedRoleGuardRejectsSecureSubrolesDisabledAndReadOnlyFields]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testInvalidNativeIdentityFailsClosedWithoutAXTargetGuessing]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testInvalidNativeIdentityFailsClosedWithoutAXTargetGuessing]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testLeaseWaitRevalidatesFocusAndCancellationBeforeTyping]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testLeaseWaitRevalidatesFocusAndCancellationBeforeTyping]' passed (0.031 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testMissingOrStaleFocusedFieldNeverTypes]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testMissingOrStaleFocusedFieldNeverTypes]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testMissingPrefetchedFieldCannotRetargetAfterInventoryWait]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testMissingPrefetchedFieldCannotRetargetAfterInventoryWait]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeInsertionNeverRepeatsAfterAnyAttemptAndProvesExactBytes]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeInsertionNeverRepeatsAfterAnyAttemptAndProvesExactBytes]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeInsertionReplacesTheExactUTF16Selection]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeInsertionReplacesTheExactUTF16Selection]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeOwnedBrowserFocusReadOnly]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/FocusedTextTargetTests.swift:499: -[JevVoiceAppTests.FocusedTextTargetTests testNativeOwnedBrowserFocusReadOnly] : Test skipped - Owned browser AX probe requires its explicit desktop gate.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeOwnedBrowserFocusReadOnly]' skipped (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeWindowObservationReplacesOnlyExactInventoryAndKeepsTitlePolicy]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testNativeWindowObservationReplacesOnlyExactInventoryAndKeepsTitlePolicy]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testWebAXEchoAndMissingReadbackCannotBecomeDoneOrRetry]' started.
+Test Case '-[JevVoiceAppTests.FocusedTextTargetTests testWebAXEchoAndMissingReadbackCannotBecomeDoneOrRetry]' passed (0.004 seconds).
+Test Suite 'FocusedTextTargetTests' passed at 2026-11-15 19:19:21.376.
+	 Executed 22 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.140 (0.144) seconds
+Test Suite 'VoiceTaskCoordinatorLaneTests' started at 2026-11-15 19:19:21.376.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCancelAllRunningOnIdleIsHonest]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCancelAllRunningOnIdleIsHonest]' passed (0.096 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCancelAllRunningReachesAgentsAlone]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCancelAllRunningReachesAgentsAlone]' passed (0.143 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCancelAllRunningStopsTasksAndAgents]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCancelAllRunningStopsTasksAndAgents]' passed (2.292 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCoordinatorWorkActuallySelectsNativeForegroundLauncher]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCoordinatorWorkActuallySelectsNativeForegroundLauncher]' passed (0.639 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCursorlessSessionPredicate]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testCursorlessSessionPredicate]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testFinishedAgentAskLeavesNoParkedCard]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testFinishedAgentAskLeavesNoParkedCard]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testHaloUsesNativeScreenPointsWithoutScreenshotMetadata]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testHaloUsesNativeScreenPointsWithoutScreenshotMetadata]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testIndependentObservationKeepsParallelReadLane]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testIndependentObservationKeepsParallelReadLane]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testIntentionalIdenticalTurnsAreNotSuppressedByTime]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testIntentionalIdenticalTurnsAreNotSuppressedByTime]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupCoalescesWithoutAwaitingRead]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupCoalescesWithoutAwaitingRead]' passed (0.032 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupFailureIsQuietAndNotRedispatched]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupFailureIsQuietAndNotRedispatched]' passed (0.023 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupOldCompletionDoesNotClearSuccessor]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupOldCompletionDoesNotClearSuccessor]' passed (0.056 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupShutdownClosesLatePreparedBindingWithoutRead]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupShutdownClosesLatePreparedBindingWithoutRead]' passed (0.031 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupUsesOnlySessionlessReadAndDiscardsPayload]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testInventoryWarmupUsesOnlySessionlessReadAndDiscardsPayload]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testLocalCommandAnswersParkedChoiceOrdinal]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testLocalCommandAnswersParkedChoiceOrdinal]' passed (0.371 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testLocalCommandAnswersParkedConfirm]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testLocalCommandAnswersParkedConfirm]' passed (0.020 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testNormalizationDoesNotEraseDirection]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testNormalizationDoesNotEraseDirection]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testObservationLaneRejectsMutationBeforeEitherTransport]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testObservationLaneRejectsMutationBeforeEitherTransport]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testOrphanedAskOnInactiveWorkIsDismissable]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testOrphanedAskOnInactiveWorkIsDismissable]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testProductionNativeSelectionAndControlledDriverSuppression]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testProductionNativeSelectionAndControlledDriverSuppression]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testRemoteRephraseCannotReplaceTheFinalSource]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testRemoteRephraseCannotReplaceTheFinalSource]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSemanticCreationIsTracedBeforeValidationAndNeverInventsDispatch]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSemanticCreationIsTracedBeforeValidationAndNeverInventsDispatch]' passed (0.052 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSessionLabelsAreDistinct]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSessionLabelsAreDistinct]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSessionObservationStaysOnCommandOwner]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSessionObservationStaysOnCommandOwner]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSpokenCancelVerdictStopsWork]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testSpokenCancelVerdictStopsWork]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testUnshapedSpeechLeavesParkedAsk]' started.
+Test Case '-[JevVoiceAppTests.VoiceTaskCoordinatorLaneTests testUnshapedSpeechLeavesParkedAsk]' passed (0.053 seconds).
+Test Suite 'VoiceTaskCoordinatorLaneTests' passed at 2026-11-15 19:19:25.242.
+	 Executed 26 tests, with 0 failures (0 unexpected) in 3.861 (3.866) seconds
+Test Suite 'JevVoicePackageTests.xctest' passed at 2026-11-15 19:19:25.242.
+	 Executed 144 tests, with 1 test skipped and 0 failures (0 unexpected) in 42.899 (42.928) seconds
+Test Suite 'Selected tests' passed at 2026-11-15 19:19:25.242.
+	 Executed 144 tests, with 1 test skipped and 0 failures (0 unexpected) in 42.899 (42.931) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+verification lane green

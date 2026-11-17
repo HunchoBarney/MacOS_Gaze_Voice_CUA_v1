@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "scripts/with-desktop-lock.py",
+    "python3",
+    ".agent/results/P4/c1-scroll.py",
+    "--receipt",
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-final-r5-stage.json",
+    "--label",
+    "r2-joins"
+  ],
+  "started_at": "2026-11-16T16:48:03.574075+00:00",
+  "source_snapshot_sha256": "60ec2b456e7c1097ba0e48f1bdd1fe139fdf7924edd581fb7d173e9a4da08681",
+  "harness_sha256": "7ffa5394af73f7246838c53eaaecdb45afff18e1fb7615840aa79ba87de05168",
+  "candidate_sha256": "7e813283b9d3c596d8049858d52873e80dbd7d9e983a74a80b6570b8f2ebf721",
+  "status": "failed",
+  "exit_code": 1,
+  "finished_at": "2026-11-16T16:48:06.665199+00:00",
+  "log_sha256": "0884585e81dbe0a12d545ab706c9d5c92e0dc8e43b335140f4f688cabb1ecb7a",
+  "source_unchanged": true,
+  "signature_still_valid": true
+}

@@ -1,0 +1,270 @@
+{"kind":"self_check","schema_version":2}
+{"kind":"event","metrics":{},"monotonic":1599947.2876894583,"stage":"opened","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599947.3552216669,"stage":"fn_down","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"Input admission":957.8268751502037},"monotonic":1599948.2458426252,"stage":"measurement","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599948.2465225002,"stage":"capture_started","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"Capture call to first audio":954.09487513825297},"monotonic":1599948.29241875,"stage":"measurement","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599950.9118296667,"stage":"fn_up","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599950.9127435833,"stage":"released","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"Captured audio duration":3100.0000000000014},"monotonic":1599950.9135151668,"stage":"measurement","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"converted_audio_ms":3099.9999999999977,"emitted_frames":32},"monotonic":1599950.9138296668,"stage":"capture.closed","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"Release context refresh":2.2283333819359541},"monotonic":1599950.935339625,"stage":"measurement","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"accepted_frames":32,"before_drain_ms":22.85820827819407,"budget_ms":2129.9999999999991,"captured_seconds":3.0999999999999979},"monotonic":1599950.9362707501,"stage":"finalization.begin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599950.9380441667,"stage":"finalization.drain_begin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"elapsed_ms":3.9057084359228611},"monotonic":1599950.9419518334,"stage":"finalization.drain_end","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"generation":1,"largest_partial_input":1643,"native_partials":1,"partial_tail_pending":1,"process_activity":1,"samples":49612},"monotonic":1599950.9423510418,"stage":"provider.finish_enter","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599950.943291625,"stage":"provider.decoder_layers_begin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"elapsed_ms":1.0807914659380913},"monotonic":1599950.9443746251,"stage":"provider.decoder_layers_end","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599950.9456229585,"stage":"provider.decode_begin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.2597373752,"stage":"provider.decode_returned","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"cancelled":0,"elapsed_ms":1314.2159166745842},"monotonic":1599952.2598482084,"stage":"provider.decode_settled","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.337651375,"stage":"command.admissionLocal","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"characters":16},"monotonic":1599952.3511089585,"stage":"final","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.3388442502,"stage":"admitted","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"characters":16},"monotonic":1599952.3518125417,"stage":"final","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.3524402501,"stage":"capture_final","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.3527037085,"stage":"command.localBegin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.3562333751,"stage":"command.coordinatorBegin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.3613515,"stage":"command.keyBegin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.3621282501,"stage":"command.keyEnd","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.3622919167,"stage":"command.gazeBegin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.4036377918,"stage":"command.gazeEnd","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.4042685835,"stage":"command.referentBegin","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.4051201667,"stage":"command.referentEnd","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.4067355834,"stage":"command.workCreated","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.40775975,"stage":"command.localEnd","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{"Release to local final":1347.3553331568837},"monotonic":1599952.4094611667,"stage":"measurement","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.5509265834,"stage":"command.executorBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.5523340418,"stage":"command.resolveBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.4078912917,"stage":"finalization.admitted","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.5585180419,"stage":"command.resolveEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.5762110418,"stage":"command.nativeActivationBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.59270725,"stage":"command.nativeActivationEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.593357,"stage":"command.nativeForegroundReadBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.5970249583,"stage":"command.nativeForegroundReadEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.7548132085,"stage":"command.nativeForegroundReadBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.75650325,"stage":"command.nativeForegroundReadEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.9552161668,"stage":"command.nativeForegroundReadBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.9623712918,"stage":"command.nativeForegroundReadEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599952.9678432918,"stage":"command.driverBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","tool":"listWindows","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599953.9261912918,"stage":"command.driverEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","tool":"listWindows","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599954.3571056668,"stage":"command.driverBegin","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","tool":"foreground","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599954.7808288333,"stage":"command.driverEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","tool":"foreground","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599954.7955386667,"stage":"terminal.settled","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599954.8035436668,"stage":"command.executorEnd","task":"C8E53E61-5752-4AEE-81EC-A6CE030F5DD5","turn":"EC6128FB-DC63-4765-8720-06DBBAF5224F"}
+{"kind":"event","metrics":{},"monotonic":1599955.0948310418,"stage":"opened","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599955.0969044585,"stage":"fn_down","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"Input admission":366.52845842763782},"monotonic":1599955.4620614168,"stage":"measurement","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599955.4637644584,"stage":"capture_started","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"Capture call to first audio":363.03683323785663},"monotonic":1599955.5120557083,"stage":"measurement","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"characters":3},"monotonic":1599957.6055826251,"stage":"partial","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"characters":9},"monotonic":1599957.8412510834,"stage":"partial","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"characters":14},"monotonic":1599957.8901396669,"stage":"partial","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599957.9232808335,"stage":"fn_up","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599957.9239107084,"stage":"released","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"Captured audio duration":2787.9166666666683},"monotonic":1599957.9263292085,"stage":"measurement","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"converted_audio_ms":2787.9166666666661,"emitted_frames":29},"monotonic":1599957.9270800001,"stage":"capture.closed","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"Release context refresh":3.5389582626521587},"monotonic":1599957.9547377084,"stage":"measurement","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"accepted_frames":29,"before_drain_ms":29.760458273813128,"budget_ms":2036.3749999999995,"captured_seconds":2.7879166666666659},"monotonic":1599957.9559412918,"stage":"finalization.begin","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599957.9563716669,"stage":"finalization.drain_begin","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"elapsed_ms":20.024916622787714},"monotonic":1599957.9763990834,"stage":"finalization.drain_end","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"generation":2,"largest_partial_input":1643,"native_partials":1,"partial_tail_pending":1,"process_activity":1,"samples":44618},"monotonic":1599957.9798217085,"stage":"provider.finish_enter","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599957.9798499166,"stage":"provider.decoder_layers_begin","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"elapsed_ms":0.027166679501533508},"monotonic":1599957.9798778335,"stage":"provider.decoder_layers_end","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599957.9807204583,"stage":"provider.decode_begin","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599958.3842808334,"stage":"provider.decode_returned","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"cancelled":0,"elapsed_ms":403.59970834106207},"monotonic":1599958.38432325,"stage":"provider.decode_settled","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599958.4179860002,"stage":"command.admissionRemote","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"characters":19},"monotonic":1599958.4187491252,"stage":"final","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599958.4184879584,"stage":"admitted","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"characters":19},"monotonic":1599958.4194731251,"stage":"final","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599958.4207705001,"stage":"capture_final","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599958.4248083751,"stage":"semantic.begin","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599958.4213947917,"stage":"finalization.admitted","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"fresh_context_ms":24.034208385273814,"infer_ms":474.94545835070312,"interpret_ms":479.6194585505873,"reserve_ms":0},"monotonic":1599958.9469894168,"stage":"semantic.no_match","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{"Release to local final":486.35987495072186},"monotonic":1599960.5507559585,"stage":"measurement","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1599961.8302655418,"stage":"terminal.done","turn":"011D2378-5A57-4033-B83B-75B0FA9A7D27"}
+{"kind":"event","metrics":{},"monotonic":1600027.5260655,"stage":"opened","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600027.5284792501,"stage":"fn_down","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"Input admission":62.01258348301053},"monotonic":1600027.5882368751,"stage":"measurement","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600027.5885346667,"stage":"capture_started","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"Capture call to first audio":63.670083414763212},"monotonic":1600027.6295303334,"stage":"measurement","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"characters":2},"monotonic":1600029.0077011667,"stage":"partial","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"characters":5},"monotonic":1600029.0294982917,"stage":"partial","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"characters":10},"monotonic":1600029.3065414585,"stage":"partial","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600029.4399163334,"stage":"fn_up","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600029.4403175418,"stage":"released","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"Captured audio duration":1855.7291666666674},"monotonic":1600029.4409152085,"stage":"measurement","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"converted_audio_ms":1855.7500000000002,"emitted_frames":20},"monotonic":1600029.4410895417,"stage":"capture.closed","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"characters":13},"monotonic":1600029.4485967502,"stage":"partial","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"Release context refresh":0.89020817540585995},"monotonic":1600029.4514879168,"stage":"measurement","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"accepted_frames":20,"before_drain_ms":11.00325002335012,"budget_ms":2000,"captured_seconds":1.8557500000000002},"monotonic":1600029.4518449584,"stage":"finalization.begin","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600029.4519262083,"stage":"finalization.drain_begin","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"elapsed_ms":1.7565833404660225},"monotonic":1600029.4536845835,"stage":"finalization.drain_end","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"generation":3,"largest_partial_input":1643,"native_partials":0,"partial_tail_pending":0,"process_activity":1,"samples":29699},"monotonic":1600029.4539548333,"stage":"provider.finish_enter","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600029.4539642085,"stage":"provider.decoder_layers_begin","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"elapsed_ms":0.032291747629642487},"monotonic":1600029.4539968751,"stage":"provider.decoder_layers_end","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600029.4542624585,"stage":"provider.decode_begin","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.3192380834,"stage":"provider.decode_returned","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"cancelled":0,"elapsed_ms":865.18416670151055},"monotonic":1600030.3194497917,"stage":"provider.decode_settled","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.32813675,"stage":"command.admissionClarify","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"characters":16},"monotonic":1600030.3315030835,"stage":"final","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.3284732918,"stage":"admitted","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.3317887085,"stage":"command.ungroundedTarget","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"characters":16},"monotonic":1600030.3319310001,"stage":"final","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.3321529585,"stage":"capture_final","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.3343903751,"stage":"semantic.begin","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.332287,"stage":"finalization.admitted","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{"action_confidence":0.98999999999999999,"fresh_context_ms":18.241333309561014,"infer_ms":122.5015833042562,"interpret_ms":127.93824984692037,"reserve_ms":0,"target_confidence":0.98999999999999999},"monotonic":1600030.4968052919,"stage":"semantic.proposal","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.5005900001,"stage":"command.workCreated","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.5011956668,"stage":"semantic.accepted","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.5631436668,"stage":"command.executorBegin","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.565161125,"stage":"command.resolveBegin","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.5667154584,"stage":"command.resolveEnd","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.5695976669,"stage":"command.nativeActivationBegin","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.5722893751,"stage":"command.nativeActivationEnd","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.572478625,"stage":"command.nativeForegroundReadBegin","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.572838,"stage":"command.nativeForegroundReadEnd","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.725315375,"stage":"command.nativeForegroundReadBegin","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.7317324167,"stage":"command.nativeForegroundReadEnd","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.8962189585,"stage":"command.nativeForegroundReadBegin","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.90003925,"stage":"command.nativeForegroundReadEnd","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.9003425834,"stage":"command.nativeForegroundVerified","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.90164375,"stage":"terminal.settled","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600030.9036502917,"stage":"command.executorEnd","task":"6C1441C3-CF19-4254-B19C-8D829BE48783","turn":"B377EB1C-7E3A-4F0F-B5F1-1AFD58CF162C"}
+{"kind":"event","metrics":{},"monotonic":1600033.121117,"stage":"opened","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600033.1220545,"stage":"fn_down","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"Input admission":51.883541746065021},"monotonic":1600033.1734460834,"stage":"measurement","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600033.1738442085,"stage":"capture_started","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"Capture call to first audio":68.636666750535369},"monotonic":1600033.2148570002,"stage":"measurement","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"characters":6},"monotonic":1600034.2208380001,"stage":"partial","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"characters":11},"monotonic":1600034.3108914169,"stage":"partial","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600034.7906412918,"stage":"fn_up","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600034.7909592085,"stage":"released","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"Captured audio duration":1660.5833333333337},"monotonic":1600034.7918548335,"stage":"measurement","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"converted_audio_ms":1660.5833333333335,"emitted_frames":18},"monotonic":1600034.7920026251,"stage":"capture.closed","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"Release context refresh":1.4083334244787693},"monotonic":1600034.8013223335,"stage":"measurement","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"accepted_frames":18,"before_drain_ms":10.528541868552566,"budget_ms":2000,"captured_seconds":1.6605833333333335},"monotonic":1600034.801706125,"stage":"finalization.begin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600034.8017849585,"stage":"finalization.drain_begin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"elapsed_ms":2.2058750037103891},"monotonic":1600034.8039930835,"stage":"finalization.drain_end","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"generation":4,"largest_partial_input":1643,"native_partials":1,"partial_tail_pending":1,"process_activity":1,"samples":26576},"monotonic":1600034.8042850418,"stage":"provider.finish_enter","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600034.8042945,"stage":"provider.decoder_layers_begin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"elapsed_ms":0.41383341886103153},"monotonic":1600034.8047092918,"stage":"provider.decoder_layers_end","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600034.8050888751,"stage":"provider.decode_begin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0098297084,"stage":"provider.decode_returned","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"cancelled":0,"elapsed_ms":204.76383343338966},"monotonic":1600035.0098543752,"stage":"provider.decode_settled","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0158515417,"stage":"command.admissionLocal","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"characters":12},"monotonic":1600035.0186653752,"stage":"final","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0160063335,"stage":"admitted","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"characters":12},"monotonic":1600035.0189710001,"stage":"final","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0191688335,"stage":"capture_final","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0193080835,"stage":"command.localBegin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0199226667,"stage":"command.coordinatorBegin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0204727501,"stage":"command.keyBegin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.02057025,"stage":"command.keyEnd","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0206674584,"stage":"command.gazeBegin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0253719168,"stage":"command.gazeEnd","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0256740001,"stage":"command.referentBegin","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0258242919,"stage":"command.referentEnd","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0266765,"stage":"command.workCreated","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0271297917,"stage":"command.localEnd","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{"Release to local final":219.68987514264882},"monotonic":1600035.0275045834,"stage":"measurement","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0976045418,"stage":"command.executorBegin","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0992702919,"stage":"command.resolveBegin","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.1008840001,"stage":"command.resolveEnd","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.0272365834,"stage":"finalization.admitted","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.1124652084,"stage":"command.driverBegin","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","tool":"listApps","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.3994337502,"stage":"command.driverEnd","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","tool":"listApps","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.4084066667,"stage":"command.driverBegin","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","tool":"listWindows","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.4641825834,"stage":"command.driverEnd","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","tool":"listWindows","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.472829625,"stage":"command.driverBegin","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","tool":"other","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.5256347917,"stage":"command.driverFailed","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","tool":"other","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.5461137919,"stage":"terminal.settled","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600035.5516051669,"stage":"command.executorEnd","task":"29668BCE-742F-45A7-A9CB-DF5B47046445","turn":"656FA76B-C271-489C-BCA0-67C51F4F4956"}
+{"kind":"event","metrics":{},"monotonic":1600043.673570625,"stage":"opened","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600043.6788401667,"stage":"fn_down","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"Input admission":230.40883336216211},"monotonic":1600043.9042253334,"stage":"measurement","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600043.9054410835,"stage":"capture_started","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"Capture call to first audio":228.27708348631859},"monotonic":1600043.9469507502,"stage":"measurement","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"characters":6},"monotonic":1600045.1864145417,"stage":"partial","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"characters":11},"monotonic":1600045.3040003334,"stage":"partial","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600045.440315125,"stage":"fn_up","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600045.4408289168,"stage":"released","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"Captured audio duration":1700.0000000000005},"monotonic":1600045.4430313751,"stage":"measurement","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"converted_audio_ms":1700,"emitted_frames":18},"monotonic":1600045.4437994584,"stage":"capture.closed","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"Release context refresh":1.1973334476351738},"monotonic":1600045.4570312083,"stage":"measurement","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"accepted_frames":18,"before_drain_ms":14.643375063315034,"budget_ms":2000,"captured_seconds":1.7},"monotonic":1600045.4574847918,"stage":"finalization.begin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600045.4595047501,"stage":"finalization.drain_begin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"elapsed_ms":2.5147083215415478},"monotonic":1600045.4620218335,"stage":"finalization.drain_end","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"generation":5,"largest_partial_input":1643,"native_partials":1,"partial_tail_pending":1,"process_activity":1,"samples":27206},"monotonic":1600045.4623286251,"stage":"provider.finish_enter","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600045.4623402501,"stage":"provider.decoder_layers_begin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"elapsed_ms":2.7199999894946814},"monotonic":1600045.4650624169,"stage":"provider.decoder_layers_end","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600045.4684417085,"stage":"provider.decode_begin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2283601668,"stage":"provider.decode_returned","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"cancelled":0,"elapsed_ms":759.99470823444426},"monotonic":1600046.2284412084,"stage":"provider.decode_settled","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2370499584,"stage":"command.admissionLocal","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"characters":12},"monotonic":1600046.2397046667,"stage":"final","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2373018751,"stage":"admitted","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"characters":12},"monotonic":1600046.2400737917,"stage":"final","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2403725835,"stage":"capture_final","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2405377917,"stage":"command.localBegin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2412184584,"stage":"command.coordinatorBegin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2422349167,"stage":"command.keyBegin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2423638334,"stage":"command.keyEnd","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2424665834,"stage":"command.gazeBegin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2482915001,"stage":"command.gazeEnd","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2487578751,"stage":"command.referentBegin","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2589312501,"stage":"command.referentEnd","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.260065875,"stage":"command.workCreated","task":"0A7AF364-771D-406E-9CED-D1E00787443D","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2606215419,"stage":"command.localEnd","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{"Release to local final":786.83724999427795},"monotonic":1600046.2615496668,"stage":"measurement","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.3061192501,"stage":"command.executorBegin","task":"0A7AF364-771D-406E-9CED-D1E00787443D","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.3074071668,"stage":"command.resolveBegin","task":"0A7AF364-771D-406E-9CED-D1E00787443D","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.3098600418,"stage":"command.resolveEnd","task":"0A7AF364-771D-406E-9CED-D1E00787443D","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.2607694585,"stage":"finalization.admitted","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.3238505418,"stage":"command.driverBegin","task":"0A7AF364-771D-406E-9CED-D1E00787443D","tool":"listApps","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.7277068752,"stage":"command.driverEnd","task":"0A7AF364-771D-406E-9CED-D1E00787443D","tool":"listApps","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.7344810001,"stage":"command.driverBegin","task":"0A7AF364-771D-406E-9CED-D1E00787443D","tool":"listWindows","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.828042625,"stage":"command.driverEnd","task":"0A7AF364-771D-406E-9CED-D1E00787443D","tool":"listWindows","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600046.8337750835,"stage":"command.driverBegin","task":"0A7AF364-771D-406E-9CED-D1E00787443D","tool":"other","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600047.2208273751,"stage":"command.driverEnd","task":"0A7AF364-771D-406E-9CED-D1E00787443D","tool":"other","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600047.2245929583,"stage":"terminal.settled","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600047.2290572084,"stage":"command.executorEnd","task":"0A7AF364-771D-406E-9CED-D1E00787443D","turn":"E2DF64DB-F80D-4CDD-B6A0-952858CAA882"}
+{"kind":"event","metrics":{},"monotonic":1600051.9734605001,"stage":"opened","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600051.9746977917,"stage":"fn_down","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"Input admission":271.72137494198978},"monotonic":1600052.2453639167,"stage":"measurement","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600052.2459942917,"stage":"capture_started","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"Capture call to first audio":271.17124991491437},"monotonic":1600052.2870138334,"stage":"measurement","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":4},"monotonic":1600053.0312029584,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":9},"monotonic":1600053.2314800834,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":11},"monotonic":1600053.3317055418,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":14},"monotonic":1600053.3678124167,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":19},"monotonic":1600053.7393363751,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":20},"monotonic":1600053.9144147085,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":25},"monotonic":1600054.0116875835,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":27},"monotonic":1600054.1061259585,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":30},"monotonic":1600054.2164884584,"stage":"partial","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.3139547084,"stage":"fn_up","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.3144575835,"stage":"released","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"Captured audio duration":2300.0000000000009},"monotonic":1600054.3147935835,"stage":"measurement","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"converted_audio_ms":2299.9999999999995,"emitted_frames":24},"monotonic":1600054.3149165418,"stage":"capture.closed","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"Release context refresh":1.6912501305341721},"monotonic":1600054.32369875,"stage":"measurement","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"accepted_frames":24,"before_drain_ms":9.3001665081828833,"budget_ms":2000,"captured_seconds":2.2999999999999994},"monotonic":1600054.324009625,"stage":"finalization.begin","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.3240786667,"stage":"finalization.drain_begin","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"elapsed_ms":3.8057083729654551},"monotonic":1600054.3278871668,"stage":"finalization.drain_end","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"generation":6,"largest_partial_input":1643,"native_partials":0,"partial_tail_pending":0,"process_activity":1,"samples":36809},"monotonic":1600054.3296523751,"stage":"provider.finish_enter","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.3296689584,"stage":"provider.decoder_layers_begin","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"elapsed_ms":0.30437507666647434},"monotonic":1600054.3299749168,"stage":"provider.decoder_layers_end","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.3302657085,"stage":"provider.decode_begin","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.5333503333,"stage":"provider.decode_returned","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"cancelled":0,"elapsed_ms":203.10908323153853},"monotonic":1600054.5333763752,"stage":"provider.decode_settled","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.5388274167,"stage":"command.admissionRemote","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":31},"monotonic":1600054.5434570834,"stage":"final","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.5389945835,"stage":"admitted","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"characters":31},"monotonic":1600054.5437792917,"stage":"final","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.5439746669,"stage":"capture_final","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.5455790418,"stage":"semantic.begin","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600054.5441222501,"stage":"finalization.admitted","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"fresh_context_ms":9.1961666475981474,"infer_ms":197.158083319664,"interpret_ms":198.66525009274483,"reserve_ms":0},"monotonic":1600054.7627281668,"stage":"semantic.no_match","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{"Release to local final":219.33858329430223},"monotonic":1600054.7760310001,"stage":"measurement","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}
+{"kind":"event","metrics":{},"monotonic":1600056.8514548752,"stage":"terminal.done","turn":"9F682BC0-C316-41E8-9517-E8C19A6A4B50"}

@@ -1,0 +1,134 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/8] Compiling JevVoice VoiceStyle.swift
+[4/14] Compiling JevVoice VoiceUserAudit.swift
+[5/14] Compiling JevVoice LatencyLedger.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+[6/14] Compiling JevVoice SettingsView.swift
+[7/14] Compiling JevVoice SpendCounter.swift
+[8/14] Compiling JevVoice ContentView.swift
+[9/14] Compiling JevVoice VoiceWindows.swift
+[10/15] Compiling JevVoice VoiceController.swift
+[11/15] Emitting module JevVoice
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:278:14: warning: no 'async' operations occur within 'await' expression
+ 276 |          },
+ 277 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 278 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 279 |          },
+ 280 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:951:13: warning: no 'async' operations occur within 'await' expression
+ 949 |         _ task: DriveTask,
+ 950 |         capturedOwner: @Sendable (DriveTask) async -> AppResolver.App? = { task in
+ 951 |             await DriveLoop.capturedForegroundApplication(application: task.application, windowID: task.windowID)
+     |             `- warning: no 'async' operations occur within 'await' expression
+ 952 |         }
+ 953 |     ) async -> (app: AppResolver.App?, matches: [AppResolver.App]) {
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1630:13: warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+1628 |     struct DriveCaptureSource: CaptureSource {
+1629 |         typealias ImageCall = @Sendable (String, [String: JSONValue]) async throws -> CuaToolResult
+1630 |         let observe: Call
+     |             |- warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+     |             `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+1631 |         let window: WindowRef
+1632 |         let session: String
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:101:90: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+ 99 | 
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+    |                                                                                          `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:102:94: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+    |                                                                                              `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+104 |         self.configuration = configuration
+[12/16] Compiling JevVoice main.swift
+[13/16] Compiling JevVoice VoiceTaskCoordinator.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift:1397:41: warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1395 |                 return try await self.observedDriverCall(tool, args, turn: traceTurn, work: traceWork, readOnly: true)
+1396 |             },
+1397 |             scopedCall: imageClient.map { _ in
+     |                                         `- warning: converting non-Sendable function value to '@Sendable (String, [String : JSONValue], CuaResultOrigin?) async throws -> CuaToolResult' may introduce data races
+1398 |                 { [weak self] tool, args, origin in
+1399 |                     guard let self else { throw DriverConnectionError.closed }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:278:14: warning: no 'async' operations occur within 'await' expression
+ 276 |          },
+ 277 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 278 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 279 |          },
+ 280 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+[13/18] Write Objects.LinkFileList
+[14/18] Linking JevVoice
+[15/18] Applying JevVoice
+[17/24] Compiling JevVoiceAppTests VoiceTurnEvidenceTests.swift
+[18/24] Compiling JevVoiceAppTests VoiceLaneAuditTests.swift
+[19/24] Compiling JevVoiceAppTests RealtimeVoiceLaneTests.swift
+[20/24] Compiling JevVoiceAppTests VoiceSemanticTests.swift
+[21/24] Compiling JevVoiceAppTests LocalSpeechTests.swift
+[22/24] Emitting module JevVoiceAppTests
+[22/24] Write Objects.LinkFileList
+[23/24] Linking JevVoicePackageTests
+Build complete! (17.77s)
+Test Suite 'Selected tests' started at 2026-11-15 21:29:40.758.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 21:29:40.764.
+Test Suite 'VoiceLaneAuditTests' started at 2026-11-15 21:29:40.764.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1OldWorkSettlementPreservesNewCaptureAndRecordsItsOwnOutcome]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1OldWorkSettlementPreservesNewCaptureAndRecordsItsOwnOutcome]' passed (0.421 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1SuccessfulWorkCompletesAfterReplyButClarificationDoesNotClaimSuccess]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1SuccessfulWorkCompletesAfterReplyButClarificationDoesNotClaimSuccess]' passed (0.216 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1TurnEndWaitsForOwnedWorkAndShowsBlockedOutcome]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1TurnEndWaitsForOwnedWorkAndShowsBlockedOutcome]' passed (0.116 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1UnsuccessfulOwnedWorkNeverCompletesOnTurnEnd]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1UnsuccessfulOwnedWorkNeverCompletesOnTurnEnd]' passed (0.756 seconds).
+Test Suite 'VoiceLaneAuditTests' passed at 2026-11-15 21:29:42.273.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.508 (1.509) seconds
+Test Suite 'JevVoicePackageTests.xctest' passed at 2026-11-15 21:29:42.273.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.508 (1.509) seconds
+Test Suite 'Selected tests' passed at 2026-11-15 21:29:42.274.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.508 (1.515) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+verification lane green

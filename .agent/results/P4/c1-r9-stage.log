@@ -1,0 +1,2 @@
+{"receipt": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-final-r9-stage.json", "app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-kkhv9b4a/Jev Voice.app", "binary_sha256": "dc79dbf4b805456e139e016b59fa427a15b265e12d53ded7a1d450a4614f1f25", "strict_signature": true, "installed": false, "driver_matches_rollback": false}
+verification lane green

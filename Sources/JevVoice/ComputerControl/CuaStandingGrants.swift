@@ -33,6 +33,12 @@ enum CuaStandingGrants {
     /// `invoke_menu` may briefly focus a non-frontmost window (the driver
     /// restores focus afterward). Granted per bundle: trusting Chrome's menus
     /// does not authorize focusing unrelated apps.
+    ///
+    /// Process-wide by design: the key lives in the shared UserDefaults
+    /// domain, so the agent drive children (the same binary under
+    /// `--mcp-stdio`) read the same answer the voice path wrote. That is
+    /// the intent — the consent is "Jev may borrow focus to reach this
+    /// app's menus", not which process asked.
     static func menuFocus(bundle: String) -> Bool {
         UserDefaults.standard.bool(forKey: menuFocusPrefix + bundle)
     }

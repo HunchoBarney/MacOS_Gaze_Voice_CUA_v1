@@ -1,0 +1,1690 @@
+
+
+SafeGround: Know When to Trust GUI Grounding Models via Uncertainty Calibration
+
+Skip to main content
+
+Report GitHub Issue
+
+ ×
+
+ Title:
+
+Content selection saved. Describe the issue below:
+
+ Description:
+
+ Submit without GitHub
+ Submit in GitHub
+
+ Why HTML?
+
+ Report Issue
+
+ Back to Abstract
+
+ Download PDF
+
+ Contents
+
+ Reading mode
+
+ Colour theme
+
+Abstract
+
+1 Introduction
+
+2 Related Work
+
+2.1 GUI Grounding
+
+2.2 Uncertainty Estimation
+
+2.3 Learn then Test Calibration
+
+3 Methodology
+
+3.1 Problem Formulation and Notations
+
+3.2 Method Overview
+
+3.3 Uncertainty Quantification
+
+Sampling-Based Spatial Distribution Construction
+
+Uncertainty Measurement 1. Top-Candidate Ambiguity (TA).
+
+Uncertainty Measurement 2. Informational Dispersion (IE).
+
+Uncertainty Measurement 3. Concentration Deficit (CD).
+
+Combined Uncertainty Score.
+
+3.4 Uncertainty Calibration for Selective Prediction
+
+Cascading Inference.
+
+4 Experiment
+
+4.1 Experimental Settings
+
+Models and Dataset
+
+Evaluation Metrics
+
+Hyperparameters
+
+4.2 Evaluation of Uncertainty Estimation
+
+4.3 Selective Prediction with FDR Guarantees
+
+FDR Control Guarantee
+
+Power Comparison
+
+4.4 Cascading Inference
+
+4.5 Sensitivity Analyses
+
+Sampling Efficiency
+
+Ablation of Uncertainty Components
+
+Sensitivity to Calibration-Test Split Ratio
+
+5 Conclusion
+
+References
+
+A Proofs
+
+B Details of Experimental Settings
+
+B.1 Dataset
+
+ScreenSpot-Pro
+
+B.2 Evaluation Metrics
+
+Area Under Receiver Operating Characteristic (AUROC)
+
+Area Under Accuracy-Rejection Curve (AUARC)
+
+False Discovery Rate (FDR)
+
+Power
+
+B.3 Spatial Region Construction
+
+Region Extraction
+
+Region Scoring
+
+C Threshold Calibration with Finite-Sample Guarantees
+
+D Prompt Template
+
+E Case Study
+
+F Additional Experimental Results
+
+Sensitivity to Sampling Temperature.
+
+Sensitivity to Uncertainty Weighting.
+
+ License: arXiv.org perpetual non-exclusive license
+
+arXiv:2602.02419v2 [cs.AI] 03 Feb 2026
+
+ SafeGround: Know When to Trust GUI Grounding Models 
+
+via Uncertainty Calibration
+
+Qingni Wang
+
+Affiliation: University of California, Santa Barbara
+
+Affiliation: University of California, Santa Cruz
+
+Yue Fan
+
+Affiliation: University of California, Santa Cruz
+
+Xin Eric Wang
+
+Affiliation: University of California, Santa Barbara
+
+Correspondence to: ericxwang@ucsb.edu
+
+Abstract
+
+Graphical User Interface (GUI) grounding aims to translate natural language instructions into executable screen coordinates, enabling automated GUI interaction. Nevertheless, incorrect grounding can result in costly, hard-to-reverse actions (e.g., erroneous payment approvals), raising concerns about model reliability.
+In this paper, we introduce SafeGround, an uncertainty-aware framework for GUI grounding models that enables risk-aware predictions through calibrations before testing.
+SafeGround leverages a distribution-aware uncertainty quantification method to capture the spatial dispersion of stochastic samples from outputs of any given model. Then, through the calibration process, SafeGround derives a test-time decision threshold with statistically guaranteed false discovery rate (FDR) control.
+We apply SafeGround on multiple GUI grounding models for the challenging ScreenSpot-Pro benchmark.
+Experimental results show that our uncertainty measure consistently outperforms existing baselines in distinguishing correct from incorrect predictions, while the calibrated threshold reliably enables rigorous risk control and potentials of substantial system-level accuracy improvements.
+Across multiple GUI grounding models, SafeGround improves system-level accuracy by up to 5.38% percentage points over Gemini-only inference.
+
+††affiliationnotice: Equal contribution
+
+Figure 1: 
+While existing models may commit costly errors on hard-to-undo actions (e.g., checkout), SafeGround detects high uncertainty and defers the decision via cascading. This mechanism explicitly limits the risk of erroneous actions to a user-specified tolerance.
+
+1 Introduction
+
+Figure 2: 
+Overview of SafeGround.
+Given a GUI input, the model performs multiple stochastic grounding samples to estimate predictive uncertainty.
+An uncertainty threshold τ\tau is calibrated on a held-out set under a user-specified risk level (i.e, the maximum error rate).
+At test time, predictions with uncertainty ≤τ\leq\tau are executed directly, while high-uncertainty cases are abstained or cascaded.
+Low-uncertainty cases exhibit concentrated region scores, low entropy, and low variance, whereas high-uncertainty cases show dispersed predictions and trigger safety-aware deferral.
+
+Graphical User Interface (GUI) grounding is a critical component for autonomous GUI agents, enabling vision-language models (VLMs) to translate natural language instructions into executable screen coordinates (Nguyen et al., 2025; Cheng et al., 2024). Recent advances have substantially improved grounding accuracy across diverse GUI environments, making it increasingly feasible to deploy such agents in real-world applications (Fan et al., 2025; Hong et al., 2024).
+However, in practical GUI interactions, a single incorrect grounding can trigger costly and hard-to-reverse actions, including erroneous payment approvals or irreversible system configurations (Zhang et al., 2025).
+Despite these risks, existing GUI grounding models typically output only point predictions, offering no indication of when a prediction is unreliable or should be deferred (Gawlikowski et al., 2022; Hu et al., 2023) as shown in Figure 1.
+
+The aforementioned limitation of existing GUI grounding models motivates the incorporation of uncertainty quantification (UQ) to enable safer decision-making. However, existing UQ techniques are poorly suited for GUI grounding and remain largely underexplored in this setting (Zhang et al., 2025). In particular, prior approaches suffer from several key limitations. (1) Uncertainty derived from model probabilities or logits (Hendrycks and Gimpel, 2017) assumes access to internal model states, making it infeasible for black-box vision-language models commonly used in GUI agents (Ye et al., 2024; Wang et al., 2025b).
+(2) Verbalized self-assessment (Kadavath et al., 2022) relies on strong instruction-following behavior and often fails when models do not explicitly reason about confidence.
+(3) Approaches that estimate uncertainty using ground-truth regions, such as Zhang et al. (2025), require annotation and cannot be applied at inference time.
+(4) Existing methods focus on producing uncertainty scores alone, without specifying how predictions should be acted upon at deployment time (e.g., whether to accept, defer, or abstain) despite this decision being critical in high-stakes GUI interactions (Geifman and El-Yaniv, 2017; Wang et al., 2025c).
+Collectively, these limitations expose a clear gap between existing UQ approaches and the practical requirements of GUI grounding, where uncertainty must be reliable under limited model access and without test-time supervision (Lin et al., 2023).
+
+To address these challenges, we introduce SafeGround, an uncertainty-aware framework that enables risk-aware predictions for existing state-of-the-art GUI grounding models, without requiring access to model internals.
+Concretely, as shown in Figure 2, SafeGround first quantifies the predictive uncertainty of grounding outputs from the spatial distribution of multiple stochastic grounding samples from the same model.
+Then, given the model outputs with estimated uncertainty, we adopt a Learn Then Test (LTT) calibration paradigm to select a decision threshold that rigorously controls the false discovery rate (FDR) of accepted grounding predictions. This calibration procedure provides finite-sample guarantees: with high probability, the proportion of incorrect predictions among all accepted actions does not exceed a user-specified risk level α\alpha.
+At inference time, SafeGround enables a principled selective prediction mechanism. Predictions deemed reliable under the calibrated threshold are executed directly, while high-uncertainty cases are abstained from or deferred to stronger models for further processing.
+Furthermore, with the selective prediction, we realized the cascading inference, where even when the primary model’s base accuracy is limited, we can further leverage external resource to aid the prediction, achieving strong system-level accurarcy.
+
+We evaluate SafeGround on the challenging ScreenSpot-Pro benchmark across multiple state-of-the-art GUI grounding models. Experimental results demonstrate that our proposed uncertainty measure consistently outperforms existing baselines in distinguishing correct from incorrect predictions. Especially, SafeGround achieves reliable FDR control in practice and significantly improves overall system accuracy through selective deferral, validating its effectiveness for high-stakes GUI interaction scenarios. Empirically, SafeGround demonstrates clear system-level accuracy gains across different risk levels. For instance, on ScreenSpot-Pro, uncertainty-aware cascading with Holo1.5-7B achieves 58.66% accuracy at risk level 0.34, improving over Gemini-only inference by 5.38% points.
+Our contributions can be summarized as follows:
+
+• 
+
+We propose SafeGround, the first framework for uncertainty-aware selective GUI grounding with finite-sample risk guarantees via calibration.
+
+• 
+
+We introduce distribution-aware uncertainty quantification that leverage the spatial dispersion and concentration of stochastic grounding predictions.
+
+• 
+
+We demonstrate that SafeGround with uncertainty-calibrated selective prediction enables reliable FDR control and improves system-level accuracy in cascading inference on the ScreenSpot-Pro benchmark.
+
+2 Related Work
+
+2.1 GUI Grounding
+
+GUI grounding maps natural language instructions to actionable interface elements or click locations in graphical user interfaces (Nguyen et al., 2025; Fan et al., 2025). Most existing GUI grounding methods formulate the problem as a text-based coordinate prediction task, where models generate point locations conditioned on the input screenshot and instruction (Chen et al., 2023; Wang et al., 2024a; Qin et al., 2025b).
+Recently, motivated by how humans interact with digital interfaces, GUI-Actor introduces an attention-based formulation that aggregates spatial evidence into a single grounding decision (Wu et al., 2025a). These methods have achieved strong empirical accuracy across diverse GUI environments. However, most existing approaches produce deterministic point predictions and do not explicitly model predictive uncertainty, limiting their ability to assess decision reliability or defer actions under high uncertainty.
+
+2.2 Uncertainty Estimation
+
+Uncertainty estimation is widely used to support reliable decision making in AI systems by quantifying the confidence of model predictions (Liu et al., 2025). In large language models, uncertainty has also been derived from probabilistic measures, semantic entropy, or verbalized self-reports (Hou et al., 2025; Wang et al., 2024b; Xu et al., 2025; Kuhn et al., 2023b). In GUI grounding, uncertainty estimation remains largely underexplored. Existing GUI grounding approaches typically rely on probabilistic uncertainty or verbalized uncertainty, both of which have been shown to be systematically miscalibrated, exhibiting a mismatch between predicted confidence and actual grounding accuracy (Zhang et al., 2025). This misalignment motivates uncertainty estimation methods that rely solely on model outputs while providing more reliable signals for downstream decision-making, as considered in our work.
+
+2.3 Learn then Test Calibration
+
+Learn Then Test (LTT) is a post-hoc calibration paradigm that separates model learning from statistical risk control (Angelopoulos et al., 2022). Given a fixed predictive model, LTT frames decision making as a hypothesis testing problem over a low-dimensional decision space, and uses held-out calibration data to identify parameters that satisfy user-specified risk constraints with finite-sample guarantees. Split conformal prediction (SCP) (Angelopoulos and Bates, 2022) follows this principle by leveraging data splitting and concentration-based confidence bounds to perform valid risk estimation. Prior work builds on this paradigm to enable reliable decision making in large foundation models (Jung et al., 2025; Wang et al., 2025a; Wang et al., 2025c; Wang et al., ). Our approach also builds on the LTT paradigm and extends it to GUI grounding through uncertainty-based calibration of spatial action decisions for the first time.
+
+3 Methodology
+
+3.1 Problem Formulation and Notations
+
+Let the GUI grounding model be a function f:𝒳×𝒯→ℝ2f:\mathcal{X}\times\mathcal{T}\rightarrow\mathbb{R}^{2}, which takes a UI screenshot x∈𝒳x\in\mathcal{X} and a user instruction q∈𝒯q\in\mathcal{T} as input.
+Given an input pair (x,q)(x,q), the model predicts a coordinate y^=(u^,v^)∈ℝ2\hat{y}=(\hat{u},\hat{v})\in\mathbb{R}^{2} on the screen.
+Although the model produces a single point prediction, the ground truth for a target UI element is typically provided as a spatial region on the screen, denoted by B∗⊂ℝ2B^{*}\subset\mathbb{R}^{2}.
+A predicted coordinate is considered correct if and only if it falls within the ground-truth region, which we conclude as an admission function A:ℝ2×𝒫⁡(ℝ2)→{0,1}A:\mathbb{R}^{2}\times\mathcal{P}(\mathbb{R}^{2})\rightarrow\{0,1\} with 11 indicating a correct prediction:
+
+A⁡(y^,B∗)={1,if y^∈B∗,0,otherwise.A\big(\hat{y},B^{*}\big)=\begin{cases}1,&\text{if $\hat{y}\in B^{*}$},\\[4.0pt]
+0,&\text{otherwise.}\end{cases}
+
+In current coordinate-based GUI grounding models, predictions are deterministic and are not accompanied by explicit uncertainty or confidence estimates, which leaves the trustworthiness of model outputs largely uncharacterized, and may cause users to place unwarranted trust in incorrect predictions, without any indication of potential failure.
+
+3.2 Method Overview
+
+To address this issue, we propose SafeGround, an uncertainty-aware GUI grounding framework that can be integrated with diverse state-of-the-art GUI grounding models without requiring access to internal model states, as illustrated in Figure 2. SafeGround introduce a user-specified risk level α∈(0,1)\alpha\in(0,1) that quantifies the maximum tolerable proportion of incorrect predictions, serving as a high-level control signal for how conservatively the system should behave. The risk level α\alpha is then translated into an uncertainty threshold τ\tau through a calibration procedure. Specifically, the GUI grounding model’s predictive uncertainty, U⁡(y^(MLG))∈ℝU\!\left(\hat{y}^{(\mathrm{MLG})}\right)\in\mathbb{R} for a prediction y^(MLG)\hat{y}^{(\mathrm{MLG})}, is estimated by SafeGround through sampling multiple additional predictions from the GUI grounding model given the same input. The larger values of such uncertainty score indicate lower reliability.
+A prediction y^\hat{y} is correct if U⁡(y^)≤τU(\hat{y})\leq\tau and rejected otherwise, in which case it is deferred to a stronger model. The threshold τ\tau is chosen such that, among all admitted predictions, the fraction of incorrect ones, measured by the admission function A⁡(y^,B∗)A(\hat{y},B^{*}), is controlled below α\alpha.
+
+3.3 Uncertainty Quantification
+
+We first quantify model uncertainty by analyzing the distributional properties of the ranked region scores. Then, three complementary uncertainty measures are introduced, where they are designed to capture complementary failure modes of GUI grounding: local ambiguity among competing targets, global dispersion of belief across regions, and lack of dominant spatial concentration.
+
+Sampling-Based Spatial Distribution Construction
+
+To move beyond deterministic point predictions and capture the output distribution of GUI grounding models, we employ a Monte Carlo (Gal and Ghahramani, ) sampling strategy followed by spatial aggregation, drawing inspiration from attention-based aggregation mechanisms in (Wu et al., 2025a).
+Specifically, for each input (x,q)(x,q), we perform KK stochastic forward passes of the grounding model, generating a set of coordinates
+𝒮={y^(i)}i=1K\mathcal{S}=\{\hat{y}^{(i)}\}_{i=1}^{K}, where y^(i)∈ℝ2\hat{y}^{(i)}\in\mathbb{R}^{2}.
+
+These sampled coordinates are then projected onto a discretized screen grid to estimate a normalized local density map PP, which empirically characterizes the spatial distribution of the model’s predictions using only sampled outputs from the model.
+Intuitively, high density in a localized area indicates model consistency and thus low uncertainty.
+To establish object-level representations, we aggregate connected high-density patches in PP into disjoint regions
+ℛ={Rm}m=1M\mathcal{R}=\{R_{m}\}_{m=1}^{M} through density-based clustering.
+Each region RmR_{m} is scored by its average probability density, denoted as SmS_{m}, serving as a proxy for the likelihood that the region corresponds to the intended UI element.
+Regions are further ranked such that S(1)≥S(2)≥⋯≥S(M)S_{(1)}\geq S_{(2)}\geq\dots\geq S_{(M)}.
+More implementation details are provided in the Appendix B.3.
+
+Uncertainty Measurement 1. Top-Candidate Ambiguity (TA).
+
+To measure the distinctiveness of a certain prediction from a GUI grounding model, we compute the margin between the two leading candidates. A vanishing margin indicates that the model is uncertain between multiple plausible targets (e.g., two identical exit buttons), therefore, we propose the uncertanty score measured by top-candidate ambiguity:
+
+UT​A={1−S(1)−S(2)S(1)+ϵ,if ​M≥2max⁡(0.1,1−S(1)),otherwiseU_{TA}=\begin{cases}1-\frac{S_{(1)}-S_{(2)}}{S_{(1)}+\epsilon},&\text{if }M\geq 2\\
+\max(0.1,1-S_{(1)}),&\text{otherwise}\end{cases}
+
+(1)
+
+where ϵ\epsilon ensures numerical stability. High UT​AU_{TA} signifies localized confusion at the decision boundary.
+
+Uncertainty Measurement 2. Informational Dispersion (IE).
+
+We assess global uncertainty using the entropy of the region score distribution. To ensure a valid probabilistic interpretation, we induce a categorical distribution over the MM regions:
+
+p^i=S(i)∑j=1MS(j),\hat{p}_{i}=\frac{S_{(i)}}{\sum_{j=1}^{M}S_{(j)}},
+
+(2)
+
+and then we define the uncertainty score based on information dispersion as the normalized entropy:
+
+UIE=−1log⁡M∑i=1Mp^ilog(p^i+ϵ).U_{\text{IE}}=-\frac{1}{\log M}\sum_{i=1}^{M}\hat{p}_{i}\log(\hat{p}_{i}+\epsilon).
+
+(3)
+
+Such measurement captures the dispersion of probability mass across regions; a high UIEU_{\text{IE}} indicates that the model’s confidence is fragmented, failing to converge on a single consistent hypothesis.
+
+Uncertainty Measurement 3. Concentration Deficit (CD).
+
+While entropy assesses global disorder, we explicitly quantify the lack of focus with another uncertainty score UC​DU_{CD} by examining the quadratic concentration of the distribution:
+
+UC​D=1−∑i=1Mp^i2U_{CD}=1-\sum_{i=1}^{M}\hat{p}_{i}^{2}
+
+(4)
+
+Unlike entropy, UC​DU_{CD} is more sensitive to the dominance of the top candidates. Higher values of UC​DU_{CD} indicate a highly fragmented distribution, suggesting that the model lacks a clear spatial focus and distributes confidence across multiple interface regions.
+
+Combined Uncertainty Score.
+
+Each uncertainty score captures a distinct aspect of predictive dispersion, and no single measurement is universally dominant across all models and scenarios.
+To obtain a unified and deployment-friendly uncertainty signal, we aggregate these three scores into a single one via a fixed weighted combination:
+
+UC​O​M​(y^)=wC​D⋅UC​D+wI​E⋅UI​E+wT​A⋅UT​A.U_{COM}(\hat{y})=w_{CD}\cdot U_{CD}+w_{IE}\cdot U_{IE}+w_{TA}\cdot U_{TA}.
+
+(5)
+
+We adopt a single set of weights across all models to preserve a plug-and-play interface without model-specific tuning.
+
+3.4 Uncertainty Calibration for Selective Prediction
+
+Although the proposed uncertainty measures capture predictive uncertainty, they cannot fully distinguish between correct and incorrect predictions.
+To enable user-specified deployment, we further introduce a selective prediction mechanism by calibrating a statistically rigorous decision threshold τ\tau on the uncertainty score, such that, among all accepted predictions, the proportion of incorrect predictions does not exceed a desired level α\alpha.
+
+Following prior SCP-based frameworks, we hold out a calibration set of NN data points: 𝒟c​a​l={(xi,qi,Bi∗)}i=1N\mathcal{D}_{cal}=\{(x_{i},q_{i},B_{i}^{*})\}_{i=1}^{N}.
+For each calibration input pair (xi,qi)(x_{i},q_{i}), we produce y^i(M​L​G)\hat{y}_{i}^{(MLG)} and quantify its uncertainty score ui=U⁡(y^i(M​L​G))u_{i}=U\left(\hat{y}_{i}^{(MLG)}\right).
+Given a candidate threshold τ\tau, we obtain the number of accepted predictions ∑iN𝟏{ui≤τ}\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau\}, and the number of incorrect predictions ∑iN𝟏​{ui≤τ,A⁡(y^i(M​L​G),Bi∗)=0}\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau,A(\hat{y}_{i}^{(MLG)},B_{i}^{*})=0\}.
+We then compute the false discovery rate (FDR) on 𝒟c​a​l\mathcal{D}_{cal} under threshold τ\tau:
+
+FDRc​a​l​(τ)=∑iN𝟏​{ui≤τ,A⁡(y^i(M​L​G),Bi∗)=0}∑iN𝟏{ui≤τ}\mathrm{FDR}_{cal}(\tau)=\frac{\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau,A(\hat{y}_{i}^{(MLG)},B_{i}^{*})=0\}}{\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau\}}
+
+(6)
+
+To provide finite-sample FDR guarantees for the accepted samples at test time, we first introduce an auxiliary lemma.
+
+Lemma 3.1 (Clopper–Pearson interval (Clopper and Pearson, 1934)).
+
+Let X∼Bin⁡(n,p)X\sim\mathrm{Bin}(n,p) be the number of successes in nn i.i.d. Bernoulli trials with success probability pp.
+For any δ∈(0,1)\delta\in(0,1), define the Clopper-Pearson confidence interval
+
+[pL(X),pU(X)]=[Beta−1​(δ2,X,n−X+1),Beta−1(1−δ2;X+1,n−X)],\begin{split}\Bigl[p_{L}(X),\,p_{U}(X)\Bigr]\!=\!\Bigl[&\mathrm{Beta}^{-1}\!\left(\tfrac{\delta}{2};\,X,\,n-X+1\right),\\
+&\mathrm{Beta}^{-1}\!\left(1-\tfrac{\delta}{2};\,X+1,\,n-X\right)\Bigr]\end{split},
+
+(7)
+
+where Beta−1​(q,a,b)\mathrm{Beta}^{-1}(q;a,b) denotes the qq-quantile from a beta distribution with shape parameters aa and bb.
+Then the interval has (at least) nominal coverage:
+
+ℙ⁡(p∈[pL​(X),pU​(X)])≥1−δ.\mathbb{P}\!\left(p\in[p_{L}(X),p_{U}(X)]\right)\geq 1-\delta.
+
+(8)
+
+In our setting, X=∑iN𝟏​{ui≤τ,A⁡(y^i(M​L​G),Bi∗)=0}X=\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau,A(\hat{y}_{i}^{(MLG)},B_{i}^{*})=0\} and n=∑iN𝟏{ui≤τ}n=\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau\}.
+Since we focus on controlling the upper tail of the system FDR R⁡(τ)R(\tau) (thereby constraining test-time FDR), based on Lemma 3.1, we construct a high-probability upper confidence bound, FDR^1−δu​p​p​e​r​(τ)\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau), for R⁡(τ)R(\tau), using its empirical estimate from the calibration data:
+
+FDR^1−δu​p​p​e​r​(τ)=Beta⁡(1−δ,X+1,n−X)=sup{R:Pr⁡(Bin⁡(n,R)≤X)≥δ},\begin{split}\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)&=\mathrm{Beta}\!\left(1-\delta;\,X+1,\,n-X\right)\\
+&=\sup\{R:\Pr(\mathrm{Bin}(n,R)\leq X)\geq\delta\}\end{split},
+
+(9)
+
+where FDR^1−δu​p​p​e​r\hat{\mathrm{FDR}}_{1-\delta}^{upper} guarantees
+
+Pr⁡(R⁡(τ)≤FDR^1−δu​p​p​e​r​(τ))≥1−δ.\Pr\big(R(\tau)\leq\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)\big)\geq 1-\delta.
+
+(10)
+
+Essentially, FDR^1−δu​p​p​e​r​(τ)\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau) can be interpreted as the largest plausible value that the system FDR could take, given that an extremely small FDRc​a​l​(τ)\mathrm{FDR}_{cal}(\tau) is observed on the calibration set at significance level δ\delta.
+If the true system FDR were to exceed this bound, then observing FDRc​a​l​(τ)\mathrm{FDR}_{cal}(\tau) in a single realization would be statistically impossible at the level δ\delta.
+A formal proof of Eq. (10) is provided in Appendix A.
+
+To rigorously constrain test-time FDR, we calibrate τ\tau such that FDR^1−δu​p​p​e​r​(τ)\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau) does not exceed the risk level α\alpha:
+
+τ^=sup{τ:FDR^1−δu​p​p​e​r​(τ)≤α}\hat{\tau}=\sup\{\tau:\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)\leq\alpha\}
+
+(11)
+
+The choice of τ^\hat{\tau} maximizes the acceptance of model predictions (or minimizes the abstention rate), while maintaining marginal FDR control.
+For a test sample (xt​e​s​t,qt​e​s​t,Bt​e​s​t∗)(x_{test},q_{test},B_{test}^{*}) with the model prediction y^t​e​s​t(M​L​G)\hat{y}_{test}^{(MLG)} and estimated uncertainty score ut​e​s​t=U⁡(y^t​e​s​t(M​L​G))u_{test}=U\left(\hat{y}_{test}^{(MLG)}\right), by applying the calibrated decision threshold τ^\hat{\tau}, we establish the following guarantee
+
+Pr⁡(Pr⁡(A⁡(y^t​e​s​t(M​L​G),Bt​e​s​t∗)=0∣ut​e​s​t≤τ^)≤α)≥1−δ.\Pr\left(\Pr\left(A\big(\hat{y}_{test}^{(MLG)},B^{*}_{test}\big)=0\mid u_{test}\leq\hat{\tau}\right)\leq\alpha\right)\geq 1-\delta.
+
+(12)
+
+Cascading Inference.
+
+At inference time, for each test input (xt​e​s​t,qt​e​s​t)(x_{test},q_{test}), we first estimate the model uncertainty ut​e​s​tu_{test}, and then perform selective prediction and escalating:
+
+• 
+
+If ut​e​s​t≤τ^u_{test}\leq\hat{\tau}, we define the sample as “safe” and accept the prediction of the primary model.
+
+• 
+
+If ut​e​s​t>τ^u_{test}>\hat{\tau}, we flag the sample as “risky” and escalate the input to a stronger model to enhance performance.
+
+4 Experiment
+
+4.1 Experimental Settings
+
+Models and Dataset
+
+We conduct our experiments over 6 GUI-grounding models, including Holo1.5 (Company, 2025), GUI-Actor (Wu et al., 2025b), UI-TARS-1.5 (Qin et al., 2025a), GTA1 (Yang et al., 2025): Holo1.5-3B, Holo1.5-7B, GUI-Actor-2VL-7B, GUI-Actor-2.5VL-7B, UI-TARS-1.5-7B and GTA1-7B.
+To assess reliability under high-stakes scenarios, we conduct all experiments on the challenging ScreenSpot-Pro (Li et al., 2025) benchmark. Additional dataset details are provided in the Appendix B.1.
+
+Evaluation Metrics
+
+To comprehensively evaluate both the discriminative ability of UQ methods and the reliability and effectiveness of SafeGround, we adopt four complementary metrics: Area Under Receiver Operating Characteristic (AUROC), Area Under Accuracy-Rejection Curve (AUARC), FDR, and power (Lin et al., 2024; Wang et al., 2025c). AUROC measures the ability of uncertainty estimates to distinguish correct from incorrect predictions, while AUARC evaluates whether prediction accuracy improves as high-uncertainty samples are progressively rejected. FDR quantifies the proportion of incorrect predictions among the accepted samples.
+Power measures the proportion of correct samples that are retained after uncertainty-based selection, relative to the total number of correct samples. More details about the metrics can be found in Appendix B.2.
+
+Hyperparameters
+
+For uncertainty estimation, we sample each input 10 times with the decoding temperature set to 1.0 to compute the corresponding UQ score. The most likely generation y^i(MLG)\hat{y}_{i}^{(\mathrm{MLG})} is obtained by uniformly sampling one output from the generated candidates.
+Specifically, when computing UQ scores, we partition the input into patches with a patch size of 14 to obtain region-level scores SiS_{i} for uncertainty estimation.
+We repeat the random calibration–test split 100 times and report the mean and standard deviation (mean±\pmstd) over all runs.
+All confidence bounds are constructed at a significance level of δ=0.05\delta=0.05.
+For the combined uncertainty score UCOMU_{\mathrm{COM}}, we use a fixed weighting scheme (wC​D,wI​E,wT​A)=(0.6,0.2,0.2)(w_{CD},w_{IE},w_{TA})=(0.6,0.2,0.2) across all models.
+
+4.2 Evaluation of Uncertainty Estimation
+
+Following prior work (Kuhn et al., 2023a; Band et al., 2022), we evaluate the quality of uncertainty estimates using AUROC and AUARC, which measure the discriminative ability of uncertainty scores and their effectiveness for selective prediction, respectively. We compare our distribution-aware uncertainty with the probabilistic confidence (PC) baseline, defined as one minus the average token probability (Pouget et al., 2016).
+
+Table 2 reports AUROC results across six GUI grounding models.
+When PC is available, our method consistently achieves higher AUROC.
+, and on Holo1.5-7B from 0.6983 to 0.7526.
+For models where PC is not directly applicable (e.g., GUI-Actor variants), our method still attains strong AUROC values (up to 0.8155), demonstrating robust error discrimination under limited model access.
+Overall, these results suggest that modeling the spatial distribution of grounding predictions yields more informative uncertainty signals than token-level confidence alone.
+
+We further evaluate uncertainty quality using AUARC, which captures accuracy gains as high uncertainty predictions are progressively rejected.
+As shown in Table 3, our method consistently outperforms baselines across models.
+For example, on Holo1.5-3B, AUARC improves from 0.6444 to 0.6576 compared to PC.
+These results indicate that our uncertainty estimates are particularly effective for guiding selective prediction decisions.
+
+Figure 3: 
+Test-time FDR (mean±\pmstd) on the ScreenSpot-Pro dataset under different risk levels.
+
+Figure 4: Test-time power (mean) of our UCOMU_{\text{COM}} and PC baseline on the ScreenSpot-Pro dataset under different risk levels.
+
+Table 1: System-level accuracy (%\%) of uncertainty-calibrated cascading under different risk levels.
+“–” indicates infeasible risk levels.
+Parentheses show Δ\Delta over the corresponding model baseline (no cascading).
+All reported accuracies are computed on the test split, with a test ratio of 0.8.
+
+Risk Level
+
+Model
+0.34
+0.38
+0.42
+0.46
+0.50
+
+Gemini-only
+53.28
+
+Holo1.5-7B
+52.41
+
+(+SafeGround)
+58.66 (+ 6.25)
+57.87 (+ 5.46)
+55.73 (+ 3.32)
+53.20 (+ 0.79)
+52.41 (+ 0.00)
+
+Holo1.5-3B
+45.45
+
+(+SafeGround)
+53.44 (+ 7.99)
+52.73 (+ 7.28)
+52.02 (+ 6.57)
+49.25 (+ 3.80)
+47.35 (+ 1.90)
+
+UI-TARS-1.5-7B
+41.58
+
+(+SafeGround)
+53.68 (+12.10)
+54.70 (+13.12)
+53.04 (+11.46)
+50.43 (+ 8.85)
+47.91 (+ 6.33)
+
+GUI-Actor-2.5VL-7B
+45.69
+
+(+SafeGround)
+55.18 (+ 9.49)
+54.86 (+ 9.17)
+53.60 (+ 7.91)
+51.38 (+ 5.69)
+49.17 (+ 3.48)
+
+GUI-Actor-2VL-7B
+40.79
+
+(+SafeGround)
+55.18 (+14.39)
+53.28 (+12.49)
+53.99 (+13.20)
+52.96 (+12.17)
+50.67 (+9.88)
+
+GTA1-7B
+46.88
+
+(+SafeGround)
+–
+–
+–
+53.12 (+ 6.24)
+49.96 (+ 3.08)
+
+Table 2: AUROC comparison of uncertainty quantification methods across different models.
+The best results for each model are highlighted in bold. PC is the Probabilistic Confidence baseline.
+
+Model
+Uncertainty Score
+
+PC
+UCOMU_{\text{COM}} (Ours)
+
+Holo1.5-3B
+0.7576
+0.8056
+
+Holo1.5-7B
+0.6983
+0.7526
+
+GUI-Actor-2.5VL-7B
+-
+0.7793
+
+UI-TARS-1.5-7B
+0.7844
+0.8021
+
+GUI-Actor-2VL-7B
+-
+0.8155
+
+GTA1-7B
+0.6114
+0.6344
+
+Table 3: AUARC comparison of uncertainty quantification methods across different models.
+The best results for each model are highlighted in bold.
+
+Model
+Uncertainty Score
+
+Random
+PC
+UCOMU_{\text{COM}} (Ours)
+
+Holo1.5-3B
+0.4706
+0.6444
+0.6576
+
+Holo1.5-7B
+0.5345
+0.6686
+0.6705
+
+GUI-Actor-2.5VL-7B
+0.4662
+–
+0.7156
+
+GUI-Actor-2VL-7B
+0.4130
+–
+0.7166
+
+UI-TARS-1.5-7B
+0.4231
+0.6222
+0.6480
+
+GTA1-7B
+0.4769
+0.5521
+0.5511
+
+4.3 Selective Prediction with FDR Guarantees
+
+While AUROC and AUARC evaluate the quality of uncertainty estimates, reliable deployment further requires translating these scores into principled decision rules with explicit risk guarantees.
+We therefore study selective prediction under false discovery rate (FDR) control.
+
+FDR Control Guarantee
+
+For each uncertainty method and risk level, we calibrate a decision threshold on the calibration set using the Clopper–Pearson upper confidence bound (Clopper and Pearson, 1934), ensuring that the test-time FDR does not exceed the specified risk level with high probability.
+Figure 3 illustrates the empirical FDR on the test set across various user-specified risk levels (α\alpha). Notably, the evaluated risk levels start from a minimum attainable value. This arises because the intrinsic limitations of the base model and the imperfect discriminative power of uncertainty estimates may cause some incorrect predictions to receive relatively low uncertainty scores, making them inseparable from correct ones by thresholding.
+As a result, very stringent FDR requirements may be infeasible to satisfy, as no decision threshold can meet the risk constraint under such conditions (Wang et al., 2025a).
+Importantly, this does not undermine the safety guarantee, as the calibration stage explicitly determines whether a user-specified risk level is achievable prior to deployment, providing a principled fail-safe mechanism for high-stakes interactions.
+
+The results in Figure 3 show that for all tested models (e.g., Holo1.5, UI-TARS), the actual FDR is consistently bounded below the theoretical upper bound. This empirically verifies that SafeGround provides rigorous safety guarantees, ensuring that, with high probability, the error rate among accepted predictions is controlled at the specified level.
+
+Power Comparison
+
+In addition to FDR, we report power to further characterize the effectiveness of selective prediction. Higher power indicates that the uncertainty estimates more precisely identify truly risky cases, allowing the system to retain a larger set of reliable predictions without violating the target FDR. Figure 4 compares the power of our method UCOMU_{\text{COM}} versus the PC baseline under identical risk levels.
+Across the evaluated models, UCOMU_{\text{COM}} demonstrates superior robustness, particularly at strict risk levels (e.g., 0.38) where PC often fails to yield valid predictions.
+Notably, the minimum attainable risk level at which PC can satisfy the FDR constraint is consistently higher than that of UCOMU_{\text{COM}}, indicating a narrower feasible operating range for PC.
+UCOMU_{\text{COM}} consistently outperforms PC, retaining a significantly larger volume of correct responses.
+These results indicate that UCOMU_{\text{COM}} is systematically less conservative than PC: it accepts a larger fraction of correct predictions while still satisfying the same FDR constraint.
+
+4.4 Cascading Inference
+
+Finally, we study the system-level benefits of uncertainty-aware decision making in a cascaded inference setting.
+Given that powerful external models (e.g., Gemini) often incur latency and financial costs, our goal is to improve system accuracy by selectively invoking stronger models when the uncertainty of the base model exceeds a calibrated threshold.
+Specifically, we fix the calibration split ratio to 0.2 and use the remaining 80% of the data as the test set to evaluate the cascaded system.
+At test time, predictions with uncertainty scores below or equal to the threshold are handled by the primary local grounding model, while high-uncertainty cases are deferred to the stronger expert model, Gemini-3-pro (Team et al., 2023).
+
+Table 1 reports the accuracy of uncertainty-aware Gemini cascading under different risk levels. Across a wide range of feasible risk levels, the proposed approach consistently improves system accuracy over both Gemini-only inference and the base models, demonstrating the effectiveness of uncertainty-aware cascading. At relatively small risk levels, uncertainty-aware cascading yields substantial accuracy gains. For instance, with Holo1.5-7B at risk level 0.340.34, the system achieves 58.66%58.66\% accuracy, outperforming Gemini-only inference by 5.38%5.38\%.
+As the risk level increases, the improvement gradually diminishes, since fewer high-uncertainty samples are deferred to Gemini, and the system behavior approaches that of the base model.
+The effect is more pronounced for models such as Holo1.5-3B and UI-TARS-1.5-7B, where uncertainty-aware cascading improves accuracy by more than 7%7\% to 13%13\% over the base models at relatively small risk levels.
+We also report the cascading rate in Figure 5, i.e., the fraction of test samples deferred to Gemini.
+As the risk level increases, the cascading rate consistently decreases across all models, indicating that fewer uncertain cases are escalated to the expert model.
+This reflects the inherent trade-off between accuracy and expert invocation cost in uncertainty-aware cascading.
+
+Figure 5: Cascading rate (fraction of test samples deferred to Gemini) across different risk levels.
+
+Figure 6: Effect of sampling size KK on uncertainty estimation quality for UI-TARS-1.5-7B.
+
+Figure 7: Test-time FDR results of various calibration test split ratios.
+
+4.5 Sensitivity Analyses
+
+Sampling Efficiency
+
+We investigate the trade-off between computational cost and estimation quality by varying the sample count KK and measuring the resulting AUROC and AUARC. As shown in Figure 6, increasing the sample size from K=5K=5 to K=10K=10 yields a improvement for both metrics, indicating that the proposed uncertainty estimates are already effective with a small number of samples. In contrast, further increasing KK from 10 to 15 leads to only marginal changes. Based on this trade-off between performance and computational cost, we set K=10K=10 as the default sampling size in all experiments.
+
+Ablation of Uncertainty Components
+
+We analyze the contribution of individual uncertainty components, UT​AU_{TA} , UI​EU_{IE}, and UC​DU_{CD}, across different GUI grounding models.
+As shown in Table 4, the most informative uncertainty cue is model-dependent.
+On GTA1, UT​AU_{TA} is the strongest single signal, whereas for GUI-Actor-2VL and Holo1.5, UC​DU_{CD} is more effective, and UT​AU_{TA} alone is insufficient.
+
+Across all models, no single component consistently dominates.
+UC​O​MU_{COM} achieves stable performance in all settings, and removing the dominant component for a given model leads to a clear drop in both AUROC and AUARC.
+This indicates that combining complementary cues yields a more robust, model-agnostic uncertainty estimate for selective prediction.
+Additional robustness analyses with respect to the uncertainty weighting are provided in the Appendix F.
+
+Table 4: 
+Ablation study of uncertainty components on GTA1, GUI-Actor-2VL, and Holo1.5 models.
+Best results within each model block are highlighted in bold.
+
+Model
+Uncertainty
+AUROC
+AUARC
+
+GTA1
+UT​AU_{TA}
+0.6228
+0.5481
+
+UI​EU_{IE}
+0.5916
+0.5390
+
+UC​DU_{CD}
+0.5917
+0.5389
+
+UC​O​MU_{COM}
+0.6344
+0.5511
+
+w/o UT​AU_{TA}
+0.5917
+0.5389
+
+GUI-Actor-2VL-7B
+UT​AU_{TA}
+0.4844
+0.4335
+
+UI​EU_{IE}
+0.7731
+0.6435
+
+UC​DU_{CD}
+0.7894
+0.6505
+
+UC​O​MU_{COM}
+0.8155
+0.7166
+
+w/o UC​DU_{CD}
+0.7987
+0.6221
+
+Holo1.5-7B
+UT​AU_{TA}
+0.6296
+0.6284
+
+UI​EU_{IE}
+0.7380
+0.6670
+
+UC​DU_{CD}
+0.7529
+0.6716
+
+UC​O​MU_{COM}
+0.7526
+0.6705
+
+w/o UC​DU_{CD}
+0.7303
+0.6483
+
+Sensitivity to Calibration-Test Split Ratio
+
+We further study the sensitivity of our method to the calibration–test split ratio when using the combined uncertainty measure UCOMU_{\text{COM}}.
+Specifically, we vary the proportion of data allocated to the calibration set while keeping the target risk level fixed, and evaluate the resulting empirical FDR on the test set.
+As shown in Figure 7, across a wide range of split ratios, the empirical FDR achieved by all three models remains consistently below the target upper bound.
+These results suggest that our approach does not rely on a carefully tuned split ratio and can be applied robustly in practical settings.
+
+5 Conclusion
+
+We presented SafeGround, an uncertainty-aware framework that enables reliable and risk controlled GUI grounding under limited model access.
+By modeling spatial uncertainty from stochastic grounding samples, SafeGround captures distributional signals that go beyond point predictions and provide effective discrimination between correct and incorrect predictions.
+Based on uncertainty estimation, we further calibrate decision thresholds with finite-sample guarantees, supporting deployment-time decision making in high-stakes GUI interactions.
+Extensive experiments demonstrate that SafeGround achieves accurate uncertainty discrimination, rigorous FDR control, and improved system-level performance through selective prediction and cascading inference. We hope this work provides a principled way for deploying GUI agents with safety guarantees.
+
+Impact Statement
+
+This paper introduces SafeGround, a framework that significantly enhances the reliability and safety of autonomous GUI agents. By providing the first principled method for uncertainty quantification in GUI grounding with finite-sample statistical guarantees, our work addresses a critical bottleneck in the real-world deployment of visual agents, the risk of high-stakes, irreversible errors (e.g., erroneous financial transactions). Beyond improving individual model reliability, the proposed selective deferral mechanism demonstrates that local models, when combined with uncertainty-aware cascading to powerful external experts, can achieve superior system-level accuracy with substantially reduced computational costs.
+This research provides a foundational step toward trustworthy human-AI interaction in digital environments, ensuring that automated systems “know when they don’t know” and make conservative decisions under ambiguous conditions.
+
+References
+
+Angelopoulos et al. (2022)
+A. N. Angelopoulos, S. Bates, E. J. Candès, M. I. Jordan, and L. Lei
+
+Learn then test: calibrating predictive algorithms to achieve risk control.
+
+External Links: 2110.01052,
+Link
+
+Cited by: §2.3.
+
+Angelopoulos and Bates (2022)
+A. N. Angelopoulos and S. Bates
+
+A gentle introduction to conformal prediction and distribution-free uncertainty quantification.
+
+External Links: 2107.07511,
+Link
+
+Cited by: §2.3.
+
+Band et al. (2022)
+N. Band, T. G. J. Rudner, Q. Feng, A. Filos, Z. Nado, M. W. Dusenberry, G. Jerfel, D. Tran, and Y. Gal
+
+Benchmarking bayesian deep learning on diabetic retinopathy detection tasks.
+
+External Links: 2211.12717,
+Link
+
+Cited by: §4.2.
+
+Chen et al. (2023)
+K. Chen, Z. Zhang, W. Zeng, R. Zhang, F. Zhu, and R. Zhao
+
+Shikra: unleashing multimodal llm’s referential dialogue magic.
+
+External Links: 2306.15195,
+Link
+
+Cited by: §2.1.
+
+Cheng et al. (2024)
+K. Cheng, Q. Sun, Y. Chu, F. Xu, L. YanTao, J. Zhang, and Z. Wu
+
+Seeclick: harnessing gui grounding for advanced visual gui agents.
+
+In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),
+
+pp. 9313–9332.
+
+Cited by: §1.
+
+Clopper and Pearson (1934)
+C. J. Clopper and E. S. Pearson
+
+The use of confidence or fiducial limits illustrated in the case of the binomial.
+
+Biometrika.
+
+Cited by: Lemma 3.1,
+§4.3.
+
+Company (2025)
+H. Company
+
+Holo1.5 - open foundation models for computer use agents.
+
+External Links: Link
+
+Cited by: Appendix F,
+§4.1.
+
+Fan et al. (2025)
+Y. Fan, H. Zhao, R. Zhang, Y. Shen, X. E. Wang, and G. Wu
+
+GUI-bee: align GUI action grounding to novel environments via autonomous exploration.
+
+In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing, C. Christodoulopoulos, T. Chakraborty, C. Rose, and V. Peng (Eds.),
+
+Suzhou, China.
+
+Cited by: §1,
+§2.1.
+
+[9]
+Y. Gal and Z. Ghahramani
+
+Dropout as a bayesian approximation: representing model uncertainty in deep learning.
+
+In Proceedings of The 33rd International Conference on Machine Learning,
+
+Cited by: §3.3.
+
+Gawlikowski et al. (2022)
+J. Gawlikowski, C. R. N. Tassi, M. Ali, J. Lee, M. Humt, J. Feng, A. Kruspe, R. Triebel, P. Jung, R. Roscher, M. Shahzad, W. Yang, R. Bamler, and X. X. Zhu
+
+A survey of uncertainty in deep neural networks.
+
+External Links: 2107.03342,
+Link
+
+Cited by: §1.
+
+Geifman and El-Yaniv (2017)
+Y. Geifman and R. El-Yaniv
+
+Selective classification for deep neural networks.
+
+Advances in neural information processing systems 30.
+
+Cited by: §1.
+
+Hendrycks and Gimpel (2017)
+D. Hendrycks and K. Gimpel
+
+A baseline for detecting misclassified and out-of-distribution examples in neural networks.
+
+In International Conference on Learning Representations,
+
+External Links: Link
+
+Cited by: §1.
+
+Hong et al. (2024)
+W. Hong, W. Wang, Q. Lv, J. Xu, W. Yu, J. Ji, Y. Wang, Z. Wang, Y. Dong, M. Ding, and J. Tang
+
+CogAgent: a visual language model for gui agents.
+
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR),
+
+pp. 14281–14290.
+
+Cited by: §1.
+
+Hou et al. (2025)
+B. Hou, Y. Zhang, J. Andreas, and S. Chang
+
+A probabilistic framework for llm hallucination detection via belief tree propagation.
+
+External Links: 2406.06950,
+Link
+
+Cited by: §2.2.
+
+Hu et al. (2023)
+M. Hu, Z. Zhang, S. Zhao, M. Huang, and B. Wu
+
+Uncertainty in natural language processing: sources, quantification, and applications.
+
+External Links: 2306.04459,
+Link
+
+Cited by: §1.
+
+Jung et al. (2025)
+J. Jung, F. Brahman, and Y. Choi
+
+Trust or escalate: LLM judges with provable guarantees for human agreement.
+
+In The Thirteenth International Conference on Learning Representations,
+
+External Links: Link
+
+Cited by: §2.3.
+
+Kadavath et al. (2022)
+S. Kadavath, T. Conerly, A. Askell, T. Henighan, D. Drain, E. Perez, N. Schiefer, Z. Hatfield-Dodds, N. DasSarma, E. Tran-Johnson, S. Johnston, S. El-Showk, A. Jones, N. Elhage, T. Hume, A. Chen, Y. Bai, S. Bowman, S. Fort, D. Ganguli, D. Hernandez, J. Jacobson, J. Kernion, S. Kravec, L. Lovitt, K. Ndousse, C. Olsson, S. Ringer, D. Amodei, T. Brown, J. Clark, N. Joseph, B. Mann, S. McCandlish, C. Olah, and J. Kaplan
+
+Language models (mostly) know what they know.
+
+External Links: 2207.05221,
+Link
+
+Cited by: §1.
+
+Kuhn et al. (2023a)
+L. Kuhn, Y. Gal, and S. Farquhar
+
+Semantic uncertainty: linguistic invariances for uncertainty estimation in natural language generation.
+
+In The Eleventh International Conference on Learning Representations,
+
+External Links: Link
+
+Cited by: §4.2.
+
+Kuhn et al. (2023b)
+L. Kuhn, Y. Gal, and S. Farquhar
+
+Semantic uncertainty: linguistic invariances for uncertainty estimation in natural language generation.
+
+External Links: 2302.09664,
+Link
+
+Cited by: §2.2.
+
+Li et al. (2025)
+K. Li, Z. Meng, H. Lin, Z. Luo, Y. Tian, J. Ma, Z. Huang, and T. Chua
+
+ScreenSpot-pro: gui grounding for professional high-resolution computer use.
+
+External Links: 2504.07981,
+Link
+
+Cited by: §4.1.
+
+Lin et al. (2023)
+Z. Lin, S. Trivedi, and J. Sun
+
+Generating with confidence: uncertainty quantification for black-box large language models.
+
+arXiv preprint arXiv:2305.19187.
+
+Cited by: §1.
+
+Lin et al. (2024)
+Z. Lin, S. Trivedi, and J. Sun
+
+Generating with confidence: uncertainty quantification for black-box large language models.
+
+External Links: 2305.19187,
+Link
+
+Cited by: §4.1.
+
+Liu et al. (2025)
+X. Liu, T. Chen, L. Da, C. Chen, Z. Lin, and H. Wei
+
+Uncertainty quantification and confidence calibration in large language models: a survey.
+
+External Links: 2503.15850,
+Link
+
+Cited by: §2.2.
+
+Nguyen et al. (2025)
+D. Nguyen, J. Chen, Y. Wang, G. Wu, N. Park, Z. Hu, H. Lyu, J. Wu, R. Aponte, Y. Xia, X. Li, J. Shi, H. Chen, V. D. Lai, Z. Xie, S. Kim, R. Zhang, T. Yu, M. Tanjim, N. K. Ahmed, P. Mathur, S. Yoon, L. Yao, B. Kveton, J. Kil, T. H. Nguyen, T. Bui, T. Zhou, R. A. Rossi, and F. Dernoncourt
+
+GUI agents: a survey.
+
+External Links: 2412.13501,
+Link
+
+Cited by: §1,
+§2.1.
+
+Pouget et al. (2016)
+A. Pouget, J. Drugowitsch, and A. Kepecs
+
+Confidence and certainty: distinct probabilistic quantities for different goals.
+
+Nature neuroscience 19 (3), pp. 366–374.
+
+Cited by: §4.2.
+
+Qin et al. (2025a)
+Y. Qin, Y. Ye, J. Fang, H. Wang, S. Liang, S. Tian, J. Zhang, J. Li, Y. Li, S. Huang, et al.
+
+UI-tars: pioneering automated gui interaction with native agents.
+
+arXiv preprint arXiv:2501.12326.
+
+Cited by: §4.1.
+
+Qin et al. (2025b)
+Y. Qin, Y. Ye, J. Fang, H. Wang, S. Liang, S. Tian, J. Zhang, J. Li, Y. Li, S. Huang, W. Zhong, K. Li, J. Yang, Y. Miao, W. Lin, L. Liu, X. Jiang, Q. Ma, J. Li, X. Xiao, K. Cai, C. Li, Y. Zheng, C. Jin, C. Li, X. Zhou, M. Wang, H. Chen, Z. Li, H. Yang, H. Liu, F. Lin, T. Peng, X. Liu, and G. Shi
+
+UI-tars: pioneering automated gui interaction with native agents.
+
+External Links: 2501.12326,
+Link
+
+Cited by: §2.1.
+
+Team et al. (2023)
+G. Team, R. Anil, S. Borgeaud, J. Alayrac, J. Yu, R. Soricut, J. Schalkwyk, A. M. Dai, A. Hauth, K. Millican, et al.
+
+Gemini: a family of highly capable multimodal models.
+
+arXiv preprint arXiv:2312.11805.
+
+Cited by: §4.4.
+
+Wang et al. (2024a)
+P. Wang, S. Bai, S. Tan, S. Wang, Z. Fan, J. Bai, K. Chen, X. Liu, J. Wang, W. Ge, Y. Fan, K. Dang, M. Du, X. Ren, R. Men, D. Liu, C. Zhou, J. Zhou, and J. Lin
+
+Qwen2-vl: enhancing vision-language model’s perception of the world at any resolution.
+
+External Links: 2409.12191,
+Link
+
+Cited by: §2.1.
+
+Wang et al. (2025a)
+Q. Wang, Y. Fan, and X. E. Wang
+
+SAFER: risk-constrained sample-then-filter in large language models.
+
+External Links: 2510.10193,
+Link
+
+Cited by: §2.3,
+§4.3.
+
+Wang et al. (2025b)
+Q. Wang, T. Geng, Z. Wang, T. Wang, B. Fu, and F. Zheng
+
+Sample then identify: a general framework for risk control and assessment in multimodal large language models.
+
+In The Thirteenth International Conference on Learning Representations,
+
+External Links: Link
+
+Cited by: §1.
+
+Wang et al. (2025c)
+Z. Wang, J. Duan, Q. Wang, X. Zhu, T. Chen, X. Shi, and K. Xu
+
+COIN: uncertainty-guarding selective question answering for foundation models with provable risk guarantees.
+
+External Links: 2506.20178,
+Link
+
+Cited by: §1,
+§2.3,
+§4.1.
+
+Wang et al. (2024b)
+Z. Wang, J. Duan, C. Yuan, Q. Chen, T. Chen, Y. Zhang, R. Wang, X. Shi, and K. Xu
+
+Word-sequence entropy: towards uncertainty estimation in free-form medical question answering applications and beyond.
+
+External Links: 2402.14259,
+Link
+
+Cited by: §2.2.
+
+[34]
+Z. Wang, Q. Wang, Y. Zhang, T. Chen, X. Zhu, X. Shi, and K. Xu
+
+SConU: selective conformal uncertainty in large language models.
+
+In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), W. Che, J. Nabende, E. Shutova, and M. T. Pilehvar (Eds.),
+
+Cited by: §2.3.
+
+Wu et al. (2025a)
+Q. Wu, K. Cheng, R. Yang, C. Zhang, J. Yang, H. Jiang, J. Mu, B. Peng, B. Qiao, R. Tan, et al.
+
+GUI-actor: coordinate-free visual grounding for gui agents.
+
+arXiv preprint arXiv:2506.03143.
+
+Cited by: §B.3,
+§2.1,
+§3.3.
+
+Wu et al. (2025b)
+Q. Wu, K. Cheng, R. Yang, C. Zhang, J. Yang, H. Jiang, J. Mu, B. Peng, B. Qiao, R. Tan, S. Qin, L. Liden, Q. Lin, H. Zhang, T. Zhang, J. Zhang, D. Zhang, and J. Gao
+
+GUI-actor: coordinate-free visual grounding for gui agents.
+
+External Links: 2506.03143,
+Link
+
+Cited by: §4.1.
+
+Xu et al. (2025)
+Z. Xu, T. Song, and Y. Lee
+
+Confronting verbalized uncertainty: understanding how llm’s verbalized uncertainty influences users in ai-assisted decision-making.
+
+Int. J. Hum.-Comput. Stud. 197 (C).
+
+External Links: ISSN 1071-5819,
+Link,
+Document
+
+Cited by: §2.2.
+
+Yang et al. (2025)
+Y. Yang, D. Li, Y. Dai, Y. Yang, Z. Luo, Z. Zhao, Z. Hu, J. Huang, A. Saha, Z. Chen, R. Xu, L. Pan, S. Savarese, C. Xiong, and J. Li
+
+GTA1: gui test-time scaling agent.
+
+External Links: 2507.05791,
+Link
+
+Cited by: §4.1.
+
+Ye et al. (2024)
+F. Ye, M. Yang, J. Pang, L. Wang, D. F. Wong, E. Yilmaz, S. Shi, and Z. Tu
+
+Benchmarking LLMs via uncertainty quantification.
+
+In The Thirty-eight Conference on Neural Information Processing Systems Datasets and Benchmarks Track,
+
+External Links: Link
+
+Cited by: §1.
+
+Zhang et al. (2025)
+S. Zhang, P. Fu, R. Zhang, J. Yang, A. Du, X. Xi, S. Wang, Y. Huang, B. Qin, Z. Luo, and J. Luan
+
+HyperClick: advancing reliable GUI grounding via uncertainty calibration.
+
+External Links: Link
+
+Cited by: §1,
+§1,
+§2.2.
+
+Limitation
+
+Our uncertainty estimation relies on the variability in the sampled predictions to characterize spatial ambiguity.
+For highly deterministic models with limited sampling diversity, the resulting spatial distributions may be less informative.
+Despite these limitations, SafeGround provides a general and principled foundation for uncertainty-aware GUI grounding.
+
+Appendix A Proofs
+
+In this section, we provide a compelete proof that the upper confidence bound FDR^1−δu​p​p​e​r​(τ)\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau) defined in Eq. (9) satisfies the statistical guarantee in Eq. (9).
+Recall FDR^1−δu​p​p​e​r​(τ)=sup{R:Pr⁡(Bin⁡(n,R)≤X)≥δ}\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)=\sup\{R:\Pr(\mathrm{Bin}(n,R)\leq X)\geq\delta\}, where n=∑iN𝟏{ui≤τ}n=\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau\} is the number of accepted calibration samples, and X=∑iN𝟏​{ui≤τ,A⁡(y^i(M​L​G),Bi∗)=0}X=\sum_{i}^{N}\mathbf{1}\{u_{i}\leq\tau,A(\hat{y}_{i}^{(MLG)},B_{i}^{*})=0\} is the number of accepted incorrect calibration samples.
+In general, Bin⁡(n,R)\mathrm{Bin}(n,R) denotes the random variable representing the number of successes in nn Bernoulli trials when the system success probability is RR.
+In our setting, it corresponds to the random variable counting the number of errors among nn samples when the system FDR is RR under a given threshold τ\tau.
+
+We define the cumulative distribution function (CDF) of the random variable R^​(τ)=Bin⁡(n,R⁡(τ))n\hat{R}(\tau)=\frac{\mathrm{Bin}(n;R(\tau))}{n}, corresponding to the error rate over any nn accepted samples when the system FDR is R⁡(τ)R(\tau), as
+
+CDF⁡(r∣R⁡(τ))=Pr⁡(R^​(τ)≤r∣R⁡(τ)).\mathrm{CDF}\big(r\mid R(\tau)\big)=\Pr\big(\hat{R}(\tau)\leq r\mid R(\tau)\big).
+
+(13)
+
+By the definition of FDR^1−δu​p​p​e​r​(τ)\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau), we have
+
+CDF⁡(Xn∣FDR^1−δu​p​p​e​r​(τ))=δ.\mathrm{CDF}\left(\frac{X}{n}\mid\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)\right)=\delta.
+
+(14)
+
+If R⁡(τ)>FDR^1−δu​p​p​e​r​(τ)R(\tau)>\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau), we have CDF⁡(Xn∣R⁡(τ))≤δ\mathrm{CDF}\left(\frac{X}{n}\mid R(\tau)\right)\leq\delta.
+Then, we have
+
+Pr⁡(R⁡(τ)≤FDR^1−δu​p​p​e​r​(τ))=1−Pr⁡(R⁡(τ)>FDR^1−δu​p​p​e​r​(τ))≥1−Pr⁡(CDF⁡(Xn∣R⁡(τ))≤δ).\begin{split}\Pr\left(R(\tau)\leq\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)\right)&=1-\Pr\left(R(\tau)>\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)\right)\\
+&\geq 1-\Pr\left(\mathrm{CDF}\left(\frac{X}{n}\mid R(\tau)\right)\leq\delta\right)\end{split}.
+
+(15)
+
+We further the Inverse Cumulative Distribution Function (ICDF):
+
+CDF−1​(p∣R⁡(τ))=sup{r:CDF⁡(r∣R⁡(τ))≤p}.\mathrm{CDF}^{-1}\big(p\mid R(\tau)\big)=\sup\left\{r:\mathrm{CDF}\left(r\mid R(\tau)\right)\leq p\right\}.
+
+(16)
+
+If CDF⁡(Xn∣R⁡(τ))≤δ\mathrm{CDF}\left(\frac{X}{n}\mid R(\tau)\right)\leq\delta, we have Xn≤CDF−1​(δ∣R⁡(τ))\frac{X}{n}\leq\mathrm{CDF}^{-1}\big(\delta\mid R(\tau)\big).
+We then obtain
+
+Pr⁡(R⁡(τ)≤FDR^1−δu​p​p​e​r​(τ))≥1−Pr⁡(Xn≤CDF−1​(δ∣R⁡(τ))).\Pr\left(R(\tau)\leq\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)\right)\geq 1-\Pr\left(\frac{X}{n}\leq\mathrm{CDF}^{-1}\big(\delta\mid R(\tau)\big)\right).
+
+(17)
+
+Since Xn\frac{X}{n} is exactly the empirical error rate observed over the nn accepted samples in the calibration set, the probability that it is less than or equal to CDF−1​(δ∣R​(τ))\mathrm{CDF}^{-1}\big(\delta\mid R(\tau)\big) does not exceed δ\delta.
+Finally, we conclude
+
+Pr⁡(R⁡(τ)≤FDR^1−δu​p​p​e​r​(τ))≥1−δ.\Pr\left(R(\tau)\leq\hat{\mathrm{FDR}}_{1-\delta}^{upper}(\tau)\right)\geq 1-\delta.
+
+(18)
+
+In this way, we obtain an upper bound on the system FDR at threshold τ\tau with at least 1−δ1-\delta confidence.
+At test time, by the exchangeability condition, we provide marginal guarantees of FDR control.
+
+Appendix B Details of Experimental Settings
+
+B.1 Dataset
+
+ScreenSpot-Pro
+
+ScreenSpot-Pro consists of 1581 UI screenshots paired with natural language instructions that refer to target UI elements on the screen.
+Each target is annotated as a spatial region rather than a single point.
+Compared to earlier GUI grounding benchmarks, ScreenSpot-Pro features higher visual complexity, denser UI layouts, and more fine-grained distinctions between neighboring elements, making it particularly suitable for studying uncertainty-aware grounding.
+
+B.2 Evaluation Metrics
+
+We evaluate uncertainty estimation quality and selective prediction performance using four complementary metrics: AUROC, AUARC, FDR, and power.
+All metrics are defined with respect to the admission function
+A⁡(y^,B∗)∈{0,1}A(\hat{y},B^{*})\in\{0,1\} introduced in Section 3.1, which indicates whether a grounding prediction is admissible.
+
+Area Under Receiver Operating Characteristic (AUROC)
+
+Let U⁡(y^)U(\hat{y}) denote an uncertainty score, where larger values indicate higher uncertainty.
+AUROC measures how well U⁡(y^)U(\hat{y}) separates inadmissible predictions from admissible ones.
+Formally, AUROC is the area under the receiver operating characteristic curve obtained by thresholding U⁡(y^)U(\hat{y}) to predict whether A⁡(y^,B∗)=0A(\hat{y},B^{*})=0.
+A higher AUROC indicates stronger discriminative ability of the uncertainty estimate.
+
+Area Under Accuracy-Rejection Curve (AUARC)
+
+AUARC evaluates selective prediction behavior by measuring how accuracy changes as predictions with high uncertainty are rejected.
+Let 𝒮τ={i:U⁡(y^i)≤τ}\mathcal{S}_{\tau}=\{i:U(\hat{y}_{i})\leq\tau\} denote the set of accepted samples under threshold τ\tau.
+The accuracy at τ\tau is defined as
+
+Acc⁡(τ)=1|𝒮τ|​∑i∈𝒮τA⁡(y^i,Bi∗).\mathrm{Acc}(\tau)=\frac{1}{|\mathcal{S}_{\tau}|}\sum_{i\in\mathcal{S}_{\tau}}A(\hat{y}_{i},B_{i}^{*}).
+
+In practice, τ\tau is chosen to correspond to a target rejection rate, and AUARC is computed as the area under the curve of Acc⁡(τ)\mathrm{Acc}(\tau) as a function of the rejection rate.
+
+False Discovery Rate (FDR)
+
+Under a given uncertainty threshold τ\tau, the false discovery rate is defined as
+
+FDR⁡(τ)=∑i𝕀⁡(U⁡(y^i)≤τ)​𝕀​(A⁡(y^i,Bi∗)=0)∑i𝕀⁡(U⁡(y^i)≤τ).\mathrm{FDR}(\tau)=\frac{\sum_{i}\mathbb{I}\big(U(\hat{y}_{i})\leq\tau\big)\,\mathbb{I}\big(A(\hat{y}_{i},B_{i}^{*})=0\big)}{\sum_{i}\mathbb{I}\big(U(\hat{y}_{i})\leq\tau\big)}.
+
+FDR quantifies the proportion of inadmissible predictions among all accepted predictions and serves as the primary risk metric controlled by SafeGround.
+
+Power
+
+Power measures the proportion of correct predictions retained by selective prediction under a risk constraint and is defined as:
+
+Power⁡(τ)=∑i=1N𝕀⁡(U⁡(y^i)≤τ)​𝕀​(A⁡(y^i,Bi∗)=1)∑i=1N𝕀⁡(A⁡(y^i,Bi∗)=1).\mathrm{Power}(\tau)=\frac{\sum_{i=1}^{N}\mathbb{I}\big(U(\hat{y}_{i})\leq\tau\big)\mathbb{I}\big(A(\hat{y}_{i},B_{i}^{*})=1\big)}{\sum_{i=1}^{N}\mathbb{I}\big(A(\hat{y}_{i},B_{i}^{*})=1\big)}.
+
+Higher power indicates that more correct predictions are retained while satisfying the specified FDR constraint.
+
+B.3 Spatial Region Construction
+
+Given an input image–instruction pair (x,q)(x,q), we obtain a set of KK sampled grounding predictions
+𝒮={y^(i)=(x(i),y(i))}i=1K\mathcal{S}=\{\hat{y}^{(i)}=(x^{(i)},y^{(i)})\}_{i=1}^{K} via stochastic decoding.
+To lift these point-wise samples into a spatial distribution, we discretize the screen into a fixed
+H×WH\times W grid of patches and map each sampled coordinate to its corresponding patch.
+Let Cu,vC_{u,v} denote the number of samples falling into patch (u,v)(u,v).
+We then normalize the resulting count map to obtain a spatial probability distribution
+
+Pu,v=Cu,v∑u′,v′Cu′,v′,P_{u,v}=\frac{C_{u,v}}{\sum_{u^{\prime},v^{\prime}}C_{u^{\prime},v^{\prime}}},
+
+(19)
+
+which serves as an empirical estimate of the model’s predictive density over the output space.
+
+Region Extraction
+
+To identify object-level grounding hypotheses, we first filter low-density patches using an
+instance-adaptive threshold.
+Specifically, let Pmax=maxu,v⁡Pu,vP_{\max}=\max_{u,v}P_{u,v}, and retain only patches satisfying
+Pu,v>β​PmaxP_{u,v}>\beta P_{\max}, where β\beta is a fixed ratio (set to 0.30.3 in our experiments, following (Wu et al., 2025a)).
+We then group spatially adjacent retained patches (using 4-connected neighborhood) into connected components.
+This yields a set of disjoint regions
+ℛ={Rm}m=1M\mathcal{R}=\{R_{m}\}_{m=1}^{M}, each corresponding to a plausible grounding target.
+
+Region Scoring
+
+For each region RmR_{m}, we compute a region-level score
+
+Sm=1|Rm|​∑(u,v)∈RmPu,v,S_{m}=\frac{1}{|R_{m}|}\sum_{(u,v)\in R_{m}}P_{u,v},
+
+(20)
+
+i.e., the average probability density within the region.
+This score reflects the relative support assigned to the region by the sampled predictions while
+remaining invariant to region size.
+The resulting region scores {Sm}m=1M\{S_{m}\}_{m=1}^{M} are subsequently normalized and used to compute
+the uncertainty metrics described in Section 3.3.
+
+Appendix C Threshold Calibration with Finite-Sample Guarantees
+
+This section details the threshold calibration procedure used in SafeGround to obtain finite-sample guarantees on selective prediction risk, based on Clopper–Pearson confidence bounds, as summarized in Algorithm 1.
+
+Algorithm 1 SafeGround: Clopper–Pearson Threshold Calibration with Sampling-Based Spatial Uncertainty
+
+ 1:
+
+  Input: GUI grounding model ff; calibration set 𝒟c​a​l={(xi,qi,Bi∗)}i=1N\mathcal{D}_{cal}=\{(x_{i},q_{i},B_{i}^{*})\}_{i=1}^{N};
+sample count KK; patch grid size H×WH\times W; region threshold ratio β\beta;
+admission function A⁡(y^,B∗)A(\hat{y},B^{*}); risk level α\alpha; significance level δ\delta;
+weights (wC​D,wI​E,wT​A)(w_{CD},w_{IE},w_{TA})
+
+ 2:
+
+  Output: calibrated uncertainty threshold τ^\hat{\tau}
+
+ 3:
+
+  for i=1i=1 to NN do
+
+ 4:
+
+   (Primary prediction) Obtain y^i(M​L​G)←f⁡(xi,qi)\hat{y}^{(MLG)}_{i}\leftarrow f(x_{i},q_{i})
+
+ 5:
+
+   (Sampling) Draw KK stochastic predictions 𝒮i={y^i(k)}k=1K\mathcal{S}_{i}=\{\hat{y}^{(k)}_{i}\}_{k=1}^{K} via stochastic decoding
+
+ 6:
+
+   (Discretized density map) Initialize count map C∈ℕH×W←0C\in\mathbb{N}^{H\times W}\leftarrow 0
+
+ 7:
+
+   for k=1k=1 to KK do
+
+ 8:
+
+    Map y^i(k)\hat{y}^{(k)}_{i} to patch index (u,v)(u,v) and set Cu,v←Cu,v+1C_{u,v}\leftarrow C_{u,v}+1
+
+ 9:
+
+   end for
+
+ 10:
+
+   Normalize to density Pu,v←Cu,v∑u′,v′Cu′,v′P_{u,v}\leftarrow\frac{C_{u,v}}{\sum_{u^{\prime},v^{\prime}}C_{u^{\prime},v^{\prime}}}
+
+ 11:
+
+   (Region extraction) Pmax←maxu,v⁡Pu,vP_{\max}\leftarrow\max_{u,v}P_{u,v}; mask Mu,v←𝕀{Pu,v>βPmax}M_{u,v}\leftarrow\mathbb{I}\{P_{u,v}>\beta P_{\max}\}
+
+ 12:
+
+   Group 4-connected active patches in MM into MiM_{i} connected components via BFS,
+yielding regions ℛi={Ri,m}m=1Mi\mathcal{R}_{i}=\{R_{i,m}\}_{m=1}^{M_{i}}
+
+ 13:
+
+   (Region scoring) For each region Ri,mR_{i,m}, compute
+Si,m←1|Ri,m|​∑(u,v)∈Ri,mPu,vS_{i,m}\leftarrow\frac{1}{|R_{i,m}|}\sum_{(u,v)\in R_{i,m}}P_{u,v}
+
+ 14:
+
+   Sort scores in descending order: Si,(1)≥⋯≥Si,(Mi)S_{i,(1)}\geq\cdots\geq S_{i,(M_{i})}
+
+ 15:
+
+   Induce categorical distribution p^i,j←Si,(j)∑ℓ=1MiSi,(ℓ)\hat{p}_{i,j}\leftarrow\frac{S_{i,(j)}}{\sum_{\ell=1}^{M_{i}}S_{i,(\ell)}}
+
+ 16:
+
+   (Uncertainty components)
+
+ 17:
+
+   UT​A,i←{1−Si,(1)−Si,(2)Si,(1)+ϵ,Mi≥2max⁡(0.1, 1−Si,(1)),Mi=1U_{TA,i}\leftarrow\begin{cases}1-\frac{S_{i,(1)}-S_{i,(2)}}{S_{i,(1)}+\epsilon},&M_{i}\geq 2\\
+\max(0.1,\,1-S_{i,(1)}),&M_{i}=1\end{cases}
+
+ 18:
+
+   UI​E,i←−1log⁡Mi∑j=1Mip^i,jlog(p^i,j+ϵ)U_{IE,i}\leftarrow-\frac{1}{\log M_{i}}\sum_{j=1}^{M_{i}}\hat{p}_{i,j}\log(\hat{p}_{i,j}+\epsilon)
+
+ 19:
+
+   UC​D,i←1−∑j=1Mip^i,j2U_{CD,i}\leftarrow 1-\sum_{j=1}^{M_{i}}\hat{p}_{i,j}^{2}
+
+ 20:
+
+   (Combined uncertainty) ui←wC​D​UC​D,i+wI​E​UI​E,i+wT​A​UT​A,iu_{i}\leftarrow w_{CD}U_{CD,i}+w_{IE}U_{IE,i}+w_{TA}U_{TA,i}
+
+ 21:
+
+   (Error indicator) erri←𝕀{A(y^i(M​L​G),Bi∗)=0}err_{i}\leftarrow\mathbb{I}\{A(\hat{y}^{(MLG)}_{i},B_{i}^{*})=0\}
+
+ 22:
+
+  end for
+
+ 23:
+
+  Sort uncertainties ascending: u(1)≤⋯≤u(N)u_{(1)}\leq\cdots\leq u_{(N)} with aligned e​r​r(1),…,e​r​r(N)err_{(1)},\ldots,err_{(N)}
+
+ 24:
+
+  Initialize the selected threshold τ^←NULL\hat{\tau}\leftarrow\texttt{NULL}
+
+ 25:
+
+  for t=1t=1 to NN do
+
+ 26:
+
+   Set candidate threshold τ←u(t)\tau\leftarrow u_{(t)}
+
+ 27:
+
+   n←∑j=1N𝕀{u(j)≤τ}n\leftarrow\sum_{j=1}^{N}\mathbb{I}\{u_{(j)}\leq\tau\} (number of accepted samples)
+
+ 28:
+
+   X←∑j=1N𝕀{u(j)≤τ∧err(j)=1}X\leftarrow\sum_{j=1}^{N}\mathbb{I}\{u_{(j)}\leq\tau\land err_{(j)}=1\} (number of errors among accepted)
+
+ 29:
+
+   Compute Clopper–Pearson upper bound: UCB←BetaInv⁡(1−δ,X+1,n−X)\mathrm{UCB}\leftarrow\mathrm{BetaInv}(1-\delta;\,X+1,\,n-X)
+
+ 30:
+
+   if UCB≤α\mathrm{UCB}\leq\alpha then
+
+ 31:
+
+    Update τ^←τ\hat{\tau}\leftarrow\tau
+
+ 32:
+
+   end if
+
+ 33:
+
+  end for
+
+ 34:
+
+  if τ^=NULL\hat{\tau}=\texttt{NULL} then
+
+ 35:
+
+   Return “The target risk level α\alpha is unattainable under calibration.”
+
+ 36:
+
+  else
+
+ 37:
+
+   Return τ^\hat{\tau}
+
+ 38:
+
+  end if
+
+Appendix D Prompt Template
+
+To ensure a fair and reliable evaluation of large vision–language models on GUI grounding, we adopt a strictly constrained prompt template for Gemini in the ScreenSpot-Pro benchmark, as illustrated in Figure 8, 9.
+
+Gemini
+
+”””
+
+You are a GUI agent that locates UI elements in screenshots.
+
+CRITICAL RULES:
+
+1. You MUST output ONLY valid JSON, nothing else
+
+2. Do NOT include any explanation, markdown formatting, or natural language
+
+3. Do NOT wrap the response in code blocks (“‘json)
+
+4. Coordinates must be in PIXEL values (NOT normalized to 0-1000)
+
+5. If you cannot find the element, output an empty list: []
+
+Your response must be a valid JSON array.
+
+”””
+
+Figure 8: A system prompt example for Gemini-3-pro in ScreenSpot-Pro dataset.
+
+Gemini
+
+Task: Point to the UI element matching this instruction: {instruction} 
+
+Image size: {W} x {H} pixels. 
+
+Output format (JSON only, no markdown):
+
+[{"point": [y, x], "label": "description"}] 
+
+Where: 
+
+- point: [y, x] coordinates in PIXELS (NOT normalized to 0-1000) 
+
+- y is vertical (0 to {H}) 
+
+- x is horizontal (0 to {W}) 
+
+If no element found, output: [] 
+
+Example: [{"point": [60, 230], "label": "submit button"}] 
+
+Figure 9: A user prompt example for Gemini-3-pro in ScreenSpot-Pro dataset.
+
+Appendix E Case Study
+
+We present qualitative examples to illustrate how the proposed uncertainty score reflects the reliability of GUI grounding predictions in practice in Figure 10, 11, 12, 13, 14.
+
+Figure 10: 
+An example of GUI grounding task using our uncertainty score.
+
+Figure 11: 
+An example of GUI grounding task using our uncertainty score.
+
+Figure 12: 
+An example of GUI grounding task using our uncertainty score.
+
+Figure 13: 
+An example of GUI grounding task using our uncertainty score.
+
+Figure 14: 
+An example of GUI grounding task using our uncertainty score.
+
+Appendix F Additional Experimental Results
+
+Sensitivity to Sampling Temperature.
+
+We further examine the sensitivity of the proposed uncertainty measures to the sampling temperature used during stochastic decoding.
+Table 5 and Table 6 report AUROC and AUARC results on Holo1.5-3B (Company, 2025) under different temperature settings.
+As the temperature increases, UI​EU_{IE} and UC​DU_{CD} become more informative, reflected by consistent gains in AUROC.
+In contrast, margin-based uncertainty exhibits relatively limited sensitivity to temperature changes.
+UC​O​MU_{COM} shows a dependence on the sampling temperature, reflecting its ability to adapt to changes in the diversity and dispersion of stochastic predictions, while remaining competitive across the evaluated temperature range.
+
+Table 5: AUROC of different uncertainty measures on Holo1.5-3B under varying sampling temperatures.
+
+Method
+Temp=0.3
+Temp=0.5
+Temp=0.7
+Temp=1.0
+
+UT​AU_{TA}
+0.6258
+0.6270
+0.6297
+0.6404
+
+UI​EU_{IE}
+0.6621
+0.6900
+0.7329
+0.7753
+
+UC​DU_{CD}
+0.6689
+0.7078
+0.7590
+0.8060
+
+UC​O​MU_{COM}
+0.6819
+0.7218
+0.7578
+0.8056
+
+Table 6: AUARC of different uncertainty measures on Holo1.5-3B under varying sampling temperatures.
+
+Method
+Temp=0.3
+Temp=0.5
+Temp=0.7
+Temp=1.0
+
+UT​AU_{TA}
+0.5373
+0.5247
+0.5186
+0.5709
+
+UI​EU_{IE}
+0.5182
+0.5165
+0.5015
+0.6534
+
+UC​DU_{CD}
+0.5219
+0.5205
+0.4977
+0.6578
+
+UC​O​MU_{COM}
+0.5250
+0.5308
+0.4960
+0.6576
+
+Sensitivity to Uncertainty Weighting.
+
+We examine the sensitivity of the proposed framework to the weighting scheme used in the combined uncertainty score UCOMU_{\mathrm{COM}}. Starting from the default setting (wC​D,wI​E,wT​A)=(0.6,0.2,0.2)(w_{CD},w_{IE},w_{TA})=(0.6,0.2,0.2), we evaluate several alternative weighting configurations that moderately vary the relative contributions of the three uncertainty components, while keeping the weights normalized.
+
+Specifically, we consider the following weighting configurations for the combined uncertainty score UCOMU_{\mathrm{COM}}:
+
+• 
+
+v1: (wC​D,wI​E,wT​A)=(0.34,0.33,0.33)(w_{CD},w_{IE},w_{TA})=(0.34,0.33,0.33);
+
+• 
+
+v2: (wC​D,wI​E,wT​A)=(0.2,0.2,0.6)(w_{CD},w_{IE},w_{TA})=(0.2,0.2,0.6);
+
+• 
+
+v3: (wC​D,wI​E,wT​A)=(0.2,0.6,0.2)(w_{CD},w_{IE},w_{TA})=(0.2,0.6,0.2);
+
+• 
+
+v4: (wC​D,wI​E,wT​A)=(0.5,0.25,0.25)(w_{CD},w_{IE},w_{TA})=(0.5,0.25,0.25);
+
+• 
+
+v5: (wC​D,wI​E,wT​A)=(0.25,0.25,0.5)(w_{CD},w_{IE},w_{TA})=(0.25,0.25,0.5);
+
+• 
+
+v6: (wC​D,wI​E,wT​A)=(0.25,0.5,0.25)(w_{CD},w_{IE},w_{TA})=(0.25,0.5,0.25);
+
+• 
+
+original: (wC​D,wI​E,wT​A)=(0.6,0.2,0.2)(w_{CD},w_{IE},w_{TA})=(0.6,0.2,0.2).
+
+As shown in Figure 15, 16, 18, 19, 17, 20, across all evaluated models, both AUROC and AUARC exhibit only minor fluctuations under different weighting schemes. These results indicate that the proposed uncertainty aggregation is robust to moderate changes in the weighting scheme, supporting the use of a fixed, model-agnostic combination in practice.
+
+Figure 15: Sensitivity analysis of AUROC and AUARC to uncertainty weighting for GTA1-7B.
+
+Figure 16: Sensitivity analysis of AUROC and AUARC to uncertainty weighting for GUI-Actor-2.5VL-7B.
+
+Figure 17: Sensitivity analysis of AUROC and AUARC to uncertainty weighting for GUI-Actor-2VL-7B.
+
+Figure 18: Sensitivity analysis of AUROC and AUARC to uncertainty weighting for Holo1.5-7B.
+
+Figure 19: Sensitivity analysis of AUROC and AUARC to uncertainty weighting for Holo1.5-3B.
+
+Figure 20: Sensitivity analysis of AUROC and AUARC to uncertainty weighting for UI-TARS-1.5-7B.
+
+ Experimental support, please
+ view the build logs
+ for errors. Generated by
+
+ L
+ A
+ T
+ E
+
+ xml
+
+ .
+
+Instructions for reporting errors
+
+We are continuing to improve HTML versions of papers, and your feedback helps enhance accessibility and mobile
+ support. To report errors in the HTML that will help us improve conversion and rendering, choose any of the
+ methods listed below:
+
+Click the "Report Issue" (
+
+ ) button, located in the page header.
+
+Tip: You can select the relevant text first, to include it in your report.
+
+Our team has already identified the following issues. We appreciate your time reviewing and reporting rendering errors we
+ may not have found yet. Your efforts will help us improve the HTML versions for all readers, because disability
+ should not be a barrier to accessing research. Thank you for your continued support in championing open access for
+ all.
+
+Have a free development cycle? Help support accessibility at arXiv! Our collaborators at LaTeXML maintain a list of packages that need conversion, and welcome developer contributions.
+
+ We gratefully acknowledge support from our major funders,
+ member institutions, ,
+ and all contributors.
+
+ About ·
+ Help ·
+ Contact ·
+ Subscribe ·
+ Copyright ·
+ Privacy ·
+ Accessibility ·
+ Operational Status (opens in new tab)
+

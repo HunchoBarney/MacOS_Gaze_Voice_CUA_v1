@@ -1,0 +1,77 @@
+{
+  "phase": "P13",
+  "criteria": [
+    {
+      "id": "P13-1",
+      "behavior": "The final subject and population are frozen and all upstream phase criteria have applicable evidence.",
+      "check": "Run the required integrated lane and check-acceptance.py --green separately for P0–P12; inspect rc-manifest.json, coverage.md and evidence/dependency hashes.",
+      "expected": "All required upstream criteria green; exact signed/runtime/model/harness/input population identified. No circular requirement that P13 already be green and no stale evidence substituted.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-2",
+      "behavior": "All task-category release bars and the aggressive interaction-goal scorecard are reported honestly on the final candidate.",
+      "check": "Run the approved frozen qualification through the existing harness; inspect qualification.json and raw rows for every PROGRAM category and speed-goal ID.",
+      "expected": "Original success/p50/Wilson requirements pass. New goal achievement or misses, meaningful p95 samples, cold/warm clocks, all failures and total costs are explicit; no partial/dispatch acknowledgment counted as effect.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-3",
+      "behavior": "Final safety/recovery cases have zero false Done, double dispatch, deny-list violation or automatic safety acknowledgment.",
+      "check": "Inspect public-entry negative cases and independent oracles for ambiguity, absent/stale/wrong target, protected controls, cancel/barge-in and uncertain mutations.",
+      "expected": "Correct refusal/recovery and independently verified results; no resampling, dropped gate, false continuity or unauthorized retry used to manufacture a pass.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-4",
+      "behavior": "The final signed application is qualified through normal physical Fn/pill/gaze and the declared real-app breadth.",
+      "check": "Inspect current-artifact P3 physical population, signed replay, P11 camera/G6 evidence and native/browser/hero/replay raw results.",
+      "expected": "Physical cases actually performed and independently observed; required breadth covered. One labeled Notes note only, existing notes untouched; Spotify playback only after local-device proof. Historical signed failure remains visible.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-5",
+      "behavior": "Matched head-to-head results meet the locked competitor requirements.",
+      "check": "Inspect frozen shared tasks, competitor versions/input/start conditions, all paired rows and the head-to-head report.",
+      "expected": "Faster than Codex CU on >=70% of shared tasks at equal-or-better strict success; browser subset within 1.2x Browser Use or faster. No unsupported global fastest claim or quick-refusal win.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-6",
+      "behavior": "The combined final product meets eye, resource, clean-install, first-use and demo bars.",
+      "check": "Inspect signed P8/P11/P12 integrated evidence and final resource/recovery/first-use/demo rows on M1/8GB.",
+      "expected": ">=15fps, >=80% first calibration, wake <=5s, dwell off default, RSS <=2.5GB, idle CPU <=10%, three moments <=3min and demo 10/10. No hidden disabled feature or developer dependency.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-7",
+      "behavior": "An independent final verdict and explicit ship decision bind the exact artifact, limitations and rollback.",
+      "check": "Inspect judge-verdict.md, ship-decision.md, final acceptance validation, candidate/signature/rollback references and named-file handoff.",
+      "expected": "Authorized fresh-context PASS; no unresolved finding or hidden speed-goal miss. Unmet new goals have an explicit user decision or remain release blockers; install/commit/merge/distribution is not presumed authorized.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-8",
+      "behavior": "Matched real-application dictation evidence establishes performance against Wispr Flow without conflating raw recognition, editing and insertion.",
+      "check": "Inspect the COMPETITIVE frozen pilot/qualification manifests, paired raw outputs/audio hashes, literal/human adjudication, scorer version and signed insertion/readback records.",
+      "expected": "Held-out >=120 distinct clips after the pilot, declared coverage/modes/context, WER/CER, critical-content errors, necessary edits, speech-end/Fn-release p50/p95 and tails. Quality/speed achievement or uncertainty is explicit; no official Voice Arena or physical-input claim from an adapted digital test.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P13-9",
+      "behavior": "Every shipped category has a correctness-and-speed scorecard and an evidence-bound leadership or gap statement.",
+      "check": "Inspect COMPETITIVE category rows, paired comparisons and uncertainty, exact comparator/subject identities, resource/privacy/setup limits and the explicit ship decision.",
+      "expected": "All rows reported as lead/parity/behind/inconclusive/not measured with reasons; no missing comparator counted as a win. Old minimum gates remain necessary, goal misses stay explicit, and global fastest/best claims are absent unless genuinely supported.",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}

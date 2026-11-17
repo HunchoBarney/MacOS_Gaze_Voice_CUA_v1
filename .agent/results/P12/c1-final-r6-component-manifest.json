@@ -1,0 +1,137 @@
+{
+  "app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r6-rbcx83ar/Jev Voice.app",
+  "binary_sha256": "db36d3a487c6f8cffc984c2ede8fd5ac9af92944446e3c16e2c4a8b29091fdb8",
+  "codex": {
+    "canonical_sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
+    "signed_sha256": "c2e5d11c409184e60bba1bdae153be4e7cfe369ceeb7030e411877f5fff3a416",
+    "version": "0.160.0"
+  },
+  "conversation_vad": {
+    "files": {
+      "LICENSE": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b",
+      "README.md": "c31dbec3e24a014a51fc06c645b3cb04897c97ecdbad9a90645466019c933ef4",
+      "silero-vad-unified-256ms-v6.2.1.mlmodelc/analytics/coremldata.bin": "8067594eb3126ab8318af507f0c00cabfed40d5fedb8a0ee5075dd02e903d909",
+      "silero-vad-unified-256ms-v6.2.1.mlmodelc/coremldata.bin": "7db35a4fd995222a7fb0129713473b15d1462572ab4a2e5e4d56bcaad9e40f41",
+      "silero-vad-unified-256ms-v6.2.1.mlmodelc/metadata.json": "2740be542c611e1ba358e1849b4e265c65cdf0b17192767e1e5de86a31ac94d6",
+      "silero-vad-unified-256ms-v6.2.1.mlmodelc/model.mil": "c6a9d1bf22d413265da0a07a1d14151c3ea2fad296b3aa5859275b33ef1c3270",
+      "silero-vad-unified-256ms-v6.2.1.mlmodelc/weights/weight.bin": "53ecc8b5081146140ab654c89109cf001f2183abddd7a2411c5081feeffff063"
+    },
+    "license": "MIT",
+    "license_source": "https://raw.githubusercontent.com/snakers4/silero-vad/caddb3b7ce1dee88a14d5621a0e9a8fdeb2c2c48/LICENSE",
+    "manifest_sha256": "be41b15f2b6c5c73c4824b99963b54bc6d5f58c3af04468132ddfe131c1c8062",
+    "model": "silero-vad-unified-256ms-v6.2.1.mlmodelc",
+    "repository": "FluidInference/silero-vad-coreml",
+    "revision": "b419383c55c110e2c9271fa6ee0ea83d03c70d96",
+    "schema": 1
+  },
+  "created_at": "2026-11-16T18:58:55.588669+00:00",
+  "driver": {
+    "canonical_sha256": "b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8",
+    "signed_matches_rollback": false,
+    "signed_sha256": "d0ad3ff5aeee576c0fb03b2eafa5a7f43769061a9fb2f9f97875bae2b158d252",
+    "version": "0.38.0"
+  },
+  "fluid_audio": {
+    "identity": "fluidaudio",
+    "kind": "remoteSourceControl",
+    "location": "https://github.com/FluidInference/FluidAudio.git",
+    "state": {
+      "revision": "0b1f46289fe27d95b5e66ad8be46e64f5ee02ae7",
+      "version": "0.17.5"
+    }
+  },
+  "installed": false,
+  "integration": {
+    "dependency_source": "Sources/JevVoice/ComputerControl/CuaDependency.swift",
+    "driver_generation": "0.38.0",
+    "experimental_window_images": false,
+    "transport": "app-stdio-jsonrpc"
+  },
+  "licenses": {
+    "cua": "ThirdParty/CuaDriver/LICENSE.md",
+    "fluid_audio": "ThirdParty/FluidAudio/LICENSE",
+    "fluid_voice_ui": "ThirdParty/FluidVoice/NOTICE.md",
+    "speech_attribution": "ThirdParty/FluidAudio/NOTICE.md",
+    "transitive_release_review": "pending C3 portable-package qualification"
+  },
+  "package_resolved_sha256": "8b6e651712aa9cc58deb51ff8e32e71b1ec431503dcecf9535dd4ed2f8ec782c",
+  "private_tester_keys": "existing Keychain policy; no secret values in this manifest",
+  "required_resources": [
+    "cua-driver",
+    "CodexRuntime/codex",
+    "EyeTracker/bin/node",
+    "EyeTracker/package.json",
+    "EyeTracker/dist/models/gaze_1x3x160x160.onnx",
+    "EyeTracker/dist/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
+    "EyeTracker/dist/models/vsdlm_l.onnx",
+    "ThirdParty/CuaDriver/LICENSE.md",
+    "ThirdParty/CuaDriver/THIRD_PARTY_NOTICES.md",
+    "ThirdParty/FluidVoice/LICENSE",
+    "ThirdParty/FluidVoice/NOTICE.md",
+    "ThirdParty/FluidAudio/LICENSE",
+    "ThirdParty/FluidAudio/NOTICE.md",
+    "ConversationVAD/resource.json",
+    "ConversationVAD/LICENSE",
+    "ConversationVAD/README.md"
+  ],
+  "resource_manifest_sha256": "2943eba79127aa53701f33d779845fdee3fe8e4901e0647d4ce4ea2eb52ddc29",
+  "rollback_app": "/Users/karanvirkang/jarvis-local/Jev Voice.app",
+  "rollback_sha256": "f6abbe98113d7f9362ab98bc48a32e1fa94df6ddb3b376ab27dc56939fa4adf1",
+  "schema_version": 1,
+  "source_snapshot": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r2-candidate-source-r6/manifest.json",
+  "source_snapshot_sha256": "b8593a83376211c00471cfbea5ce7a32752807d18f482873451982daa9743e09",
+  "speech_models": {
+    "parakeet-eou-streaming/160ms": {
+      "bytes": 224047838,
+      "files": {
+        "decoder.mlmodelc/analytics/coremldata.bin": "3996975a8cbc1949159c55605b3132b39b2484f51acbd55d796d93c70de02b49",
+        "decoder.mlmodelc/coremldata.bin": "c3ccbff963d8cf07e2be2bd56ea3384a89ea49628922c6bd95ff62e2ae57dc34",
+        "decoder.mlmodelc/metadata.json": "0977480649f2756894b0acfe2fdf4231a991f25e3fe02562bfb71b65ca944575",
+        "decoder.mlmodelc/model.mil": "b7c084a35bdbc887d69d6226cd533e2c11b2792c37d7352cf878f9f6f3c13555",
+        "decoder.mlmodelc/weights/weight.bin": "0b4cacecdcd9df79ab1e56de67230baf5a8664d2afe0bb8f3408eefa972cb2f4",
+        "joint_decision.mlmodelc/analytics/coremldata.bin": "5bca32ad130dcad6605cc00044c752aa5b45ef57d14c17f2d1a2fa49d6cf55b5",
+        "joint_decision.mlmodelc/coremldata.bin": "22d4abc4625b935ee035b5f8ce7cb28d1041b9b01c12173e287bf4b5f5d99625",
+        "joint_decision.mlmodelc/metadata.json": "e970ae87137730020690d24d971813db3633bbdfed602d43b6a9c84deced6dc8",
+        "joint_decision.mlmodelc/model.mil": "45e8590bc87e34c162b547e43a4f60e64db15b017f48395d7835a6867884804f",
+        "joint_decision.mlmodelc/weights/weight.bin": "7039b2010a269153f5a96edf28637f921a86ef8822f248f2d6712f7a6bce84b4",
+        "streaming_encoder.mlmodelc/analytics/coremldata.bin": "a981b257db79b4f86e6fa06a92562160a0ae71554746c24af24d8634b85f0356",
+        "streaming_encoder.mlmodelc/coremldata.bin": "e762abc60d999bcd10aab985b68191a602f2e8e03165cf08671c60f93936037a",
+        "streaming_encoder.mlmodelc/metadata.json": "75be31534cdd91711b08ba3a46046523eb9be9909618cd569cce1ea79e842a95",
+        "streaming_encoder.mlmodelc/model.mil": "709f9280eb0bba1fd698cc252275ba802885c2c53cdb60d399277281dac09b5d",
+        "streaming_encoder.mlmodelc/weights/weight.bin": "12cd781a4300b52b6687587b7d8e37e0ce5c8ccb1dbea036008275e6abf5070c",
+        "vocab.json": "83fd42ad33dae1bd3ceee6c0bb6c625f314cf0b2dc8430be441ac1e2643d5c36"
+      },
+      "root": "/Users/karanvirkang/Library/Application Support/JevVoice/Models/parakeet-eou-streaming/160ms",
+      "sha256": "6fb6832c18f2af3e03f6a0bc13c35c50f5f834509af639b5faa886e13a5e7393"
+    },
+    "parakeet-ultra": {
+      "bytes": 632314500,
+      "files": {
+        "Decoder.mlmodelc/analytics/coremldata.bin": "fe92b6cfaa012abd5248c0bc877832f19807015abffc60d87b8ccc8ccb48b3b5",
+        "Decoder.mlmodelc/coremldata.bin": "3b06e66768f0df7e21795f50e2b29300e33eeb1a2579dc42c695279c2d308497",
+        "Decoder.mlmodelc/model.mil": "956f600207f88396017ca5c96cfa3acd5bfee60835a5b44b762e033a8fb28955",
+        "Decoder.mlmodelc/weights/weight.bin": "02a0d219f281b9665bc10c8768649403b2eebbbf4b44c627041d948e0de11bb4",
+        "Encoder.mlmodelc/analytics/coremldata.bin": "d87101d824d6723cf95304da33755c3c60e762663b9ef2b0c4bd0aa166a09a0d",
+        "Encoder.mlmodelc/coremldata.bin": "397a84a4062f563cbc5f56077c674f09a61d85be5090f61d2f1932afb92ac0fe",
+        "Encoder.mlmodelc/model.mil": "f5d601568a4171d99a314c0fe3f6bc67715da2623732a3fb566e050ea83e5848",
+        "Encoder.mlmodelc/weights/weight.bin": "315ba01f33cadbf601d43ac7f5c86208b7aa75fdaa34705c9869d5abe3521c9b",
+        "JointDecisionv3.mlmodelc/analytics/coremldata.bin": "68d38ca646aebafa7a9329e2efda50f5767c49e89fdb5f77f212072bb66f97c4",
+        "JointDecisionv3.mlmodelc/coremldata.bin": "5e3af5a4ce686f6c237cadbd9284e10d333bc0e1546633cd0e430e6194044bc4",
+        "JointDecisionv3.mlmodelc/model.mil": "791b3c3cf3eb2079c84623fc880f6bba008d1366e5f8b03e9a8ed8bd4d7194a0",
+        "JointDecisionv3.mlmodelc/weights/weight.bin": "3f310b85b82341c53ec383025ab094a4e462ee1c592e1ad7c6bfe39cff66ca25",
+        "Preprocessor.mlmodelc/analytics/coremldata.bin": "c9beeb989c8d66f8be11df59bc6df277ec76cee404f6865b46243835ef562f6d",
+        "Preprocessor.mlmodelc/coremldata.bin": "dbde3f2300842c1fd51ef3ff948a0bcffe65ffd2dca10707f2509f32c1d65b1d",
+        "Preprocessor.mlmodelc/metadata.json": "2a98699e22d279dd37fa1d238aeb1c6db1df0d6fad687775324157689d8f3acf",
+        "Preprocessor.mlmodelc/model.mil": "4b8518a956450fec57f06c2a21bdffc26973f7f1fa6842fb38fe917f896b6b93",
+        "Preprocessor.mlmodelc/weights/weight.bin": "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea",
+        "config.json": "965c69bf500c7be18958df6438dc1ba897721690ae412937ca7c91e28cec1870",
+        "parakeet_v3_vocab.json": "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735",
+        "parakeet_vocab.json": "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735"
+      },
+      "root": "/Users/karanvirkang/Library/Application Support/JevVoice/Models/parakeet-ultra",
+      "sha256": "79dd023845503d9151ac5ee0aca55eb261a6431d307032e8ae47ff3eb9c7e356"
+    }
+  },
+  "stage_receipt": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-final-r6-stage.json",
+  "stage_receipt_sha256": "a8615e1c716849c33acbd6583eb0cb0e64daeccc03d66db240e34f74de00ff58"
+}

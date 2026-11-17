@@ -5,7 +5,7 @@ import JevVoiceCore
 /// Exact upstream integration tested for this migration. Stock auto-updates
 /// must not silently replace the verified build.
 enum CuaDependency {
-    static let sourceRevision = "b0968e1" // cua-driver-rs-v0.34.0
+    static let sourceRevision = "85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19" // cua-driver-rs-v0.38.0
     static let hostBundleID = "com.chriswozniczek.jevvoice"
     static let installedExecutable = URL(fileURLWithPath: "/Applications/CuaDriver.app/Contents/MacOS/cua-driver")
     /// `make app` embeds the pinned build at Contents/Resources/cua-driver so
@@ -13,7 +13,7 @@ enum CuaDependency {
     /// (swift run, tests) fall back to the installed driver.
     static var bundledExecutable: URL? { Bundle.main.url(forResource: "cua-driver", withExtension: nil) }
     static var executable: URL { bundledExecutable ?? installedExecutable }
-    static let executableSHA256 = "54e5d48128fb62323366c49b6be480ccef83cdee23bd7fc1f19431347a5df86b"
+    static let executableSHA256 = "b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8"
     /// Signing is part of `make app`, so the embedded copy can never match the
     /// upstream byte hash. The build records the post-signing digest here and
     /// the outer app signature seals it; unpackaged bundles have no embedded

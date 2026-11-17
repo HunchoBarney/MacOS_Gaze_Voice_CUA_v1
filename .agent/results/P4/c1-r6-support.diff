@@ -1,0 +1,187 @@
+--- r5/.agent/results/P4/jev-stage-candidate.py
++++ r6/.agent/results/P4/jev-stage-candidate.py
+@@ -45,7 +45,7 @@
+ 
+ def main():
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--label", choices=("before", "after", "after-r2", "after-r3", "final", "final-r2", "final-r3", "final-r4", "final-r5"), required=True)
++    parser.add_argument("--label", choices=("before", "after", "after-r2", "after-r3", "final", "final-r2", "final-r3", "final-r4", "final-r5", "final-r6"), required=True)
+     parser.add_argument("--snapshot", type=Path, required=True)
+     args = parser.parse_args()
+     if os.environ.get("JARVIS_VERIFICATION_LANE_HELD") != "1":
+--- r5/Sources/JevVoice/Drive/DriveCandidates.swift
++++ r6/Sources/JevVoice/Drive/DriveCandidates.swift
+@@ -28,11 +28,15 @@
+             case done
+             case abstain
+         }
++        enum TargetScope: Sendable {
++            case window
++        }
+         var id: String
+         var description: String
+         var needsText = false
+         var kind: Kind
+         var element: DriveLoop.Element? = nil
++        var targetScope: TargetScope? = nil
+     }
+ 
+     /// Per-round extras — candidates the snapshot can't mint (traffic
+@@ -119,6 +123,10 @@
+             var details: [String: JSONValue] = ["bounds": .null]
+             if case .request(let request) = candidate.kind {
+                 details["tool"] = .string(request.tool)
++                if case .window? = candidate.targetScope {
++                    details["arguments"] = .object(request.args)
++                    details["target_scope"] = .object(["kind": .string("window")])
++                }
+                 if candidate.needsText {
+                     let literal = literalText(values: values,
+                                               label: candidate.element?.label ?? request.elementText)
+@@ -381,7 +389,7 @@
+                     args: ["key": .string(key),
+                            "delivery_mode": .string("background")],
+                     elementText: windowTitle,
+-                    summary: "press \(key)"))))
++                    summary: "press \(key)")), targetScope: .window))
+         }
+         for dir in ["up", "down"] {
+             out.append(Draft(id: "scroll:\(dir)", description: "scroll \(dir)",
+@@ -391,7 +399,7 @@
+                            "by": .string("page"), "amount": .number(1),
+                            "delivery_mode": .string("background")],
+                     elementText: windowTitle,
+-                    summary: "scroll \(dir)"))))
++                    summary: "scroll \(dir)")), targetScope: .window))
+         }
+         // A `menu A > B > C` path in the goal mints one invoke_menu
+         // candidate — the driver resolves each segment against the live
+@@ -557,6 +565,17 @@
+         ]
+         if let context { s["clipboard_or_context"] = .string(context) }
+         for (key, value) in fields where s[key] == nil { s[key] = value }
++        if let details = s["_candidate_details"]?.object {
++            s["_candidate_details"] = .object(details.mapValues { value in
++                guard var detail = value.object,
++                      var scope = detail["target_scope"]?.object,
++                      scope["kind"]?.string == "window" else { return value }
++                scope["app"] = .string(app)
++                scope["window"] = .string(window)
++                detail["target_scope"] = .object(scope)
++                return .object(detail)
++            })
++        }
+         return .object(s)
+     }
+ }
+--- r5/Sources/JevVoice/Drive/JevChooser.swift
++++ r6/Sources/JevVoice/Drive/JevChooser.swift
+@@ -239,8 +239,9 @@
+                         + "If the requested end state is already established by the current observed evidence, "
+                         + "further input is not unfinished work unless a repeat is explicitly requested.",
+                     criteria: [
+-                        "true": "For an implicit multi-step goal, this exact operation on the identified target is one "
+-                            + "legitimate immediate step of currently unfinished work, including UI preparation implied by "
++                        "true": "This exact operation on the identified target directly carries out the user's current instruction, "
++                            + "or is one legitimate immediate step of currently unfinished work in an implicit multi-step goal, "
++                            + "including UI preparation implied by "
+                             + "the requested end state. It need not be the only valid next step. An explicitly requested "
+                             + "control or operation must still match exactly. Preparation never authorizes another end goal, "
+                             + "violating a constraint, or changing unrelated saved data. Focus-only leaves text unchanged. "
+--- r5/Tests/JevVoiceAppTests/JevChooserTests.swift
++++ r6/Tests/JevVoiceAppTests/JevChooserTests.swift
+@@ -732,6 +732,71 @@
+         }
+     }
+ 
++    func testC1WindowPrimitiveRequestRetainsArgumentsScopeAndAuthorityBoundary() async throws {
++        let button = DriveLoop.Element(index: 7, token: "native-button-token",
++            role: "AXButton", label: "Open", value: nil,
++            frame: (10, 10, 120, 30), actions: ["AXPress"])
++        var drafts = DriveCandidates.drafts(elements: [button], snapshotID: "native-snapshot",
++            windowTitle: "Owned", goal: "scroll down", cap: nil, url: nil)
++        drafts.append(.init(id: "media", description: "volume up",
++            kind: .request(.init(effect: .tool, tool: "media key",
++                                  args: ["key": .string("volumeUp")], summary: "volume up"))))
++        let actions = drafts.filter { !["done", "reobserve", "stuck"].contains($0.id) }
++            .map { (id: $0.id, description: $0.description) }
++        let primitiveIDs = Set(["key:return", "key:escape", "key:tab", "scroll:up", "scroll:down"])
++        let arguments = Dictionary(uniqueKeysWithValues: drafts.compactMap { draft -> (String, JSONValue)? in
++            guard primitiveIDs.contains(draft.id), case .request(let request) = draft.kind else { return nil }
++            return (draft.id, .object(request.args))
++        })
++        XCTAssertEqual(Set(arguments.keys), primitiveIDs)
++        for (app, window) in [("owned.application", "Owned"), ("", "")] {
++            var fields = DriveCandidates.observationFields(elements: [button], candidates: drafts,
++                goal: "scroll down", values: [:])
++            fields["app"] = .string("wrong.application")
++            fields["window"] = .string("Wrong window")
++            let untouched = JSONValue.object(fields)
++            let state = DriveCandidates.stateJSON(goal: "scroll down", app: app, window: window,
++                options: actions.map(\.description), recentSteps: [], context: nil,
++                snapshotID: "native-snapshot", fields: fields)
++            XCTAssertEqual(.object(fields), untouched)
++            let called = LockedBox(false)
++            let choose = JevChooser.make(model: "jev-1.14.0") { captured, _ in
++                called.set(true)
++                XCTAssertEqual(captured["app"]?.string, app)
++                XCTAssertEqual(captured["window"]?.string, window)
++                XCTAssertEqual(captured["available_actions"]?.array?.compactMap { $0["id"]?.string },
++                               actions.map(\.id))
++                for (id, actualArguments) in arguments {
++                    let detail = try XCTUnwrap(captured["candidate_details"]?[id])
++                    XCTAssertEqual(detail["arguments"], actualArguments)
++                    XCTAssertEqual(detail["target_scope"], .object([
++                        "kind": .string("window"), "app": .string(app), "window": .string(window),
++                    ]))
++                    for authority in ["pid", "window_id", "session", "permission", "authorized", "verified"] {
++                        XCTAssertNil(detail[authority])
++                        XCTAssertNil(detail["arguments"]?[authority])
++                        XCTAssertNil(detail["target_scope"]?[authority])
++                    }
++                }
++                XCTAssertNil(captured["candidate_details"]?["e7"]?["target_scope"])
++                XCTAssertNil(captured["candidate_details"]?["e7"]?["arguments"])
++                XCTAssertNil(captured["candidate_details"]?["media"]?["target_scope"])
++                XCTAssertNil(captured["candidate_details"]?["media"]?["arguments"])
++                throw RequestCaptured.stop
++            }
++            do {
++                _ = try await choose(state, actions + [(id: "done", description: "Goal satisfied")])
++                XCTFail("Capture must stop before inference")
++            } catch RequestCaptured.stop {}
++            XCTAssertTrue(called.value)
++            XCTAssertEqual(.object(fields), untouched)
++            for draft in drafts where primitiveIDs.contains(draft.id) {
++                guard case .request(let request) = draft.kind else { return XCTFail("Missing primitive request") }
++                XCTAssertEqual(.object(request.args), arguments[draft.id])
++            }
++        }
++    }
++
+     func testCandidateSupportUsesUnfinishedValidityAndRetainsRawGates() async throws {
+         for (support, probability, accepted) in [(0.89, 0.91, false), (0.90, 0.70, true),
+                                                   (0.99, 0.69, false)] {
+@@ -749,8 +814,9 @@
+                         + "If the requested end state is already established by the current observed evidence, "
+                         + "further input is not unfinished work unless a repeat is explicitly requested.")
+                     XCTAssertEqual(criteria?["true"],
+-                        "For an implicit multi-step goal, this exact operation on the identified target is one "
+-                        + "legitimate immediate step of currently unfinished work, including UI preparation implied by "
++                        "This exact operation on the identified target directly carries out the user's current instruction, "
++                        + "or is one legitimate immediate step of currently unfinished work in an implicit multi-step goal, "
++                        + "including UI preparation implied by "
+                         + "the requested end state. It need not be the only valid next step. An explicitly requested "
+                         + "control or operation must still match exactly. Preparation never authorizes another end goal, "
+                         + "violating a constraint, or changing unrelated saved data. Focus-only leaves text unchanged. "
+--- r5/scripts/verification-lane.sh
++++ r6/scripts/verification-lane.sh
+@@ -480,7 +480,7 @@
+     ;;
+   c1-package-stage)
+     [[ -f .build/release/JevVoice && "${2:-}" == "--label" &&
+-       ( "${3:-}" == "final-r3" || "${3:-}" == "final-r4" || "${3:-}" == "final-r5" ) ]] || exit 2
++       ( "${3:-}" == "final-r3" || "${3:-}" == "final-r4" || "${3:-}" == "final-r5" || "${3:-}" == "final-r6" ) ]] || exit 2
+     JARVIS_VERIFICATION_LANE_HELD=1 python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 2.75 -- \
+       python3 .agent/results/P4/jev-stage-candidate.py "${@:2}"
+     ;;

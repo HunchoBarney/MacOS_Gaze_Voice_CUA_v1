@@ -1,5 +1,12 @@
 # Screen Eye Tracking
 
+> **Drift note (2026-10-18):** this file is upstream-derived reference
+> documentation — CLI flags, API endpoints, model layout. Program
+> direction (P2a Core ML spike, P8/P11 tracker phases, fps/calibration
+> bars) lives in `.agent/PROGRAM.md` and `.agent/phases/`; where this
+> README's runtime claims disagree with current code or the harness,
+> the harness wins.
+
 This workspace copy of [PINTO0309/screen-eye-tracking](https://github.com/PINTO0309/screen-eye-tracking)
 at source commit `48b7e37` includes the local calibration and projection changes.
 The upstream license is preserved in `LICENSE`. Its macOS trial scripts
@@ -11,7 +18,7 @@ workspace root.
 
 A desktop application that estimates where the user is looking on the selected display and renders a red gaze marker at the estimated hit position. It uses RetinaFace or YOLO WholeBody28 for eye position detection and an ONNX gaze model for gaze estimation.
 
-The application is built as an Electron + React transparent overlay. It can run inference through the original Python / ONNX Runtime GPU backend, or fully inside Electron renderer with onnxruntime-web or LiteRT.js.
+The application is built as an Electron + React transparent overlay running onnxruntime-web inside a dedicated inference worker. (The Python backend and LiteRT path were removed — one runtime, one calibration pipeline.)
 
 MediaPipe dependency-free.
 
@@ -30,19 +37,6 @@ MediaPipe dependency-free.
 ## Setup
 
 ```bash
-########## This step is not necessary if you are not using Python ##########
-# Installing uv
-## Linux / Mac
-curl -LsSf https://astral.sh/uv/install.sh | sh
-## Windows
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Starting a virtual environment
-uv python install 3.10.12
-uv sync
-source .venv/bin/activate
-########## This step is not necessary if you are not using Python ##########
-
 # Installing pnpm
 ## Linux / Mac
 curl -fsSL https://get.pnpm.io/install.sh | sh -
@@ -55,16 +49,7 @@ pnpm install
 
 Download the model files from the [release](https://github.com/PINTO0309/screen-eye-tracking/releases/tag/onnx), then place the required models under `public/models/`.
 
-For `--runtime python`:
-
-```text
-public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
-public/models/yolomit_t_wholebody28_1x3x480x640.onnx
-public/models/vsdlm_l.onnx
-public/models/gaze_Nx3x160x160.onnx
-```
-
-For `--runtime onnxweb`, also place:
+Place under `public/models/`:
 
 ```text
 public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
@@ -73,16 +58,12 @@ public/models/vsdlm_l.onnx
 public/models/gaze_1x3x160x160.onnx
 ```
 
-For `--runtime litert`, also place:
+Optional appearance-ensemble model (adds a second gaze signal fused into the
+calibration map; the app runs fine without it and warns once at startup):
 
 ```text
-public/models/retinaface_mbn025_wo_postprocess_480x640_float32.tflite
-public/models/yolomit_t_wholebody28_1x3x480x640_float32.tflite
-public/models/vsdlm_l_float32.tflite
-public/models/gaze_1x3x160x160_float32.tflite
+public/models/mobileone_s0_gaze.onnx
 ```
-
-The LiteRT RetinaFace model has its dynamic postprocess tail removed. It must output `loc`, `conf_logits`, and `landms`; the renderer decodes boxes, scores, landmarks, and applies the lightweight selection step in JavaScript.
 
 An archive of CoreML models is also available from the same release, but I don't have demo code because I don't own an iPhone.
 
@@ -98,82 +79,46 @@ An archive of CoreML models is also available from the same release, but I don't
 
   <img width="600" alt="inches" src="https://github.com/user-attachments/assets/e3b3e637-283e-4d3c-ab08-72ada5e950af" />
 
-### 1. Python ver
+### Running
 
-The default ONNX Runtime backend is TensorRT. If TensorRT is unavailable, the backend emits a warning and falls back to CUDA, then CPU.
+All inference runs inside Electron on onnxruntime-web — there is no Python backend.
+The runtime defaults to the wasm execution provider for reliability — on
+Electron 42/macOS the WebGPU provider can wedge silently (`InferenceSession.run()`
+never returns, 0% CPU, no error). WebGPU remains available as an explicit opt-in
+via `--web-accelerator webgpu` pending an upstream fix.
 
 ```bash
 # Recommended
 pnpm dev -- \
---backend cuda \
 --calibrate \
 --gaze-projection-mode binocular-screen \
 --display-size-inch 31.5
 
 # Selecting the gaze estimation mode
 pnpm dev -- \
---backend cuda \
 --calibrate \
 --display-size-inch 31.5
 
 pnpm dev -- \
---backend cuda \
 --calibrate \
 --gaze-projection-mode legacy \
 --display-size-inch 31.5
 
 pnpm dev -- \
---backend cuda \
 --calibrate \
 --gaze-projection-mode binocular-screen \
 --display-size-inch 31.5
 
 pnpm dev -- \
---backend cuda \
 --calibrate \
 --gaze-projection-mode binocular-convergence \
 --display-size-inch 31.5
 ```
 
-To explicitly use TensorRT or CPU:
+`--backend` is accepted for compatibility but ignored — the onnxruntime-web
+runtime selects its own accelerator (`--web-accelerator webgpu|wasm` pins it;
+the `auto` default resolves to wasm).
 
-```bash
-pnpm dev -- \
---backend tensorrt \
---calibrate \
---gaze-projection-mode binocular-convergence \
---display-size-inch 31.5
-
-pnpm dev -- \
---backend cpu \
---calibrate \
---gaze-projection-mode binocular-convergence \
---display-size-inch 31.5
-```
-
-### 2. Web component only ver (Python independent)
-
-To run inference fully in Electron without starting Python:
-
-```bash
-# onnxruntime-web
-pnpm dev -- \
---runtime onnxweb \
---calibrate \
---gaze-projection-mode binocular-screen \
---display-size-inch 31.5 \
---web-inference-worker dedicated
-
-# LiteRT.js
-pnpm dev -- \
---runtime litert \
---calibrate \
---gaze-projection-mode binocular-screen \
---display-size-inch 31.5 \
---web-inference-worker dedicated
-```
-
-The web runtimes try WebGPU first. If model loading fails, they reload both models with wasm.
 When a web runtime is selected, Electron uses the selected model files in `public/models/` during dev runs and copies them to `dist/models/` for production runs. It also copies the required runtime wasm assets from `node_modules/` to `public/` during dev runs, or to `dist/` for production runs. The renderer loads both models and wasm assets as normal public assets.
 
 ## Lip Motion
@@ -182,29 +127,11 @@ If you specify `yolo` for `--detector` and also specify `--enable-lip-motion`, y
 
 ```bash
 pnpm dev -- \
---backend cuda \
 --detector yolo \
+--enable-lip-motion \
 --calibrate \
 --gaze-projection-mode binocular-screen \
 --display-size-inch 31.5
-
-pnpm dev -- \
---runtime onnxweb \
---detector yolo \
---enable-lip-motion \
---calibrate \
---gaze-projection-mode binocular-screen \
---display-size-inch 31.5 \
---web-inference-worker dedicated
-
-pnpm dev -- \
---runtime litert \
---detector yolo \
---enable-lip-motion \
---calibrate \
---gaze-projection-mode binocular-screen \
---display-size-inch 31.5 \
---web-inference-worker dedicated
 ```
 
 <img width="600" alt="LipMotion" src="https://github.com/user-attachments/assets/9f256287-cf8e-4b1b-9770-3b3c04373911" />
@@ -215,8 +142,6 @@ https://github.com/user-attachments/assets/0d761f22-047a-4f5a-b83a-6200f11897eb
 
 ```bash
 pnpm dev -- \
---backend tensorrt \
---runtime python \
 --detector retinaface \
 --display-index 0 \
 --display-size-inch 31.5 \
@@ -225,24 +150,30 @@ pnpm dev -- \
 --preview-fps 8
 ```
 
-- `--runtime python|onnxweb|litert`: Inference runtime. Default: `python`. `onnxweb` and `litert` never start the Python process.
-- `--backend tensorrt|cuda|cpu`: Python ONNX Runtime execution backend. Default: `tensorrt`. Ignored by web runtimes.
+- `--runtime onnxweb`: Inference runtime (onnxweb is the only runtime; other values log a warning and are ignored).
 - `--detector retinaface|yolo`: Eye position detector. Default: `retinaface`.
 - `--retinaface-model`: RetinaFace model path. Default: `public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx`.
-- `--yolo-model`: YOLO WholeBody28 model path. Defaults to `public/models/yolomit_t_wholebody28_1x3x480x640.onnx` for Python/onnxweb and `public/models/yolomit_t_wholebody28_1x3x480x640_float32.tflite` for LiteRT.
-- `--lip-motion-model`: Lip motion model path. Defaults to `public/models/vsdlm_l.onnx` for Python/onnxweb and `public/models/vsdlm_l_float32.tflite` for LiteRT.
+- `--yolo-model`: YOLO WholeBody28 model path. Default: `public/models/yolomit_t_wholebody28_1x3x480x640.onnx`.
+- `--lip-motion-model`: Lip motion model path. Default: `public/models/vsdlm_l.onnx`.
+- `--appearance-model`: Appearance-ensemble gaze model path. Default: `public/models/mobileone_s0_gaze.onnx`.
+- `--no-appearance-model`: Disable the appearance-model ensemble signal.
 - `--detector-model`: Directly overrides the selected detector model path.
 - `--display-index`: Target monitor index for the overlay marker. This uses the display order reported by Electron.
 - `--debug-overlay`: Starts as a normal opaque window instead of a transparent overlay and opens DevTools.
+- `--debug`: Enables the renderer's debug affordances (verbose panels/logging). Unlike `--debug-overlay` the window stays a transparent overlay.
+- `--show-camera-marker`: Shows the camera-position marker (arrow + `Camera position` label) on startup. Hidden by default.
+- `--no-tray`: Suppresses the menu-bar tray icon and its menu (including the standalone `Quit` item). Host apps that embed the tracker always pass this.
 - `--shape-overlay`: On Linux/Windows, restricts the transparent window shape to the visible overlay elements. This is a fallback for environments where normal click-through does not work. Do not use it if the gaze marker flickers.
 - `--display-size-inch`: Target monitor diagonal size in inches. Any positive finite value is accepted. Default: `31.5`.
-- `--camera`: Python runtime uses an OpenCV camera index or video path. Web runtimes use a browser video input index or `deviceId`. Default: `0`.
-- `--camera-resolution`: Camera capture resolution preset or `WIDTHxHEIGHT`. Default: `VGA` (`640x480`). Accepted presets are `QQVGA`, `QVGA`, `VGA`, `SVGA`, `XGA`, `HD`/`720p`, `SXGA`, `UXGA`, `Full HD`/`1080p`, `3MP`, `QHD`/`WQHD`/`1440p`, `5MP`, `6MP`, `4K UHD`, `DCI 4K`, `12MP`, `5K`, `6K`, `8K UHD`, and `12K`. `2MP`, `4MP`, and `8MP` aliases are rejected; use `1920x1080`, `2560x1440`, or `3840x2160` instead.
+- `--camera`: Browser video input index or `deviceId`. Default: `0`.
+- `--camera-resolution`: Camera capture resolution preset or `WIDTHxHEIGHT`. Default: `HD`/`720p` (`1280x720`); if the camera refuses the exact constraints the tracker warns and falls back to `VGA` (`640x480`). An explicit `--camera-resolution` request is exact-or-fail (no fallback). Accepted presets are `QQVGA`, `QVGA`, `VGA`, `SVGA`, `XGA`, `HD`/`720p`, `SXGA`, `UXGA`, `Full HD`/`1080p`, `3MP`, `QHD`/`WQHD`/`1440p`, `5MP`, `6MP`, `4K UHD`, `DCI 4K`, `12MP`, `5K`, `6K`, `8K UHD`, and `12K`. `2MP`, `4MP`, and `8MP` aliases are rejected; use `1920x1080`, `2560x1440`, or `3840x2160` instead.
 - `--camera-fov`: Horizontal camera FOV in degrees. Must be greater than `0` and less than `180`. Default: `90`.
 - `--score-threshold`: Detection score threshold. For YOLO, this applies to Head and Mouth; Eye uses a fixed `0.20` threshold.
-- `--calibration-file`: Path for the 9-point calibration result. Default: `.gaze_calibration.json`.
-- `--calibrate`: Runs 9-point calibration with geometry retuning and held-out validation.
-- `--gaze-filter oneeuro|ema`: Gaze marker filter. `oneeuro` (default) is speed-adaptive: steady when the gaze is still, responsive during fast glances. `ema` keeps the legacy fixed-alpha smoothing.
+- `--calibration-file`: Path for the calibration result. Default: `.gaze_calibration.json`.
+- `--calibrate`: Runs the pursuit calibration tour followed by a verification sweep, then saves the best fit.
+- `--calibration-tier full|standard|quick`: Calibration coverage. `full` (default) is a 17-point 4×4 tour that reaches the screen corners; `standard` is a 9-point 3×3 tour; `quick` is corners + center (~10s) for patching a drifted or moved setup. `⌘⇧G` (global hotkey) runs the `quick` tier at any time; `⌘⇧P` toggles tracking pause.
+- `--accuracy-test`: After calibration, runs a 9-point held-out accuracy test and writes `accuracy_report.json`.
+- `--gaze-filter saccade|oneeuro|ema`: Gaze marker filter. `saccade` (default) passes fast glances through unfiltered, eases fixations, and anchors sustained fixations (dwell lock). `oneeuro` is speed-adaptive; `ema` is fixed-alpha smoothing.
 - `--filter-mincutoff`: One Euro filter minimum cutoff frequency in Hz. Larger values track faster but jitter more. Default: `1.0`.
 - `--filter-beta`: One Euro filter speed coefficient. Larger values respond faster to quick glances. Default: `0.7`.
 - `--filter-dcutoff`: One Euro filter derivative cutoff frequency in Hz. Default: `1.0`.
@@ -251,11 +182,11 @@ pnpm dev -- \
 - `--smoothing-alpha-y`: Vertical gaze marker smoothing when `--gaze-filter ema` is used. Larger values are steadier but slower. Default: `0.45`.
 - `--preview-fps`: PiP camera preview update FPS. Default: `8`.
 - `--enable-inference-time`: Shows total inference time in the top-left corner as `xx.xx ms`.
-- `--web-inference-worker off|ort-proxy|dedicated`: Experimental web runtime worker mode. Default: `off`. `ort-proxy` only applies to onnxruntime-web wasm inference; `dedicated` moves onnxruntime-web or LiteRT inference processing into a dedicated Worker. `dedicated` may not reduce the model-only `inference_ms`, but it can reduce renderer main-thread blocking and improve effective FPS, dropped frames, and p95 frame interval stability when capture, preprocessing, inference, and preview generation compete with overlay rendering.
+- `--web-inference-worker off|ort-proxy|dedicated`: Inference worker mode. Default: `dedicated` — inference runs in a dedicated Worker so capture, preprocessing, and model time never block overlay rendering. `off` and `ort-proxy` remain as debug escape hatches.
 - `--external-api`: Starts a read-only local HTTP/WebSocket API for external applications. Disabled by default.
 - `--external-api-host`: Host for `--external-api`. Default: `127.0.0.1`.
 - `--external-api-port`: Port for `--external-api`. Default: `47892`.
-- `--hide-preview`: Hides the PiP camera preview.
+- `--show-preview`: Shows the PiP camera preview (diagnostic; hidden by default in the product shell).
 - `--no-flip-x`: Disables horizontal gaze point flip correction. By default the screen x coordinate is flipped.
 - `--no-flip-y`: Disables vertical pitch flip correction for the gaze model output. The parallel translation correction from the face/eye camera-space Y position is not flipped.
 - `--camera-screen-x`: Camera position on the target screen, normalized horizontally. Left `0.0`, center `0.5`, right `1.0`. Default: `0.5`.
@@ -265,20 +196,23 @@ pnpm dev -- \
 - `--retinaface-head-face-ratio`: Static ratio used with RetinaFace to convert Face width to Head-equivalent width. Default: `1.545`.
 - `--gaze-projection-mode legacy|binocular-screen|binocular-convergence`: Screen projection mode. Default: `legacy`.
 - `--enable-lip-motion`: With `--detector yolo`, estimates Mouth class id `19` with `vsdlm_l`; opening the mouth sends a left click at the current gaze point, and a quick open-close-open sequence sends the second click for a normal OS double-click. With RetinaFace this option is ignored with a warning.
+- `--gaze-model`: Gaze model path. Default: `public/models/gaze_1x3x160x160.onnx`.
+- `--gaze-max-fps`: Caps the inference frame rate (per-second processing budget on low-end machines). Default: `20`.
+- `--host-pid`: PID of the owning host app (Jev Voice passes its own). The tracker polls it every 2s and self-quits when the host dies, so a crashed or force-quit host can't orphan the tracker. Absent in standalone runs — no watchdog by design.
+- `--web-accelerator auto|webgpu|wasm`: Pin the onnxruntime-web execution provider. Default: `auto`, which resolves to `wasm` — the WebGPU provider can wedge inference silently on Electron 42/macOS, so `webgpu` is opt-in pending an upstream fix.
 
-If vertical tracking feels too slow while horizontal tracking is acceptable with `--gaze-filter ema`, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`. With the default `oneeuro` filter, raise `--filter-beta` for faster glances or lower `--filter-mincutoff` for a steadier marker.
+If vertical tracking feels too slow while horizontal tracking is acceptable with `--gaze-filter ema`, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`. With the default `saccade` filter the marker passes real glances through unfiltered and locks while dwelling; `--gaze-filter oneeuro` restores the speed-adaptive filter (raise `--filter-beta` for faster glances or lower `--filter-mincutoff` for a steadier marker).
 
-The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green, Eye detections are drawn in yellow, and Mouth is drawn with the same margin-adjusted bbox used for lip motion input. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
+With `--show-preview`, the PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green, Eye detections are drawn in yellow, and Mouth is drawn with the same margin-adjusted bbox used for lip motion input. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
 
-## External Read-Only API
+## External API
 
-External API access is disabled unless `--external-api` is passed. When enabled, the Electron main process exposes the latest internal state for local applications:
+External API access is disabled unless `--external-api` is passed. When enabled, the Electron main process exposes the latest internal state for local applications, plus a small control endpoint:
 
 https://github.com/user-attachments/assets/345e7fd9-540b-47b5-a2e6-69a25d1e7a54
 
 ```bash
 pnpm dev -- \
---backend cuda \
 --external-api \
 --calibrate \
 --gaze-projection-mode binocular-screen \
@@ -286,26 +220,17 @@ pnpm dev -- \
 --web-inference-worker dedicated
 
 pnpm dev -- \
---runtime onnxweb \
 --external-api \
 --calibrate \
 --gaze-projection-mode binocular-screen \
---display-size-inch 31.5 \
---web-inference-worker dedicated
-
-pnpm dev -- \
---runtime litert \
---external-api \
---calibrate \
---gaze-projection-mode binocular-screen \
---display-size-inch 31.5 \
---web-inference-worker dedicated
+--display-size-inch 31.5
 ```
 
 HTTP endpoints:
 
 ```text
 GET http://127.0.0.1:47892/health
+GET http://127.0.0.1:47892/ready
 GET http://127.0.0.1:47892/snapshot
 GET http://127.0.0.1:47892/snapshot/gaze
 GET http://127.0.0.1:47892/snapshot/display
@@ -314,7 +239,21 @@ GET http://127.0.0.1:47892/snapshot/calibration
 GET http://127.0.0.1:47892/snapshot/runtime
 GET http://127.0.0.1:47892/snapshot/models
 GET http://127.0.0.1:47892/snapshot/status
+GET http://127.0.0.1:47892/snapshot/paused
+GET http://127.0.0.1:47892/snapshot/calibration_status
+GET http://127.0.0.1:47892/snapshot/settings
+POST http://127.0.0.1:47892/control
 ```
+
+`GET /health` is liveness only — the process serves. `GET /ready` is the honest readiness signal `make local` polls: `200 {"ready": true}` once the pipeline produces, `503 {"ready": false, "reason": <string>}` otherwise. Reasons in precedence order: `status_error` (the served status is `level:"error"`), `runtime_not_started`, `models_not_loaded`, `no_recent_gaze`. A paused tracker counts as ready — pausing stops the stream on purpose — and fresh gaze means `gaze.updated_at` within the last 3s.
+
+The GET endpoints are read-only; `POST /control` is the single write path. Its JSON body is `{"action": "<name>", "value": <any>}` where `action` is one of `pause_toggle`, `recalibrate`, `dot_scale`, `dwell_lock`, `preview_toggle`, `status_toggle`, `inference_time_toggle`, `show_marker`, `implicit_sample`, or `quit`. Response codes:
+
+- `200 {"ok": true}` — a valid non-lifecycle action forwarded to the renderer (`recalibrate` runs the same path as the `⌘⇧G` hotkey).
+- `202 {"ok": true}` — `quit` only: acknowledged API-side, then the app quits on the next tick; it is never forwarded to the renderer.
+- `400` — `bad_request` (unparseable request target), `unknown_action`, `invalid_json`, `invalid_body`, or `invalid_value`. `invalid_value` is specific to `implicit_sample`: its `value` must be a normalized screen point `{"x_norm": 0..1, "y_norm": 0..1}` — a malformed point is rejected here rather than clamped into a bogus calibration label.
+- `409 {"error": "tracking_inactive"}` — `implicit_sample` declined because no live inference can consume the label (renderer down, modal UI owning the screen, tracker paused, or models never reported loaded). On accept it lands as the same `cursor_idle` message the idle sampler emits.
+- `405` — non-POST on `/control`, non-GET elsewhere. `403` — requests carrying an `Origin` header are rejected: the API is unauthenticated, so only originless local clients may call it. `413` — body over 64 KiB. `503 control_unavailable` — no control/quit handler wired (e.g. `quit` without an `onQuit` callback). Handlers may also return their own `{status, error}` 4xx/5xx result.
 
 `gaze` sample.
 
@@ -367,9 +306,8 @@ Result sample.
     "updated_at": "2026-06-21T13:49:54.535Z",
     "runtime": {
       "name": "onnxweb",
-      "backend": "tensorrt",
       "updated_at": "2026-06-21T13:47:13.297Z",
-      "accelerator": "webgpu"
+      "accelerator": "wasm"
     },
     "display": {
       "display_index": 1,
@@ -589,12 +527,14 @@ type ExternalSnapshot = {
   };
   status: StatusState | null;
   preview: PreviewState | null;
+  paused: boolean; // renderer-reported pause flag (⌘⇧P / pause_toggle)
+  calibration_status: string | null; // renderer-reported calibration phase
+  settings: Record<string, unknown> | null; // live settings.json contents
 };
 
 type RuntimeState = {
-  name?: "python" | "onnxweb" | "litert";
-  backend?: "tensorrt" | "cuda" | "cpu" | string;
-  accelerator?: "tensorrt" | "cuda" | "cpu" | "webgpu" | "wasm" | string;
+  name?: "onnxweb";
+  accelerator?: "webgpu" | "wasm" | string;
   updated_at: string;
 };
 
@@ -636,7 +576,16 @@ type GazeState = {
   distance_source?: "iris" | "head";
   eye_open?: number;
   blink?: boolean;
-  gaze_filter?: "oneeuro" | "ema" | string;
+  head_turned?: boolean; // head rotated past the tracking envelope — frames held
+  gaze_filter?: "saccade" | "oneeuro" | "ema" | string;
+  gaze_state?: "saccade" | "dwell" | "fixation"; // saccade filter only
+  tracking_source?: "detector" | "iris";
+  held_reason?: string; // why output is held: "head_turned", "no_face", "eye_<validity>"
+  filter_velocity_deg_s?: number; // saccade-filter eye velocity
+  capture_ms?: number;
+  preview_ms?: number;
+  processed_fps?: number;
+  frame_interval_ms?: number;
   head_face_width_ratio?: number;
   eye_position_weight_x?: number;
   eye_position_weight_y?: number;
@@ -647,8 +596,9 @@ type GazeState = {
   detect_inference_ms?: number;
   gaze_inference_ms?: number;
   inference_ms?: number;
-  yaw_deg?: number;
-  pitch_deg?: number;
+  yaw_deg?: number; // metric head pose vs session baseline (Kabsch fit);
+  pitch_deg?: number; // absent when the mesh fit degenerates — no fallback,
+                    // eye angles are not head pose
   updated_at: string;
 };
 
@@ -658,7 +608,7 @@ type CalibrationState = {
   count?: number;
   saved_path?: string;
   message?: string;
-  raw_projection?: "unclipped-v1" | "unclipped-v2";
+  raw_projection?: "unclipped-v1" | "unclipped-v2" | "featuremap-v3";
   legacy_calibration?: boolean;
   affine?: number[][];
   rbf?: {
@@ -689,8 +639,8 @@ type CalibrationState = {
 };
 
 type ModelState = {
-  runtime?: "python" | "onnxweb" | "litert";
-  accelerator?: "tensorrt" | "cuda" | "cpu" | "webgpu" | "wasm" | string;
+  runtime?: "onnxweb";
+  accelerator?: "webgpu" | "wasm" | string;
   detector?: "retinaface" | "yolo" | string;
   model?: string;
   providers?: string[];
@@ -732,6 +682,9 @@ type UpdateEvent = {
     | "models"
     | "status"
     | "preview"
+    | "paused"
+    | "calibration_status"
+    | "settings"
   >;
   snapshot: ExternalSnapshot;
 };
@@ -748,6 +701,28 @@ pnpm dev -- --gaze-projection-mode binocular-screen --calibration-file .gaze_cal
 pnpm dev -- --gaze-projection-mode binocular-convergence --calibration-file .gaze_calibration.binocular-convergence.json
 ```
 
+## Tray & Settings
+
+In standalone runs (no `--no-tray`), a menu-bar tray icon shows the tracker state (`Tracking` / `Paused` / `No face` / `Calibrating` / `Needs calibration`) and offers `Recalibrate` (same path as `⌘⇧G`), a `Pause Tracking` / `Resume Tracking` toggle (same as `⌘⇧P`), dot-size and dwell-lock controls, diagnostic toggles (preview, status panel, inference time), and `Quit`.
+
+User-facing toggles persist to `settings.json`, written next to the calibration file (so a custom `--calibration-file` puts settings beside it). The file is created on first write; a missing or corrupt file is treated as `{}`. Shape:
+
+```json
+{
+  "version": 1,
+  "dot_scale": 1.0,
+  "dwell_lock": false,
+  "show_camera_marker_on_start": false,
+  "diagnostics": {
+    "preview": false,
+    "status": false,
+    "inference_time": false
+  }
+}
+```
+
+The renderer reads it through the `getSettings`/`setSettings` bridge and reports live state (`paused`, `calibration_status`, `settings`) back through `reportState`, which is what the `/snapshot` slices above expose.
+
 ## If Nothing Appears
 
 `pnpm dev` uses Vite on port `5173`. If an old dev server is still running, startup is stopped to avoid connecting to the wrong renderer. Stop the old process first.
@@ -755,34 +730,42 @@ pnpm dev -- --gaze-projection-mode binocular-convergence --calibration-file .gaz
 Because the default window is transparent, renderer load failures or display selection mistakes can be hard to see. First verify with a normal window:
 
 ```bash
-pnpm dev -- --backend tensorrt --debug-overlay
+pnpm dev -- --debug-overlay
 ```
 
 In the normal transparent overlay, mouse events pass through to the application behind it. Clicks pass through even when the red gaze marker, PiP, status panel, or camera position marker is visible. The camera position marker is shown as an upward arrow with the `Camera position` label. To avoid gaze-marker flicker, the OS window shape is not updated by default. Try `--shape-overlay` only in environments where normal click-through does not work. `--debug-overlay` is the only mode where the overlay receives normal window input.
 
 Startup logs include display entries such as `Display 0` and `Display 1`. If the overlay appears on the wrong monitor, specify `--display-index`. When `--display-index` is omitted, the primary display is used.
 
-## 9-Point Calibration
+## Pursuit Calibration
 
-The app can run without calibration. To calibrate, start it with `--calibrate`.
+The app can run without calibration. To calibrate, start it with `--calibrate` — or press `⌘⇧G` at any time for a quick patch.
 
 ```bash
-pnpm dev -- --backend cuda --calibrate
+pnpm dev -- --calibrate
 ```
 
-After a centered `3`, `2`, `1` countdown, nine calibration targets (center, four corners, and four edge midpoints) and then two separate validation targets appear. For the center target, two red arrows bracket the target as `-> O <-`. For outer targets, a red arrow at the screen center points toward the target direction. Look at each target and hold still with your eyes open. The app takes the median of at least three fresh gaze feature samples near the end of each target display; each sample carries the projected point, per-eye angles, eye centers, head width, iris diameter, and eye openness. Moving, stale, or closed-eye samples are rejected and retried.
+Calibration is a *pursuit* tour: a target glides through waypoints while the app continuously samples the gaze feature stream and tags each frame with the target's interpolated position — no hold-still-and-stare per point. Three tiers trade coverage for time (`--calibration-tier`):
 
-When all nine samples are collected, the fit runs two stages. First, a geometry stage re-projects every stored feature across a grid of eye-position weight candidates and keeps the weight pair whose affine fit has the lowest error — this personalizes the head-translation correction to the actual camera mounting instead of the default `1.0/0.25` weights. Second, a 2D affine plus Gaussian RBF residual correction is fitted to the nine re-projected targets to absorb nonlinear projection error that affine alone cannot model. The combined correction is then checked against the two held-out validation targets before it is saved to `.gaze_calibration.json`. If raw targets collapse together, the fit error exceeds `0.18`, or validation fails, the sequence restarts without replacing a previous saved calibration. The fitted eye-position weights are stored in the calibration file (`unclipped-v2` format) and applied to the live projector on load. The 0.06 stability and 0.18 normalized error limits are starting heuristics, not measured accuracy claims.
+- `full` (default): 17-waypoint 4×4 grid including deep corners — the corners are where iris signal is thinnest, so they get real training data rather than extrapolation.
+- `standard`: 9-waypoint 3×3 grid.
+- `quick`: corners + center, ~10s. This is what `⌘⇧G` runs — a patch for a drifted or moved setup, refitted against the persisted sample pool rather than the 5 new points alone.
 
-When `--calibrate` is used, the PiP camera preview and normal red gaze marker are hidden during calibration and validation. They return after calibration completes.
+After the tour, a verification sweep samples a second pass and gates the fit on median / p90 reprojection error; a failing gate retries without replacing a previous saved calibration.
 
-Calibration files created with clipped raw projection are preserved but ignored; run `--calibrate` to replace one with a validated unclipped calibration. Older `unclipped-v1` files (5-point affine) still load, but they carry no fitted geometry or RBF correction, so recalibrating is recommended. New calibration files store raw input bounds and suppress strong extrapolation outside the calibrated range. The validation errors are saved in the calibration file in normalized display coordinates. They indicate whether the fit met this app's gate; they do not establish pixel accuracy or performance under head movement.
+The fit itself runs a regularized linear map over a ~40-dim feature vector (eye angles, head-pose proxies, iris-in-box offsets, mesh geometry, head-frame position, jaw-delta, and the optional appearance-model yaw/pitch), falling back to affine+RBF when the feature map doesn't earn its complexity on leave-one-out error. The choice is stored in the calibration file (`featuremap-v3` format) along with fitted geometry weights, raw input bounds, verify verdict, an optional drift offset, and up to ~800 feature samples.
 
-The live marker also discards a single raw jump larger than 0.35 normalized screen units unless a nearby second frame confirms the new position. This can delay a large intentional glance by one frame. Frames where the model's eye-openness measure indicates a blink are gated out before the jump gate, so blinks no longer inject outlier points; the marker freezes at its last position and dims while eyes are closed. Output smoothing defaults to a One Euro filter (speed-adaptive cutoff), which reduces both idle jitter and fast-glance lag compared with fixed-alpha EMA; `--gaze-filter ema` restores the previous behavior. The calibration and validation flow follows [Tobii's calibration guidance](https://www.developer.tobiipro.com/commonconcepts/calibration.html); the jump thresholds are local heuristics and still need a live comparison of jitter and response delay.
+**Continuous learning**: when the OS cursor sits idle while your gaze dwells on it, the tracker treats that agreement as a trusted label and refits silently in the background — the map keeps improving the longer you use it, and the sample pool persists across restarts.
+
+**Drift self-healing**: consistent one-directional rejection of implicit labels is read as a camera/laptop move; the measured offset is applied as a persistent `output_offset` so tracking stays correct without a recalibration prompt, then absorbed into the map by the next implicit refit. Only a saturated correction (something beyond a reposition) surfaces the `⌘⇧G` notice.
+
+**Exit**: during calibration or the accuracy test, the `×` button (top-right) or `Escape` cancels cleanly — nothing partial is written.
+
+The live marker gates out blink frames (freezing at the last position while eyes are closed and ~140ms after reopening), passes saccades through unfiltered, and anchors sustained fixations — the default `saccade` filter. `--gaze-filter oneeuro`/`ema` restore the older filters. The calibration flow follows [Tobii's calibration guidance](https://www.developer.tobiipro.com/commonconcepts/calibration.html).
 
 ## Estimation Assumptions
 
-- Camera input defaults to `VGA` (`640x480`) and can be changed with `--camera-resolution`. Horizontal FOV defaults to `90°` and can be changed with `--camera-fov`.
+- Camera input defaults to `HD`/`720p` (`1280x720`) with a warned `VGA` (`640x480`) fallback when the device refuses, and can be changed with `--camera-resolution`. Horizontal FOV defaults to `90°` and can be changed with `--camera-fov`.
 - The camera is assumed to be mounted at the top center of the target display.
 - For the vertical direction, the app estimates eye height relative to the camera center from the face/eye bbox Y position and projects it to screen coordinates assuming the camera is at the top center of the display. If the face moves upward in the camera frame, the marker moves upward; if the face moves downward, the marker moves downward.
 - Adult average Head width is assumed to be `16cm`. The eye-to-display distance is estimated from the detected face/head bbox width.
@@ -804,9 +787,8 @@ The live marker also discards a single raw jump larger than 0.35 normalized scre
 ## Verification
 
 ```bash
-uv run python -m compileall src
 pnpm build
-uv run python -m screen_eye_tracking.backend --help
+npx vitest run
 ```
 
 ## Citation

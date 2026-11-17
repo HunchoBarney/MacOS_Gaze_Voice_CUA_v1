@@ -1,0 +1,31 @@
+{
+  "source": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/staging/vision-pinned-owner-20261110.artifacts/completion-research-20261110/native-d121-candidate-stage/before.app/Contents/Resources/CodexRuntime/codex",
+  "target": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/staging/vision-pinned-owner-20261110.artifacts/completion-research-20261110/native-d121-candidate-stage/after.app/Contents/Resources/CodexRuntime/codex",
+  "source_sha256": "a1796c8be961155422fa733be7249f1164201cb64c06790acb1cb023bfd6bf21",
+  "target_sha256": "f860c85ee7971fee6ea6193035e6674b1b6a8e9635333c28e30907c72a03b2e3",
+  "before_free_bytes": 1657192448,
+  "original_replaced": false,
+  "prototype_passed": true,
+  "metadata_preserved": true,
+  "temporary_signature_passed": true,
+  "shared_samples": [
+    {
+      "offset": 0,
+      "shared": true
+    },
+    {
+      "offset": 1048576,
+      "shared": true
+    },
+    {
+      "offset": 104857600,
+      "shared": true
+    },
+    {
+      "offset": 209715200,
+      "shared": true
+    }
+  ],
+  "original_unchanged": true,
+  "after_free_bytes": 1654411264
+}

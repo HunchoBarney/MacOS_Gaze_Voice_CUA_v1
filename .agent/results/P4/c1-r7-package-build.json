@@ -1,0 +1,12 @@
+{
+  "started_at": "2026-11-17T00:00:54.375302+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-package-release"
+  ],
+  "source_snapshot_sha256": "235d9e7055f649130c94dcc65be836abdea055a499dd277bc7415db05761f750",
+  "status": "passed",
+  "exit_code": 0,
+  "finished_at": "2026-11-17T00:00:55.992356+00:00",
+  "log_sha256": "e9c2e805ad99d9d6b9521967dfa64260f5d670cb17269e0d2977daed29aa81eb"
+}

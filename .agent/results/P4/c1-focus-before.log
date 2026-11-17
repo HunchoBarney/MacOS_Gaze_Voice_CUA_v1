@@ -1,0 +1,1668 @@
+Waiting for the Jarvis desktop test lock…
+{
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1594420.7604936669,
+    "last_started_at": 1594418.9922714585,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 1768.2222083676606
+  },
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "native_window_witness": [
+      {
+        "frontmost_pid": 55722,
+        "monotonic": 1594425.68806675,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61813,
+            "kCGWindowOwnerPID": 55722
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61804,
+            "kCGWindowOwnerPID": 55748
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+        "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+      },
+      {
+        "frontmost_pid": 55722,
+        "monotonic": 1594425.7056332917,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61813,
+            "kCGWindowOwnerPID": 55722
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61804,
+            "kCGWindowOwnerPID": 55748
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+        "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594425.8763019168,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61813,
+            "kCGWindowOwnerPID": 55722
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61804,
+            "kCGWindowOwnerPID": 55748
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+        "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594425.902617,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61813,
+            "kCGWindowOwnerPID": 55722
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61804,
+            "kCGWindowOwnerPID": 55748
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+        "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594426.0714313334,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61813,
+            "kCGWindowOwnerPID": 55722
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61804,
+            "kCGWindowOwnerPID": 55748
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+        "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594426.1214554585,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61813,
+            "kCGWindowOwnerPID": 55722
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61804,
+            "kCGWindowOwnerPID": 55748
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+        "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+      }
+    ],
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "physical_input": false,
+  "rows": [
+    {
+      "case": 0,
+      "command": "open Calculator",
+      "controller_detail_bytes": 5,
+      "controller_detail_sha256": "ed251864987c367e9641fbdc89c1d83e9bf0fa2e3eecef8f301c79f619bfac81",
+      "controller_status": "Ready when you are",
+      "false_done": false,
+      "normal_route": "local",
+      "observed_bundle_id": "com.apple.calculator",
+      "observed_window_id": 61801,
+      "passed": true,
+      "scripted_confirmation": false,
+      "semantic_focus": false,
+      "submit_to_visible_effect_ms": 3319.35662496835,
+      "trace": [
+        {
+          "monotonic": 1594423.196003375,
+          "stage": "contextBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.6759200417,
+          "stage": "contextEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.714226375,
+          "stage": "admissionLocal",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.71465975,
+          "stage": "localBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.7163710834,
+          "stage": "coordinatorBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.71702675,
+          "stage": "keyBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.71705,
+          "stage": "keyEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.7170758334,
+          "stage": "gazeBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1857721251,
+          "stage": "gazeEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1858642919,
+          "stage": "referentBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1876334168,
+          "stage": "referentEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1890574584,
+          "stage": "workCreated",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1899374167,
+          "stage": "localEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.2733450418,
+          "stage": "executorBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.2746734584,
+          "stage": "resolveBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6569817918,
+          "stage": "resolveEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.680832,
+          "stage": "nativeActivationBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6817170002,
+          "stage": "nativeActivationEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6821358334,
+          "stage": "nativeForegroundReadBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6974245,
+          "stage": "nativeForegroundReadEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.87404525,
+          "stage": "nativeForegroundReadBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.89285525,
+          "stage": "nativeForegroundReadEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594426.062919375,
+          "stage": "nativeForegroundReadBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594426.090797,
+          "stage": "nativeForegroundReadEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594426.1224600833,
+          "stage": "driverBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594428.4171405418,
+          "stage": "driverEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594429.2104975001,
+          "stage": "driverBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594429.3564281669,
+          "stage": "driverEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594429.3772092501,
+          "stage": "executorEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        }
+      ],
+      "trace_dropped": 0,
+      "work_count": 1,
+      "works": [
+        {
+          "active": false,
+          "application": "com.apple.calculator",
+          "capture_id": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475",
+          "history_count": 2,
+          "id": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "outcome": "done"
+        }
+      ],
+      "wrong_proposal": false
+    }
+  ],
+  "status": "reproduction_observed",
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 4295.176583342254
+}
+{
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1594443.1530627501,
+    "last_started_at": 1594441.0587598335,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 2094.302916666493
+  },
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "native_window_witness": [
+      {
+        "frontmost_pid": 55808,
+        "monotonic": 1594448.7222977919,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61834,
+            "kCGWindowOwnerPID": 55808
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61825,
+            "kCGWindowOwnerPID": 55801
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+        "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+      },
+      {
+        "frontmost_pid": 55808,
+        "monotonic": 1594448.7388691667,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61834,
+            "kCGWindowOwnerPID": 55808
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61825,
+            "kCGWindowOwnerPID": 55801
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+        "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594448.9061754583,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61834,
+            "kCGWindowOwnerPID": 55808
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61825,
+            "kCGWindowOwnerPID": 55801
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+        "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594448.9577726668,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61834,
+            "kCGWindowOwnerPID": 55808
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61825,
+            "kCGWindowOwnerPID": 55801
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+        "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594449.1425741252,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61834,
+            "kCGWindowOwnerPID": 55808
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61825,
+            "kCGWindowOwnerPID": 55801
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+        "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594449.2413301251,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61834,
+            "kCGWindowOwnerPID": 55808
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61825,
+            "kCGWindowOwnerPID": 55801
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+        "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+      }
+    ],
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "physical_input": false,
+  "rows": [
+    {
+      "case": 0,
+      "command": "open Calculator",
+      "controller_detail_bytes": 5,
+      "controller_detail_sha256": "ed251864987c367e9641fbdc89c1d83e9bf0fa2e3eecef8f301c79f619bfac81",
+      "controller_status": "Finished",
+      "false_done": false,
+      "normal_route": "local",
+      "observed_bundle_id": "com.apple.calculator",
+      "observed_window_id": 61801,
+      "passed": true,
+      "scripted_confirmation": false,
+      "semantic_focus": false,
+      "submit_to_visible_effect_ms": 3286.6313331760466,
+      "trace": [
+        {
+          "monotonic": 1594446.1354770001,
+          "stage": "contextBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.389008875,
+          "stage": "contextEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4250366667,
+          "stage": "admissionLocal",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4256092084,
+          "stage": "localBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4283720835,
+          "stage": "coordinatorBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4290625835,
+          "stage": "keyBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4291036667,
+          "stage": "keyEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4291900417,
+          "stage": "gazeBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8795219585,
+          "stage": "gazeEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8796079168,
+          "stage": "referentBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.880387,
+          "stage": "referentEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8807231667,
+          "stage": "workCreated",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8812902083,
+          "stage": "localEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.9771193333,
+          "stage": "executorBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.9772667917,
+          "stage": "resolveBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.6401475002,
+          "stage": "resolveEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.7068547085,
+          "stage": "nativeActivationBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.7133045418,
+          "stage": "nativeActivationEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.7142427084,
+          "stage": "nativeForegroundReadBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.733121,
+          "stage": "nativeForegroundReadEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.8991435834,
+          "stage": "nativeForegroundReadBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.9411025834,
+          "stage": "nativeForegroundReadEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.1271093334,
+          "stage": "nativeForegroundReadBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.223909625,
+          "stage": "nativeForegroundReadEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.2528240418,
+          "stage": "nativeForegroundVerified",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.2589892084,
+          "stage": "executorEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        }
+      ],
+      "trace_dropped": 0,
+      "work_count": 1,
+      "works": [
+        {
+          "active": false,
+          "application": "com.apple.calculator",
+          "capture_id": "F4554C4C-27B2-47EC-8C08-943A59CE0B55",
+          "history_count": 2,
+          "id": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "outcome": "done"
+        }
+      ],
+      "wrong_proposal": false
+    }
+  ],
+  "status": "reproduction_observed",
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 4129.682291531935
+}
+{
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1594465.4263399583,
+    "last_started_at": 1594463.4401544167,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 1986.1855416093022
+  },
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "native_window_witness": [
+      {
+        "frontmost_pid": 55854,
+        "monotonic": 1594471.1059867917,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61853,
+            "kCGWindowOwnerPID": 55854
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61844,
+            "kCGWindowOwnerPID": 55846
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+        "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+      },
+      {
+        "frontmost_pid": 55854,
+        "monotonic": 1594471.1515883335,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61853,
+            "kCGWindowOwnerPID": 55854
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61844,
+            "kCGWindowOwnerPID": 55846
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+        "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594471.3595650417,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61853,
+            "kCGWindowOwnerPID": 55854
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61844,
+            "kCGWindowOwnerPID": 55846
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+        "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594471.4058257085,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61853,
+            "kCGWindowOwnerPID": 55854
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61844,
+            "kCGWindowOwnerPID": 55846
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+        "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594471.5729280834,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61853,
+            "kCGWindowOwnerPID": 55854
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61844,
+            "kCGWindowOwnerPID": 55846
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadBegin",
+        "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+        "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+      },
+      {
+        "frontmost_pid": 55730,
+        "monotonic": 1594472.8928674168,
+        "normal_window_metadata": [
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 408,
+              "Width": 230,
+              "X": 270,
+              "Y": 420
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61801,
+            "kCGWindowOwnerPID": 55730
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 422,
+              "Width": 656,
+              "X": 141,
+              "Y": 64
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61853,
+            "kCGWindowOwnerPID": 55854
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 900,
+              "Width": 1440,
+              "X": 0,
+              "Y": 0
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 61844,
+            "kCGWindowOwnerPID": 55846
+          },
+          {
+            "kCGWindowAlpha": 1,
+            "kCGWindowBounds": {
+              "Height": 812,
+              "Width": 1440,
+              "X": 0,
+              "Y": 30
+            },
+            "kCGWindowIsOnscreen": true,
+            "kCGWindowNumber": 60257,
+            "kCGWindowOwnerPID": 11085
+          }
+        ],
+        "stage": "nativeForegroundReadEnd",
+        "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+        "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+      }
+    ],
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "physical_input": false,
+  "rows": [
+    {
+      "case": 0,
+      "command": "open Calculator",
+      "controller_detail_bytes": 5,
+      "controller_detail_sha256": "ed251864987c367e9641fbdc89c1d83e9bf0fa2e3eecef8f301c79f619bfac81",
+      "controller_status": "Ready when you are",
+      "false_done": false,
+      "normal_route": "local",
+      "observed_bundle_id": "com.apple.calculator",
+      "observed_window_id": 61801,
+      "passed": true,
+      "scripted_confirmation": false,
+      "semantic_focus": false,
+      "submit_to_visible_effect_ms": 2836.1882916651666,
+      "trace": [
+        {
+          "monotonic": 1594468.4984780834,
+          "stage": "contextBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8139367918,
+          "stage": "contextEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8536948333,
+          "stage": "admissionLocal",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8628520835,
+          "stage": "localBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8646545417,
+          "stage": "coordinatorBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8652065834,
+          "stage": "keyBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8652269584,
+          "stage": "keyEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8652489167,
+          "stage": "gazeBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3279585,
+          "stage": "gazeEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3280470418,
+          "stage": "referentBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.332160375,
+          "stage": "referentEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3334313752,
+          "stage": "workCreated",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3344507918,
+          "stage": "localEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.4417520417,
+          "stage": "executorBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.4423732085,
+          "stage": "resolveBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594470.870943875,
+          "stage": "resolveEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.0417439584,
+          "stage": "nativeActivationBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.0954745833,
+          "stage": "nativeActivationEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.095558125,
+          "stage": "nativeForegroundReadBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.127073625,
+          "stage": "nativeForegroundReadEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.3560882502,
+          "stage": "nativeForegroundReadBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.3926292502,
+          "stage": "nativeForegroundReadEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.5629082501,
+          "stage": "nativeForegroundReadBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594472.8907907917,
+          "stage": "nativeForegroundReadEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594472.9926507918,
+          "stage": "nativeForegroundVerified",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594473.2096310835,
+          "stage": "executorEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        }
+      ],
+      "trace_dropped": 0,
+      "work_count": 1,
+      "works": [
+        {
+          "active": false,
+          "application": "com.apple.calculator",
+          "capture_id": "06A54516-E2B3-4F5F-8D15-E42E2008E295",
+          "history_count": 2,
+          "id": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "outcome": "done"
+        }
+      ],
+      "wrong_proposal": false
+    }
+  ],
+  "status": "reproduction_observed",
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 5113.342416705564
+}
+{"result": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-focus-before.json", "times_ms": [6181.205875007436, 3123.512208228931, 4711.153000127524]}

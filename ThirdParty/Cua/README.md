@@ -1,15 +1,16 @@
 # Cua integration provenance and recovery
 
 The app verifies `/Applications/CuaDriver.app/Contents/MacOS/cua-driver`
-against SHA-256 `54e5d48128fb62323366c49b6be480ccef83cdee23bd7fc1f19431347a5df86b`
-(the official upstream `cua-driver-rs` **v0.34.0** release build, tag
-`cua-driver-rs-v0.34.0` at commit `b0968e1b1283`; tarball hash verified
-against the downloaded release tarball on 2026-10-05). The authoritative
+against SHA-256 `b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8`
+(the official upstream `cua-driver-rs` **v0.38.0** release build, tag
+`cua-driver-rs-v0.38.0` at commit `85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19`;
+archive digest verified against GitHub's published asset digest on 2026-10-25). The authoritative
 runtime constants are in
 [`CuaDependency.swift`](../../Sources/JevVoice/ComputerControl/CuaDependency.swift).
 Do not update the pin just to accept a different build.
 
-v0.32.0 supersedes the local fork we previously ran: upstream landed the
+Historical note — v0.32.0 (a prior pin; the current pin is v0.38.0, above)
+superseded the local fork we previously ran: upstream landed the
 foreground-chord modifier fix (0.30.4), launch-before-snapshot wait (0.31.0),
 element-token snapshot-store resolution (0.31.0), cursor reveal for
 keyboard-first actions (0.31.0), and the post-navigation page-title refresh
@@ -18,7 +19,21 @@ fork's `type_chars_only` arg was removed from our calls. Browser `target_id`/
 `tab_id` are re-minted per `get_browser_state` read — callers must use ids
 from the same snapshot, immediately.
 
+The current canonical installer bakes 0.37.0. This is an intentional exact
+0.38.0 component-release selection, not a claim that the default installer
+currently selects it. The release explains that GitHub's prerelease label
+protects the monorepo-wide Latest pointer; plain component SemVer is stable.
+Archive SHA-256:
+`5f71191c082ca07c9dfc13b7c9a6eec60a82818c245a93534cc0eb7911471d72`.
+Use the app-bundle member, not the separate bare executable.
+The existing embedding/liveness/standard-permission flags and backward
+tool schemas pass isolated preflight; signed Jev runtime acceptance is
+recorded separately under `.agent/results/P3/closeout02/cua-upgrade/`.
+
 Prior pins (recovery only):
+- `54e5d48128fb62323366c49b6be480ccef83cdee23bd7fc1f19431347a5df86b` — upstream
+  v0.34.0, prior pin; preserve the old application and embedded vendor bytes
+  before replacement. Never silently fall back to it under the new pin.
 - `656ff1c1aea1ee063d7735bcd8eb4491346971d4fb3199c6d2260b40aae83c66` — upstream
   v0.32.0, prior pin.
 - `eb08ff7afb89804822c4d7026df3c211feb23e5ab3926fa5ea2007aa08916379` — local
@@ -69,8 +84,9 @@ the pin.
 - `LICENSE.md`: upstream license. Preserve upstream notices in reconstructed builds.
 
 The patch includes the local perception artifact tooling and native control/schema
-repairs. The detailed adoption/test history remains in
-[the migration evidence](../../docs/voice-ui/EVIDENCE.md). It is recovery material,
+repairs. The detailed adoption/test history was in `docs/voice-ui/EVIDENCE.md`;
+the `docs/` tree was removed from this repo (a93f7d1) — recover it from git
+history before that commit if needed. It is recovery material,
 not a newly reviewed or accepted upstream release.
 
 ## Reconstruct into a new directory
@@ -99,7 +115,8 @@ requires separate integration validation and an intentional pin update.
 ## Models and local state
 
 The current source snapshot, pinned Driver and perception bundle are also shared
-as private release assets. See [collaborator handoff](../../docs/HANDOFF.md).
+as private release assets. The collaborator handoff (`docs/HANDOFF.md`) was
+removed with the `docs/` tree (a93f7d1) — see git history before that commit.
 
 The source patch preserves local artifact tooling/lock metadata. The sparse source
 tree under `development/JevVoice/cua-source/` is now tracked by Git and includes
@@ -113,7 +130,8 @@ do not claim a fresh source checkout is a fully configured runtime.
 The existing source still lives at `development/JevVoice/cua-source`; its `.git`
 points to a missing worktree database. Nothing in this cleanup rewrites that pointer
 or deletes its builds. Run the verifier above against it to compare the preserved
-snapshot. See [storage and recovery](../../docs/LOCAL-DEVELOPMENT-STORAGE.md).
+snapshot. The storage-and-recovery doc (`docs/LOCAL-DEVELOPMENT-STORAGE.md`)
+was removed with the `docs/` tree (a93f7d1) — see git history before that commit.
 
 
 ## Unaccepted execution-simplification candidate
@@ -138,8 +156,9 @@ To reconstruct for review, first reconstruct and verify the baseline above, then
 run `git apply --check` followed by `git apply` with this candidate patch in the
 new checkout. Reverse only this delta with `git apply -R` after checking it applies.
 The baseline verifier intentionally reports these three changed files after the
-candidate patch. See [the scoped record](../../docs/EXECUTION-SIMPLIFICATION-REPLACEMENTS.md)
-for remaining acceptance requirements. No dependency versions were changed.
+candidate patch. The scoped record (`docs/EXECUTION-SIMPLIFICATION-REPLACEMENTS.md`)
+was removed with the `docs/` tree (a93f7d1) — see git history before that
+commit for remaining acceptance requirements. No dependency versions were changed.
 
 ## Unaccepted scroll-readback candidate
 

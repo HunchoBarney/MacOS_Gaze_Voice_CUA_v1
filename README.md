@@ -1,61 +1,109 @@
 # Jarvis / Jev Voice
 
 A macOS menu-bar computer-control app with a floating voice capsule, Fn/Globe
-hold-to-talk, Apple SpeechAnalyzer, Cua Driver, Jev decisions, and optional text
-generation. The application bundle is still named **Jev Voice.app**.
+hold-to-talk, an OpenAI Realtime voice lane, Cua Driver, Jev decisions, and
+persistent delegatable agents. The application bundle is still named
+**Jev Voice.app**.
 
-**Status:** the current production path uses SpeechAnalyzer and Cua; passing
-logic tests does not establish reliable continuous speech, live dictation, or
-concurrent control across all apps. Live/desktop and physical Fn/microphone
-checks remain opt-in and unverified at release level.
+Architecture in one breath: one embedded Cua daemon serves every consumer;
+voice tasks and agents use the shared `TaskLoop` through `DriveLoop`,
+gated by one consent choke point (`CuaPolicy` — standing
+grant plus a code deny list the grant never bypasses). Agents reach the
+loop through `JevVoice --mcp-stdio --agent <slug>`, an MCP server mode of
+the same binary.
+
+**Status:** this source tree contains local-first, turn-owned speech,
+direct native insertion and the shared action loop. Full current-artifact
+Fn/pill qualification and the later general/browser/script/replay/eyes/
+packaging work remain open. The installed daily app may be a different
+candidate; source checks do not establish packaged or physical success.
+
+The current shipping sequence and next candidate are in
+[SHIP-PLAN](.agent/SHIP-PLAN.md). Development is
+[open-source-first](.agent/REUSE.md); use existing code, platform APIs and
+maintained FOSS before implementing a subsystem from scratch.
+
+The planned model policy retains Jev for semantic decisions and Cua/native
+execution, with GPT-6.1 Terra API recovery when needed. Direct operations
+and ordinary dictation avoid an extra model call. The
+[competitive protocol](.agent/COMPETITIVE.md) targets Wispr Flow dictation
+quality and category-level speed/correctness leadership; those comparisons
+and performance goals are not yet measured product claims.
 
 ## Start developing
 
 Requires macOS 26+, Xcode with the macOS 26 SDK, and command-line tools selected
-with `xcode-select`. The Swift package has no external package dependencies.
+with `xcode-select`. The Swift package pins FluidAudio 0.17.5 for local
+speech/TTS; consult `Package.swift` before changing that dependency.
 
 ```sh
 make setup       # check the local toolchain; no credentials or downloads
 make test        # default suite; live checks are normally skipped
-make app         # release build → build/Jev Voice.app, ad-hoc signed
-make run         # build and open that bundle (quit other Jev Voice copies first)
+make local       # daily driver: build → sign → install to ~/jarvis-local,
+                 # relaunch, then wait for the tracker API's /ready
+make run         # alias for `make local`
+make app         # release build → build/Jev Voice.app, signed
+make bundle-tracker  # stage the tracker payload into the app (strict)
+make install-tracker # write the tracker to app-support as real files
+make check-tracker   # report which tracker path a staged app resolves
 make dist        # package the bundle as a zip
 ```
 
-Building the app does **not** install its runtime dependencies. Computer control
-requires the exact pinned Cua Driver Local and configured perception extension;
-stock Cua is not an interchangeable replacement. See [Cua integration](ThirdParty/Cua/README.md).
+`make local` requires `node` (and `pnpm` via corepack) for the tracker
+checkout; `SKIP_TRACKER_DEPS=1` skips that when the tracker isn't wanted.
+
+Computer control requires the exact pinned Cua runtime and compatible
+SDK/source contracts; an arbitrary installed driver is not interchangeable.
+The retired perception extension is not a setup prerequisite. Development
+staging may omit the tracker; release qualification requires the strict
+complete bundle. See [Cua integration](ThirdParty/Cua/README.md).
+
+Eye tracking resolves in order: `JARVIS_EYE_TRACKER_DIR`, an `EyeTracking/`
+sibling of the bundle, `~/Library/Application Support/JevVoice/EyeTracking`
+(`make local` symlinks this repo there; `make install-tracker` writes real
+files instead — the no-checkout path), or a payload bundled at
+`Contents/Resources/EyeTracker` (probed via its `EyeTracking` alias).
+`make stage` bundles the tracker when the checkout can produce a complete
+payload (built `dist/` + `node_modules`), warns and skips otherwise
+(`SKIP_TRACKER_BUNDLE=1` bypasses);
+`make bundle-tracker` is the strict verified path and `make check-tracker`
+reports which resolution a staged app would use. Boot output lands in
+`~/Library/Application Support/JevVoice/tracker.log`.
 
 ## Use the app
 
-Open the waveform menu-bar menu → Settings. Configure the Jev key in Commands,
-choose the microphone in Voice, and follow macOS permission prompts. Optional
-text generation has a separate provider/key configuration. Saved keys remain in
-Keychain; do not put them in repository files.
+Open the waveform menu-bar menu → Settings. Voice needs an **OpenAI API key**
+(`sk-…`, or `OPENAI_API_KEY` in the environment) — ChatGPT sign-in cannot start
+realtime sessions. Configure the Jev (TypeSafe) key in Commands, choose the
+microphone in Voice, and follow the macOS permission prompts (microphone,
+camera for eye tracking, screen recording, accessibility). Saved keys remain
+in Keychain; do not put them in repository files.
 
 When Voice settings reports Ready, the microphone is already running. Idle audio is
 discarded; the macOS microphone indicator stays active. Hold Fn/Globe, speak, and
-release to finalize. A fresh recognition session receives only audio admitted during
-the hold. Cold startup or recovery can still require preparation; check readiness. The controller
-can dispatch completed commands during a hold; reliable behavior across the full
-acceptance matrix remains unfinished. Escape cancels the voice interaction;
+release to finalize. A fresh realtime session receives only audio admitted
+during the hold. Cold startup or recovery can still require preparation; check
+readiness. Local partials are displayed in the pill; final admission owns
+the dispatch decision. Reliable behavior across the full acceptance matrix
+remains unfinished. Escape cancels the voice interaction;
 task Stop and Stop All controls handle task cancellation. Expand the capsule for
 Activity and diagnostics. Set the macOS Globe-key action to Do Nothing if it
 opens emoji or system Dictation instead.
 
-Speech processing is on-device. Jev and an enabled text provider receive context
-selected by their integrations, which can include speech and observed application
-content. Do not assume only app names leave the device.
-
-## Empryo
-
-`EMPRYO.md` contains project-specific instructions loaded by Empryo; `AGENTS.md`
-provides the cross-agent entry point. Existing tests, opt-in live checks and
-migration evidence remain the verification paths.
+Local speech produces the transcript of record. Realtime response creation
+is gated by local admission/miss handling, and automatic per-Fn screenshots
+to the realtime lane have been removed. Visual deciders can request
+task-scoped captures when required. Eye inference remains on-device.
+Configured remote capabilities can receive admitted task content and
+application context; local transcription does not make the complete product
+offline. Keys stay in Keychain. Do not assume only app names leave the device.
 
 ## Find your way
 
-- [Agent rules](AGENTS.md): commands, pinned Driver, workspace and live-test rules.
+- [.agent/PROGRAM.md](.agent/PROGRAM.md): the v1 program — hero jobs, phase DAG, release bars (source of truth for "done").
+- [.agent/SHIP-PLAN.md](.agent/SHIP-PLAN.md): current candidate order, remaining phases, evidence and rollback.
+- [.agent/REUSE.md](.agent/REUSE.md): open-source-first policy, license/version research and component decisions.
+- [Agent rules](AGENTS.md): harness entry point — commands, gates, pinned Driver, workspace and live-test rules.
 - [Cua integration](ThirdParty/Cua/README.md): the pinned Driver contract.
 - [Eye tracking trial](EyeTracking/README.md): standalone gaze overlay and its local macOS workflow.
 

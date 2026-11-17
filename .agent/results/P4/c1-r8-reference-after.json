@@ -1,0 +1,13 @@
+{
+  "started_at": "2026-11-17T03:26:09.318528+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "VoiceSemanticTests|LocalSpeechTests|VoiceLaneAuditTests|VoiceTaskCoordinatorLaneTests"
+  ],
+  "source_snapshot": ".agent/results/P4/c1-r8-source-4/manifest.json",
+  "source_snapshot_sha256": "7499a5078d365df471bfad91ffdc1da9be7186d9440d9eee0af75317992e31b5",
+  "exit_code": 0,
+  "finished_at": "2026-11-17T03:32:10.944158+00:00",
+  "log_sha256": "0d318fd55492ab592518284b5014dbae3af9228ad9bc2fef65549e921c743522"
+}

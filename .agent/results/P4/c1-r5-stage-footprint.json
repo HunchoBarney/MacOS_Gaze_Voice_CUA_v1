@@ -1,0 +1,31 @@
+{
+  "signed_resource_macho_bytes": 1106771312,
+  "largest_macho_bytes": 240152160,
+  "main_executable_bytes": 31465800,
+  "macho_count": 51,
+  "largest": [
+    [
+      240152160,
+      "Contents/Resources/CodexRuntime/codex"
+    ],
+    [
+      240152160,
+      "Contents/Resources/CodexRuntime/bin/codex"
+    ],
+    [
+      236775040,
+      "Contents/Resources/EyeTracker/bin/node"
+    ],
+    [
+      188126656,
+      "Contents/Resources/EyeTracker/node_modules/.pnpm/electron@42.4.1/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+    ],
+    [
+      80570656,
+      "Contents/Resources/cua-driver"
+    ]
+  ],
+  "current_free_bytes": 3145523200,
+  "conservative_file_growth_bytes": 1395166488,
+  "emergency_reserve_bytes": 1073741824
+}

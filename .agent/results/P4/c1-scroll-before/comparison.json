@@ -1,0 +1,18 @@
+{
+  "status": "blocked_or_failed",
+  "physical_input": false,
+  "human_confirmed": false,
+  "entry": "signed packaged MCP drive_until; production DriveLoop and bundled Cua",
+  "clock": "MCP request to response; independent AX witness completion reported separately",
+  "gaze": "controlled unavailable endpoint; bound-window fallback only",
+  "jev_limit": null,
+  "billed_provider_calls": 0,
+  "binary_sha256": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+  "harness_sha256": "a720ff08229df6672ab791a50afa71e955feba1cbe9dff2eed86816a88d10fcc",
+  "rows": [],
+  "documents_before": 0,
+  "error_type": "AssertionError",
+  "error": "",
+  "documents_after": 0,
+  "documents_restored": true
+}

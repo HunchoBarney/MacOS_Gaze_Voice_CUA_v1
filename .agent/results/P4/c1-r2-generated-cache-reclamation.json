@@ -1,0 +1,9 @@
+{
+  "purpose": "reclaim this checkout generated compiler/index caches; preserve sources, models, evidence and binaries",
+  "before_free_bytes": 4930002944,
+  "paths": [
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/debug/ModuleCache",
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/debug/index"
+  ],
+  "after_free_bytes": 4929986560
+}

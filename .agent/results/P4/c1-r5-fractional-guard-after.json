@@ -1,0 +1,62 @@
+{
+  "cases": [
+    {
+      "minimum": "2.75",
+      "free_bytes_before": 4197629952,
+      "expected_exit": 0,
+      "exit_code": 0,
+      "stdout": "child started\n",
+      "stderr": ""
+    },
+    {
+      "minimum": "3",
+      "free_bytes_before": 4197629952,
+      "expected_exit": 0,
+      "exit_code": 0,
+      "stdout": "child started\n",
+      "stderr": ""
+    },
+    {
+      "minimum": "100000",
+      "free_bytes_before": 4197629952,
+      "expected_exit": 75,
+      "exit_code": 75,
+      "stdout": "",
+      "stderr": "Insufficient build space; no child was started.\n"
+    },
+    {
+      "minimum": "-1",
+      "free_bytes_before": 4197629952,
+      "expected_exit": 2,
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: jev-build-guard.py [-h] --directory DIRECTORY\n                          [--minimum-free-gib MINIMUM_FREE_GIB]\n                          [--stop-free-gib STOP_FREE_GIB]\n                          ...\njev-build-guard.py: error: A command and finite nonnegative space budgets are required.\n"
+    },
+    {
+      "minimum": "nan",
+      "free_bytes_before": 4197629952,
+      "expected_exit": 2,
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: jev-build-guard.py [-h] --directory DIRECTORY\n                          [--minimum-free-gib MINIMUM_FREE_GIB]\n                          [--stop-free-gib STOP_FREE_GIB]\n                          ...\njev-build-guard.py: error: A command and finite nonnegative space budgets are required.\n"
+    },
+    {
+      "minimum": "inf",
+      "free_bytes_before": 4197629952,
+      "expected_exit": 2,
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: jev-build-guard.py [-h] --directory DIRECTORY\n                          [--minimum-free-gib MINIMUM_FREE_GIB]\n                          [--stop-free-gib STOP_FREE_GIB]\n                          ...\njev-build-guard.py: error: A command and finite nonnegative space budgets are required.\n"
+    },
+    {
+      "minimum": "bad",
+      "free_bytes_before": 4197629952,
+      "expected_exit": 2,
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "usage: jev-build-guard.py [-h] --directory DIRECTORY\n                          [--minimum-free-gib MINIMUM_FREE_GIB]\n                          [--stop-free-gib STOP_FREE_GIB]\n                          ...\njev-build-guard.py: error: argument --minimum-free-gib: invalid float value: 'bad'\n"
+    }
+  ],
+  "guard_sha256": "b0472c3c6093d03bf3387f634c3fed10ef58d4fd8fb4e414ac6f6a84a475ac9f",
+  "prior_wrapper": "Stopped on an assertion before any snapshot/staging; the 3GiB case must follow actual free space, not assume continued refusal."
+}

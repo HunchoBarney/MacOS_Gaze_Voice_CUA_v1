@@ -1,0 +1,9 @@
+{
+  "source": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/dependency-cache/repositories/FluidAudio-08d244c7/objects/pack/pack-87d5d17de60e00a1582b9ced49c996bf0fa4da10.pack",
+  "target": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/repositories/FluidAudio-08d244c7/objects/pack/pack-87d5d17de60e00a1582b9ced49c996bf0fa4da10.pack",
+  "sha256": "2163d45ef05722b43e04a1545e82d1a7b5beb91999ee461c3383a63050069d18",
+  "before_free_bytes": 3133476864,
+  "operation": "APFS copy-on-write sharing of identical immutable Git pack; both cache paths retained",
+  "after_free_bytes": 3133349888,
+  "both_caches_preserved": true
+}

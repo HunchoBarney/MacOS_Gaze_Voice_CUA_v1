@@ -1,0 +1,20 @@
+{
+  "verdict": "PASS",
+  "reviewer": "6cc7d424",
+  "review_receipt": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-native-ancestor-g4.md",
+  "review_receipt_sha256": "d4770e72a30ab086f23aef5b514def6e0ce49da893c90145c9fe2c556ae8d9e5",
+  "source_changes": {
+    "Sources/JevVoice/Drive/NativeWindowObservation.swift": {
+      "before": "422ee6bcdb6dc23daf312cbbb50dffc62558f568514e6dd099334580910c18c7",
+      "after": "815cd29fbe01535dc9356462095e514d2b43a41612dec80684b6c7370f2037e5"
+    },
+    "Sources/JevVoice/Drive/ObservedGoalProof.swift": {
+      "before": "04662a584e6d502674e68a1541fcd394ac923b8b523d626ed604c71ebc5e19c5",
+      "after": "411fc62bed17e02352ef60c692264e575143cbec2c063cb569386ddb5078d059"
+    },
+    "Sources/JevVoice/Drive/TaskLoop.swift": {
+      "before": "9b2e908ebe81bffc78208d48dbe934be19e7bb704b6b3cdac15fb544420d1c00",
+      "after": "0883898e16f117e5f57cd4d2a35ad2678e6e8159a3919e5606d921a141bef3fb"
+    }
+  }
+}

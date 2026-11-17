@@ -1,0 +1,47 @@
+{
+  "status": "blocked_or_failed",
+  "physical_input": false,
+  "human_confirmed": false,
+  "entry": "signed packaged MCP drive_until; production DriveLoop and bundled Cua",
+  "clock": "MCP request to response; independent AX witness completion reported separately",
+  "gaze": "controlled unavailable endpoint; bound-window fallback only",
+  "jev_limit": null,
+  "billed_provider_calls": 0,
+  "binary_sha256": "65155dbeae7cee3f8f3ce24968dc5c24951df235800f0d4836bfd22c7022adf3",
+  "harness_sha256": "7ffa5394af73f7246838c53eaaecdb45afff18e1fb7615840aa79ba87de05168",
+  "rows": [
+    {
+      "case": "c1-owned-scroll-0",
+      "goal": "scroll down",
+      "caller_deadline_seconds": 30,
+      "completion_hints_sent": false,
+      "status": "blocked",
+      "verified": false,
+      "strict_success": false,
+      "false_done": false,
+      "cancelled_by_harness": false,
+      "actor_pid": 9170,
+      "kind": "qualification",
+      "requested_window_id": 62583,
+      "result_text": "Blocked: The model call failed: Jev API error 400: {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} Recent steps: the decider failed \u2014 http(status: 400, body: \"{\\\"detail\\\":{\\\"error_type\\\":\\\"max_tokens_exceeded\\\"}}\")",
+      "is_error": false,
+      "wall_ms": 1162.945208,
+      "actual_state": {
+        "scroll_before": 0.0,
+        "scroll_after": 0.0,
+        "decoy_unchanged": true,
+        "content_unchanged": true,
+        "verified_elapsed_ms": 2882.356916000001
+      },
+      "visual_trace": [],
+      "visual_trace_collection_ms": 2359.1158330000007,
+      "visual_trace_required": false,
+      "visual_trace_complete": false
+    }
+  ],
+  "documents_before": 1,
+  "error_type": "AssertionError",
+  "error": "",
+  "documents_after": 1,
+  "documents_restored": true
+}

@@ -1,0 +1,53 @@
+{
+  "phase": "P6",
+  "criteria": [
+    {
+      "id": "P6-1",
+      "behavior": "The typed ScriptIntent registry and executor reuse native/OS/FOSS facilities and ship without a developer toolchain.",
+      "check": "Run scripts/verification-lane.sh p6 after M1 adds that mode; inspect registry/helper source, permission declarations and .agent/results/P6/contract-review.md.",
+      "expected": "Nonempty suites pass; entries declare typed args, target/account, argv or native helper, confirmation, verifier and actual reversal. Versions/licenses and custom gaps are recorded.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P6-2",
+      "behavior": "Arguments, account/contact/date binding and consent resist injection and stale approval.",
+      "check": "Run p6 negative cases for Unicode/quoting/metacharacters, unknown args, ambiguous contacts, wrong account, changed recipient/content, cancellation and uncertain execution.",
+      "expected": "No shell-string execution, unintended target, duplicate mutation or authorization bypass. Read-back/confirmation binds the unchanged consequential action.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P6-3",
+      "behavior": "Inbox/messages, calendar/reminders/notes and inbox_brief work through normal voice/typed routing.",
+      "check": "Inspect .agent/results/P6/integration.json and public tool/coordinator wiring; reproduce the frozen controlled account/fixture cases through the recorded entrypoint.",
+      "expected": "Every declared hero family reaches a real native/script/browser executor with the correct account and arguments; no unavailable placeholder or canned result is counted as success.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P6-4",
+      "behavior": "Completion and supported undo use independent result evidence rather than process exit or model claims.",
+      "check": "Inspect native/API/DOM readbacks and partial-failure/undo cases in P6 integration evidence against actual executor/verifier source.",
+      "expected": "Draft and sent outcomes remain distinct; persistence is proved where claimed. Uncertain results are reported honestly and never retried blindly.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P6-5",
+      "behavior": "Each declared script intent and the brief meet their live reliability/latency bar on controlled data.",
+      "check": "Run the SHIP-PLAN desktop-lock benchmark with tag p6 through a reviewed normal-product injector; inspect qualification.json, raw rows, oracles and manifest.",
+      "expected": "Per-intent strict success >=99%, p50 <=1.5s; brief <=5s; PROGRAM statistics and zero critical violations. All failures and S-NATIVE/S-WORKFLOW gaps are reported.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P6-6",
+      "behavior": "Independent review and a complete scoped handoff support P6 acceptance.",
+      "check": "Inspect P6 final judge verdict, integrated lane, actual G5/G6 evidence, source/runtime bindings and phase handoff.",
+      "expected": "Authorized fresh-context PASS; physical evidence is not inferred from typed tests. No real recipients or unrelated user data were mutated during qualification.",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}

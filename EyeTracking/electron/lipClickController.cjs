@@ -13,6 +13,7 @@ function createLipClickController({
   let mouthOpenActive = false;
   let invalidSince = null;
   let lastPressAt = null;
+  let buttonDown = false;
   let pending = Promise.resolve();
 
   function setEnabled(value) {
@@ -52,9 +53,30 @@ function createLipClickController({
         mouthOpenActive = true;
         registerPressEffect(point);
         enqueue(async () => {
+          // The click may have been queued before a calibration modal armed
+          // the shield — re-check at execution so a stale press can't land
+          // on the modal (e.g. its exit button).
+          if (!enabled || calibrationActive) {
+            return;
+          }
           await mouse.move(point);
-          await mouse.press();
-          await mouse.release();
+          // move() awaited — the shield may have armed in that millisecond
+          // window. Re-check so a queued press can't land on the modal.
+          if (!enabled || calibrationActive) {
+            return;
+          }
+          buttonDown = true;
+          try {
+            await mouse.press();
+          } finally {
+            // release must pair with press even on a throw — skipping it
+            // would leave the OS button physically held down.
+            try {
+              await mouse.release();
+            } finally {
+              buttonDown = false;
+            }
+          }
         });
       }
     } else if (mouthOpenActive) {
@@ -68,8 +90,10 @@ function createLipClickController({
     mouthOpenActive = false;
   }
 
+  // Physical OS-button state — true only inside the press/release pair of an
+  // in-flight click. The stub always returned false, hiding a stuck button.
   function isPressed() {
-    return false;
+    return buttonDown;
   }
 
   function registerPressEffect(point) {

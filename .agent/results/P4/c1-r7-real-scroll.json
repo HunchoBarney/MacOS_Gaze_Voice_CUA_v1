@@ -1,0 +1,19 @@
+{
+  "started_at": "2026-11-17T00:07:04.593362+00:00",
+  "command": [
+    "python3",
+    "scripts/with-desktop-lock.py",
+    "python3",
+    ".agent/results/P4/c1-scroll.py",
+    "--receipt",
+    ".agent/results/P12/c1-final-r7-stage.json",
+    "--label",
+    "r7-native"
+  ],
+  "receipt_sha256": "6f9876b06512d63279d7c86fb6692fd13ab4d3ee753a89f662df91cfc9effc31",
+  "g4": "b66d4b3f SOURCE+ARTIFACT PASS for exact local R7 candidate; not C1 acceptance",
+  "status": "failed",
+  "exit_code": 1,
+  "finished_at": "2026-11-17T00:07:33.158646+00:00",
+  "log_sha256": "96cd49846553b59f76fa53c03b9b1a90210ef4d0f2d6f727b3979ef27a649622"
+}

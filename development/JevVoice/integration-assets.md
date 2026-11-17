@@ -1,3 +1,12 @@
+> **SUPERSEDED (2026-10):** this document describes the pre-rebuild mini-Clicky
+> integration plan — the architecture it targets (`CuaTaskAgent`,
+> `CuaConnectionPool`, `CuaDialogueState`, `CompanionBrain`, `LoopbackMCPServer`)
+> is deleted; current layout:
+> `Sources/JevVoice/{Agents,Companion,ComputerControl,Consent,Contracts,Drive,
+> Driver,Gaze,Settings,UI,Voice}`. Note: the "becomes `AgentInstructions.swift`"
+> plan below never landed — no such file exists. Kept for history — do not
+> treat as current truth.
+
 # Integration assets — mini-Clicky build (coordinator-owned)
 
 Verbatim wire contracts extracted from `Clicky_Decompile/mirror/` for the

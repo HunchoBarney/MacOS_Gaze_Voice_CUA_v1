@@ -1,0 +1,460 @@
+Waiting for the Jarvis desktop test lock…
+c1after 1: signed exact typing; profiled=False
+{
+  "captured_binding_matches": true,
+  "decoy_unchanged": true,
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 0,
+    "failed": 0,
+    "last_started_at": 1591128.5447241669,
+    "pending": 1,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 0
+  },
+  "elapsed_ms": 1875.8634582627565,
+  "exact_insertion": true,
+  "executable_sha256": "db03d7c877acdcb1408d42fee09564cb74e859d373a1a8b24ce4a2eecf0d8eb9",
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "no_model_rounds": true,
+  "normal_controller_no_audit_binding": true,
+  "observed_window": 61331,
+  "outcomes": [
+    "done"
+  ],
+  "physical_input": false,
+  "status": "passed",
+  "task_literal_matches": true,
+  "task_window": 61331,
+  "trace": [
+    {
+      "monotonic": 1591131.2637275835,
+      "stage": "contextBegin",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.6880042502,
+      "stage": "contextEnd",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7169221668,
+      "stage": "admissionLocal",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7172817502,
+      "stage": "localBegin",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7181769584,
+      "stage": "coordinatorBegin",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7187721252,
+      "stage": "keyBegin",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7187950835,
+      "stage": "keyEnd",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7188212918,
+      "stage": "gazeBegin",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7389276668,
+      "stage": "gazeEnd",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7397408334,
+      "stage": "referentBegin",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7405209169,
+      "stage": "referentEnd",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7421294167,
+      "stage": "workCreated",
+      "task": "0235365E-6B7B-458E-A053-86F002C84114",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7434470835,
+      "stage": "localEnd",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7932096669,
+      "stage": "executorBegin",
+      "task": "0235365E-6B7B-458E-A053-86F002C84114",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591131.7947341667,
+      "stage": "resolveBegin",
+      "task": "0235365E-6B7B-458E-A053-86F002C84114",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591132.7010794168,
+      "stage": "resolveEnd",
+      "task": "0235365E-6B7B-458E-A053-86F002C84114",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591132.7961517917,
+      "stage": "nativeTextInsertionBegin",
+      "task": "0235365E-6B7B-458E-A053-86F002C84114",
+      "tool": "typeText",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591132.800187625,
+      "stage": "nativeTextInsertionEnd",
+      "task": "0235365E-6B7B-458E-A053-86F002C84114",
+      "tool": "typeText",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    },
+    {
+      "monotonic": 1591132.8244889583,
+      "stage": "executorEnd",
+      "task": "0235365E-6B7B-458E-A053-86F002C84114",
+      "turn": "FE60C1A0-E971-48A3-BB51-623C55C40C04"
+    }
+  ],
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 3665.27787479572,
+  "type_dispatches": 1,
+  "typing_proof": [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count": 1
+}
+c1after 2: signed exact typing; profiled=False
+{
+  "captured_binding_matches": true,
+  "decoy_unchanged": true,
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1591152.3690082917,
+    "last_started_at": 1591150.9764335002,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 1392.5747915636748
+  },
+  "elapsed_ms": 2934.0634583495557,
+  "exact_insertion": true,
+  "executable_sha256": "db03d7c877acdcb1408d42fee09564cb74e859d373a1a8b24ce4a2eecf0d8eb9",
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "no_model_rounds": true,
+  "normal_controller_no_audit_binding": true,
+  "observed_window": 61352,
+  "outcomes": [
+    "done"
+  ],
+  "physical_input": false,
+  "status": "passed",
+  "task_literal_matches": true,
+  "task_window": 61352,
+  "trace": [
+    {
+      "monotonic": 1591157.1610333335,
+      "stage": "contextBegin",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.4889568752,
+      "stage": "contextEnd",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5185365835,
+      "stage": "admissionLocal",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5189280417,
+      "stage": "localBegin",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.520412375,
+      "stage": "coordinatorBegin",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5220155418,
+      "stage": "keyBegin",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5220397084,
+      "stage": "keyEnd",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5220685834,
+      "stage": "gazeBegin",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5387143334,
+      "stage": "gazeEnd",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.539400625,
+      "stage": "referentBegin",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5402870001,
+      "stage": "referentEnd",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.545029625,
+      "stage": "workCreated",
+      "task": "B74A0B9E-D8E2-474D-901F-DDE716AEDEE6",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.5467797501,
+      "stage": "localEnd",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.6203317083,
+      "stage": "executorBegin",
+      "task": "B74A0B9E-D8E2-474D-901F-DDE716AEDEE6",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591157.620478875,
+      "stage": "resolveBegin",
+      "task": "B74A0B9E-D8E2-474D-901F-DDE716AEDEE6",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591159.0545089168,
+      "stage": "resolveEnd",
+      "task": "B74A0B9E-D8E2-474D-901F-DDE716AEDEE6",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591159.57654475,
+      "stage": "nativeTextInsertionBegin",
+      "task": "B74A0B9E-D8E2-474D-901F-DDE716AEDEE6",
+      "tool": "typeText",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591159.5961552917,
+      "stage": "nativeTextInsertionEnd",
+      "task": "B74A0B9E-D8E2-474D-901F-DDE716AEDEE6",
+      "tool": "typeText",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    },
+    {
+      "monotonic": 1591159.6459397501,
+      "stage": "executorEnd",
+      "task": "B74A0B9E-D8E2-474D-901F-DDE716AEDEE6",
+      "turn": "69287196-A676-41CC-A952-790DAC3DA2B0"
+    }
+  ],
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 4257.10262497887,
+  "type_dispatches": 1,
+  "typing_proof": [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count": 1
+}
+c1after 3: signed exact typing; profiled=False
+{
+  "captured_binding_matches": true,
+  "decoy_unchanged": true,
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1591177.1248437501,
+    "last_started_at": 1591175.2744875418,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 1850.3562083933502
+  },
+  "elapsed_ms": 1659.7801665775478,
+  "exact_insertion": true,
+  "executable_sha256": "db03d7c877acdcb1408d42fee09564cb74e859d373a1a8b24ce4a2eecf0d8eb9",
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "no_model_rounds": true,
+  "normal_controller_no_audit_binding": true,
+  "observed_window": 61375,
+  "outcomes": [
+    "done"
+  ],
+  "physical_input": false,
+  "status": "passed",
+  "task_literal_matches": true,
+  "task_window": 61375,
+  "trace": [
+    {
+      "monotonic": 1591179.4429196252,
+      "stage": "contextBegin",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7191505418,
+      "stage": "contextEnd",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7487931668,
+      "stage": "admissionLocal",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7491688335,
+      "stage": "localBegin",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7499818334,
+      "stage": "coordinatorBegin",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.75055725,
+      "stage": "keyBegin",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7505760833,
+      "stage": "keyEnd",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7506045417,
+      "stage": "gazeBegin",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7645795417,
+      "stage": "gazeEnd",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.765304875,
+      "stage": "referentBegin",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7679353335,
+      "stage": "referentEnd",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7691151667,
+      "stage": "workCreated",
+      "task": "4EB43F4A-0F9E-42EB-8B1D-B51635040BEB",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.7698651669,
+      "stage": "localEnd",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.9360951667,
+      "stage": "executorBegin",
+      "task": "4EB43F4A-0F9E-42EB-8B1D-B51635040BEB",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591179.9362690002,
+      "stage": "resolveBegin",
+      "task": "4EB43F4A-0F9E-42EB-8B1D-B51635040BEB",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591180.4662502918,
+      "stage": "resolveEnd",
+      "task": "4EB43F4A-0F9E-42EB-8B1D-B51635040BEB",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591180.7231156668,
+      "stage": "nativeTextInsertionBegin",
+      "task": "4EB43F4A-0F9E-42EB-8B1D-B51635040BEB",
+      "tool": "typeText",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591180.7279322501,
+      "stage": "nativeTextInsertionEnd",
+      "task": "4EB43F4A-0F9E-42EB-8B1D-B51635040BEB",
+      "tool": "typeText",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    },
+    {
+      "monotonic": 1591180.738183375,
+      "stage": "executorEnd",
+      "task": "4EB43F4A-0F9E-42EB-8B1D-B51635040BEB",
+      "turn": "AAE6B4ED-3488-4F10-89F8-8C6FFFEF0EAD"
+    }
+  ],
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 3353.3977915067226,
+  "type_dispatches": 1,
+  "typing_proof": [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count": 1
+}
+PASS three measured runs; profiled run excluded. No physical voice acceptance.

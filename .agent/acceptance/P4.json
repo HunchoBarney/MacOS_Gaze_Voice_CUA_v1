@@ -1,0 +1,53 @@
+{
+  "phase": "P4",
+  "criteria": [
+    {
+      "id": "P4-1",
+      "behavior": "Repeated same-slug --mcp-stdio drive_until calls stay live: a second identical --agent session connects and completes instead of wedging on daemon session reuse (P1 finding, CuaDriveServer.swift:205,209).",
+      "check": "Regression test drives two sequential same-slug sessions to completion; fails on pre-fix tree, passes after. scripts/verification-lane.sh focused filter includes it.",
+      "expected": "Both sessions complete; no daemon respawn required; intentional reconnect semantics preserved.",
+      "passes": true,
+      "evidence": "CuaDriveSessionTests 5/5: unique labels per bind, structural bindTransport pairs connect+rebind, failed connect mints nothing, liveCalls Mutex-guarded; jarvis-judge 05377410 PASS."
+    },
+    {
+      "id": "P4-2",
+      "behavior": "TaskLoop implements frozen CONTRACTS \u00a71: TaskObservation in, DecideResult out; loop owns actuation, settle, budgets, consent routing; JevDecider returns only act/askUser/escalate/done/blocked and never executes.",
+      "check": "swift test TaskLoopTests/JevDeciderTests: observe-decide-act-settle, explicit finite and nil/unbounded budgets, loop-owned no-progress guard, verified goal evidence, consent/askUser routed by loop. User-approved progress-driven contract supersedes the old production four-round ceiling.",
+      "expected": "Protocol real (not stubbed); decider has no actuation path; done-without-settle rejected.",
+      "passes": true,
+      "evidence": "Historical pre-progress review: TaskLoopTests18 + JevDeciderTests20, judge PASS. Progress-driven and native-value revision: 1191 Swift tests (18 skipped), zero failures; 114 focused tests (1 skipped), zero failures. Fresh judge 896e253f independently marks P4-2 MET and source SOURCEPASS. This is not a phase PASS: P4-5/P4-6 remain false. Logs: .agent/results/P4/jev-editable-values-all.log and jev-editable-values-focused-final.log."
+    },
+    {
+      "id": "P4-3",
+      "behavior": "DriveLoop's control flow is re-expressed on TaskLoop with identical authority semantics: element_token/snapshot addressing, captured window/literal authority, cancellation and stale-turn kill, refusal shapes unchanged.",
+      "check": "scripts/verification-lane.sh \u2014 DriveLoopTests + VoiceTaskCoordinatorLaneTests all green on the TaskLoop implementation.",
+      "expected": "Zero DriveLoopTest regressions; no shadow loops remain.",
+      "passes": true,
+      "evidence": "DriveLoop re-expressed on TaskLoop (DriveCaptureSource+JevDecider+actuate+consentRuling); DriveLoopTests 51 + VoiceTaskCoordinatorLaneTests 26 + FastLaneExecutorTests 49 green incl. refusal shapes; judge 3f65025d PASS."
+    },
+    {
+      "id": "P4-4",
+      "behavior": "The dead perception lane is deleted, not bypassed: its code path and call sites are removed and nothing references it.",
+      "check": "grep for the perception lane symbols in Sources returns zero outside tests documenting removal; full test suite green.",
+      "expected": "Lane gone from production source; no dead references.",
+      "passes": true,
+      "evidence": "rg parse_visual_regions|visualRegionCandidates|screenshotTask|turnAssetsTask|annotateGaze|actionPoint in Sources = 0; judge 3f65025d PASS."
+    },
+    {
+      "id": "P4-5",
+      "behavior": "Jev slice meets the PROGRAM bar: \u226595% success and p50 \u22644 s on the bench local-safe set (or judge-accepted DriveLoop slice) with real per-row verifier verdicts.",
+      "check": "bench results jsonl rows with wall_ms + verdict; report.py aggregates wilson/p50 vs bar; every row independently verified.",
+      "expected": "\u226595% at Wilson-aware bar, p50 \u22644 s, zero false_done.",
+      "passes": false,
+      "evidence": "Historical correction retained: bench/results/results-20261108.jsonl rows123..152 had25 external end-state matches but ONLY16/30 strict successes; nine blocked browser rows do not count. Earlier83%/sole-compute/model-limit claim is withdrawn. Earlier signed source6ec2307771e34c8aaee594112231d5f5: native-candidate-3cdd2d5ec1b1477cafe97db9df666845/results.json has6/9 strict successes,7/9 state matches,3 caller cancellations, zero false_done, clean resources; median SUCCESSFUL completion8419.1137705ms exceeds4000ms. Goal-only native-pilot-80784ea4c4e34e089b26d682b29495d2/results.json physically finishes but reportsstuck:0/1strict. Matched corrected-harness placeholder reproduction cec8134bb3c840efa991aea407890827 -> e26e9a1d5e764aba883183cade15cc71 improves0/1 ->3/3 with actualEmailcorrect, but uses30s diagnostic caller deadline and is NOT phase qualification; median7108ms rounded up. Historical visual report: .agent/results/P4/jev-p4-audit-6addd9ad96f24e94a4f1da31363e4c87.html. Latest D16 signed synthetic pilot native-d16-visual-pilot:0/1 strict, blocked2428.328167ms, target/other activations0/0, false_done0, clean resources. Presence.97 passes; location.89 and authorization.92 fail unchanged.95 gates. Conditional comparison stopped; no speedup/reliability claim. P4-5 remainsfalse. Latest report and raw artifact paths: .agent/results/P4/jev-explicit-decision-results.md and .html."
+    },
+    {
+      "id": "P4-6",
+      "behavior": "Fresh-context judge returns PASS on P4-1..P4-5 with file:line evidence; ExecPlan Progress/Outcomes/Handoff updated; milestone commits only from owned paths when user authorizes.",
+      "check": "python3 scripts/check-acceptance.py --green .agent/acceptance/P4.json after judge; .agent/results/P4 evidence complete.",
+      "expected": "Independent PASS, truthful handoff, no scope creep.",
+      "passes": false,
+      "evidence": "Earlier fresh judge896e253f: SOURCEPASS, PHASEFAIL; P4-1..P4-4 MET, P4-5/P4-6 NOT MET. Latest D16 fresh judge de8b6c5e independently returns SOURCE PASS / PHASE FAIL on the frozen five-file source delta, with346 affected consumer tests passing,0skips/0failures. The subsequent one signed synthetic pilot fails0/1 and stops the conditional comparison; reviewed source hashes still match the signed source. No acceptance flags flipped, no candidate install, commit or push. Current handoff: .agent/phases/P4-taskloop-jevdecider.md, .agent/results/P4/jev-explicit-decision-source-review.md and .agent/results/P4/jev-explicit-decision-results.md. P4-5/P4-6 remainfalse."
+    }
+  ]
+}

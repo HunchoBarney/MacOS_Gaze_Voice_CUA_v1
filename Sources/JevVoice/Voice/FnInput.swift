@@ -109,6 +109,9 @@ final class FnInputMonitor: ObservableObject {
     var operationActive: () -> Bool = { false }
     var onAction: (FnInputState.Action) -> Void = { _ in }
     var onInterruption: (String) -> Void = { _ in }
+    var onReleaseRecovery: (TimeInterval, TimeInterval, Bool) -> Void = { _, _, _ in }
+    var onPhysicalFnChanged: (Bool) -> Void = { _ in }
+    private var reportedPhysicalFn: Bool?
     /// Fn+Ctrl seams — the coordinator binds these to dictation capture.
     var onDictationBegin: () -> Void = {}
     var onDictationConvert: () -> Void = {}
@@ -122,12 +125,17 @@ final class FnInputMonitor: ObservableObject {
         get { state.latchMode }
         set { state.latchMode = newValue }
     }
-    private var state = FnInputState()
+    private var state: FnInputState
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var healthTimer: Timer?
     private var observedPhysicalHold = false
+    private var releaseCandidate: TimeInterval?
     private(set) var beginHandlingMs: Double = 0
+
+    init(state: FnInputState = FnInputState()) {
+        self.state = state
+    }
 
     func start() {
         refresh()
@@ -177,7 +185,7 @@ final class FnInputMonitor: ObservableObject {
         message = ready ? "Hold Fn to speak, release to finish" : "Fn is temporarily unavailable"
     }
 
-    private func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+    func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         let handlingStarted = ProcessInfo.processInfo.systemUptime
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             interrupt("Keyboard monitoring was interrupted. Hold Fn again to retry.")
@@ -192,6 +200,8 @@ final class FnInputMonitor: ObservableObject {
         default: return Unmanaged.passUnretained(event)
         }
         if kind == .flagsChanged, event.getIntegerValueField(.keyboardEventKeycode) == 63 {
+            releaseCandidate = nil
+            reportPhysicalFn(event.flags.contains(.maskSecondaryFn))
             // Reconcile after missed events/tap interruptions, including keys held before launch.
             let modifiers: Set<UInt16> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
             state.reconcilePressedKeys(Set((UInt16(0)...127).filter {
@@ -235,12 +245,48 @@ final class FnInputMonitor: ObservableObject {
             message = "Fn is unavailable while secure keyboard input is active"
             return
         }
-        if state.held && physicalFnDown { observedPhysicalHold = true }
-        if state.held && observedPhysicalHold && !physicalFnDown {
-            interrupt("The Fn release was missed. Hold Fn again to retry.")
-            _ = state.handle(.flagsChanged, key: 63, fn: false, canBegin: false, active: false)
+        guard AXIsProcessTrusted() else { refresh(); return }
+        guard let tap, CGEvent.tapIsEnabled(tap: tap) else {
+            interrupt("Keyboard monitoring was interrupted. Hold Fn again to retry.")
+            refresh()
+            return
         }
-        if !AXIsProcessTrusted() || tap == nil || !CGEvent.tapIsEnabled(tap: tap!) || !ready { refresh() }
+        guard ready else { refresh(); return }
+        reconcilePhysicalFn(isDown: physicalFnDown, now: ProcessInfo.processInfo.systemUptime)
+    }
+
+    func reconcilePhysicalFn(isDown: Bool, now: TimeInterval) {
+        if isDown { reportPhysicalFn(true) }
+        guard state.held else {
+            if !isDown, reportedPhysicalFn == true, releaseCandidate == nil {
+                releaseCandidate = now
+                return
+            }
+            if !isDown, reportedPhysicalFn == true { reportPhysicalFn(false) }
+            releaseCandidate = nil
+            observedPhysicalHold = false
+            return
+        }
+        if isDown {
+            observedPhysicalHold = true
+            releaseCandidate = nil
+            return
+        }
+        guard observedPhysicalHold else { return }
+        guard let firstUp = releaseCandidate else { releaseCandidate = now; return }
+        releaseCandidate = nil
+        observedPhysicalHold = false
+        let result = state.handle(.flagsChanged, key: 63, fn: false, now: firstUp,
+                                  canBegin: false, active: operationActive())
+        reportPhysicalFn(false)
+        if result.action == .finish { onReleaseRecovery(firstUp, now, result.latch) }
+        dispatch(result)
+    }
+
+    private func reportPhysicalFn(_ down: Bool) {
+        guard reportedPhysicalFn != down else { return }
+        reportedPhysicalFn = down
+        onPhysicalFnChanged(down)
     }
 
     private var physicalFnDown: Bool {
@@ -249,6 +295,8 @@ final class FnInputMonitor: ObservableObject {
     }
 
     private func interrupt(_ reason: String) {
+        releaseCandidate = nil
+        observedPhysicalHold = false
         // A latched capture depends on the tap as much as a held one does.
         let captureHeld = state.held || state.latched
         state.interrupt()

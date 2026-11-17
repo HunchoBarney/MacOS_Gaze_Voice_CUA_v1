@@ -1,0 +1,10 @@
+{
+  "purpose": "retire generated debug build and release symbols after complete G3 and source review PASS; preserve release objects, frozen sources, logs, models and all app candidates",
+  "at": "2026-11-16T13:37:52.462683+00:00",
+  "before_free_bytes": 4356665344,
+  "paths": [
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/debug",
+    "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/release/JevVoice.dSYM"
+  ],
+  "after_free_bytes": 4357447680
+}

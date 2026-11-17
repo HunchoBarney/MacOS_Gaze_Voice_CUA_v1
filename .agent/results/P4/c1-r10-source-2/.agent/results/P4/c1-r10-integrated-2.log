@@ -1,0 +1,661 @@
+Building for debugging...
+[0/6] Write swift-version--58304C5D6DBC2206.txt
+[1/6] Write sources
+[4/7] Emitting module JevVoice
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:286:14: warning: no 'async' operations occur within 'await' expression
+ 284 |          },
+ 285 |          nativeForegroundWindow: @escaping @Sendable (Int) async -> Int? = {
+ 286 |              await DriveLoop.observeForegroundWindow(pid: $0)
+     |              `- warning: no 'async' operations occur within 'await' expression
+ 287 |          },
+ 288 |          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1039:13: warning: no 'async' operations occur within 'await' expression
+1037 |         _ task: DriveTask,
+1038 |         capturedOwner: @Sendable (DriveTask) async -> AppResolver.App? = { task in
+1039 |             await DriveLoop.capturedForegroundApplication(application: task.application, windowID: task.windowID)
+     |             `- warning: no 'async' operations occur within 'await' expression
+1040 |         }
+1041 |     ) async -> (app: AppResolver.App?, matches: [AppResolver.App]) {
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Drive/DriveLoop.swift:1718:13: warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+1716 |     struct DriveCaptureSource: CaptureSource {
+1717 |         typealias ImageCall = @Sendable (String, [String: JSONValue]) async throws -> CuaToolResult
+1718 |         let observe: Call
+     |             |- warning: stored property 'observe' of 'Sendable'-conforming struct 'DriveCaptureSource' has non-Sendable type 'DriveLoop.Call' (aka '(String, Dictionary<String, JSONValue>) async throws -> JSONValue'); this is an error in the Swift 6 language mode
+     |             `- note: a function type must be marked '@Sendable' to conform to 'Sendable'
+1719 |         let window: WindowRef
+1720 |         let session: String
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/LatencyLedger.swift:144:38: warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+142 |     @MainActor
+143 |     func attach(controller: VoiceController, input: FnInputMonitor,
+144 |                 gaze: GazeService = .shared) {
+    |                                      `- warning: main actor-isolated static property 'shared' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+145 |         guard !attached else { return }
+146 |         attached = true
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Gaze/GazeService.swift:20:16: note: static property declared here
+ 18 |     typealias Batch = GazeCandidateFeed.Batch
+ 19 | 
+ 20 |     static let shared = GazeService()
+    |                `- note: static property declared here
+ 21 | 
+ 22 |     let stream: GazeStream
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:101:90: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+ 99 | 
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+    |                                                                                          `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Support/VoiceNormalQualification.swift:102:94: warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+100 |     init(configuration: Profile, executableSHA256: String, lane: String,
+101 |          windowProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.windowObservation,
+102 |          foregroundProbe: @escaping @Sendable () -> [String: Any] = VoiceNormalQualification.foregroundObservation) throws {
+    |                                                                                              `- warning: converting non-Sendable function value to '@Sendable () -> [String : Any]' may introduce data races
+103 |         guard lane == "RealtimeVoiceLane", executableSHA256.count == 64 else { throw Failure.invalidProfile }
+104 |         self.configuration = configuration
+[5/12] Compiling JevVoice OnboardingChecklist.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:72:14: warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 64 |     var afterFix: () -> Void = {}
+ 65 | 
+ 66 |     private let defaults: UserDefaults
+    |                 `- note: mutation of this property is only permitted within the actor
+ 67 | 
+ 68 |     /// Nonisolated so `@StateObject` view initializers (which run
+    :
+ 70 |     /// properties and takes no actor state.
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+    |              `- warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+ 74 |     }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:73:14: warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 32 |     @Published private(set) var rows: [Row] = OnboardingChecklistModel.makeRows()
+ 33 |     /// "Set up later" — persisted; the card stays gone until reset.
+ 34 |     @Published var dismissed: Bool {
+    |                    `- note: mutation of this property is only permitted within the actor
+ 35 |         didSet { defaults.set(dismissed, forKey: Self.dismissedKey) }
+ 36 |     }
+    :
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+    |              `- warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 74 |     }
+ 75 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Voice/RealtimeVoiceLane.swift:1679:43: warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1677 |                 }
+1678 |             }
+1679 |         case .itemCreated(let itemID, let isImage):
+     |                                           `- warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1680 |             // Context notes are only real once the server confirms the item —
+1681 |             // recording the id optimistically leaves a phantom we delete
+[6/12] Compiling JevVoice SettingsView.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:72:14: warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 64 |     var afterFix: () -> Void = {}
+ 65 | 
+ 66 |     private let defaults: UserDefaults
+    |                 `- note: mutation of this property is only permitted within the actor
+ 67 | 
+ 68 |     /// Nonisolated so `@StateObject` view initializers (which run
+    :
+ 70 |     /// properties and takes no actor state.
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+    |              `- warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+ 74 |     }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:73:14: warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 32 |     @Published private(set) var rows: [Row] = OnboardingChecklistModel.makeRows()
+ 33 |     /// "Set up later" — persisted; the card stays gone until reset.
+ 34 |     @Published var dismissed: Bool {
+    |                    `- note: mutation of this property is only permitted within the actor
+ 35 |         didSet { defaults.set(dismissed, forKey: Self.dismissedKey) }
+ 36 |     }
+    :
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+    |              `- warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 74 |     }
+ 75 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Voice/RealtimeVoiceLane.swift:1679:43: warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1677 |                 }
+1678 |             }
+1679 |         case .itemCreated(let itemID, let isImage):
+     |                                           `- warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1680 |             // Context notes are only real once the server confirms the item —
+1681 |             // recording the id optimistically leaves a phantom we delete
+[7/12] Compiling JevVoice ConversationContext.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:72:14: warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 64 |     var afterFix: () -> Void = {}
+ 65 | 
+ 66 |     private let defaults: UserDefaults
+    |                 `- note: mutation of this property is only permitted within the actor
+ 67 | 
+ 68 |     /// Nonisolated so `@StateObject` view initializers (which run
+    :
+ 70 |     /// properties and takes no actor state.
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+    |              `- warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+ 74 |     }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:73:14: warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 32 |     @Published private(set) var rows: [Row] = OnboardingChecklistModel.makeRows()
+ 33 |     /// "Set up later" — persisted; the card stays gone until reset.
+ 34 |     @Published var dismissed: Bool {
+    |                    `- note: mutation of this property is only permitted within the actor
+ 35 |         didSet { defaults.set(dismissed, forKey: Self.dismissedKey) }
+ 36 |     }
+    :
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+    |              `- warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 74 |     }
+ 75 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Voice/RealtimeVoiceLane.swift:1679:43: warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1677 |                 }
+1678 |             }
+1679 |         case .itemCreated(let itemID, let isImage):
+     |                                           `- warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1680 |             // Context notes are only real once the server confirms the item —
+1681 |             // recording the id optimistically leaves a phantom we delete
+[8/12] Compiling JevVoice RealtimeVoiceLane.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:72:14: warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 64 |     var afterFix: () -> Void = {}
+ 65 | 
+ 66 |     private let defaults: UserDefaults
+    |                 `- note: mutation of this property is only permitted within the actor
+ 67 | 
+ 68 |     /// Nonisolated so `@StateObject` view initializers (which run
+    :
+ 70 |     /// properties and takes no actor state.
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+    |              `- warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+ 74 |     }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:73:14: warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 32 |     @Published private(set) var rows: [Row] = OnboardingChecklistModel.makeRows()
+ 33 |     /// "Set up later" — persisted; the card stays gone until reset.
+ 34 |     @Published var dismissed: Bool {
+    |                    `- note: mutation of this property is only permitted within the actor
+ 35 |         didSet { defaults.set(dismissed, forKey: Self.dismissedKey) }
+ 36 |     }
+    :
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+    |              `- warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 74 |     }
+ 75 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Voice/RealtimeVoiceLane.swift:1679:43: warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1677 |                 }
+1678 |             }
+1679 |         case .itemCreated(let itemID, let isImage):
+     |                                           `- warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1680 |             // Context notes are only real once the server confirms the item —
+1681 |             // recording the id optimistically leaves a phantom we delete
+[9/12] Compiling JevVoice VoiceController.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:72:14: warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 64 |     var afterFix: () -> Void = {}
+ 65 | 
+ 66 |     private let defaults: UserDefaults
+    |                 `- note: mutation of this property is only permitted within the actor
+ 67 | 
+ 68 |     /// Nonisolated so `@StateObject` view initializers (which run
+    :
+ 70 |     /// properties and takes no actor state.
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+    |              `- warning: main actor-isolated property 'defaults' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+ 74 |     }
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/UI/OnboardingChecklist.swift:73:14: warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 32 |     @Published private(set) var rows: [Row] = OnboardingChecklistModel.makeRows()
+ 33 |     /// "Set up later" — persisted; the card stays gone until reset.
+ 34 |     @Published var dismissed: Bool {
+    |                    `- note: mutation of this property is only permitted within the actor
+ 35 |         didSet { defaults.set(dismissed, forKey: Self.dismissedKey) }
+ 36 |     }
+    :
+ 71 |     nonisolated init(defaults: UserDefaults = .standard) {
+ 72 |         self.defaults = defaults
+ 73 |         self._dismissed = Published(initialValue: defaults.bool(forKey: Self.dismissedKey))
+    |              `- warning: main actor-isolated property '_dismissed' can not be mutated from a nonisolated context; this is an error in the Swift 6 language mode
+ 74 |     }
+ 75 | 
+
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Sources/JevVoice/Voice/RealtimeVoiceLane.swift:1679:43: warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1677 |                 }
+1678 |             }
+1679 |         case .itemCreated(let itemID, let isImage):
+     |                                           `- warning: immutable value 'isImage' was never used; consider replacing with '_' or removing it [#no-usage]
+1680 |             // Context notes are only real once the server confirms the item —
+1681 |             // recording the id optimistically leaves a phantom we delete
+[10/13] Compiling JevVoice VoiceRemoteTrial.swift
+[10/15] Write Objects.LinkFileList
+[11/15] Linking JevVoice
+[13/16] Emitting module JevVoiceAppTests
+[14/22] Compiling JevVoiceAppTests LocalSpeechTests.swift
+[15/22] Compiling JevVoiceAppTests RealtimeVoiceLaneTests.swift
+[16/22] Compiling JevVoiceAppTests UXOnboardingTests.swift
+[17/22] Compiling JevVoiceAppTests VoiceLaneAuditTests.swift
+[18/22] Compiling JevVoiceAppTests VoiceOneBrainTests.swift
+[19/22] Compiling JevVoiceAppTests VoiceSemanticTests.swift
+[19/22] Applying JevVoice
+[20/22] Write Objects.LinkFileList
+[21/22] Linking JevVoicePackageTests
+Build complete! (28.60s)
+Test Suite 'Selected tests' started at 2026-11-16 23:13:19.052.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-16 23:13:19.056.
+Test Suite 'FnInputMonitorReleaseTests' started at 2026-11-16 23:13:19.056.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testCancelledHoldStillReportsItsPhysicalReleaseWithoutAnotherAction]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testCancelledHoldStillReportsItsPhysicalReleaseWithoutAnotherAction]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testConfirmedPhysicalReleaseFinishesOnceWithoutDiscardingCapture]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testConfirmedPhysicalReleaseFinishesOnceWithoutDiscardingCapture]' passed (0.053 seconds).
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testInterruptedHoldCannotRearmOrFinish]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testInterruptedHoldCannotRearmOrFinish]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testQueuedRealReleaseWinsWithoutSecondHealthTick]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testQueuedRealReleaseWinsWithoutSecondHealthTick]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testRecoveredDictationUsesNormalFinish]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testRecoveredDictationUsesNormalFinish]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testRecoveredTapLatchUsesFirstPhysicalUpTime]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testRecoveredTapLatchUsesFirstPhysicalUpTime]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testTransientPhysicalUpDoesNotFinishOrInterrupt]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testTransientPhysicalUpDoesNotFinishOrInterrupt]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testUnobservedPhysicalHoldNeverSynthesizesRelease]' started.
+Test Case '-[JevVoiceAppTests.FnInputMonitorReleaseTests testUnobservedPhysicalHoldNeverSynthesizesRelease]' passed (0.000 seconds).
+Test Suite 'FnInputMonitorReleaseTests' passed at 2026-11-16 23:13:19.112.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.056 (0.056) seconds
+Test Suite 'FnInputStateTests' started at 2026-11-16 23:13:19.112.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testArmedChordWithoutSeamFailsClosed]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testArmedChordWithoutSeamFailsClosed]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testDictationChordBeginsDictation]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testDictationChordBeginsDictation]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testEscapeCancelsActiveCapture]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testEscapeCancelsActiveCapture]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testFnDownUpBeginsAndFinishes]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testFnDownUpBeginsAndFinishes]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testFnDownWithoutConsumerDoesNotArm]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testFnDownWithoutConsumerDoesNotArm]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testInterruptKeepsHeldAndDisarms]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testInterruptKeepsHeldAndDisarms]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testKeyDuringHoldCancelsCapture]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testKeyDuringHoldCancelsCapture]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testLatchMode]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testLatchMode]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.FnInputStateTests testMidHoldCtrlConvertsToDictation]' started.
+Test Case '-[JevVoiceAppTests.FnInputStateTests testMidHoldCtrlConvertsToDictation]' passed (0.000 seconds).
+Test Suite 'FnInputStateTests' passed at 2026-11-16 23:13:19.113.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'LocalSpeechTests' started at 2026-11-16 23:13:19.114.
+Test Case '-[JevVoiceAppTests.LocalSpeechTests testConversationRemoteFinalRecoversFromEmptyAndUsesExistingNativeAdmissionOnce]' started.
+Test Case '-[JevVoiceAppTests.LocalSpeechTests testConversationRemoteFinalRecoversFromEmptyAndUsesExistingNativeAdmissionOnce]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.LocalSpeechTests testRealtimeAdmissionNeedsNoLocalProviderAndKeepsDictationLiteral]' started.
+Test Case '-[JevVoiceAppTests.LocalSpeechTests testRealtimeAdmissionNeedsNoLocalProviderAndKeepsDictationLiteral]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.LocalSpeechTests testRealtimeEmptyFinalRetiresOnlyItsTurnAndRejectsLateOrForeignFinals]' started.
+Test Case '-[JevVoiceAppTests.LocalSpeechTests testRealtimeEmptyFinalRetiresOnlyItsTurnAndRejectsLateOrForeignFinals]' passed (0.001 seconds).
+Test Suite 'LocalSpeechTests' passed at 2026-11-16 23:13:19.124.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+Test Suite 'RealtimeVoiceLaneTests' started at 2026-11-16 23:13:19.124.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testCaptureActiveTracksBoundTurn]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testCaptureActiveTracksBoundTurn]' passed (3.392 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testClosedMigratesSpeakQueueToRetry]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testClosedMigratesSpeakQueueToRetry]' passed (0.036 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testForeignTranscriptCompletionIsRejected]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testForeignTranscriptCompletionIsRejected]' passed (0.048 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testRespondToTaskSchemaRequiresStableTaskAndAskIdentities]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testRespondToTaskSchemaRequiresStableTaskAndAskIdentities]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testResponseDoneDecodesCallsBeforeDone]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testResponseDoneDecodesCallsBeforeDone]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testResponseDoneEndsLiveTurn]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testResponseDoneEndsLiveTurn]' passed (0.022 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testRoutedPlaybackRejectsOldCompletionsAndUnavailableOutput]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testRoutedPlaybackRejectsOldCompletionsAndUnavailableOutput]' passed (0.024 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testSharedSeamExposesTheController]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testSharedSeamExposesTheController]' passed (0.155 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testStartedToolResultDecodesStatusProperly]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testStartedToolResultDecodesStatusProperly]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnenvelopedCallsStayBlockedEvenAfterLegacyShieldClears]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnenvelopedCallsStayBlockedEvenAfterLegacyShieldClears]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnknownToolOutputIsContractJSON]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnknownToolOutputIsContractJSON]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnrelatedResponseDoneKeepsTurnOpen]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnrelatedResponseDoneKeepsTurnOpen]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnscopedTranscriptCannotSupplyDictationAndLegacyFinalStaysLiteral]' started.
+Test Case '-[JevVoiceAppTests.RealtimeVoiceLaneTests testUnscopedTranscriptCannotSupplyDictationAndLegacyFinalStaysLiteral]' passed (0.013 seconds).
+Test Suite 'RealtimeVoiceLaneTests' passed at 2026-11-16 23:13:22.846.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 3.719 (3.721) seconds
+Test Suite 'UXOnboardingTests' started at 2026-11-16 23:13:22.846.
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testAllPendingShowsCard]' started.
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testAllPendingShowsCard]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testDismissalPersists]' started.
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testDismissalPersists]' passed (0.103 seconds).
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testFixRunsActionAndRepaints]' started.
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testFixRunsActionAndRepaints]' passed (0.174 seconds).
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testRowsFlipAndAllClearHides]' started.
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testRowsFlipAndAllClearHides]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testTrackerRowNeedsRunning]' started.
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testTrackerRowNeedsRunning]' passed (0.056 seconds).
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testVoiceSetupRequiresAKeyInsteadOfLocalModels]' started.
+Test Case '-[JevVoiceAppTests.UXOnboardingTests testVoiceSetupRequiresAKeyInsteadOfLocalModels]' passed (0.073 seconds).
+Test Suite 'UXOnboardingTests' passed at 2026-11-16 23:13:23.257.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.411 (0.411) seconds
+Test Suite 'VoiceLaneAuditTests' started at 2026-11-16 23:13:23.257.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testAuditReceiptPersistsWitnessForEveryOutcome]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testAuditReceiptPersistsWitnessForEveryOutcome]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1OldWorkSettlementPreservesNewCaptureAndRecordsItsOwnOutcome]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1OldWorkSettlementPreservesNewCaptureAndRecordsItsOwnOutcome]' passed (0.211 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1SuccessfulWorkCompletesAfterReplyButClarificationDoesNotClaimSuccess]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1SuccessfulWorkCompletesAfterReplyButClarificationDoesNotClaimSuccess]' passed (0.251 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1TurnEndWaitsForOwnedWorkAndShowsBlockedOutcome]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1TurnEndWaitsForOwnedWorkAndShowsBlockedOutcome]' passed (0.112 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1UnsuccessfulOwnedWorkNeverCompletesOnTurnEnd]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testC1UnsuccessfulOwnedWorkNeverCompletesOnTurnEnd]' passed (0.429 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testCancelFiresUniversalStopSeam]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testCancelFiresUniversalStopSeam]' passed (0.206 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testCancelledShortCaptureNeverClicks]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testCancelledShortCaptureNeverClicks]' passed (0.021 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testConvertedFeedTeesChunksToLocalSpeechSink]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testConvertedFeedTeesChunksToLocalSpeechSink]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDeterministicPushedOutcomeSpeaksLocally]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDeterministicPushedOutcomeSpeaksLocally]' passed (0.059 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDeterministicSayDecodesContractResults]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDeterministicSayDecodesContractResults]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationCommandOnEmptyHistoryIsNoOp]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationCommandOnEmptyHistoryIsNoOp]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationEditsDeliverAndDelete]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationEditsDeliverAndDelete]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationHoldSpendsNoScreenshot]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationHoldSpendsNoScreenshot]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationInsertFailureStillThrows]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testDictationInsertFailureStillThrows]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testEditTokensParsesVocabulary]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testEditTokensParsesVocabulary]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testFailureSpeaksBriefPhrase]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testFailureSpeaksBriefPhrase]' passed (0.098 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testManualSpeechWindowClosesExactlyOnceOnReleaseThenCancellation]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testManualSpeechWindowClosesExactlyOnceOnReleaseThenCancellation]' passed (0.099 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testMeteringFinishNeverFiresGazeHandler]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testMeteringFinishNeverFiresGazeHandler]' passed (0.051 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testPauseDuringPreparationCannotReopenTheMicrophone]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testPauseDuringPreparationCannotReopenTheMicrophone]' passed (0.194 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testPersistedHandsFreePauseDoesNotWarmTheMicrophoneOnLaunch]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testPersistedHandsFreePauseDoesNotWarmTheMicrophoneOnLaunch]' passed (0.063 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testPlainPushedOutcomeKeepsModelPath]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testPlainPushedOutcomeKeepsModelPath]' passed (0.048 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testRealtimeFeedbackAndPauseNeverFallBackToLegacySpeech]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testRealtimeFeedbackAndPauseNeverFallBackToLegacySpeech]' passed (0.111 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSendTurnAssetsRejectsStaleTurn]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSendTurnAssetsRejectsStaleTurn]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSendTurnAssetsSkipsDictationTurn]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSendTurnAssetsSkipsDictationTurn]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallArmsResponseForSaylessResult]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallArmsResponseForSaylessResult]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallIgnoresForeignTurn]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallIgnoresForeignTurn]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallRespectsInFlightResponse]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallRespectsInFlightResponse]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallSuppressesSayResult]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSettleToolCallSuppressesSayResult]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testShortDictationFinishNeverClicks]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testShortDictationFinishNeverClicks]' passed (0.047 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSpeechlessTapDispatchesGazeHandler]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSpeechlessTapDispatchesGazeHandler]' passed (0.100 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSpeechlessTapWithoutHandlerDismisses]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSpeechlessTapWithoutHandlerDismisses]' passed (0.054 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSpokenFailurePhrasing]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testSpokenFailurePhrasing]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testStartDictationLatchesAndDelivers]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testStartDictationLatchesAndDelivers]' passed (0.170 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testStartDictationRespectsHotkeyGate]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testStartDictationRespectsHotkeyGate]' passed (0.161 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testToolSayFillsDetailAndSpeaks]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testToolSayFillsDetailAndSpeaks]' passed (0.106 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testTranscriptSettleCapIs200ms]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testTranscriptSettleCapIs200ms]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testWitnessDoesNotRecordOtherStagesOrTruncateWindowOrder]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testWitnessDoesNotRecordOtherStagesOrTruncateWindowOrder]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testWitnessKeepsWindowIdentityButNeverObservedContent]' started.
+Test Case '-[JevVoiceAppTests.VoiceLaneAuditTests testWitnessKeepsWindowIdentityButNeverObservedContent]' passed (0.001 seconds).
+Test Suite 'VoiceLaneAuditTests' passed at 2026-11-16 23:13:25.903.
+	 Executed 38 tests, with 0 failures (0 unexpected) in 2.642 (2.646) seconds
+Test Suite 'VoiceOneBrainTests' started at 2026-11-16 23:13:25.903.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testAmbiguousMultiwordAskReplyNeverRequestsReasoning]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testAmbiguousMultiwordAskReplyNeverRequestsReasoning]' passed (0.018 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeConversationKeepsListeningAfterCancelAndRejectsRetiredResponses]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeConversationKeepsListeningAfterCancelAndRejectsRetiredResponses]' passed (0.059 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeConversationMatchesEitherFinalCommitOrderAndIgnoresForeignDuplicates]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeConversationMatchesEitherFinalCommitOrderAndIgnoresForeignDuplicates]' passed (0.054 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeDictationUsesMatchingInputOnceWithoutCreatingResponseOrTool]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeDictationUsesMatchingInputOnceWithoutCreatingResponseOrTool]' passed (0.024 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeDoesNotSendAudioBeforeConfigurationConfirmation]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeDoesNotSendAudioBeforeConfigurationConfirmation]' passed (0.014 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeManualOwnershipRequiresConfirmedModeAndFreshConnection]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeManualOwnershipRequiresConfirmedModeAndFreshConnection]' passed (0.010 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeManualTurnKeepsTranscriptionAndConnectionIdentity]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeManualTurnKeepsTranscriptionAndConnectionIdentity]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeRejectsAnAcknowledgementWithoutTheRequestedInputConfiguration]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeRejectsAnAcknowledgementWithoutTheRequestedInputConfiguration]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeSessionUsesServerTurnsAndAuthoritativeInputTranscription]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testC1RealtimeSessionUsesServerTurnsAndAuthoritativeInputTranscription]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testLocalHitDoesNotNeedAKeySocketOrScreenshot]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testLocalHitDoesNotNeedAKeySocketOrScreenshot]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testNaturalAppRequestUsesCanonicalSurfaceAndCapturedIdentityOnce]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testNaturalAppRequestUsesCanonicalSurfaceAndCapturedIdentityOnce]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testOldResponseWithNewCallIDCannotActDuringNewMiss]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testOldResponseWithNewCallIDCannotActDuringNewMiss]' passed (0.050 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testOutcomeOnlyResponseHasToolsDisabledAndCannotAct]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testOutcomeOnlyResponseHasToolsDisabledAndCannotAct]' passed (0.058 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testRawIncrementalAndDoneDuplicatesSpendOnlyOneExecutorPermit]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testRawIncrementalAndDoneDuplicatesSpendOnlyOneExecutorPermit]' passed (0.023 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testRawRemoteReplyCannotSelectBetweenUnselectedCurrentAsks]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testRawRemoteReplyCannotSelectBetweenUnselectedCurrentAsks]' passed (0.035 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testRemoteArgumentMutationIsBlockedWithoutExecutorCall]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testRemoteArgumentMutationIsBlockedWithoutExecutorCall]' passed (0.036 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testResolvedTargetCannotBeSilentlyDroppedByAnUnsupportedExecutor]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testResolvedTargetCannotBeSilentlyDroppedByAnUnsupportedExecutor]' passed (0.036 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testSemanticNoMatchContinuesOriginalRemoteOwnerOnce]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testSemanticNoMatchContinuesOriginalRemoteOwnerOnce]' passed (0.026 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testSemanticStageTelemetryIsNumericAndAddsNoTrafficOrTextLeak]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testSemanticStageTelemetryIsNumericAndAddsNoTrafficOrTextLeak]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testTypedMissUsesOneResponseWithoutAudioOrImages]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testTypedMissUsesOneResponseWithoutAudioOrImages]' passed (0.022 seconds).
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testUnknownConfusableClarifiesWithoutReasoningOrExecution]' started.
+Test Case '-[JevVoiceAppTests.VoiceOneBrainTests testUnknownConfusableClarifiesWithoutReasoningOrExecution]' passed (0.007 seconds).
+Test Suite 'VoiceOneBrainTests' passed at 2026-11-16 23:13:26.412.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.507 (0.509) seconds
+Test Suite 'VoiceSemanticTests' started at 2026-11-16 23:13:26.412.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testAuditScopedCancelPreservesUnrelatedWorkAndGlobalHook]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testAuditScopedCancelPreservesUnrelatedWorkAndGlobalHook]' passed (0.064 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareAmbiguousObservedVendorStillRequiresSemanticJudgment]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareAmbiguousObservedVendorStillRequiresSemanticJudgment]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareAppLookupCannotCaptureGreetingsOrPermissionReplies]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareAppLookupCannotCaptureGreetingsOrPermissionReplies]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareNameLookupDoesNotRewriteQuotedOrAnsweredOrUnknownInput]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareNameLookupDoesNotRewriteQuotedOrAnsweredOrUnknownInput]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareObservedNamesDispatchCanonicalFocusLocally]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBareObservedNamesDispatchCanonicalFocusLocally]' passed (0.025 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBatchedRequestContainsOnlyBoundedActionsAndObservedAppData]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBatchedRequestContainsOnlyBoundedActionsAndObservedAppData]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBoundedAuditCannotFallThroughToOpenAI]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testBoundedAuditCannotFallThroughToOpenAI]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCancellationAndDisableDuringValidationDoNotExecute]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCancellationAndDisableDuringValidationDoNotExecute]' passed (0.039 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCancelledInterpretationReportsCancellationNotDeadlineAndCreatesNoWork]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCancelledInterpretationReportsCancellationNotDeadlineAndCreatesNoWork]' passed (0.019 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCapturedWindowGetterRejectsOtherAndCompletedTurns]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCapturedWindowGetterRejectsOtherAndCompletedTurns]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testChangedContextCannotCreateSemanticWork]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testChangedContextCannotCreateSemanticWork]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationDoesNotActOnAmbientOrIncompleteSpeechOrMissingAnchor]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationDoesNotActOnAmbientOrIncompleteSpeechOrMissingAnchor]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationNegationCannotBecomeALocalStopWhenSplitAcrossFinals]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationNegationCannotBecomeALocalStopWhenSplitAcrossFinals]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationRetainsNegationAndRejectsAFragmentAfterWindowChange]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationRetainsNegationAndRejectsAFragmentAfterWindowChange]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationSelectionCannotOverrideWeakRequestSupport]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testConversationSelectionCannotOverrideWeakRequestSupport]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCoordinatorAwaitBeginEndAndCancellation]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testCoordinatorAwaitBeginEndAndCancellation]' passed (0.077 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDecoderRejectsInventedTiedAndMalformedTargets]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDecoderRejectsInventedTiedAndMalformedTargets]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDisabledAssistDoesNotInvokeInference]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDisabledAssistDoesNotInvokeInference]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDisableReenableDuringFreshnessCannotReviveProposal]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDisableReenableDuringFreshnessCannotReviveProposal]' passed (0.031 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDisappearedTargetNeverExecutesWithoutConfirmation]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDisappearedTargetNeverExecutesWithoutConfirmation]' passed (0.021 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDriverSuccessFailureCategoriesAndPrivateSentinels]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testDriverSuccessFailureCategoriesAndPrivateSentinels]' passed (0.708 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testExhaustedReservationReportsBudgetCategoryDistinctFromTransport]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testExhaustedReservationReportsBudgetCategoryDistinctFromTransport]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testExpiredSemanticHopReportsDeadlineCategoryAndMeasuredWall]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testExpiredSemanticHopReportsDeadlineCategoryAndMeasuredWall]' passed (4.015 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testInstructionAuthorizesFocusWithoutAskOrStandingGrant]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testInstructionAuthorizesFocusWithoutAskOrStandingGrant]' passed (0.034 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testInstructionDispatchSelectsTypedExecutorOnceWithoutApproval]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testInstructionDispatchSelectsTypedExecutorOnceWithoutApproval]' passed (0.654 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testInvalidAndOversizedContextCannotSilentlyDropTargets]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testInvalidAndOversizedContextCannotSilentlyDropTargets]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testKnownRoutesAndAsksNeverUseSemanticEligibility]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testKnownRoutesAndAsksNeverUseSemanticEligibility]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testLateCancelledInterpretationCannotCreateWork]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testLateCancelledInterpretationCannotCreateWork]' passed (0.025 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testLocalHandoffAndWorkShareTurnIdentity]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testLocalHandoffAndWorkShareTurnIdentity]' passed (0.700 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testLowConfidenceCannotCreateAppFocusWorkOrApproval]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testLowConfidenceCannotCreateAppFocusWorkOrApproval]' passed (0.036 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testNormalLocalControllerPreservesCapturedWindowWithoutAuditBinding]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testNormalLocalControllerPreservesCapturedWindowWithoutAuditBinding]' passed (0.270 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testNormalLocalControllerUsesOneLiteralForGoalAndPayload]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testNormalLocalControllerUsesOneLiteralForGoalAndPayload]' passed (0.129 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testNormalSemanticRouteDoesNotTurnLocalAcousticMissIntoPass]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testNormalSemanticRouteDoesNotTurnLocalAcousticMissIntoPass]' passed (0.067 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testObservedOpaqueBundleIdentifierDoesNotPoisonCatalog]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testObservedOpaqueBundleIdentifierDoesNotPoisonCatalog]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testOwnedDiagnosticWindowBindingIsPreservedInProductionSpec]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testOwnedDiagnosticWindowBindingIsPreservedInProductionSpec]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7BoundedFollowupCannotBecomeContinuousFromKindAlone]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7BoundedFollowupCannotBecomeContinuousFromKindAlone]' passed (0.007 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7ContinuousExtentStillRequiresWholeInstructionSupport]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7ContinuousExtentStillRequiresWholeInstructionSupport]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/VoiceSemanticTests.swift:309: -[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe] : Test skipped - Opt-in real Jev semantic probe
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7LiveSemanticBoundaryProbe]' skipped (0.003 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7MissingOrMalformedBoundedJudgmentCannotAuthorizeNativeScroll]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7MissingOrMalformedBoundedJudgmentCannotAuthorizeNativeScroll]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7ReferenceRequiresCurrentNativeSubjectAndIndependentSupport]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7ReferenceRequiresCurrentNativeSubjectAndIndependentSupport]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7ScrollSelectionCannotDiscardAnUnprovenWholeGoal]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7ScrollSelectionCannotDiscardAnUnprovenWholeGoal]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7SemanticScrollBindsOriginalTextAndObservedWindow]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7SemanticScrollBindsOriginalTextAndObservedWindow]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7UntilConditionCannotEnterUnboundedContinuation]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR7UntilConditionCannotEnterUnboundedContinuation]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8DirectConversationScrollDoesNotCallSemanticInterpreter]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8DirectConversationScrollDoesNotCallSemanticInterpreter]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8LocalAppFocusNeedsAnObservedCurrentIdentity]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8LocalAppFocusNeedsAnObservedCurrentIdentity]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8LocalFollowupRetainsVerifiedSubjectAndDistinguishesDuration]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8LocalFollowupRetainsVerifiedSubjectAndDistinguishesDuration]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8RejectedOrUnverifiedTurnCannotResumeAnOlderScroll]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8RejectedOrUnverifiedTurnCannotResumeAnOlderScroll]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8UnknownAndConstrainedWordingKeepsItsWholeSemanticRequest]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testR8UnknownAndConstrainedWordingKeepsItsWholeSemanticRequest]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testRefusedAdmissionHasNoHandoff]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testRefusedAdmissionHasNoHandoff]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testReplacementTurnWithSameUUIDRetainsItsAuthority]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testReplacementTurnWithSameUUIDRetainsItsAuthority]' passed (0.039 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSemanticProposalNeverCallsOrdinaryCommandHandler]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSemanticProposalNeverCallsOrdinaryCommandHandler]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSemanticProposalRecordsReserveInferenceAndFreshContextDurations]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSemanticProposalRecordsReserveInferenceAndFreshContextDurations]' passed (0.271 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSemanticWatchdogDiscardsLateResult]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSemanticWatchdogDiscardsLateResult]' passed (4.046 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testShowGoogleStaysLocalWithNoSemanticInferenceOrApproval]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testShowGoogleStaysLocalWithNoSemanticInferenceOrApproval]' passed (0.018 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSingleBatchAndMissingKeyZeroTransportRequests]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSingleBatchAndMissingKeyZeroTransportRequests]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSpeechLiteralSlotAndExecutionGoalAgreeAfterASRPunctuation]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testSpeechLiteralSlotAndExecutionGoalAgreeAfterASRPunctuation]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTraceDoesNotChangeAdmissionOrDispatchCount]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTraceDoesNotChangeAdmissionOrDispatchCount]' passed (0.032 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTraceOnlyInterpretationCallbackRejectsBeforeCredentialOrNetworkUse]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTraceOnlyInterpretationCallbackRejectsBeforeCredentialOrNetworkUse]' passed (0.064 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTransportFailuresReportTransportCategoryWithoutWaitingOnTheWall]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTransportFailuresReportTransportCategoryWithoutWaitingOnTheWall]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTypedFocusNeverParsesDisplayNameAsCommand]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testTypedFocusNeverParsesDisplayNameAsCommand]' passed (0.634 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppFramesAndBareNamesReachBoundedSemanticFocus]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppFramesAndBareNamesReachBoundedSemanticFocus]' passed (0.058 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppOptOutPreservesClarificationAndUnknownNameCannotAct]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppOptOutPreservesClarificationAndUnknownNameCannotAct]' passed (0.017 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppSemanticHandledRepliesNeverAppendGenericClarification]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppSemanticHandledRepliesNeverAppendGenericClarification]' passed (0.027 seconds).
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppSemanticNoMatchKeepsOriginalClarificationWithoutOpenAI]' started.
+Test Case '-[JevVoiceAppTests.VoiceSemanticTests testUnresolvedAppSemanticNoMatchKeepsOriginalClarificationWithoutOpenAI]' passed (0.006 seconds).
+Test Suite 'VoiceSemanticTests' passed at 2026-11-16 23:13:38.701.
+	 Executed 64 tests, with 1 test skipped and 0 failures (0 unexpected) in 12.281 (12.289) seconds
+Test Suite 'VoiceTurnTests' started at 2026-11-16 23:13:38.701.
+Test Case '-[JevVoiceTests.VoiceTurnTests testCancelledGenerationCannotResetOrPublishIntoNextHold]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testCancelledGenerationCannotResetOrPublishIntoNextHold]' passed (0.001 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testColdUnreadyTurnCannotAcceptFramesOrFallbackRemotely]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testColdUnreadyTurnCannotAcceptFramesOrFallbackRemotely]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testConversationInterruptionDrainsOldCreatedAndDoneWithoutGrantingItsTools]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testConversationInterruptionDrainsOldCreatedAndDoneWithoutGrantingItsTools]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testDictationLiteralCannotBecomeCommandAndMicTestCannotAdmit]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testDictationLiteralCannotBecomeCommandAndMicTestCannotAdmit]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testFinalizeDeadlineStartsAtReleaseAndCannotBecomeRemoteMiss]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testFinalizeDeadlineStartsAtReleaseAndCannotBecomeRemoteMiss]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testIndependentConversationTurnOwnersCanEachRequestExactlyOnce]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testIndependentConversationTurnOwnersCanEachRequestExactlyOnce]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testInternalFinalCannotAdmitBeforeRelease]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testInternalFinalCannotAdmitBeforeRelease]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testLocalAdmissionCannotRequestReasoningAndCompletedTurnCannotRequestAgain]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testLocalAdmissionCannotRequestReasoningAndCompletedTurnCannotRequestAgain]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testMidHoldDictationConversionKeepsIdentityButWithdrawsCommandAuthority]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testMidHoldDictationConversionKeepsIdentityButWithdrawsCommandAuthority]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testOutcomeNarrationNeverGetsExecutorAuthority]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testOutcomeNarrationNeverGetsExecutorAuthority]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testQueuedFramesAndLossFailClosed]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testQueuedFramesAndLossFailClosed]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testRealtimeFinalRequiresMatchingCommittedInputAndPreservesItsProvenance]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testRealtimeFinalRequiresMatchingCommittedInputAndPreservesItsProvenance]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testRealtimeSourceCannotRelaxLocalCaptureOrAcceptAnUncommittedFinal]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testRealtimeSourceCannotRelaxLocalCaptureOrAcceptAnUncommittedFinal]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testReleaseSealsProducerBoundaryBeforeConsumerDrains]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testReleaseSealsProducerBoundaryBeforeConsumerDrains]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testResponseIdentityAndOnePermitIndependentOfCallID]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testResponseIdentityAndOnePermitIndependentOfCallID]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testRevokeUnboundResponseRequiresNewConnection]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testRevokeUnboundResponseRequiresNewConnection]' passed (0.000 seconds).
+Test Case '-[JevVoiceTests.VoiceTurnTests testUnsafeProposalCannotBeDisguisedAsMiss]' started.
+Test Case '-[JevVoiceTests.VoiceTurnTests testUnsafeProposalCannotBeDisguisedAsMiss]' passed (0.000 seconds).
+Test Suite 'VoiceTurnTests' passed at 2026-11-16 23:13:38.706.
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'JevVoicePackageTests.xctest' passed at 2026-11-16 23:13:38.706.
+	 Executed 179 tests, with 1 test skipped and 0 failures (0 unexpected) in 19.630 (19.650) seconds
+Test Suite 'Selected tests' passed at 2026-11-16 23:13:38.706.
+	 Executed 179 tests, with 1 test skipped and 0 failures (0 unexpected) in 19.630 (19.653) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+verification lane green

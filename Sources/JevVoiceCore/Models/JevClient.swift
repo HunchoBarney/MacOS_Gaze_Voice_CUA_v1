@@ -17,7 +17,7 @@ public enum JevError: Error, LocalizedError {
     }
 }
 
-public final class JevClient {
+public final class JevClient: Sendable {
     public let apiKey: String
     public let baseURL: URL
     public let model: String
@@ -38,19 +38,50 @@ public final class JevClient {
     @discardableResult
     public func systemOne<State: Encodable>(
         state: State,
-        questions: [String: Question]
+        questions: [String: Question],
+        assets: [String: JevImageAsset]? = nil
     ) async throws -> (response: SystemOneResponse, latencyMs: Double) {
+        let images = assets?.isEmpty == false ? assets : nil
+        if questions.values.contains(where: \.requiresImage), images == nil {
+            throw JevVisionError.missingImage
+        }
+        if let images {
+            let textBody = try JSONEncoder().encode(
+                SystemOneRequest(model: model, state: state, questions: questions))
+            let object = try JSONSerialization.jsonObject(with: textBody) as? [String: Any]
+            func strings(in value: Any) -> [String] {
+                if let text = value as? String { return [text] }
+                if let array = value as? [Any] { return array.flatMap { strings(in: $0) } }
+                if let map = value as? [String: Any] { return map.values.flatMap { strings(in: $0) } }
+                return []
+            }
+            var references = strings(in: object?["state"] as Any)
+            for question in (object?["questions"] as? [String: [String: Any]] ?? [:]).values {
+                references += strings(in: question["instructions"] as Any)
+                references += strings(in: question["criteria"] as Any)
+            }
+            guard images.keys.allSatisfy({ reference in
+                !reference.isEmpty && references.contains(where: { $0.contains(reference) })
+            }) else { throw JevVisionError.unreferencedAsset }
+        }
         var request = URLRequest(url: baseURL)
         request.httpMethod = "POST"
         // Per-step judgments sit inside a voice hold: a hung request must
-        // bound out fast. The drive loop adds one bounded retry, so 8s
-        // caps a step's judge stall near 16s — the old 20s doubled to 40.
+        // bound out fast. There is no retry on this path — the drive loop
+        // settles a thrown call as a blocked step — so 8s is the whole
+        // stall, down from the old 20s default.
         request.timeoutInterval = 8
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if images != nil {
+            request.setValue("true", forHTTPHeaderField: "TypeSafe-Danger-Zone-Images")
+        }
         request.httpBody = try JSONEncoder().encode(
-            SystemOneRequest(model: model, state: state, questions: questions)
+            SystemOneRequest(model: model, state: state, questions: questions, assets: images)
         )
+        if images != nil, (request.httpBody?.count ?? 0) > 32 * 1024 * 1024 {
+            throw JevVisionError.requestTooLarge
+        }
 
         let start = Date()
         let data: Data

@@ -1,0 +1,17 @@
+{
+  "command": [
+    "python3",
+    ".agent/results/P4/jev-build-guard.py",
+    "--directory",
+    ".",
+    "--minimum-free-gib",
+    "2.75",
+    "--",
+    "python3",
+    "-c",
+    "print(\"child started\")"
+  ],
+  "exit_code": 2,
+  "stdout": "",
+  "stderr": "usage: jev-build-guard.py [-h] --directory DIRECTORY\n                          [--minimum-free-gib MINIMUM_FREE_GIB]\n                          [--stop-free-gib STOP_FREE_GIB]\n                          ...\njev-build-guard.py: error: argument --minimum-free-gib: invalid int value: '2.75'\n"
+}

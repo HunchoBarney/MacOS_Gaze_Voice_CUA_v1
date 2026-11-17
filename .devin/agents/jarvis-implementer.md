@@ -1,7 +1,7 @@
 ---
 name: jarvis-implementer
 description: Write-capable implementer for a Jarvis phase ExecPlan. Edits only the phase's owned files, follows the sprint contract agreed at G2, and reports what it changed and what remains unproven.
-model: opus
+model: swe-2-max
 allowed-tools:
   - read
   - grep

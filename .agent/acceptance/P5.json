@@ -1,0 +1,61 @@
+{
+  "phase": "P5",
+  "criteria": [
+    {
+      "id": "P5-1",
+      "behavior": "A reviewed SDK-backed Terra API adapter produces recovery proposals for the shared TaskLoop while Jev remains primary; reuse, version, license and capability checks are recorded.",
+      "check": "Run scripts/verification-lane.sh p5 after M1 implements that mode; inspect OpenAIResponsesClientTests, RecoveryDeciderTests and .agent/results/P5/contract-review.md against the actual source.",
+      "expected": "Nonempty targeted suites pass. Supported actions decode; unknown or malformed action/safety events fail closed. The SDK adoption or minimal gap has evidence.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P5-2",
+      "behavior": "The loop alone owns input, consent and verified completion, including sequences, cancellations and stale responses.",
+      "check": "Run the p5 lane; inspect source-review.md and counterexamples for pending safety without consent, wrong target/scope, stale callback, canceled turn and uncertain mutation.",
+      "expected": "No unauthorized or duplicate input, automatic safety acknowledgment or false Done. A model-written probability or coordinate grants no authority.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P5-3",
+      "behavior": "Jev escalation, ask_about_screen and web_lookup reach real executors through normal task admission.",
+      "check": "Inspect .agent/results/P5/integration.json and actual coordinator/tool wiring; replay its declared controlled public-entry cases on the signed subject under the desktop lock.",
+      "expected": "Supported requests produce independently grounded outcomes or source-backed answers; unsupported/uncertain requests are honest. The same turn retains cancellation and target scope.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P5-4",
+      "behavior": "Effort escalation, progress, bounded no-progress recovery, recording and existing complex/background delegation remain functional.",
+      "check": "Run p5 tests and inspect integration records for stall, failed verification, effort progression, cancellation, stream interruption and Codex route selection.",
+      "expected": "Routine native work avoids the complex lane; difficult tasks escalate with observable progress and stop safely. Recorded evidence excludes secrets and states session limits.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P5-5",
+      "behavior": "The approved Jev-first policy uses Terra API recovery only where its measured benefit justifies it.",
+      "check": "Inspect the P5 routing-comparison report, frozen Jev-only/hybrid manifest, all raw rows, escalation records and request/cost ledger against SHIP-PLAN and COMPETITIVE.",
+      "expected": "Same executor/verifier/population and clocks; success, critical errors, p50/p95, recovery yield and unnecessary escalations reported. No extra model call on direct dictation/actions, automatic cap extension, replacement tournament or silent billing/model switch.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P5-6",
+      "behavior": "The signed general path meets the complex-task release bar with independent outcomes and no red-team violations.",
+      "check": "Run the SHIP-PLAN desktop-lock benchmark with tag p5 under its grant; inspect .agent/results/P5/qualification.json, raw results, oracles, resource series and artifact manifest.",
+      "expected": "Nonempty frozen population: strict success >=80%, p50 <=60s, PROGRAM Wilson rule; zero false Done, duplicate dispatch and safety violations. New speed-goal gaps and p95 are visible.",
+      "passes": false,
+      "evidence": null
+    },
+    {
+      "id": "P5-7",
+      "behavior": "An authorized independent reviewer accepts the exact implementation and applicable evidence; the handoff is complete.",
+      "check": "Inspect P5 source/final judge verdicts, integrated verification-lane result, source/runtime hashes, phase progress and named-file handoff.",
+      "expected": "PASS with no unresolved finding; G5/G6 gaps are not relabeled as source PASS. Install, commit and provider decisions have their actual authorization.",
+      "passes": false,
+      "evidence": null
+    }
+  ]
+}

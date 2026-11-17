@@ -1,0 +1,172 @@
+{
+  "baseline": ".agent/results/P4/c1-baseline-source.json",
+  "baseline_sha256": "546ee12e841a8e4a0572ff5990bf2867ef8ebc768a6ec6c954699ec017d313f4",
+  "head_unchanged": true,
+  "fingerprinted_files": 208,
+  "unchanged_files": 189,
+  "modified": [
+    {
+      "path": "Sources/JevVoice/Drive/DriveLoop.swift",
+      "before_sha256": "2cba4f6eb8c4326ca7a892cedcf735f1cf17b803c990cd64e4f9c8b26b47d61f",
+      "after_sha256": "9f30c3c12b128f039b3c9db25945cbe9274dcc5f028999b4e4c4df0a8d39cea7",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Sources/JevVoice/Drive/DriveLoop.swift"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/FastLaneExecutor.swift",
+      "before_sha256": "b33818b00b0a01605d6e8d5c716f7573b41a6761d7b3648a6c78a1894ffa71d5",
+      "after_sha256": "2ee705b82c0ce4625170d49f33729fb2654991be98f5d947541687602bb50bfd",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Sources/JevVoice/Drive/FastLaneExecutor.swift"
+    },
+    {
+      "path": "Sources/JevVoice/Drive/JevVisualDecision.swift",
+      "before_sha256": "30404250a3f936f2559da2f28958c3ea491b853ed4cd017d52801f37f2abccae",
+      "after_sha256": "0660e81406def09e63dac6d284efc3abde5e69715c3a7b23a082975e203b62fb",
+      "owned": true,
+      "exact_before_bytes": false,
+      "before_origin": null
+    },
+    {
+      "path": "Sources/JevVoice/Drive/VisualGoalProof.swift",
+      "before_sha256": "f35cd042063847a83e75fe528bad26f7895634c0789324fdc27a91489074d47e",
+      "after_sha256": "8aa94ee006c637d1ae5ea492368b63842b0bd950049977cfbd98b563a1cc43d6",
+      "owned": true,
+      "exact_before_bytes": false,
+      "before_origin": null
+    },
+    {
+      "path": "Sources/JevVoice/Drive/VoiceTaskCoordinator.swift",
+      "before_sha256": "d6d29adaffe08e2c1f312a2201b6f6c6e319d7f223d42d224f5872ec924df5d8",
+      "after_sha256": "16ebf4483598c4e201692aaaf2b37ce41e9c92563dca54668f5f436e497de2c2",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift"
+    },
+    {
+      "path": "Sources/JevVoice/Gaze/DwellClick.swift",
+      "before_sha256": "beb195cc0c76a2cf6739854049d16988f1e6cb82364e723df7613c8e5be31a7b",
+      "after_sha256": "a62d64297b1024235a5a204f88e5d97d0723d1c0349adfd0963efa3d599b76a4",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-before/Sources/JevVoice/Gaze/DwellClick.swift"
+    },
+    {
+      "path": "Sources/JevVoice/Gaze/GazeService.swift",
+      "before_sha256": "eec9aac176a7f24a3fb6689c475ca666db0f45ac09a9dd9f43467e70804a64d2",
+      "after_sha256": "925f08bf126e7830ff9ad8763766155059c5345feb64e92de4e7da56928f0a69",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-before/Sources/JevVoice/Gaze/GazeService.swift"
+    },
+    {
+      "path": "Sources/JevVoice/Settings/Permissions.swift",
+      "before_sha256": "42536d2cf3da030cb29fe1540e2f3ff90bb569d4c7e9b4a90c8059e220af3520",
+      "after_sha256": "8bb488d2f60ca1ff6d281c2d528389a05289f460d1ab3ff786e22708184b99b0",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Sources/JevVoice/Settings/Permissions.swift"
+    },
+    {
+      "path": "Sources/JevVoice/UI/SettingsView.swift",
+      "before_sha256": "5e15b2bae419e8f289059a592ef719cd49d8fdfdb89f77c4a0cf02c7f439391b",
+      "after_sha256": "32f16adab10e8100d216d6c8a28c3723a085cc83000495c38762000a0e5cc6ee",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-before/Sources/JevVoice/UI/SettingsView.swift"
+    },
+    {
+      "path": "Sources/JevVoice/Voice/VoiceController.swift",
+      "before_sha256": "acd63a13cdb4c48aee7c3009809f85acf3a55f0abd0efa88c2e18da9405ed2fa",
+      "after_sha256": "c654863b1095d316501c03b8fdc5ef93e16c4e3783a935c0d36697ab4126ddd9",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Sources/JevVoice/Voice/VoiceController.swift"
+    },
+    {
+      "path": "Sources/JevVoice/main.swift",
+      "before_sha256": "87804302f9703d1048a6f00f89221e3be6f73860d262db6b53a1ef0450d92a63",
+      "after_sha256": "8b59e1a97fb7ec9a08848e643d37cbc471700a7b53e6cfeed92fceb327bb1014",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Sources/JevVoice/main.swift"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/DwellClickTests.swift",
+      "before_sha256": "cb023a46e661c74d3dd8e937b3148122c4c2915268e7195f1582d7a788ff8e81",
+      "after_sha256": "a31cf433e98d4a805205724bf9d9220bc605a19a033c5d0d8cdf01ad09d7a323",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-before/Tests/JevVoiceAppTests/DwellClickTests.swift"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/FastLaneExecutorTests.swift",
+      "before_sha256": "a0b9492da4c072c2d7bbaa23cdc8c955bcb421856a206265b375657f5a23e49e",
+      "after_sha256": "50c2d0bd8b0ebf04fb76316d03e2456d8694e43cc2a37967859f0bc1ce46ba1c",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/FastLaneTests.swift",
+      "before_sha256": "2a0f701365e0e6395a9c004eb26c65bfd3a4f8a0d2c87e416d01786eb221bbc0",
+      "after_sha256": "5c5a74e70f19bf6ad18fc15b3a172758153312d5e4ae69998315e50e3f25f5c4",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Tests/JevVoiceAppTests/FastLaneTests.swift"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/GazeServiceTests.swift",
+      "before_sha256": "bc2ac2fb351061861f5663bd6e1a3d823f73d319b4d27beccc938e0466153d23",
+      "after_sha256": "1d4fe002a1c72c262a651c45eca16d46fae2c326471f2d4d3d121bb66e25304c",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-before/Tests/JevVoiceAppTests/GazeServiceTests.swift"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/JevVisionTests.swift",
+      "before_sha256": "cb28820bbe0a9455479647b5217e60a310812e712cace7e4aa1cd80f6ba5eab2",
+      "after_sha256": "227e8a4d594e2ae98984d2e06957c70e8cbcd86d038355a92ae6947faca7fb40",
+      "owned": true,
+      "exact_before_bytes": false,
+      "before_origin": null
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/LocalSpeechTests.swift",
+      "before_sha256": "88c82ceed72d232dc38987c4c98fc6649dce5b85041e7b1b17adf26f945b36d5",
+      "after_sha256": "bc2b96eef02eb9591dcfb7534613beac876dcd4720fcdee706fd4adb65906f30",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-performance-before/Tests/JevVoiceAppTests/LocalSpeechTests.swift"
+    },
+    {
+      "path": "Tests/JevVoiceAppTests/TrackerFlowTests.swift",
+      "before_sha256": "f8c0b14205c72d99324df4a8a10edf14ce3c34f39f132a6ab8594cfeec3715d6",
+      "after_sha256": "0c7c7afe93870d77edee716691fb6b3ad5d2b0e4b51996056eb70b61373ad5ea",
+      "owned": true,
+      "exact_before_bytes": true,
+      "before_origin": ".agent/results/P4/c1-before/Tests/JevVoiceAppTests/TrackerFlowTests.swift"
+    },
+    {
+      "path": "scripts/verification-lane.sh",
+      "before_sha256": "d4e1f580b1191e5918e99697b291a2a9d87c46bb324c3a00f0f1f0c28e9b7491",
+      "after_sha256": "3a6cef33993c5b603b518be31398461caeff133cae5bd61b451da34a71dd8332",
+      "owned": true,
+      "exact_before_bytes": false,
+      "before_origin": null
+    }
+  ],
+  "supplementary_artifacts": {
+    ".agent/results/P4/c1-report.py": "cc7a9291109411a3e95bed0433e9c3d64c681d3da012ef976a4d9875dd6c8ed4",
+    ".agent/results/P4/c1-focus.py": "f6d0bd3f8a9d5cad2c2d49216d1031317f83ee47e5f3b0df4ec4e12f70a40e12",
+    ".agent/results/P4/c1-scroll.py": "7ffa5394af73f7246838c53eaaecdb45afff18e1fb7615840aa79ba87de05168",
+    ".agent/results/P4/c1-scope.py": "640f8b9446e992a16a212e9994c702a2e05d61bfbdd565eefe2be6ba6e9b7d82",
+    ".agent/results/P4/jev-stage-candidate.py": "f40b986cfd5cacb125b17c90614b1482a2104551f2792b78b2c731c868797e00",
+    ".agent/results/P12/c1_manifest.py": "4812338a6efa34badf45810d94d39ed07338a203a3285bb13579dce5723f59d9",
+    ".agent/results/P12/test_c1_manifest.py": "415dbfa432ec8a0eeb13318eb196cbf434a24ecf6f861d55a8ecf97da5196818",
+    ".agent/results/P12/speech-attribution.md": "39053f2ddb56eb167d14a1259a54e1cca93a4c68655f7c090c1182e5840a7fdd"
+  },
+  "limitation": "Exact original bytes were not retained for every initial dirty file. The patch covers only hash-proven originals. Remaining modified paths have before/after hashes, current frozen source, the G2 contract, and failing-before evidence; they are not silently compared to HEAD."
+}

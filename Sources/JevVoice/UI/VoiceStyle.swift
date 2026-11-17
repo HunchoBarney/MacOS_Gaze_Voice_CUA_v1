@@ -53,6 +53,8 @@ extension VoiceController.Status {
         case .stopping: return "Stopping…"
         case .testingMicrophone: return "Testing microphone"
         case .done: return "Finished"
+        case .replied: return "Reply"
+        case .stopped: return "Stopped"
         case .error: return "Something needs attention"
         }
     }
@@ -60,6 +62,8 @@ extension VoiceController.Status {
         switch self {
         case .listening, .testingMicrophone: return "waveform"
         case .done: return "checkmark.circle.fill"
+        case .stopped: return "xmark.circle"
+        case .replied: return "text.bubble"
         case .error: return "exclamationmark.circle.fill"
         case .reviewTranscript, .awaitingRelease: return "text.bubble"
         case .awaitingAnswer: return "questionmark.bubble"

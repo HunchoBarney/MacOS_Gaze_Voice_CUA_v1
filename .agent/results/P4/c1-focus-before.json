@@ -1,0 +1,504 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "physical_input": false,
+  "human_confirmed": false,
+  "binary_sha256": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+  "app": "/var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-c1-before-tjbmt7hv/Jev Voice.app",
+  "workload": "open Calculator; target already running; new Jev process per trial",
+  "platform": "macOS-26.2-arm64-arm-64bit",
+  "rows": [
+    {
+      "index": 0,
+      "passed": true,
+      "report": ".agent/results/P3/user-audit-c1focus-before-66520186/result.json",
+      "visible_effect_ms": 3319.35662496835,
+      "context_to_verified_ms": 6181.205875007436,
+      "trace": [
+        {
+          "monotonic": 1594423.196003375,
+          "stage": "contextBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.6759200417,
+          "stage": "contextEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.714226375,
+          "stage": "admissionLocal",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.71465975,
+          "stage": "localBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.7163710834,
+          "stage": "coordinatorBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.71702675,
+          "stage": "keyBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.71705,
+          "stage": "keyEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594423.7170758334,
+          "stage": "gazeBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1857721251,
+          "stage": "gazeEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1858642919,
+          "stage": "referentBegin",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1876334168,
+          "stage": "referentEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1890574584,
+          "stage": "workCreated",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.1899374167,
+          "stage": "localEnd",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.2733450418,
+          "stage": "executorBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594424.2746734584,
+          "stage": "resolveBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6569817918,
+          "stage": "resolveEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.680832,
+          "stage": "nativeActivationBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6817170002,
+          "stage": "nativeActivationEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6821358334,
+          "stage": "nativeForegroundReadBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.6974245,
+          "stage": "nativeForegroundReadEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.87404525,
+          "stage": "nativeForegroundReadBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594425.89285525,
+          "stage": "nativeForegroundReadEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594426.062919375,
+          "stage": "nativeForegroundReadBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594426.090797,
+          "stage": "nativeForegroundReadEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594426.1224600833,
+          "stage": "driverBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594428.4171405418,
+          "stage": "driverEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594429.2104975001,
+          "stage": "driverBegin",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594429.3564281669,
+          "stage": "driverEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "tool": "listWindows",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        },
+        {
+          "monotonic": 1594429.3772092501,
+          "stage": "executorEnd",
+          "task": "9BC9B9B4-0780-49C7-A403-440458ACCE36",
+          "turn": "0F8DFB6E-318D-4ABC-BB9C-C97F3AA5C475"
+        }
+      ],
+      "documents_restored": true,
+      "normal_route": "local",
+      "work_count": 1
+    },
+    {
+      "index": 1,
+      "passed": true,
+      "report": ".agent/results/P3/user-audit-c1focus-before-b74644f7/result.json",
+      "visible_effect_ms": 3286.6313331760466,
+      "context_to_verified_ms": 3123.512208228931,
+      "trace": [
+        {
+          "monotonic": 1594446.1354770001,
+          "stage": "contextBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.389008875,
+          "stage": "contextEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4250366667,
+          "stage": "admissionLocal",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4256092084,
+          "stage": "localBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4283720835,
+          "stage": "coordinatorBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4290625835,
+          "stage": "keyBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4291036667,
+          "stage": "keyEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.4291900417,
+          "stage": "gazeBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8795219585,
+          "stage": "gazeEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8796079168,
+          "stage": "referentBegin",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.880387,
+          "stage": "referentEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8807231667,
+          "stage": "workCreated",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.8812902083,
+          "stage": "localEnd",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.9771193333,
+          "stage": "executorBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594446.9772667917,
+          "stage": "resolveBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.6401475002,
+          "stage": "resolveEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.7068547085,
+          "stage": "nativeActivationBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.7133045418,
+          "stage": "nativeActivationEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.7142427084,
+          "stage": "nativeForegroundReadBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.733121,
+          "stage": "nativeForegroundReadEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.8991435834,
+          "stage": "nativeForegroundReadBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594448.9411025834,
+          "stage": "nativeForegroundReadEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.1271093334,
+          "stage": "nativeForegroundReadBegin",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.223909625,
+          "stage": "nativeForegroundReadEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.2528240418,
+          "stage": "nativeForegroundVerified",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        },
+        {
+          "monotonic": 1594449.2589892084,
+          "stage": "executorEnd",
+          "task": "FEA7C9D8-45B7-4506-9AA4-82CB76F9E4B7",
+          "turn": "F4554C4C-27B2-47EC-8C08-943A59CE0B55"
+        }
+      ],
+      "documents_restored": true,
+      "normal_route": "local",
+      "work_count": 1
+    },
+    {
+      "index": 2,
+      "passed": true,
+      "report": ".agent/results/P3/user-audit-c1focus-before-aee4dc31/result.json",
+      "visible_effect_ms": 2836.1882916651666,
+      "context_to_verified_ms": 4711.153000127524,
+      "trace": [
+        {
+          "monotonic": 1594468.4984780834,
+          "stage": "contextBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8139367918,
+          "stage": "contextEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8536948333,
+          "stage": "admissionLocal",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8628520835,
+          "stage": "localBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8646545417,
+          "stage": "coordinatorBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8652065834,
+          "stage": "keyBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8652269584,
+          "stage": "keyEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594468.8652489167,
+          "stage": "gazeBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3279585,
+          "stage": "gazeEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3280470418,
+          "stage": "referentBegin",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.332160375,
+          "stage": "referentEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3334313752,
+          "stage": "workCreated",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.3344507918,
+          "stage": "localEnd",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.4417520417,
+          "stage": "executorBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594469.4423732085,
+          "stage": "resolveBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594470.870943875,
+          "stage": "resolveEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.0417439584,
+          "stage": "nativeActivationBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.0954745833,
+          "stage": "nativeActivationEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.095558125,
+          "stage": "nativeForegroundReadBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.127073625,
+          "stage": "nativeForegroundReadEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.3560882502,
+          "stage": "nativeForegroundReadBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.3926292502,
+          "stage": "nativeForegroundReadEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594471.5629082501,
+          "stage": "nativeForegroundReadBegin",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594472.8907907917,
+          "stage": "nativeForegroundReadEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594472.9926507918,
+          "stage": "nativeForegroundVerified",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        },
+        {
+          "monotonic": 1594473.2096310835,
+          "stage": "executorEnd",
+          "task": "78F9E884-1E3C-4485-8FD3-891128931835",
+          "turn": "06A54516-E2B3-4F5F-8D15-E42E2008E295"
+        }
+      ],
+      "documents_restored": true,
+      "normal_route": "local",
+      "work_count": 1
+    }
+  ],
+  "harness_sha256": "f6d0bd3f8a9d5cad2c2d49216d1031317f83ee47e5f3b0df4ec4e12f70a40e12",
+  "launcher_sha256": "5162aedd03b6870a7419ff547705a2107f8bdc5f365aa3ffc1da38f5c5ad38a1"
+}

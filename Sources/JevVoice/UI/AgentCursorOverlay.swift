@@ -42,6 +42,11 @@ final class AgentCursorLabels {
     }
 
     private var panels: [String: NSPanel] = [:]
+    private var expiryTasks: [String: Task<Void, Never>] = [:]
+    /// A chip with no position update for this long belongs to a dead
+    /// reporter — the driver's last report may never arrive (agent died
+    /// mid-action), so the chip re-arms this clock on every `show`.
+    private static let timeToLive: Duration = .seconds(10)
 
     /// Places (or moves) an agent's chip so its dot sits on `point`, given
     /// in AppKit screen coordinates.
@@ -76,10 +81,20 @@ final class AgentCursorLabels {
         }
         panels[key]?.setFrame(NSRect(origin: origin, size: size), display: true)
         panels[key]?.orderFrontRegardless()
+        // Re-arm the no-update expiry — a reporter that keeps pushing
+        // positions keeps its chip; silence past the TTL hides it.
+        expiryTasks[key]?.cancel()
+        expiryTasks[key] = Task { [weak self] in
+            try? await Task.sleep(for: Self.timeToLive)
+            guard !Task.isCancelled else { return }
+            self?.hide(agentSlug: key.isEmpty ? nil : key)
+        }
     }
 
     func hide(agentSlug: String?) {
-        guard let panel = panels.removeValue(forKey: agentSlug ?? "") else { return }
+        let key = agentSlug ?? ""
+        expiryTasks.removeValue(forKey: key)?.cancel()
+        guard let panel = panels.removeValue(forKey: key) else { return }
         panel.orderOut(nil)
         panel.contentView = nil
     }

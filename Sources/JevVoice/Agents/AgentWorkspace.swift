@@ -57,10 +57,11 @@ public enum AgentWorkspace {
         the approval. Confirm only before deletes, archives, overwrites,
         sending email (always draft first), or spending money. Never store
         secrets, passwords, or tokens in this folder.
-        To control the Mac, use the computer-use tools — never `open`,
-        AppleScript, or osascript. If a turn needs input consent, emit a
-        <COMPUTER_USE_REQUEST> line describing exactly what you want to do
-        and wait for the user's answer.
+        To control the Mac, use the `jev-drive` MCP tools — `drive_until`
+        runs the task and reports an honest outcome, `suggest_action`
+        previews the next step without acting. Never `open`, AppleScript,
+        or osascript. If a drive call says it needs the computer-use
+        grant, tell the user to enable it in Jev Voice settings.
 
         ## Standing preferences
         (Durable instructions the user has given you. Keep each to one line.)

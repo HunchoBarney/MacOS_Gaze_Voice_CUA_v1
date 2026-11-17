@@ -1,0 +1,17 @@
+[
+  {
+    "path": ".agent/results/P3/normal-voice-qualification/run-speed-ab.py",
+    "source": "/Users/karanvirkang/Documents/code/jarvis-v1-p3-semantic-closeout/.agent/results/P3/normal-voice-qualification/run-speed-ab.py",
+    "sha256": "1a76193853c60db093551fa088211897f89b1333d559acb84c1aa94d4016c928"
+  },
+  {
+    "path": ".agent/results/P3/typing-repair/run-packaged-check.py",
+    "source": "/Users/karanvirkang/Documents/code/jarvis-v1-p3-semantic-closeout/.agent/results/P3/typing-repair/run-packaged-check.py",
+    "sha256": "2eda6c24195a4621d99ca2759f1ba1a3768dd2695ac95db9e8df93cee08f14e3"
+  },
+  {
+    "path": ".agent/results/P3/physical-20261105/run-focus-window-density.py",
+    "source": "/Users/karanvirkang/Documents/code/jarvis-v1-p3-semantic-closeout/.agent/results/P3/physical-20261105/run-focus-window-density.py",
+    "sha256": "7fa05ab1a68584e7c599e86455d33e1d0a363b079ea5506b1f6f175c0c4d03d6"
+  }
+]

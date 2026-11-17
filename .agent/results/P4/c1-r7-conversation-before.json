@@ -1,0 +1,14 @@
+{
+  "started_at": "2026-11-16T20:23:34.417892+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "VoiceSemanticTests.testR7BoundedFollowup|VoiceSemanticTests.testR7UntilCondition"
+  ],
+  "core_receipt_sha256": "f3045d7f2b269f1780442fef26d4d463fe48695a9a8fb6c53333a17090caed19",
+  "production_matches_core": true,
+  "status": "failed",
+  "exit_code": 1,
+  "finished_at": "2026-11-16T20:24:55.679322+00:00",
+  "log_sha256": "92af0dfe337e7557d3593154f39ef2e6a7ac1f2a59ad40dcc21cb03cb520b10b"
+}

@@ -1,0 +1,97 @@
+{
+  "source_review": "PASS",
+  "reviewer": "8c92201b",
+  "review_scope": "SOURCE/COMPONENT repair only; prior native review carried forward unchanged; no G5/P4/release claim",
+  "source_review_file": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-exact-native-facts-g4.md",
+  "upstream_baseline": "d96e1bc359b2cc638c7a406aad01a7276b1b416f",
+  "rust_toolchain": "1.97.1",
+  "candidate_driver": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/build/vision-capture-045/release/cua-driver",
+    "sha256": "6f42da99480c8a85a7cd40605ab9f295938b4b22d87077f437638f6b0e1b7a7a",
+    "bytes": 40190480
+  },
+  "candidate_sdk": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/build/vision-capture-045/release/libcua_driver_sdk.dylib",
+    "sha256": "409df0bd34422a3e2a6145ca9e7ba35a3f122823bfec83c275355c382acd5d50",
+    "bytes": 31451776
+  },
+  "baseline_driver": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/build/vision-capture-045-baseline/cua-driver",
+    "sha256": "969f9c87d59877785a4cf646ccd4cf351ae534a5097e1cd0b19f344a988b5013",
+    "bytes": 40156320
+  },
+  "baseline_sdk": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/build/vision-capture-045-baseline/libcua_driver_sdk.dylib",
+    "sha256": "7c1f8e0210e8a35269b5b77279abed02fabd7cc1274b9dbc8586029326caae19",
+    "bytes": 31414800
+  },
+  "tracked_patch": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-vision-captured-ax-g4-final.patch",
+    "sha256": "a55c1bc4df40cc1e960500a4b2a60cf362b65615b39ebda6680462daa3037b30",
+    "bytes": 281644
+  },
+  "untracked_contract_test": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/cua-upstream-0.45.4/libs/cua-driver/rust/crates/cua-driver-contract/tests/captured_input_contract.rs",
+    "sha256": "51ce48c0da2ee9cc27f2463ae416569430423816332672ed03d9978e82497057",
+    "bytes": 4094
+  },
+  "driver_notices": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/cua-upstream-0.45.4/libs/cua-driver/rust/THIRD_PARTY_NOTICES.md",
+    "sha256": "5860ee54b73d3d84f8af8a3c3fc996739755297d91e259314416378548ee8f6d",
+    "bytes": 9965
+  },
+  "app_source_sha256": {
+    "Sources/JevVoice/Driver/CuaConnection.swift": "a5a3a8cef5972746d07f95f1589d4ab990dfa50c14e9574c7e95d2a7c4ad380e",
+    "Sources/JevVoice/Drive/VisualTarget.swift": "f299c3542c06c46937ce0fcf75db51e86c450a34d552d1db0ce9676eac700fab",
+    "Sources/JevVoice/Drive/JevVisualDecision.swift": "b3f629ecbc9d98c1226f3c5d722fc5fa1c84778c7f5b39539ad1a8e941e50ae0",
+    "Sources/JevVoice/Drive/JevChooser.swift": "bc6696ded6c8c8b67857a9915eb028d827c3de918c46309351b4737ae6a3d585",
+    "Sources/JevVoice/Drive/DriveLoop.swift": "219e048fdefba40103aaada6a77cb3115c1e4ff858eb031f4e162ac2c2e189a5",
+    "Sources/JevVoice/Drive/DriveCandidates.swift": "4e6210d7161efb513596239ee89e4a5e352cf0d91bfb22a489271457b07f0fc4",
+    "Sources/JevVoice/Drive/JevDecider.swift": "d9b66068fbc908f74ce69c1e404de6e83b66aeef6af5d195244ffca72deb911f",
+    "Sources/JevVoice/Drive/NativeWindowObservation.swift": "422ee6bcdb6dc23daf312cbbb50dffc62558f568514e6dd099334580910c18c7",
+    "Sources/JevVoice/Drive/TaskLoop.swift": "9b2e908ebe81bffc78208d48dbe934be19e7bb704b6b3cdac15fb544420d1c00",
+    "Sources/JevVoice/Drive/ObservedGoalProof.swift": "04662a584e6d502674e68a1541fcd394ac923b8b523d626ed604c71ebc5e19c5",
+    "Sources/JevVoice/Drive/NativeReplacementProof.swift": "d1db3424b011b0ec6824f17bb5acf1bb741e51eb63257bf652572c40aaf594c4"
+  },
+  "checks": {
+    "swift_passed": 308,
+    "swift_failed": 0,
+    "native_components": "inherited unchanged, not rerun",
+    "python_harness": "14 guards pass; TDD original addition and null-existing failures retained; independent37e0a926 PASS",
+    "source_state_tdd": "8 missing fact assertions before; all308 after zero failures"
+  },
+  "limitations": [
+    "Not signed yet; no install/launch/pin/acceptance change.",
+    "Live model gates/actual CF identity are unproven until signed pilot and matched A/B.",
+    "No physical Fn/gaze or speed qualification."
+  ],
+  "inherited_native_receipt": {
+    "path": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-vision-captured-ax-native-final-receipt.json",
+    "sha256": "17ff4666aadc2d98adfbaa651ca7b848b5c28b20d429a0c8aff281307fa87ed6",
+    "reviewer": "e4be8f31",
+    "source_review_file": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-vision-captured-ax-g4-source-r2.md"
+  },
+  "source_review_sha256": "c0b594db691e4431de3343c30f3f56903f91249c23da8b8b287a07c62552c1d5",
+  "supplemental_checks": [
+    {
+      "path": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-vision-scalar-trace-tests.log",
+      "sha256": "8bf866e96a88fe34510dfc4dbd60774c2a6b0f77810ba35a57fd3699f626c91a",
+      "result": "44 JevVisionTests passed; no behavior/threshold changes"
+    }
+  ],
+  "base_native_receipt": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-exact-replacement-native-admission.json",
+  "base_native_receipt_sha256": "b534c3866ba9b6d61791ee9d08ba3c285c3c09c52c8b2e536d0de213ab3ddf4b",
+  "source_review_scope": "StageB four native context FACTS only; prior exact proof unchanged; no live claim",
+  "inherited_checks": {
+    "mac_unit_passed": 734,
+    "mac_unit_ignored": 12,
+    "mac_integration_passed": 2,
+    "rust_sdk_unit_passed": 111,
+    "node_passed": 16,
+    "python_passed": 44,
+    "python_skipped": 3,
+    "swift_passed": 267,
+    "release_cli_and_sdk": "built",
+    "generated_parity": "passed"
+  }
+}

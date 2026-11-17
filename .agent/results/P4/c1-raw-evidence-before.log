@@ -1,0 +1,104 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/6] Compiling JevVoiceAppTests JevVisionTests.swift
+[4/6] Emitting module JevVoiceAppTests
+[5/6] Compiling JevVoiceAppTests GazeServiceTests.swift
+[5/7] Write Objects.LinkFileList
+[6/7] Linking JevVoicePackageTests
+Build complete! (14.45s)
+Test Suite 'Selected tests' started at 2026-11-15 16:48:21.547.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-15 16:48:21.555.
+Test Suite 'DwellPolicyTests' started at 2026-11-15 16:48:21.555.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testAllAddsTheFloorsButNeverChrome]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testAllAddsTheFloorsButNeverChrome]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1EveryOptedInDelayIsAtLeastOneSecond]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1EveryOptedInDelayIsAtLeastOneSecond]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1UnmarkedSafeAndMalformedConsentStayOff]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testC1UnmarkedSafeAndMalformedConsentStayOff]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDefaultsRoundTrip]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDefaultsRoundTrip]' passed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDelayBand]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDelayBand]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedAppExemptsEveryCandidate]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedAppExemptsEveryCandidate]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedCuaPolicyPhrases]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedCuaPolicyPhrases]' passed (0.008 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedLabelsNeverFire]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDeniedLabelsNeverFire]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyCorpusIncludesContextFields]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyCorpusIncludesContextFields]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyDefeatsObfuscation]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyDefeatsObfuscation]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyNormalizesSeparators]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testDenyNormalizesSeparators]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testEmptyNormalizedTokenIsInert]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testEmptyNormalizedTokenIsInert]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testModeDefaultAndUnknown]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testModeDefaultAndUnknown]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testMultiplierAdaptsInsideClamp]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testMultiplierAdaptsInsideClamp]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testOffFiresNothing]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testOffFiresNothing]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSafeReachesVerifiedKindsOnly]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSafeReachesVerifiedKindsOnly]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSecureFieldsNeverFire]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testSecureFieldsNeverFire]' passed (0.000 seconds).
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testTrafficLightCloseDeniedByID]' started.
+Test Case '-[JevVoiceAppTests.DwellPolicyTests testTrafficLightCloseDeniedByID]' passed (0.002 seconds).
+Test Suite 'DwellPolicyTests' passed at 2026-11-15 16:48:21.627.
+	 Executed 18 tests, with 0 failures (0 unexpected) in 0.067 (0.072) seconds
+Test Suite 'EyeSettingsFlowTests' started at 2026-11-15 16:48:21.627.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testDwellModeWriteReloads]' started.
+Test Case '-[JevVoiceAppTests.EyeSettingsFlowTests testDwellModeWriteReloads]' passed (0.010 seconds).
+Test Suite 'EyeSettingsFlowTests' passed at 2026-11-15 16:48:21.638.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+Test Suite 'GazeDwellTests' started at 2026-11-15 16:48:21.638.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAcquireSwitchAbortsOldHold]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAcquireSwitchAbortsOldHold]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAmbiguousPauses]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testAmbiguousPauses]' passed (0.003 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testDeniedNeverFires]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testDeniedNeverFires]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testEngagedReleaseIsAbort]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testEngagedReleaseIsAbort]' passed (0.001 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFeedLossEndsHold]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFeedLossEndsHold]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFiresOncePerAcquire]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testFiresOncePerAcquire]' passed (0.005 seconds).
+Test Case '-[JevVoiceAppTests.GazeDwellTests testQuickReleaseIsNotAbort]' started.
+Test Case '-[JevVoiceAppTests.GazeDwellTests testQuickReleaseIsNotAbort]' passed (0.002 seconds).
+Test Suite 'GazeDwellTests' passed at 2026-11-15 16:48:21.656.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.016 (0.018) seconds
+Test Suite 'JevVisionTests' started at 2026-11-15 16:48:21.656.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ExactNativeFactsPreserveWhitespaceAndUnicode]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ExactNativeFactsPreserveWhitespaceAndUnicode]' passed (0.078 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsCannotHideChangedDocument]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsCannotHideChangedDocument]' passed (0.018 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsStillNeedSubjectEvidence]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:541: error: -[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsStillNeedSubjectEvidence] : XCTAssertNil failed: "VerifiedVisualGoal(binding: JevVoice.VisualBinding(task: JevVoice.TaskBrief(goal: "Open Search", window: Optional(JevVoice.WindowRef(pid: 7, windowID: 42)), application: nil, values: [:], deny: [], successContains: [], context: nil, gazeHint: nil), captureID: "same-pixels", generation: C3F1B2E8-490F-4F83-9BDA-85FA9B9B1B96, session: "test-session", origin: nil, imageData: 1530 bytes, snapshotID: Optional("s00000001"), capturedElementTools: Set([])), originCaptureID: "capture-synthetic", kind: JevVoice.VisualGoalKind.status, scores: ["exact_required": 0.01, "offered_only": 0.01, "completed": 0.99, "evidence_visible": 0.99, "hidden_required": 0.01, "kind_supported": 0.99], subjectCodeProven: true)"
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:544: error: -[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsStillNeedSubjectEvidence] : XCTAssertNotNil failed
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1IdenticalPixelsStillNeedSubjectEvidence]' failed (1.301 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralCannotDischargeUnrelatedOutcomeRequirements]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralCannotDischargeUnrelatedOutcomeRequirements]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralPresenceKeepsRawJudgment]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:559: error: -[JevVoiceAppTests.JevVisionTests testC1NativeLiteralPresenceKeepsRawJudgment] : XCTAssertEqual failed: ("0.95") is not equal to ("0.01") - A native fact must not invent a model probability
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1NativeLiteralPresenceKeepsRawJudgment]' failed (0.009 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ScrollNeedsIndependentAuthorizationAcrossLanes]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1ScrollNeedsIndependentAuthorizationAcrossLanes]' passed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1SupportedKindCannotEraseIndependentRequirements]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testC1SupportedKindCannotEraseIndependentRequirements]' passed (0.004 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativePolicyFailureCannotEscapeThroughOptimisticPixelAnswers]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testNativePolicyFailureCannotEscapeThroughOptimisticPixelAnswers]' passed (0.031 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testOpenReferentPickBindsIndecisiveMatchWinner]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testOpenReferentPickBindsIndecisiveMatchWinner]' passed (0.010 seconds).
+Test Suite 'JevVisionTests' failed at 2026-11-15 16:48:23.113.
+	 Executed 9 tests, with 3 failures (0 unexpected) in 1.456 (1.458) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-15 16:48:23.113.
+	 Executed 35 tests, with 3 failures (0 unexpected) in 1.549 (1.559) seconds
+Test Suite 'Selected tests' failed at 2026-11-15 16:48:23.113.
+	 Executed 35 tests, with 3 failures (0 unexpected) in 1.549 (1.566) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

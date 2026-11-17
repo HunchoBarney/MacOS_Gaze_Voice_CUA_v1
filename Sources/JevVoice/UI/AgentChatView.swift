@@ -62,11 +62,6 @@ struct AgentChatView: View {
                         ForEach(chat.messages) { message in
                             messageRow(message)
                         }
-                        ForEach(chat.consents) { display in
-                            ConsentCardView(display: display, agentName: agent.name) { approved in
-                                model.resolve(display, approved: approved)
-                            }
-                        }
                         if let activity = chat.activity, chat.busy {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.mini)

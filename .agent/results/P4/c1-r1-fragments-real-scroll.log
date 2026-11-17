@@ -1,0 +1,11 @@
+Waiting for the Jarvis desktop test lock…
+Traceback (most recent call last):
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 164, in <module>
+    main()
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 104, in main
+    with socket.socket() as unavailable, real.Session(
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-realapps.py", line 252, in __enter__
+    return self._enter()
+  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/jev-realapps.py", line 263, in _enter
+    raise RuntimeError("explicit real-app approval required")
+RuntimeError: explicit real-app approval required

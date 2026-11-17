@@ -1,0 +1,19 @@
+{
+  "started_at": "2026-11-17T01:37:43.769044+00:00",
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-chooser-release-tests",
+    "FastLaneExecutorTests.testC1ScrollWithoutViewportEvidenceSendsNoInput|FastLaneExecutorTests.testC1ScrollWithoutAnOwnedRegionBindingSendsNoInput|FastLaneExecutorTests.testC1UncertainScrollDispatchIsNotResurrectedOrRetried"
+  ],
+  "g2": "b30bbce0 PASS before production edits",
+  "expected": "New missing-viewport and unbound-region controls fail on R7 production; bound uncertain-send control passes.",
+  "sha256": {
+    "Sources/JevVoice/Drive/NativeWindowObservation.swift": "a48ea28f27c83f6b931336efc331143d4713ef6f564b841a0b39c4b2b94712f5",
+    "Sources/JevVoice/Drive/FastLaneExecutor.swift": "f2a1379cdc51fa65e04ea91e86e6808cea589f7e4bfca98069698cd0c5c2b39b",
+    "Sources/JevVoice/Drive/DriveLoop.swift": "a8ca99ef8c3fb73d0038e340994df7487c7aaba969223e444188c7cb722fa84e",
+    "Tests/JevVoiceAppTests/FastLaneExecutorTests.swift": "e182aa5450608628a7ddf751fa65690ad1547b4fe600511d7da346bd1eec2e1d"
+  },
+  "exit_code": 1,
+  "finished_at": "2026-11-17T01:39:49.956875+00:00",
+  "log_sha256": "ded76cac33212c93d16f6e817be341034b5a4f7ccec89f6069fec5bc3605d0e9"
+}

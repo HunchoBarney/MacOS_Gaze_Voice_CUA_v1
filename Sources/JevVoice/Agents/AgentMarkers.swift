@@ -3,7 +3,6 @@ import Foundation
 /// Parses the bracketed control markers agents emit inside their final
 /// message text (mirror/07-clickys.md):
 ///   <ROUTINE>{"action":"create","every_minutes":60,"title":"…","task":"…"}</ROUTINE>
-///   <COMPUTER_USE_REQUEST>plain-language ask</COMPUTER_USE_REQUEST>
 /// The `</>` close variant is accepted as well — the fork has been seen to
 /// emit it when the tag is the last thing in the message.
 public enum AgentMarkers {
@@ -54,13 +53,6 @@ public enum AgentMarkers {
         }
     }
 
-    /// The ask text of each computer-use consent request, trimmed.
-    public static func computerUseRequests(in text: String) -> [String] {
-        markers(in: text, tag: "COMPUTER_USE_REQUEST")
-            .map { String(text[$0.content]).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
     /// Message text with every marker block removed — what should be spoken
     /// or shown as the agent's visible reply. A dangling open tag with no
     /// close (stream cut mid-marker) is stripped through end of string.
@@ -71,7 +63,7 @@ public enum AgentMarkers {
             // any nested tags — is consumed whole, so no range constructed
             // here can ever index backwards into the string.
             var open: Range<String.Index>?, tag = ""
-            for name in ["ROUTINE", "COMPUTER_USE_REQUEST"] {
+            for name in ["ROUTINE"] {
                 if let range = text.range(of: "<\(name)>", range: cursor..<text.endIndex),
                    open == nil || range.lowerBound < open!.lowerBound {
                     open = range; tag = name

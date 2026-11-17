@@ -1,0 +1,461 @@
+Waiting for the Jarvis desktop test lock…
+c1before 1: signed exact typing; profiled=False
+{
+  "captured_binding_matches": true,
+  "decoy_unchanged": true,
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1588779.8811360418,
+    "last_started_at": 1588775.2697263751,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 4611.40966671519
+  },
+  "elapsed_ms": 2265.1988335419446,
+  "exact_insertion": true,
+  "executable_sha256": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "no_model_rounds": true,
+  "normal_controller_no_audit_binding": true,
+  "observed_window": 61224,
+  "outcomes": [
+    "done"
+  ],
+  "physical_input": false,
+  "status": "passed",
+  "task_literal_matches": true,
+  "task_window": 61224,
+  "trace": [
+    {
+      "monotonic": 1588781.9358510834,
+      "stage": "contextBegin",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.2795125002,
+      "stage": "contextEnd",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.306394625,
+      "stage": "admissionLocal",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.3070922084,
+      "stage": "localBegin",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.3084314584,
+      "stage": "coordinatorBegin",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.3096955835,
+      "stage": "keyBegin",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.3097174168,
+      "stage": "keyEnd",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.30975225,
+      "stage": "gazeBegin",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.6556343334,
+      "stage": "gazeEnd",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.6561360417,
+      "stage": "referentBegin",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.656292875,
+      "stage": "referentEnd",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.65864,
+      "stage": "workCreated",
+      "task": "1E70E138-B114-437E-A74F-4C4F0A0AD866",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.6593880001,
+      "stage": "localEnd",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.8794729584,
+      "stage": "executorBegin",
+      "task": "1E70E138-B114-437E-A74F-4C4F0A0AD866",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588782.8803309584,
+      "stage": "resolveBegin",
+      "task": "1E70E138-B114-437E-A74F-4C4F0A0AD866",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588783.8035212501,
+      "stage": "resolveEnd",
+      "task": "1E70E138-B114-437E-A74F-4C4F0A0AD866",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588783.9155639585,
+      "stage": "nativeTextInsertionBegin",
+      "task": "1E70E138-B114-437E-A74F-4C4F0A0AD866",
+      "tool": "typeText",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588783.9191552917,
+      "stage": "nativeTextInsertionEnd",
+      "task": "1E70E138-B114-437E-A74F-4C4F0A0AD866",
+      "tool": "typeText",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    },
+    {
+      "monotonic": 1588783.9374242919,
+      "stage": "executorEnd",
+      "task": "1E70E138-B114-437E-A74F-4C4F0A0AD866",
+      "turn": "0D67E693-B312-4FEA-9D5A-A5D38424DBE3"
+    }
+  ],
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 7294.640333391726,
+  "type_dispatches": 1,
+  "typing_proof": [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count": 1
+}
+c1before 2: signed exact typing; profiled=False
+{
+  "captured_binding_matches": true,
+  "decoy_unchanged": true,
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1588810.4884456669,
+    "last_started_at": 1588808.5646832085,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 1923.7624583765864
+  },
+  "elapsed_ms": 2386.8579999543726,
+  "exact_insertion": true,
+  "executable_sha256": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "no_model_rounds": true,
+  "normal_controller_no_audit_binding": true,
+  "observed_window": 61245,
+  "outcomes": [
+    "done"
+  ],
+  "physical_input": false,
+  "status": "passed",
+  "task_literal_matches": true,
+  "task_window": 61245,
+  "trace": [
+    {
+      "monotonic": 1588818.3468598751,
+      "stage": "contextBegin",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7457547085,
+      "stage": "contextEnd",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7726751668,
+      "stage": "admissionLocal",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7735282918,
+      "stage": "localBegin",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.776695125,
+      "stage": "coordinatorBegin",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7797392502,
+      "stage": "keyBegin",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7797708751,
+      "stage": "keyEnd",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7798172084,
+      "stage": "gazeBegin",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7951201252,
+      "stage": "gazeEnd",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7960290834,
+      "stage": "referentBegin",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7965502085,
+      "stage": "referentEnd",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7987812501,
+      "stage": "workCreated",
+      "task": "3B0F1D9F-D37D-43D8-A9A8-B61C0A46B832",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.7995468334,
+      "stage": "localEnd",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.907944,
+      "stage": "executorBegin",
+      "task": "3B0F1D9F-D37D-43D8-A9A8-B61C0A46B832",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588818.9145418333,
+      "stage": "resolveBegin",
+      "task": "3B0F1D9F-D37D-43D8-A9A8-B61C0A46B832",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588819.7224665417,
+      "stage": "resolveEnd",
+      "task": "3B0F1D9F-D37D-43D8-A9A8-B61C0A46B832",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588819.7664887083,
+      "stage": "nativeTextInsertionBegin",
+      "task": "3B0F1D9F-D37D-43D8-A9A8-B61C0A46B832",
+      "tool": "typeText",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588819.7700760835,
+      "stage": "nativeTextInsertionEnd",
+      "task": "3B0F1D9F-D37D-43D8-A9A8-B61C0A46B832",
+      "tool": "typeText",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    },
+    {
+      "monotonic": 1588819.7854592502,
+      "stage": "executorEnd",
+      "task": "3B0F1D9F-D37D-43D8-A9A8-B61C0A46B832",
+      "turn": "A7C1E84C-4754-45A6-9BA5-EA10C199D490"
+    }
+  ],
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 8093.281958485022,
+  "type_dispatches": 1,
+  "typing_proof": [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count": 1
+}
+c1before 3: signed exact typing; profiled=False
+{
+  "captured_binding_matches": true,
+  "decoy_unchanged": true,
+  "desktop_ownership_release_safe": true,
+  "driver_inventory_prewarm": {
+    "attempts": 1,
+    "cancelled": 0,
+    "completed": 1,
+    "failed": 0,
+    "last_settled_at": 1588839.8612059169,
+    "last_started_at": 1588836.7715285835,
+    "pending": 0,
+    "reads_dispatched": 1,
+    "settled_elapsed_ms": 3089.677333366126
+  },
+  "elapsed_ms": 7428.993625100702,
+  "exact_insertion": true,
+  "executable_sha256": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+  "focus_diagnostics": {
+    "accessibility_trusted": true,
+    "document_matches": true,
+    "focused_element_matches": true,
+    "focused_role": "AXTextArea",
+    "has_document": true,
+    "last_ax_error": -25212,
+    "stage": "matched"
+  },
+  "human_confirmed": false,
+  "no_model_rounds": true,
+  "normal_controller_no_audit_binding": true,
+  "observed_window": 61266,
+  "outcomes": [
+    "done"
+  ],
+  "physical_input": false,
+  "status": "passed",
+  "task_literal_matches": true,
+  "task_window": 61266,
+  "trace": [
+    {
+      "monotonic": 1588842.1660956668,
+      "stage": "contextBegin",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588842.5067659167,
+      "stage": "contextEnd",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588842.5401398335,
+      "stage": "admissionLocal",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588842.540887125,
+      "stage": "localBegin",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588842.5428737502,
+      "stage": "coordinatorBegin",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588842.5454115001,
+      "stage": "keyBegin",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588842.5454425835,
+      "stage": "keyEnd",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588842.5454910418,
+      "stage": "gazeBegin",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588843.5982900418,
+      "stage": "gazeEnd",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588843.5987689167,
+      "stage": "referentBegin",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588843.6002557501,
+      "stage": "referentEnd",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588843.6025555418,
+      "stage": "workCreated",
+      "task": "154A04C4-7E67-4A9A-9530-A155D84EA937",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588843.6035985001,
+      "stage": "localEnd",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588843.7702261668,
+      "stage": "executorBegin",
+      "task": "154A04C4-7E67-4A9A-9530-A155D84EA937",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588843.7711634585,
+      "stage": "resolveBegin",
+      "task": "154A04C4-7E67-4A9A-9530-A155D84EA937",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588846.8278819583,
+      "stage": "resolveEnd",
+      "task": "154A04C4-7E67-4A9A-9530-A155D84EA937",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588848.7209197918,
+      "stage": "nativeTextInsertionBegin",
+      "task": "154A04C4-7E67-4A9A-9530-A155D84EA937",
+      "tool": "typeText",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588848.7403320835,
+      "stage": "nativeTextInsertionEnd",
+      "task": "154A04C4-7E67-4A9A-9530-A155D84EA937",
+      "tool": "typeText",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    },
+    {
+      "monotonic": 1588848.7765371667,
+      "stage": "executorEnd",
+      "task": "154A04C4-7E67-4A9A-9530-A155D84EA937",
+      "turn": "18E265AB-5D9C-4D9A-AC51-37ADF5F8FF6D"
+    }
+  ],
+  "tracker_startup_state": "renderer_started",
+  "tracker_startup_wait_ms": 5177.2125833667815,
+  "type_dispatches": 1,
+  "typing_proof": [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count": 1
+}
+PASS three measured runs; profiled run excluded. No physical voice acceptance.

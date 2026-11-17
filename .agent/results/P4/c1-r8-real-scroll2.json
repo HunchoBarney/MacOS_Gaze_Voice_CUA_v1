@@ -1,0 +1,21 @@
+{
+  "started_at": "2026-11-17T03:48:12.580338+00:00",
+  "command": [
+    "python3",
+    "scripts/with-desktop-lock.py",
+    "python3",
+    ".agent/results/P4/c1-scroll.py",
+    "--receipt",
+    ".agent/results/P12/c1-final-r8-stage.json",
+    "--label",
+    "r8-native2"
+  ],
+  "receipt_sha256": "20c497d1ab2531e4ce2c7dab5079db2c344c4d3cf6359ad544570f8ad4e78b7f",
+  "source_snapshot_sha256": "7499a5078d365df471bfad91ffdc1da9be7186d9440d9eee0af75317992e31b5",
+  "g4": "b51619af SOURCE and ARTIFACT PASS; same candidate",
+  "harness_delta": "Start MCP actor before opening/observing owned documents; retain strict URL ownership and timed operation/oracles. First run failed before any drive request; preserve it. Added redacted ownership diagnostics on missing window.",
+  "status": "failed",
+  "exit_code": 1,
+  "finished_at": "2026-11-17T03:48:25.186302+00:00",
+  "log_sha256": "ed854616f91f716d4d05de4ac968673461fa6efe938d18ac860d987817fa4540"
+}

@@ -1,0 +1,32 @@
+{
+  "at": "2026-11-16T16:00:54.191162+00:00",
+  "resigned": false,
+  "restorations": [
+    {
+      "label": "before",
+      "files": [
+        "Resources/EyeTracker/node_modules/.pnpm/undici@7.28.0/node_modules/undici/lib/llhttp/.gitkeep",
+        "Resources/EyeTracker/node_modules/.pnpm/node-addon-api@5.0.0/node_modules/node-addon-api/nothing.c",
+        "Resources/EyeTracker/node_modules/.pnpm/timm@1.7.1/node_modules/timm/.flowconfig",
+        "Resources/EyeTracker/node_modules/.pnpm/tr46@0.0.3/node_modules/tr46/lib/.gitkeep",
+        "Resources/EyeTracker/node_modules/.pnpm/mime@1.6.0/node_modules/mime/.npmignore"
+      ],
+      "binary_sha256": "29b4d4f9457f0b2924afd37a61234ae42301c9b458050b3874798757ffcbf8c5",
+      "resource_envelope_sha256": "e35d81abc9afb09beacb3aff8ae69afd1a7604f658f6d41e85dada4e491c37bb",
+      "strict_signature_after": true
+    },
+    {
+      "label": "final-r2",
+      "files": [
+        "Resources/EyeTracker/node_modules/.pnpm/undici@7.28.0/node_modules/undici/lib/llhttp/.gitkeep",
+        "Resources/EyeTracker/node_modules/.pnpm/node-addon-api@5.0.0/node_modules/node-addon-api/nothing.c",
+        "Resources/EyeTracker/node_modules/.pnpm/timm@1.7.1/node_modules/timm/.flowconfig",
+        "Resources/EyeTracker/node_modules/.pnpm/tr46@0.0.3/node_modules/tr46/lib/.gitkeep",
+        "Resources/EyeTracker/node_modules/.pnpm/mime@1.6.0/node_modules/mime/.npmignore"
+      ],
+      "binary_sha256": "eac804975c9504c4dfc6aada473ed087f0c90535e855cbae9de0510a0eae52a8",
+      "resource_envelope_sha256": "5e1f16d5092bbbf313936f16b1c2426efef5ba26a848bb4e2cfdcadabaebd61d",
+      "strict_signature_after": true
+    }
+  ]
+}

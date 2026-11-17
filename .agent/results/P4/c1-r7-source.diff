@@ -1,0 +1,1349 @@
+--- R6/.agent/results/P4/jev-stage-candidate.py
++++ R7/.agent/results/P4/jev-stage-candidate.py
+@@ -45,7 +45,7 @@
+ 
+ def main():
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--label", choices=("before", "after", "after-r2", "after-r3", "final", "final-r2", "final-r3", "final-r4", "final-r5", "final-r6"), required=True)
++    parser.add_argument("--label", choices=("before", "after", "after-r2", "after-r3", "final", "final-r2", "final-r3", "final-r4", "final-r5", "final-r6", "final-r7"), required=True)
+     parser.add_argument("--snapshot", type=Path, required=True)
+     args = parser.parse_args()
+     if os.environ.get("JARVIS_VERIFICATION_LANE_HELD") != "1":
+--- R6/Sources/JevVoice/Drive/DriveLoop.swift
++++ R7/Sources/JevVoice/Drive/DriveLoop.swift
+@@ -69,6 +69,7 @@
+         var maxInvalidChoices = 2
+         var maxStaleRounds = 3
+         var windowOnly = false
++        var allowParsedScroll = true
+         static let `default` = Config()
+     }
+ 
+@@ -509,6 +510,63 @@
+         return verified
+     }
+ 
++    static func permitsPinnedScroll(_ resolved: FastResolution, task: DriveTask) -> Bool {
++        guard let window = task.windowID, window > 0, task.scope == .work,
++              task.application != nil, task.values.isEmpty, task.successContains.isEmpty,
++              task.previousContext?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
++              resolved.openVerb == nil, resolved.launchURLs.isEmpty, !resolved.displayScoped,
++              let action = resolved.action, !action.deictic,
++              case .scroll(_, let pages) = action.body, pages == 1 else { return false }
++        return true
++    }
++
++    func runWindowScroll(_ request: WindowScrollRequest, task: DriveTask, session: String) async -> DriveResult {
++        var history: [String] = []
++        do {
++            try Task.checkCancellation()
++            guard request.matches(task) else {
++                return settle(.blocked("The scrolling request or target changed."),
++                              task, history, blockedReason: "scroll request changed")
++            }
++            let candidates = await resolveTaskApplication(task)
++            guard let app = try await resolveTargetApp(candidates, task: task, session: session),
++                  app.bundle == request.application, let pid = task.pid ?? app.pid, pid > 0 else {
++                return settle(.blocked("The captured application's window is unavailable."),
++                              task, history, blockedReason: "pinned app mismatch")
++            }
++            let action = FastAction(body: .scroll(direction: request.direction, pages: 1), generic: true,
++                description: "Scrolling \(request.direction)", result: "Scrolled \(request.direction)",
++                effect: .delivered)
++            let resolved = FastResolution(action: action, openVerb: nil, name: app.name,
++                                          bundle: request.application, pid: pid)
++            var confirmed = false
++            try Task.checkCancellation()
++            return try await runFastLane(resolved, task: task, session: session,
++                history: &history, confirmed: &confirmed, scrollLines: request.lines,
++                scrollAnchor: request.continuation)
++                ?? settle(.blocked("The scroll could not be verified."), task, history)
++        } catch is CancellationError {
++            return settle(.cancelled, task, history)
++        } catch let abort as Abort {
++            switch abort {
++            case .denied(let why):
++                return settle(.blockedByConsent(why), task, history,
++                              blockedReason: why, consentBlock: .permanent)
++            case .declined:
++                return settle(.blockedByConsent("The scroll was not approved."), task, history,
++                              consentBlock: .declined)
++            case .missingGrant:
++                return settle(.blockedByConsent("Computer use needs the standing grant."), task, history,
++                              consentBlock: .missingGrant)
++            case .refused(let why):
++                return settle(.blocked(why), task, history, blockedReason: why)
++            }
++        } catch {
++            return settle(.blocked("The scroll could not be verified: \(error.localizedDescription)"),
++                          task, history, blockedReason: "scroll unverified")
++        }
++    }
++
+     /// Typed semantic handler: never reparse a model/user/display string into
+     /// a primitive or fall through to the generic chooser.
+     func runAppFocus(bundleID: String, task: DriveTask, session: String,
+@@ -605,15 +663,18 @@
+                    case .hotkey(let localKeys, _)? = local?.action?.body, localKeys == keys {
+                     boundHotkey = true
+                 } else { boundHotkey = false }
+-                apps = local?.openVerb != nil || boundLiteral || boundHotkey
++                let boundScroll = local.map { Self.permitsPinnedScroll($0, task: task) } ?? false
++                apps = local?.openVerb != nil || boundLiteral || boundHotkey || boundScroll
+                     ? [.object(row)] : await appInventory(session: session)
+             } else {
+                 apps = needsInventory ? await appInventory(session: session) : []
+             }
+             let frontmost = frontmostBundleID()
+-            if !config.windowOnly, var fast = Self.resolveFastLane(goal: task.goal, apps: apps,
++            if var fast = Self.resolveFastLane(goal: task.goal, apps: apps,
+                                                appHint: task.application,
+-                                               frontmostBundle: frontmost) {
++                                               frontmostBundle: frontmost),
++               config.allowParsedScroll || !fast.isScroll,
++               !config.windowOnly || Self.permitsPinnedScroll(fast, task: task) {
+                 if task.windowID != nil, !fast.bundle.isEmpty {
+                     guard let bound = try await resolveTargetApp(await resolvedApps, task: task, session: session),
+                           bound.bundle?.caseInsensitiveCompare(fast.bundle) == .orderedSame else {
+--- R6/Sources/JevVoice/Drive/FastLane.swift
++++ R7/Sources/JevVoice/Drive/FastLane.swift
+@@ -1,6 +1,41 @@
+ import AppKit
+ import Foundation
+ import JevVoiceCore
++
++struct WindowScrollRequest: Sendable {
++    static let smallLines = 1
++    static let normalLines = 3
++    let goal: String
++    let application: String
++    let windowID: Int
++    let direction: String
++    let lines: Int
++    let continuation: NativeWindowObservation.ScrollViewport?
++
++    init?(goal: String, application: String, windowID: Int, direction: String, small: Bool,
++          continuation: NativeWindowObservation.ScrollViewport? = nil) {
++        guard !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
++              !application.isEmpty, windowID > 0,
++              ["up", "down", "left", "right"].contains(direction) else { return nil }
++        if let continuation {
++            guard continuation.window.windowID == windowID, continuation.supports(direction) else { return nil }
++        }
++        self.goal = goal
++        self.application = application
++        self.windowID = windowID
++        self.direction = direction
++        lines = small ? Self.smallLines : Self.normalLines
++        self.continuation = continuation
++    }
++
++    func matches(_ task: DriveTask) -> Bool {
++        Data(task.goal.utf8) == Data(goal.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
++            && task.application == application && task.windowID == windowID
++            && task.scope == .work && task.values.isEmpty && task.successContains.isEmpty
++            && task.windowName == nil
++            && task.previousContext?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
++    }
++}
+ 
+ /// The deterministic verb layer: whole-utterance commands whose correct
+ /// execution is a known chord, app primitive, or URL — no model call needed.
+--- R6/Sources/JevVoice/Drive/FastLaneExecutor.swift
++++ R7/Sources/JevVoice/Drive/FastLaneExecutor.swift
+@@ -65,6 +65,10 @@
+         /// the app can't be known until live window rows answer which display
+         /// the gaze point sits on. `runFastLane` resolves it at dispatch.
+         var displayScoped = false
++        var isScroll: Bool {
++            if case .scroll? = action?.body { return true }
++            return false
++        }
+     }
+ 
+     /// The outcome of one whole-utterance parse attempt. A risk-gated
+@@ -285,7 +289,9 @@
+     func runFastLane(_ resolved: FastResolution, task: DriveTask, session: String,
+                      history: inout [String],
+                      confirmed: inout Bool,
+-                     nativeEvents: (@Sendable (VoiceCommandTrace.Stage) async -> Void)? = nil) async throws -> DriveResult? {
++                     nativeEvents: (@Sendable (VoiceCommandTrace.Stage) async -> Void)? = nil,
++                     scrollLines: Int? = nil,
++                     scrollAnchor: NativeWindowObservation.ScrollViewport? = nil) async throws -> DriveResult? {
+         let nativeEvent = nativeEvents ?? self.nativeEvent
+         var bundle = resolved.bundle
+         var name = resolved.name
+@@ -550,6 +556,14 @@
+             rows = await materialize(pid: pid, bundle: bundle, didLaunch: launchedPID != nil,
+                                      session: session)
+         }
++        if case .scroll = action.body, let pinned = task.windowID {
++            let matches = rows.filter { $0["window_id"]?.integer == pinned }
++            guard matches.count == 1, let row = matches.first, row["pid"]?.integer == pid,
++                  task.windowName == nil || windowID(named: task.windowName, in: matches) == pinned else {
++                return settle(.blocked("The pinned scroll window has no unique verified owner."),
++                              task, history, blockedReason: "pinned scroll window changed")
++            }
++        }
+         if let pinned = task.windowID, !rows.isEmpty,
+            !rows.contains(where: { $0["window_id"]?.integer == pinned }) {
+             throw DriverConnectionError.refused("The pinned target window closed. No other window was substituted.")
+@@ -589,7 +603,7 @@
+         case .scroll(let direction, let pages):
+             return try await runVerifiedScroll(direction: direction, pages: pages, task: task,
+                 window: WindowRef(pid: pid, windowID: windowID), name: name, bundle: bundle,
+-                session: session, history: &history)
++                session: session, history: &history, lineAmount: scrollLines, scrollAnchor: scrollAnchor)
+         case .type(let payload):
+             // "type X here" binds the target to the gaze point — a dead
+             // or unsure tracker must not retarget the bound/frontmost
+@@ -953,8 +967,12 @@
+ 
+     private func runVerifiedScroll(direction: String, pages: Int, task: DriveTask,
+                                    window: WindowRef, name: String, bundle: String,
+-                                   session: String, history: inout [String]) async throws -> DriveResult {
+-        guard pages > 0, ["up", "down", "left", "right"].contains(direction) else {
++                                   session: String, history: inout [String],
++                                   lineAmount: Int? = nil,
++                                   scrollAnchor: NativeWindowObservation.ScrollViewport? = nil) async throws -> DriveResult {
++        let scrollContinuation = scrollAnchor ?? self.scrollContinuation
++        guard pages > 0, ["up", "down", "left", "right"].contains(direction),
++              lineAmount.map({ pages == 1 && [1, 3].contains($0) }) != false else {
+             return settle(.blocked("The scroll direction or amount is unclear."), task, history,
+                           pid: window.pid, windowID: window.windowID, bundleID: bundle)
+         }
+@@ -988,7 +1006,7 @@
+         var previousViewport = scrollContinuation
+         var reachedEdge = false
+         let small = ["a little", "a bit"].contains { task.goal.lowercased().contains($0) }
+-        let lines = small ? 1 : 3
++        let lines = lineAmount ?? (small ? 1 : 3)
+         func unverified(_ reason: String, _ records: [String]) -> DriveResult {
+             settle(.blocked(reason), task, records + [reason], pid: window.pid, windowID: window.windowID,
+                    bundleID: bundle, confirmedAny: verifiedCount > 0,
+@@ -1059,6 +1077,7 @@
+                     pid: window.pid, windowID: window.windowID, bundleID: bundle,
+                     confirmedAny: verifiedCount > 0)
+             }
++            try Task.checkCancellation()
+             let dispatchedAt = ProcessInfo.processInfo.systemUptime
+             do {
+                 let result = try await callOnce("scroll", arguments)
+--- R6/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift
++++ R7/Sources/JevVoice/Drive/VoiceTaskCoordinator.swift
+@@ -30,6 +30,8 @@
+         var isAgentAsk: Bool { agentAskID != nil }
+         var worker: Task<Void, Never>?
+         var semanticFocus: VoiceSemanticRouter.Proposal?
++        var windowScroll: WindowScrollRequest?
++        var allowParsedScroll = true
+         var semanticExecutionStarted = false
+         var semanticDriverLoop: DriveLoop?
+         var scrollContinuation: NativeWindowObservation.ScrollViewport?
+@@ -749,6 +751,8 @@
+                         steps: [String] = [],
+                         captureID: UUID? = nil,
+                         pinnedWindowID: Int? = nil,
++                        windowScroll: WindowScrollRequest? = nil,
++                        allowParsedScroll: Bool = true,
+                         scrollContinuation: NativeWindowObservation.ScrollViewport? = nil,
+                         continuousScroll: Bool = false,
+                         onConversationScroll: (@MainActor (NativeWindowObservation.VerifiedScroll) -> Void)? = nil,
+@@ -762,10 +766,22 @@
+                                    say: "I didn't catch a task.").encoded()
+         }
+         let normalized = trimmed.lowercased()
++        if let windowScroll {
++            let bound = Self.voiceTaskSpec(trimmed, app: app, frontmostHint: frontmostHint,
++                values: literalText.map { ["text": $0] } ?? [:], windowID: pinnedWindowID)
++            let sameTranscript = transcriptHint.map {
++                Data($0.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
++                    == Data(windowScroll.goal.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
++            } ?? true
++            guard steps.isEmpty, !continuousScroll, sameTranscript, windowScroll.matches(bound) else {
++                return VoiceToolResult(status: VoiceToolResult.Status.refused,
++                                       say: "The scrolling request or target changed.").encoded()
++            }
++        }
+         let phrase = Self.normalizedPhrase(trimmed)
+         // Utterances about existing work aren't tasks — each answers from
+         // the task log (or shows the cheat sheet) and creates no Work row.
+-        if Self.repeatPhrases.contains(phrase) {
++        if windowScroll == nil, Self.repeatPhrases.contains(phrase) {
+             guard let last = tasks.last(where: {
+                 !$0.active && !Self.repeatPhrases.contains(Self.normalizedPhrase($0.request))
+             }) else {
+@@ -776,6 +792,7 @@
+             return await beginVoiceTask(last.request,
+                                         frontmostHint: frontmostHint,
+                                         captureID: captureID, pinnedWindowID: pinnedWindowID,
++                                        allowParsedScroll: allowParsedScroll,
+                                         scrollContinuation: scrollContinuation,
+                                         continuousScroll: continuousScroll, onConversationScroll: onConversationScroll,
+                                         admissionIsCurrent: admissionIsCurrent)
+@@ -821,12 +838,9 @@
+         // The model's ordered steps ARE the plan — fold into context rather
+         // than a second planner.
+         let plan = steps.filter { !$0.isEmpty }
+-        // B6 — the focal-gated referent rides every task: "Looking at"
+-        // the live fixation, plus up to two recent ones, so deictic
+-        // follow-ups ("that one", "explain it") resolve without pointing
+-        // words. Glances and stale fixations don't leak in.
+         onCommandStage?(captureID, nil, .gazeBegin, nil)
+-        let gazeContext = await gazeContextProvider()
++        var gazeContext: String?
++        if windowScroll == nil { gazeContext = await gazeContextProvider() }
+         onCommandStage?(captureID, nil, .gazeEnd, nil)
+         guard !Task.isCancelled, admissionIsCurrent() else {
+             onCommandStage?(captureID, nil, .cancelled, nil)
+@@ -836,24 +850,25 @@
+         // modifiers picks the lane; the routed intent rides the context
+         // so the executor knows an "answer" intent fetches, not clicks,
+         // and the provenance echo (≤5 words) becomes the spoken ack.
+-        let classified = IntentRouter.classify(trimmed)
++        let classified = windowScroll == nil ? IntentRouter.classify(trimmed) : nil
+         onCommandStage?(captureID, nil, .referentBegin, nil)
+-        let referent = await gazeService.scorer.currentReferent
++        var referent: GazeReferent?
++        if windowScroll == nil { referent = await gazeService.scorer.currentReferent }
+         onCommandStage?(captureID, nil, .referentEnd, nil)
+         guard !Task.isCancelled else {
+             onCommandStage?(captureID, nil, .cancelled, nil)
+             return VoiceToolResult(status: VoiceToolResult.Status.cancelled, say: "Cancelled.").encoded()
+         }
+-        let routed = IntentRouter.route(verb: classified.verb,
+-                                        referent: referent,
+-                                        modifiers: classified.modifiers)
++        let routed = classified.flatMap {
++            IntentRouter.route(verb: $0.verb, referent: referent, modifiers: $0.modifiers)
++        }
+         // The router's cancel verdict is authoritative, not advisory, and
+         // it is UNIVERSAL: "stop"/"cancel that"/"never mind" with no named
+         // target takes every active task and every live agent turn — a
+         // stop request must never spin up a drive loop for itself, and it
+         // must never leave sibling work running past the word "stop". A
+         // named target ("stop scout") keeps the targeted path.
+-        if classified.verb == .cancel {
++        if classified?.verb == .cancel {
+             feed.add(.route, "\"\(trimmed)\" → cancel")
+             if let hint = Self.cancelHint(from: trimmed) {
+                 return await cancelVoiceTask(hint)
+@@ -864,11 +879,11 @@
+                                 : VoiceToolResult.Status.nothingRunning,
+                 say: stopped ? "Stopped." : "Nothing is running.").encoded()
+         }
+-        let previousContext = ([plan.isEmpty ? nil : "Plan: \(plan.joined(separator: "; "))",
++        let previousContext = windowScroll == nil ? ([plan.isEmpty ? nil : "Plan: \(plan.joined(separator: "; "))",
+                                 transcriptHint, gazeContext,
+                                 routed.map { "Intent lane: \($0.lane.rawValue) — \($0.reason)" }]
+             .compactMap { $0 })
+-            .joined(separator: "\n")
++            .joined(separator: "\n") : ""
+         let spec = Self.voiceTaskSpec(trimmed, app: app, frontmostHint: frontmostHint,
+             previousContext: previousContext.isEmpty ? nil : previousContext,
+             values: values, windowID: pinnedWindowID)
+@@ -879,6 +894,12 @@
+             return VoiceToolResult(status: VoiceToolResult.Status.cancelled, say: "Cancelled.").encoded()
+         }
+         let work = Work(label: label, request: trimmed, spec: spec)
++        guard windowScroll?.matches(spec) != false else {
++            return VoiceToolResult(status: VoiceToolResult.Status.refused,
++                                   say: "The scrolling request or target changed.").encoded()
++        }
++        work.windowScroll = windowScroll
++        work.allowParsedScroll = allowParsedScroll
+         work.provenance = captureID.map { SpeechProvenance(captureID: $0) }
+         work.captureID = captureID
+         work.scrollContinuation = scrollContinuation
+@@ -1474,6 +1495,7 @@
+                 VoiceController.shared?.dictationRequest(start) ?? false
+             },
+             resolver: resolver,
++            config: .init(allowParsedScroll: work.allowParsedScroll),
+             focusLease: inputGuard,
+             nativeEvent: { [weak self] stage in
+                 await self?.recordNativeStage(stage, turn: traceTurn, work: traceWork)
+@@ -1522,6 +1544,9 @@
+         // `run` never throws — cancellation and transport faults surface as
+         // DriveResult statuses, so every outcome funnels through describe.
+         @MainActor func runWork() async -> DriveResult {
++            if let scroll = work.windowScroll {
++                return await loop.runWindowScroll(scroll, task: work.spec, session: Self.session)
++            }
+             if let semantic = work.semanticFocus {
+                 return await loop.runAppFocus(bundleID: semantic.target.id, task: work.spec,
+                     session: Self.directSession, nativeEvents: { [weak self] stage in
+--- R6/Sources/JevVoice/Voice/ConversationContext.swift
++++ R7/Sources/JevVoice/Voice/ConversationContext.swift
+@@ -45,6 +45,7 @@
+     var scope: ConversationScope?
+     var direction: String?
+     var small = false
++    var windowScroll: WindowScrollRequest?
+ 
+     var scrollGoal: String? {
+         guard let direction, ["up", "down", "left", "right"].contains(direction) else { return nil }
+@@ -470,7 +471,7 @@
+             return
+         }
+         let goal: String
+-        if VoiceTaskCoordinator.isRepeatRequest(text) {
++        if decision.windowScroll == nil, VoiceTaskCoordinator.isRepeatRequest(text) {
+             guard memory.lastVerified, memory.lastScope == decision.scope, let previous = memory.lastGoal else {
+                 throw VoiceError("There is no verified request here to repeat. Please say the action.")
+             }
+--- R6/Sources/JevVoice/Voice/VoiceController.swift
++++ R7/Sources/JevVoice/Voice/VoiceController.swift
+@@ -1105,6 +1105,8 @@
+                 frontmostHint: frontmost() ?? lastExternalApp,
+                 literalText: command.admission.slots["text"], transcriptHint: command.text,
+                 captureID: capture, pinnedWindowID: scope.windowID,
++                windowScroll: command.decision.windowScroll,
++                allowParsedScroll: command.decision.kind != .task,
+                 scrollContinuation: command.continuation,
+                 continuousScroll: command.decision.kind == .continueScroll,
+                 onConversationScroll: { [weak lane] witness in
+--- R6/Sources/JevVoice/Voice/VoiceSemanticRouter.swift
++++ R7/Sources/JevVoice/Voice/VoiceSemanticRouter.swift
+@@ -245,12 +245,18 @@
+         state["input_mode"] = .string("persistent_conversation")
+         state["window_id"] = context.windowID.map { .number(Double($0)) } ?? .null
+         state["conversation"] = memory.state
++        state["scroll_defaults"] = .object([
++            "scope": .string("current_window"), "unit": .string("line"),
++            "normal_amount": .number(Double(WindowScrollRequest.normalLines)),
++            "small_amount": .number(Double(WindowScrollRequest.smallLines)),
++            "ongoing_stopping_policy": .string("User stop/pause, an edge, or safety cancellation ends ongoing scrolling.")
++        ])
+         state["pending_questions"] = .array(context.capturedAsks.map {
+             .object(["task_id": .string($0.taskID.uuidString), "ask_id": .string($0.askID.uuidString),
+                      "kind": .string(String(describing: $0.kind)), "options": .array($0.options.map(JSONValue.string))])
+         })
+         var scopes: [String: String?] = [
+-            "window": "The currently observed foreground application/window; no other application's window.",
++            "window": "The observed current foreground window, explicitly referred to or used by an unqualified window-local instruction under `scroll_defaults`. No other window.",
+             "clarify": "The request does not identify a unique usable scope."
+         ]
+         var questions: [String: Question] = [
+@@ -261,8 +267,8 @@
+                 Preserve negation, corrections and every preceding clause. Never invent a missing clause.
+                 """, criteria: [
+                     "task": "A complete requested Mac action or workflow, including opening an app. Preserve the entire request.",
+-                    "scroll": "A request for a bounded scroll with an unambiguous direction.",
+-                    "continue_scroll": "Continue the last independently verified scroll until told to stop, in its same region.",
++                    "scroll": "One bounded scroll, including a small additional movement or a bounded direction reversal.",
++                    "continue_scroll": "Explicitly keep repeating the last verified scroll until stopped. A little more is one bounded movement, not an instruction to scroll indefinitely.",
+                     "answer": "An answer to an identified currently pending question.",
+                     "stop": "Stop or cancel the current conversation's actions; no other requested action.",
+                     "pause": "Pause this assistant's continuous listening.",
+@@ -271,59 +277,115 @@
+                     "clarify": "An actual request whose meaning or target needs clarification.",
+                 ]),
+             "addressed": .noul(instructions: """
+-                Is `utterance` a request, control or answer addressed to this Mac assistant in this conversation?
+-                A microphone being open does not make every sentence an instruction.
+-                Exclude quoted, reported and example requests, ambient conversation and the assistant's own reply.
+-                """),
++                Does `utterance` directly request this Mac assistant to act, stop, pause, or answer a pending
++                question in the active conversation? Judge communicative intent, not execution permission.
++                """, criteria: [
++                    "true": "A direct Mac-control instruction, request, control, or answer addressed to the assistant. Short imperatives and polite requests do not need a wake word or the assistant's name.",
++                    "false": "Ambient speech, narration, quotation, reported or example commands, an instruction addressed to another person, or the assistant's own reply. An open microphone alone is insufficient."
++                ]),
+             "complete": .noul(instructions: """
+-                Is the entire `utterance` complete enough to interpret without guessing missing words,
+-                unresolved corrections, trailing negation or a missing object? Include the entire preceding
+-                clause if several speech segments appear. A complete stop/pause control or answer can be short.
+-                """),
+-            "scope": .choice(instructions: """
+-                Which observed application/window is the requested action scoped to?
+-                Use window for the current foreground window. Select an observed app only when the user
+-                explicitly identifies that app or its unambiguous observed role as the intended target.
+-                An app merely mentioned in quoted text or another part of a request is not a target.
+-                """, criteria: scopes),
++                Is the full intended instruction/control/answer expressed in `utterance`, considering
++                `conversation` and the application's `scroll_defaults`? Judge missing words or clauses,
++                not permission, whether an action has happened, or whether its result is visible.
++                A linguistically complete request can concern an unavailable target or an unsupported
++                scroll direction; capability and target availability are checked separately.
++                Scrolling a window describes moving its content viewport, not moving the window frame.
++                """, criteria: [
++                    "true": "The utterance expresses a complete request, control or answer. A short imperative can be complete. An ordinary scroll can omit the current window and numeric amount because `scroll_defaults` supplies those defaults. Keep every clause and correction. A contextually resolved follow-up need not repeat the prior action's words. A stop/pause control needs no object or window; a request to keep a verified action going needs no fixed amount or explicit ending time.",
++                    "false": "Required words or an object are missing, a correction or negation is unfinished, a condition has no consequent, or a preceding clause remains unresolved. A speech segment ending is not by itself evidence of a complete instruction."
++                ]),
+             "scope_requested_window": .noul(instructions: """
+-                Does the full request authorize operating in `frontmost_app`/`window_id`, with a clear
+-                current-window referent? A requested operation alone is not permission to act in this scope.
+-                A request explicitly targeting another app is false.
+-                """),
+-            "direction": .choice(instructions: "Select the direction explicitly requested by the full scroll instruction.",
++                Does the full instruction target the observed current window `frontmost_app`/`window_id`,
++                using `scroll_defaults.scope` only when the scroll instruction specifies no different target?
++                Judge the intended target relationship. Code checks live target identity and permission separately.
++                """, criteria: [
++                    "true": "The request explicitly refers to the current window, or is an unqualified window-local instruction using the current-window default. No explicit app/window/region contradicts it.",
++                    "false": "The request targets another app/window/region, has an unresolved referent, is quoted/reported, negated or merely discussed, or no current app/window is observed. Never invent a target."
++                ]),
++            "direction": .choice(instructions: """
++                Which scroll direction does the full instruction request in `conversation`? A direct
++                reference to the verified scroll can retain its direction or explicitly reverse it.
++                No default direction is allowed without words or a valid referenced scroll.
++                """,
+                 criteria: ["up": "Toward the top.", "down": "Toward the bottom.",
+                            "left": "Toward the left.", "right": "Toward the right.",
+                            "clarify": "No unique scroll direction is requested."]),
+-            "amount": .choice(instructions: "How much bounded scrolling does the entire instruction request?",
+-                criteria: ["small": "A little, a bit, a small movement.",
+-                           "normal": "An ordinary scroll without a small-amount qualifier.",
+-                           "clarify": "The requested amount is ambiguous or a different exact amount is required."]),
+-            "small_requested": .noul(instructions: "Does the full request explicitly call for a small scroll movement?"),
++            "amount": .choice(instructions: """
++                Which scroll-amount category does the full instruction request under `scroll_defaults`?
++                Absence of an amount qualifier uses the normal default. Preserve exact units or counts.
++                """, criteria: [
++                    "small": "A qualitative small movement, such as a little, a bit, a touch or a tiny scroll; use the small default.",
++                    "normal": "An ordinary scroll with no small qualifier and no exact distance/count; use the normal default.",
++                    "clarify": "Conflicting amount, exact distance/pages/count, repetition, or an end condition that a default movement cannot represent."
++                ]),
++            "small_requested": .noul(instructions: """
++                Does a qualitative SMALL amount qualify the requested movement in the full `utterance`?
++                Judge the amount qualifier; operation and target are judged separately.
++                """, criteria: [
++                    "true": "The requested movement is qualified as little, small, tiny, a bit, a touch or an equivalent qualitative amount, including a small relative or additional movement.",
++                    "false": "There is no small-amount qualifier on the movement, or another exact amount is requested. A small object/window, quoted small amount or a merely bounded movement does not qualify."
++                ]),
++            "bounded_window_scroll": .noul(instructions: """
++                Suppose native code independently proves one small/ordinary scroll movement in the requested
++                direction in the same captured current window and document. Would that evidence satisfy the
++                ENTIRE instruction in `utterance`, in its `conversation` context and under `scroll_defaults`?
++                Judge sufficiency of this hypothetical proof, not whether movement has already happened.
++                """, criteria: [
++                    "true": "The requested result is one small or ordinary movement of the current window's content viewport in one direction. A relative small shift or one additional movement is still one bounded movement. Independently proved movement would satisfy the whole instruction.",
++                    "false": "A named region/sidebar, another app/window, exact distance/units/pages/counts, explicit multiple or continuous movements, until/end condition, visible target, hidden/persisted state, another action or unrepresented condition remains. Also false for ambiguous, negated, quoted, reported, example or status-only commands, or moving the window frame. A useful first step is insufficient."
++                ]),
++            "scroll_extent": .choice(instructions:
++                "Does the entire scroll instruction request one bounded movement or ongoing repetition? Preserve all clauses.",
++                criteria: [
++                    "single": "One bounded movement, including a little more or a bounded reversal. An ordinary unqualified scroll is single.",
++                    "ongoing": "Explicitly keep scrolling until the user stops it, with no different end condition or extra action.",
++                    "clarify": "A compound instruction, exact distance/count, named end condition, conflicting duration or unclear request."
++                ]),
++            "verified_scroll_reference": .noul(instructions: """
++                Does the full instruction directly refer to the SAME window/document/region as
++                `conversation.verified_scroll`? Judge the intended subject, not permission or an effect.
++                """, criteria: [
++                    "true": "An explicit contextual reference to the existing verified scroll's subject. Direction or qualitative amount may be explicitly updated, but its window/document/region stays the same.",
++                    "false": "No verified scroll exists, the reference is unresolved, an app/window/region changes, or the utterance is negated, quoted, reported, hypothetical or status-only. Mere stored context does not establish that the new request refers to it."
++                ]),
+             "continue_supported": .noul(instructions: """
+-                Does the user explicitly ask to continue `conversation.verified_scroll` in that same
+-                application, window, region and direction? The stored action is context, not permission.
+-                False if no verified scroll exists, the user requests a different direction/region,
+-                or the continuation refers to another action.
+-                """),
++                Consider ongoing repetition of `conversation.verified_scroll` in its same application,
++                window, document, region, direction and amount, using `scroll_defaults.ongoing_stopping_policy`.
++                Does that plan represent the ENTIRE requested instruction in `utterance`?
++                Judge requested meaning, not execution permission or whether an effect has occurred.
++                """, criteria: [
++                    "true": "The user asks to keep that verified scrolling action going, with its existing subject, direction and amount. The application's normal stopping policy can be implicit. There is no additional result, end condition, precise quantity or other action.",
++                    "false": "No verified scroll exists; only one bounded movement or a little more is requested; the subject, direction or amount changes; a named region, until-visible/end condition, exact quantity, hidden/persisted result or another action is required. Also false for an unresolved reference, negated, quoted, reported, example or status-only speech. Stored context alone is not a new request."
++                ]),
+         ]
+-        for (key, app) in base.targets {
++        for key in base.targets.keys {
+             scopes[key] = "The explicitly requested observed application at `observed_apps.\(key)`."
+-            questions["scope_requested_" + key] = .noul(instructions:
+-                "Does the full request explicitly authorize an action targeting the observed application "
+-                + "`observed_apps.\(key)` (\(app.id)), including an unambiguous observed app role? "
+-                + "Mere mention, quotation, or guessing an app from context is false.")
++            questions["scope_requested_" + key] = .noul(instructions: """
++                Does the full instruction explicitly request an action targeting `observed_apps.\(key)`
++                by name or unambiguous observed role? Judge intended target, not execution permission.
++                """, criteria: [
++                    "true": "The actual requested action targets this observed app by explicit name or unambiguous observed app role.",
++                    "false": "Mere mention, quoted/reported/example text, a different target, negation or a guessed app."
++                ])
+         }
+         questions["scope"] = .choice(instructions: """
+-            Select the scope the full request authorizes. `window` is the current foreground window.
+-            An application option requires an explicit app name or unambiguous observed app role.
+-            Do not infer authority from merely mentioning an app or selecting an action.
++            Which observed application/window does the full instruction intend to operate on?
++            `scroll_defaults.scope` supplies the current window for an unqualified scroll request.
++            An explicit different app, window or region overrides that default and must be preserved.
++            Select an app only for its explicit name or unambiguous observed role.
++            Judge intended scope, not OS permission or whether an effect occurred.
+             """, criteria: scopes)
+         for direction in ["up", "down", "left", "right"] {
+-            questions["scroll_supported_" + direction] = .noul(instructions:
+-                "Does the full utterance request a scroll \(direction) in its identified region/scope? "
+-                + "The direction AND region must follow the request. Other directions, negation, quotation, "
+-                + "unclear regions or the existence of a scroll tool alone are false.")
++            questions["scroll_supported_" + direction] = .noul(instructions: """
++                Does the full instruction in `conversation` request scrolling \(direction) in its intended
++                scope? A direct reference to the verified scroll may supply the operation/direction/region;
++                an explicit new direction overrides the old one. Use `scroll_defaults` only for an
++                unspecified current window/amount. Judge requested operation, direction and target
++                together, not permission or observed completion.
++                """, criteria: [
++                    "true": "The requested movement is a scroll \(direction) in the identified scope, stated directly or through an unambiguous reference to the verified scroll. Preserve explicit scope.",
++                    "false": "A different or ambiguous direction, another operation such as moving a window, an unresolved target/region, negation, quotation, reported/example or status-only speech. A scroll tool existing does not establish a request."
++                ])
+         }
+         return Request(state: .object(state), questions: questions, targets: base.targets)
+     }
+@@ -356,23 +418,57 @@
+         if kind == .clarify { return .init(kind: kind) }
+         guard try probability("complete") >= minimumAutomaticConfidence else { return .init(kind: .incomplete) }
+         if kind == .stop || kind == .pause || kind == .answer { return .init(kind: kind) }
+-        if kind == .continueScroll {
++        func freshScope() throws -> ConversationScope? {
++            guard let chosen = try pick("scope", Set(request.targets.keys).union(["window", "clarify"])),
++                  chosen != "clarify",
++                  try probability("scope_requested_" + chosen) >= minimumAutomaticConfidence else { return nil }
++            if chosen == "window" { return .window(context) }
++            return request.targets[chosen].map(ConversationScope.application)
++        }
++        func currentScroll() -> ConversationContext.Scroll? {
+             guard let scroll = memory.scroll, scroll.scope.matches(context),
++                  case .window(let app, let window) = scroll.scope,
++                  request.state["frontmost_app"]?.string == app,
++                  request.state["window_id"]?.integer == window,
++                  request.state["conversation"] == memory.state else { return nil }
++            return scroll
++        }
++        guard kind == .scroll || kind == .continueScroll else {
++            guard let scope = try freshScope() else { return .init(kind: .clarify) }
++            return .init(kind: kind, scope: scope)
++        }
++        guard request.state["conversation"] == memory.state,
++              let extent = try pick("scroll_extent", ["single", "ongoing", "clarify"]) else {
++            return .init(kind: .clarify)
++        }
++        if extent == "ongoing" {
++            guard let scroll = currentScroll(),
+                   try probability("continue_supported") >= minimumAutomaticConfidence else {
+                 return .init(kind: .clarify)
+             }
+-            return .init(kind: kind, scope: scroll.scope, direction: scroll.direction, small: scroll.small)
+-        }
+-        guard let chosenScope = try pick("scope", Set(request.targets.keys).union(["window", "clarify"])),
+-              chosenScope != "clarify",
+-              try probability("scope_requested_" + chosenScope) >= minimumAutomaticConfidence else {
+-            return .init(kind: .clarify)
+-        }
++            return .init(kind: .continueScroll, scope: scroll.scope,
++                         direction: scroll.direction, small: scroll.small)
++        }
++        if extent == "clarify" {
++            guard let scope = try freshScope() else { return .init(kind: .clarify) }
++            return .init(kind: .task, scope: scope)
++        }
++        let reference = try probability("verified_scroll_reference")
+         let scope: ConversationScope?
+-        if chosenScope == "window" { scope = .window(context) }
+-        else { scope = request.targets[chosenScope].map(ConversationScope.application) }
++        let continuation: NativeWindowObservation.ScrollViewport?
++        if reference >= minimumAutomaticConfidence {
++            guard let previous = currentScroll() else { return .init(kind: .clarify) }
++            scope = previous.scope
++            continuation = previous.viewport
++        } else if 1 - reference >= minimumAutomaticConfidence {
++            scope = try freshScope()
++            continuation = nil
++        } else { return .init(kind: .clarify) }
+         guard let scope else { return .init(kind: .clarify) }
+-        guard kind == .scroll else { return .init(kind: kind, scope: scope) }
++        guard try probability("bounded_window_scroll") >= minimumAutomaticConfidence,
++              case .window(let app, let window) = scope else { return .init(kind: .task, scope: scope) }
++        guard request.state["frontmost_app"]?.string == app,
++              request.state["window_id"]?.integer == window else { return .init(kind: .clarify) }
+         guard let direction = try pick("direction", ["up", "down", "left", "right", "clarify"]),
+               direction != "clarify",
+               try probability("scroll_supported_" + direction) >= minimumAutomaticConfidence,
+@@ -382,6 +478,12 @@
+         let small = try probability("small_requested")
+         guard amount == "small" ? small >= minimumAutomaticConfidence
+             : 1 - small >= minimumAutomaticConfidence else { return .init(kind: .clarify) }
+-        return .init(kind: kind, scope: scope, direction: direction, small: amount == "small")
++        guard let text = request.state["utterance"]?.string,
++              let scroll = WindowScrollRequest(goal: text, application: app, windowID: window,
++                direction: direction, small: amount == "small", continuation: continuation) else {
++            throw Failure.invalidContext
++        }
++        return .init(kind: .scroll, scope: scope, direction: direction, small: amount == "small",
++                     windowScroll: scroll)
+     }
+ }
+--- R6/Tests/JevVoiceAppTests/DriveLoopTests.swift
++++ R7/Tests/JevVoiceAppTests/DriveLoopTests.swift
+@@ -155,6 +155,40 @@
+                 DriveTask(goal: "Replace document text", pid: 42, windowID: 7), session: "exact")
+             guard case .blocked = result.status else { return XCTFail("\(result.status)") }
+             XCTAssertFalse(driver.calls.contains { ["get_window_state", "launch_app", "bring_to_front"].contains($0.tool) })
++        }
++    }
++
++    func testR7WindowOnlyDoesNotBroadenOtherFastLanesOrDropScrollConditions() async {
++        let goals = ["mute", "lock screen", "copy", "type hello", "open Calculator",
++                     "search for Cedar", "move window left", "scroll down and click Save",
++                     "don't scroll down", "she said scroll down", "did you scroll down",
++                     "scroll the sidebar down", "scroll down until Cedar is visible",
++                     "scroll down exactly three pages"]
++        for goal in goals {
++            let driver = FakeDriver()
++            driver.responses["list_windows"] = [.object(["windows": .array([.object([
++                "window_id": .number(7), "pid": .number(42), "title": .string("Owned"),
++            ])])])]
++            let result = await exactWindowLoop(driver, choose: { _, _ in .init(id: "stuck") },
++                postMedia: { _ in XCTFail("Window-only cannot post a media key"); return false }).run(
++                    DriveTask(goal: goal, application: "test.owned.editor", pid: 42, windowID: 7), session: "r7-exclusions")
++            XCTAssertNotEqual(result.status, .done, goal)
++            XCTAssertFalse(driver.calls.contains {
++                ["scroll", "hotkey", "type_text", "launch_app", "browser_navigate"].contains($0.tool)
++            }, goal)
++        }
++        for variant in ["postcondition", "values", "context"] {
++            let driver = FakeDriver()
++            driver.responses["list_windows"] = [.object(["windows": .array([.object([
++                "window_id": .number(7), "pid": .number(42), "title": .string("Owned"),
++            ])])])]
++            var task = DriveTask(goal: "scroll down", application: "test.owned.editor", pid: 42, windowID: 7)
++            if variant == "postcondition" { task.successContains = ["Cedar"] }
++            if variant == "values" { task.values["text"] = "Cedar" }
++            if variant == "context" { task.previousContext = "Until Cedar is visible." }
++            let result = await exactWindowLoop(driver, choose: { _, _ in .init(id: "stuck") }).run(task, session: "r7-conditions")
++            XCTAssertNotEqual(result.status, .done, variant)
++            XCTAssertFalse(driver.calls.contains { $0.tool == "scroll" }, variant)
+         }
+     }
+ 
+--- R6/Tests/JevVoiceAppTests/DriveSessionCursorTests.swift
++++ R7/Tests/JevVoiceAppTests/DriveSessionCursorTests.swift
+@@ -15,6 +15,9 @@
+     /// the user's own action never flashes a cursor.
+     func testDirectSessionLabelsFastLaneDispatch() async {
+         let driver = DriveLoopTests.FakeDriver()
++        driver.responses["list_windows"] = [.object(["windows": .array([
++            .object(["window_id": .number(7), "pid": .number(42), "title": .string("Fixture")])
++        ])])]
+         // Scroll resolves against the frontmost app — the roster and the
+         // frontmost hint both come from injected seams.
+         driver.responses["list_apps"] = [
+@@ -44,6 +47,9 @@
+     /// dispatch, same as before the split existed.
+     func testNoDirectSessionKeepsCallerLabel() async {
+         let driver = DriveLoopTests.FakeDriver()
++        driver.responses["list_windows"] = [.object(["windows": .array([
++            .object(["window_id": .number(7), "pid": .number(42), "title": .string("Fixture")])
++        ])])]
+         driver.responses["list_apps"] = [
+             .object(["apps": .array([
+                 .object(["name": .string("Safari"),
+--- R6/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift
++++ R7/Tests/JevVoiceAppTests/FastLaneExecutorTests.swift
+@@ -90,6 +90,235 @@
+     private func gaze(_ x: Double, _ y: Double) -> () async throws -> GazeSample {
+         { GazeSample(x: x, y: y, confidence: 0.9, state: "dwell",
+                      updatedAt: Date()) }
++    }
++
++    private func verifiedScrollLoop(_ driver: FakeDriver, rows: [JSONValue]? = nil,
++                                    grant: Bool = true, allowParsedScroll: Bool = true,
++                                    sample: (@Sendable (NativeWindowObservation.ScrollViewport, Bool)
++                                        -> NativeWindowObservation.ScrollViewport?)? = nil,
++                                    authorization: (@Sendable () async -> Bool)? = nil) -> DriveLoop {
++        let moved = LockedBox(false)
++        let identity = NativeFieldIdentity(AXUIElementCreateApplication(424242))
++        let window = WindowRef(pid: 424242, windowID: 7)
++        let anchor = NativeWindowObservation.ScrollViewport(
++            window: window, root: identity, region: identity, meter: identity,
++            content: identity, document: NativeWindowObservation.documentSubject(
++                window: window, identifier: "file:///owned.txt"),
++            title: Data("Owned".utf8), frame: CGRect(x: 0, y: 30, width: 400, height: 270),
++            windowFrame: CGRect(x: 0, y: 0, width: 400, height: 300),
++            contentSize: CGSize(width: 400, height: 2000), contentDigest: Data("body".utf8),
++            point: CGPoint(x: 200, y: 165), metric: .verticalBar, position: 0.2,
++            minimum: 0, maximum: 1, capturedAt: 0, tokenCenterMatches: true)
++        let owned = rows ?? [windowRow(id: 7, pid: 424242, app: "AuditFixture", title: "Owned",
++            x: 0, y: 0, w: 400, h: 300)]
++        let state: JSONValue = .object([
++            "pid": .number(424242), "window_id": .number(7), "window_title": .string("Owned"),
++            "snapshot_id": .string("owned-scroll-snapshot"),
++            "elements": .array([.object([
++                "element_index": .number(1), "element_token": .string("owned-scroll-region"),
++                "role": .string("AXScrollArea"), "label": .string("Owned viewport"),
++                "frame": .object(["x": .number(0), "y": .number(30), "w": .number(400), "h": .number(270)]),
++                "actions": .array([]),
++            ])]),
++        ])
++        return DriveLoop(call: { tool, args in
++            let response = try driver.call(tool, args)
++            switch tool {
++            case "list_apps": return self.apps([self.appRow("AuditFixture", "fixture.audit", pid: 424242)])
++            case "list_windows": return self.windows(owned)
++            case "get_window_state": return state
++            case "scroll":
++                moved.set(true)
++                return .object(["effect": .string("unverifiable")])
++            default: return response
++            }
++        }, choose: { _, _ in
++            driver.modelCalls += 1
++            return .init(id: "stuck")
++        }, ask: nil, granted: { grant }, explicitConsent: false,
++        resolver: AppResolver(listApps: { [.init(name: "AuditFixture", bundle: "fixture.audit", pid: 424242)] }),
++        config: .init(maxRounds: 2, maxInvalidChoices: 1, maxStaleRounds: 1,
++                      windowOnly: true, allowParsedScroll: allowParsedScroll),
++        nativeReadOnly: { _, _ in nil }, nativeScrollRead: { _, _, _, _ in
++            var result = anchor
++            result.position = moved.value ? 0.4 : 0.2
++            result.capturedAt = ProcessInfo.processInfo.systemUptime
++            result.readGeneration = UUID()
++            return sample.map { $0(result, moved.value) } ?? result
++        }, scrollContinuationIsCurrent: authorization)
++    }
++
++    func testR7PinnedScrollUsesIndependentViewportOnce() async {
++        let driver = FakeDriver()
++        let result = await verifiedScrollLoop(driver).run(
++            DriveTask(goal: "scroll down", application: "fixture.audit", pid: 424242, windowID: 7),
++            session: "r7-owned-scroll")
++        XCTAssertEqual(result.status, .done)
++        XCTAssertTrue(result.dispatchedEffect)
++        XCTAssertEqual(driver.calls.filter { $0.tool == "scroll" }.count, 1)
++        XCTAssertEqual(driver.modelCalls, 0)
++    }
++
++    func testR7SemanticFallbackCannotReenterParsedScroll() async {
++        for goal in ["scroll down", "scroll down 100 times"] {
++            let driver = FakeDriver()
++            let result = await verifiedScrollLoop(driver, allowParsedScroll: false).run(
++                DriveTask(goal: goal, application: "fixture.audit", pid: 424242, windowID: 7),
++                session: "r7-no-parser")
++            XCTAssertNotEqual(result.status, .done)
++            XCTAssertFalse(driver.calls.contains { $0.tool == "scroll" })
++            XCTAssertGreaterThan(driver.modelCalls, 0)
++        }
++    }
++
++    func testR7TypedContinuationCannotLoseItsNativeSubject() async throws {
++        let identity = NativeFieldIdentity(AXUIElementCreateApplication(424242))
++        let window = WindowRef(pid: 424242, windowID: 7)
++        let anchor = NativeWindowObservation.ScrollViewport(
++            window: window, root: identity, region: identity, meter: identity,
++            content: identity, document: NativeWindowObservation.documentSubject(
++                window: window, identifier: "file:///different-document.txt"),
++            title: Data("Owned".utf8), frame: CGRect(x: 0, y: 30, width: 400, height: 270),
++            windowFrame: CGRect(x: 0, y: 0, width: 400, height: 300),
++            contentSize: CGSize(width: 400, height: 2000), contentDigest: Data("other body".utf8),
++            point: CGPoint(x: 200, y: 165), metric: .verticalBar, position: 0.2,
++            minimum: 0, maximum: 1, capturedAt: ProcessInfo.processInfo.systemUptime)
++        let request = try XCTUnwrap(WindowScrollRequest(goal: "A little more.",
++            application: "fixture.audit", windowID: 7, direction: "down", small: true,
++            continuation: anchor))
++        let driver = FakeDriver()
++        let result = await verifiedScrollLoop(driver).runWindowScroll(request,
++            task: DriveTask(goal: request.goal, application: request.application, pid: 424242, windowID: 7),
++            session: "r7-native-subject")
++        XCTAssertNotEqual(result.status, .done)
++        XCTAssertFalse(driver.calls.contains { $0.tool == "scroll" })
++        XCTAssertEqual(driver.modelCalls, 0)
++    }
++
++    func testR7DisablingScrollParserDoesNotDisableOtherFastActions() async {
++        let posted = LockedBox(0)
++        let loop = DriveLoop(call: { _, _ in XCTFail("Media needs no driver"); return .null },
++            choose: { _, _ in XCTFail("Media needs no chooser"); return nil },
++            ask: nil, granted: { true }, config: .init(allowParsedScroll: false),
++            postMediaKey: { _ in posted.set(posted.value + 1); return true })
++        let result = await loop.run(DriveTask(goal: "mute"), session: "r7-other-fast")
++        XCTAssertEqual(result.status, .done)
++        XCTAssertEqual(posted.value, 1)
++    }
++
++    func testR7NaturalScrollPreservesWholeRequestAndTypedAmount() async throws {
++        for small in [false, true] {
++            let goal = small ? "A tiny scroll toward the bottom, please." : "Please move the page farther down."
++            let request = try XCTUnwrap(WindowScrollRequest(goal: goal, application: "fixture.audit",
++                windowID: 7, direction: "down", small: small))
++            let driver = FakeDriver()
++            let task = DriveTask(goal: goal, application: "fixture.audit", pid: 424242, windowID: 7)
++            let result = await verifiedScrollLoop(driver).runWindowScroll(request, task: task, session: "r7-natural")
++            XCTAssertEqual(result.status, .done)
++            XCTAssertTrue(result.dispatchedEffect)
++            XCTAssertEqual(request.goal, goal)
++            XCTAssertEqual(driver.modelCalls, 0)
++            let scrolls = driver.calls.filter { $0.tool == "scroll" }
++            XCTAssertEqual(scrolls.count, 1)
++            XCTAssertEqual(scrolls.first?.args["direction"], .string("down"))
++            XCTAssertEqual(scrolls.first?.args["by"], .string("line"))
++            XCTAssertEqual(scrolls.first?.args["amount"], .number(small ? 1 : 3))
++        }
++    }
++
++    func testR7TypedScrollCannotBeRetargetedOrLoseExtraConditions() async throws {
++        let goal = "Please move the page farther down."
++        let request = try XCTUnwrap(WindowScrollRequest(goal: goal, application: "fixture.audit",
++            windowID: 7, direction: "down", small: false))
++        for variant in ["goal", "app", "window", "missingWindow", "pid", "values", "postcondition", "scope", "context", "title"] {
++            var task = DriveTask(goal: goal, application: "fixture.audit", pid: 424242, windowID: 7)
++            switch variant {
++            case "goal": task.goal += " until Cedar is visible."
++            case "app": task.application = "fixture.other"
++            case "window": task.windowID = 8
++            case "missingWindow": task.windowID = nil
++            case "pid": task.pid = 999
++            case "values": task.values["text"] = "literal"
++            case "postcondition": task.successContains = ["Cedar"]
++            case "scope": task.scope = .open
++            case "context": task.previousContext = "Only scroll after Cedar is visible."
++            default: task.windowName = "Another document"
++            }
++            let driver = FakeDriver()
++            let result = await verifiedScrollLoop(driver).runWindowScroll(request, task: task, session: "r7-changed")
++            XCTAssertNotEqual(result.status, .done, variant)
++            XCTAssertFalse(result.dispatchedEffect, variant)
++            XCTAssertFalse(driver.calls.contains { $0.tool == "scroll" }, variant)
++            XCTAssertEqual(driver.modelCalls, 0, variant)
++        }
++    }
++
++    func testR7PinnedScrollRequiresUniqueOwnedRowAndConsent() async {
++        let row = windowRow(id: 7, pid: 424242, app: "AuditFixture", title: "Owned",
++            x: 0, y: 0, w: 400, h: 300)
++        let foreign = windowRow(id: 7, pid: 999, app: "Other", title: "Owned",
++            x: 0, y: 0, w: 400, h: 300)
++        for variant in ["empty", "foreign", "duplicate", "grant", "deny"] {
++            let rows = variant == "empty" ? [] : variant == "foreign" ? [foreign]
++                : variant == "duplicate" ? [row, row] : [row]
++            let driver = FakeDriver()
++            let result = await verifiedScrollLoop(driver, rows: rows, grant: variant != "grant").run(
++                DriveTask(goal: "scroll down", application: "fixture.audit", pid: 424242,
++                    windowID: 7, deny: variant == "deny" ? ["Owned"] : []), session: "r7-refusal")
++            XCTAssertNotEqual(result.status, .done, variant)
++            XCTAssertFalse(result.dispatchedEffect, variant)
++            XCTAssertFalse(driver.calls.contains { $0.tool == "scroll" }, variant)
++        }
++    }
++
++    func testR7TypedScrollCannotCompleteWithWrongDirectionOrChangedSubject() async throws {
++        let goal = "A tiny scroll toward the bottom, please."
++        let request = try XCTUnwrap(WindowScrollRequest(goal: goal, application: "fixture.audit",
++            windowID: 7, direction: "down", small: true))
++        for variant in ["direction", "subject", "missing", "unchanged"] {
++            let driver = FakeDriver()
++            let loop = verifiedScrollLoop(driver, sample: { value, dispatched in
++                guard dispatched else { return value }
++                var changed = value
++                switch variant {
++                case "direction": changed.position = 0.1
++                case "subject": changed.contentDigest = Data("other".utf8)
++                case "missing": return nil
++                default: changed.position = 0.2
++                }
++                return changed
++            })
++            let result = await loop.runWindowScroll(request,
++                task: DriveTask(goal: goal, application: "fixture.audit", pid: 424242, windowID: 7),
++                session: "r7-unverified")
++            XCTAssertNotEqual(result.status, .done, variant)
++            XCTAssertFalse(result.dispatchedEffect, variant)
++            XCTAssertEqual(driver.calls.filter { $0.tool == "scroll" }.count, 1, variant)
++            XCTAssertEqual(driver.modelCalls, 0, variant)
++        }
++    }
++
++    func testR7TypedScrollCancellationDuringAuthorizationSendsNothing() async throws {
++        let request = try XCTUnwrap(WindowScrollRequest(goal: "Move the page down a little.",
++            application: "fixture.audit", windowID: 7, direction: "down", small: true))
++        let reached = LockedBox(false)
++        let driver = FakeDriver()
++        let loop = verifiedScrollLoop(driver, authorization: {
++            reached.set(true)
++            try? await Task.sleep(for: .seconds(5))
++            return true
++        })
++        let attempt = Task {
++            await loop.runWindowScroll(request,
++                task: DriveTask(goal: request.goal, application: "fixture.audit", pid: 424242, windowID: 7),
++                session: "r7-cancelled")
++        }
++        for _ in 0..<200 where !reached.value { try await Task.sleep(for: .milliseconds(10)) }
++        XCTAssertTrue(reached.value)
++        attempt.cancel()
++        let result = await attempt.value
++        XCTAssertEqual(result.status, .cancelled)
++        XCTAssertFalse(driver.calls.contains { $0.tool == "scroll" })
+     }
+ 
+     func testC1ScrollAcknowledgementWithoutViewportEvidenceIsUnverified() async throws {
+--- R6/Tests/JevVoiceAppTests/VoiceSemanticTests.swift
++++ R7/Tests/JevVoiceAppTests/VoiceSemanticTests.swift
+@@ -1,3 +1,4 @@
++import ApplicationServices
+ import Foundation
+ import XCTest
+ import JevVoiceCore
+@@ -23,7 +24,9 @@
+     }
+ 
+     private func conversationResponse(kind: String = "scroll", addressed: Double = 0.99,
+-                                      complete: Double = 0.99, support: Double = 0.99) throws -> SystemOneResponse {
++                                      complete: Double = 0.99, support: Double = 0.99,
++                                      bounded: Double = 0.99, extent: String = "single",
++                                      reference: Double = 0.01, continuation: Double = 0.99) throws -> SystemOneResponse {
+         func choice(_ value: String) -> [String: Any] {
+             ["type": "choice", "choice": value, "confidence": 1, "probabilities": [value: 1.0]]
+         }
+@@ -34,9 +37,255 @@
+                 "scope": choice("window"), "scope_requested_window": noul(0.99),
+                 "direction": choice("down"), "scroll_supported_down": noul(support),
+                 "amount": choice("small"), "small_requested": noul(0.99),
+-                "continue_supported": noul(0.99)],
++                "bounded_window_scroll": noul(bounded),
++                "scroll_extent": choice(extent), "verified_scroll_reference": noul(reference),
++                "continue_supported": noul(continuation)],
+             "usage": ["input_tokens": 1, "output_tokens": 1],
+         ]))
++    }
++
++    private func verifiedScrollMemory() -> ConversationContext {
++        let identity = NativeFieldIdentity(AXUIElementCreateApplication(424242))
++        let window = WindowRef(pid: 424242, windowID: 41)
++        let viewport = NativeWindowObservation.ScrollViewport(
++            window: window, root: identity, region: identity, meter: identity,
++            content: identity, document: NativeWindowObservation.documentSubject(
++                window: window, identifier: "file:///owned.txt"),
++            title: Data("Owned".utf8), frame: CGRect(x: 0, y: 30, width: 400, height: 270),
++            windowFrame: CGRect(x: 0, y: 0, width: 400, height: 300),
++            contentSize: CGSize(width: 400, height: 2000), contentDigest: Data("body".utf8),
++            point: CGPoint(x: 200, y: 165), metric: .verticalBar, position: 0.2,
++            minimum: 0, maximum: 1, capturedAt: 1)
++        var memory = ConversationContext()
++        let scope = ConversationScope.window(app: "fixture.editor", id: 41)
++        memory.remember("Scroll down a little.", scope: scope)
++        memory.recordVerification(true)
++        memory.scroll = .init(scope: scope, direction: "down", small: true, viewport: viewport)
++        return memory
++    }
++
++    func testR7BoundedFollowupCannotBecomeContinuousFromKindAlone() throws {
++        var scope = context()
++        scope.windowID = 41
++        let memory = verifiedScrollMemory()
++        let request = try VoiceSemanticRouter.conversationRequest("A little more.", context: scope, memory: memory)
++        let decision = try VoiceSemanticRouter.decodeConversation(
++            conversationResponse(kind: "continue_scroll", extent: "single", reference: 0.99),
++            request: request, context: scope, memory: memory)
++        XCTAssertEqual(decision.kind, .scroll)
++        XCTAssertNotNil(decision.windowScroll)
++        XCTAssertEqual(decision.windowScroll?.goal, "A little more.")
++    }
++
++    func testR7UntilConditionCannotEnterUnboundedContinuation() throws {
++        var scope = context()
++        scope.windowID = 41
++        let memory = verifiedScrollMemory()
++        let request = try VoiceSemanticRouter.conversationRequest(
++            "Keep scrolling until Cedar is visible.", context: scope, memory: memory)
++        let decision = try VoiceSemanticRouter.decodeConversation(
++            conversationResponse(kind: "continue_scroll", bounded: 0.01, extent: "clarify", reference: 0.99),
++            request: request, context: scope, memory: memory)
++        XCTAssertEqual(decision.kind, .task)
++        XCTAssertNil(decision.windowScroll)
++    }
++
++    func testR7ReferenceRequiresCurrentNativeSubjectAndIndependentSupport() throws {
++        var scope = context()
++        scope.windowID = 41
++        let memory = verifiedScrollMemory()
++        for reference in [0.5, 0.89, 0.99] {
++            let request = try VoiceSemanticRouter.conversationRequest("A little more.", context: scope, memory: memory)
++            let result = try VoiceSemanticRouter.decodeConversation(
++                conversationResponse(reference: reference), request: request, context: scope, memory: memory)
++            if reference == 0.99 {
++                XCTAssertEqual(result.kind, .scroll)
++                XCTAssertEqual(result.windowScroll?.continuation?.window, memory.scroll?.viewport.window)
++                XCTAssertEqual(result.windowScroll?.continuation?.region, memory.scroll?.viewport.region)
++                XCTAssertEqual(result.windowScroll?.goal, "A little more.")
++            } else {
++                XCTAssertEqual(result.kind, .clarify)
++                XCTAssertNil(result.windowScroll)
++            }
++        }
++        scope.windowID = 42
++        let changed = try VoiceSemanticRouter.conversationRequest("A little more.", context: scope, memory: memory)
++        XCTAssertEqual(try VoiceSemanticRouter.decodeConversation(conversationResponse(reference: 0.99),
++            request: changed, context: scope, memory: memory).kind, .clarify)
++        let absent = try VoiceSemanticRouter.conversationRequest("A little more.", context: scope, memory: .init())
++        XCTAssertEqual(try VoiceSemanticRouter.decodeConversation(conversationResponse(reference: 0.99),
++            request: absent, context: scope, memory: .init()).kind, .clarify)
++    }
++
++    func testR7ContinuousExtentStillRequiresWholeInstructionSupport() throws {
++        var scope = context()
++        scope.windowID = 41
++        let memory = verifiedScrollMemory()
++        let request = try VoiceSemanticRouter.conversationRequest("Keep scrolling.", context: scope, memory: memory)
++        let valid = try VoiceSemanticRouter.decodeConversation(
++            conversationResponse(kind: "continue_scroll", extent: "ongoing", reference: 0.99),
++            request: request, context: scope, memory: memory)
++        XCTAssertEqual(valid.kind, .continueScroll)
++        XCTAssertNil(valid.windowScroll)
++        let weak = try VoiceSemanticRouter.decodeConversation(
++            conversationResponse(kind: "continue_scroll", extent: "ongoing", reference: 0.99, continuation: 0.89),
++            request: request, context: scope, memory: memory)
++        XCTAssertNotEqual(weak.kind, .continueScroll)
++        XCTAssertNil(weak.windowScroll)
++    }
++
++    func testR7ScrollSelectionCannotDiscardAnUnprovenWholeGoal() throws {
++        var scope = context()
++        scope.windowID = 41
++        for text in ["Move down a little until Cedar is visible.",
++                     "Scroll the sidebar down.", "Scroll down and click Save.",
++                     "Scroll down exactly three pages."] {
++            let request = try VoiceSemanticRouter.conversationRequest(text,
++                context: scope, memory: ConversationContext())
++            XCTAssertNotNil(request.questions["bounded_window_scroll"])
++            let decision = try VoiceSemanticRouter.decodeConversation(
++                conversationResponse(bounded: 0.89), request: request,
++                context: scope, memory: ConversationContext())
++            XCTAssertEqual(decision.kind, .task, text)
++            XCTAssertEqual(decision.scope, .window(app: "fixture.editor", id: 41))
++            XCTAssertEqual(request.state["utterance"], .string(text))
++        }
++    }
++
++    func testR7LiveSemanticBoundaryProbe() async throws {
++        let environment = ProcessInfo.processInfo.environment
++        guard environment["JARVIS_C1_REAL_JEV"] == "approved",
++              let path = environment["JARVIS_C1_SEMANTIC_PROBE_DIR"] else {
++            throw XCTSkip("Opt-in real Jev semantic probe")
++        }
++        let directory = URL(fileURLWithPath: path).standardizedFileURL
++        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
++            .deletingLastPathComponent().deletingLastPathComponent()
++        XCTAssertEqual(directory.deletingLastPathComponent().path,
++                       root.appendingPathComponent(".agent/results/P4").path)
++        XCTAssertTrue(directory.lastPathComponent.hasPrefix("c1-r7-semantic-"))
++        let attributes = try FileManager.default.attributesOfItem(atPath: directory.path)
++        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
++        let output = directory.appendingPathComponent("results.json")
++        guard !FileManager.default.fileExists(atPath: output.path) else {
++            throw VoiceSemanticRouter.Failure.invalidContext
++        }
++        let key = try XCTUnwrap(environment["TYPESAFE_API_KEY"]
++            ?? KeychainAPIKeyStore(allowUserInteraction: false).read())
++        var scope = context()
++        scope.targetAppID = "com.apple.TextEdit"
++        scope.windowID = 41
++        scope.entities = [.init(name: "TextEdit", id: "com.apple.TextEdit", canOpenLocally: true)]
++        scope.appRoles = [:]
++        struct ProbeCase {
++            let text: String
++            var expected: ConversationDecision.Kind?
++            var direction: String?
++            var small = false
++            var anchored = false
++            var window = 41
++        }
++        let cases: [ProbeCase] = [
++            .init(text: "Scroll down.", expected: .scroll, direction: "down"),
++            .init(text: "Could you nudge this down a bit?"),
++            .init(text: "Move the page a little farther down, please.", expected: .scroll, direction: "down", small: true),
++            .init(text: "A tiny scroll upward, please.", expected: .scroll, direction: "up", small: true),
++            .init(text: "Scroll the current window to the right a little.", expected: .scroll, direction: "right", small: true),
++            .init(text: "Please scroll this window left.", expected: .scroll, direction: "left"),
++            .init(text: "Scroll down until Cedar is visible."),
++            .init(text: "Scroll the sidebar down a little."),
++            .init(text: "Scroll down exactly three pages."),
++            .init(text: "Scroll down and click Save."),
++            .init(text: "Don't scroll down."),
++            .init(text: "She said, 'scroll down a little'."),
++            .init(text: "Did you scroll down?"),
++            .init(text: "Scroll until the saved confirmation is visible."),
++            .init(text: "Okay, keep scrolling.", expected: .continueScroll, direction: "down", small: true, anchored: true),
++            .init(text: "Keep going.", expected: .continueScroll, direction: "down", small: true, anchored: true),
++            .init(text: "A little more.", expected: .scroll, direction: "down", small: true, anchored: true),
++            .init(text: "A bit more, please.", expected: .scroll, direction: "down", small: true, anchored: true),
++            .init(text: "The other way a little.", expected: .scroll, direction: "up", small: true, anchored: true),
++            .init(text: "Keep scrolling until Cedar is visible.", anchored: true),
++            .init(text: "Keep scrolling the sidebar.", anchored: true),
++            .init(text: "Keep scrolling in Safari.", anchored: true),
++            .init(text: "A little more.", anchored: true, window: 42),
++            .init(text: "Scroll the other window down a bit."),
++            .init(text: "If Cedar is already visible, scroll down."),
++            .init(text: "Can you scroll upwards just a touch?", expected: .scroll, direction: "up", small: true),
++            .init(text: "Scroll the background document down."),
++            .init(text: "Scroll it down, actually don't."),
++            .init(text: "Move that window down a little."),
++        ]
++        struct Payload: Encodable {
++            let model: String
++            let state: JSONValue
++            let questions: [String: Question]
++        }
++        let encoder = JSONEncoder()
++        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
++        var rows: [[String: Any]] = []
++        for (index, item) in cases.enumerated() {
++            var current = scope
++            current.windowID = item.window
++            var memory = ConversationContext()
++            if item.anchored {
++                let previous = try XCTUnwrap(verifiedScrollMemory().scroll)
++                let previousScope = ConversationScope.window(app: "com.apple.TextEdit", id: 41)
++                memory.remember("Scroll down a little.", scope: previousScope)
++                memory.recordVerification(true)
++                memory.scroll = .init(scope: previousScope, direction: "down", small: true, viewport: previous.viewport)
++            }
++            let request = try VoiceSemanticRouter.conversationRequest(item.text, context: current, memory: memory)
++            let body = try encoder.encode(Payload(model: "jev-latest",
++                state: request.state, questions: request.questions))
++            try body.write(to: directory.appendingPathComponent("case-\(index).request.json"), options: .withoutOverwriting)
++            var wire = URLRequest(url: URL(string: "https://api.typesafe.ai/v1/systemone")!)
++            wire.httpMethod = "POST"
++            wire.timeoutInterval = 8
++            wire.httpBody = body
++            wire.setValue("application/json", forHTTPHeaderField: "Content-Type")
++            wire.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
++            let started = ProcessInfo.processInfo.systemUptime
++            let (data, response) = try await URLSession.shared.data(for: wire)
++            let elapsed = (ProcessInfo.processInfo.systemUptime - started) * 1000
++            try data.write(to: directory.appendingPathComponent("case-\(index).response.json"), options: .withoutOverwriting)
++            let status = try XCTUnwrap(response as? HTTPURLResponse).statusCode
++            guard (200..<300).contains(status) else { throw VoiceSemanticRouter.Failure.unavailable }
++            let answer = try JSONDecoder().decode(SystemOneResponse.self, from: data)
++            let decision = try VoiceSemanticRouter.decodeConversation(answer, request: request,
++                context: current, memory: memory)
++            rows.append(["text": item.text, "expected_bounded_scroll": item.expected == .scroll,
++                "expected_kind": item.expected?.rawValue as Any? ?? NSNull(),
++                "kind": decision.kind.rawValue, "direction": decision.direction as Any? ?? NSNull(),
++                "small": decision.small, "model": answer.model, "elapsed_ms": elapsed,
++                "questions": request.questions.count,
++                "has_native_intent": decision.windowScroll != nil,
++                "has_native_anchor": decision.windowScroll?.continuation != nil])
++            try JSONSerialization.data(withJSONObject: [
++                "semantic_only": true, "microphone_proven": false, "native_actions": 0,
++                "context": "controlled semantic fixture; no live window authority",
++                "expectation_correction": "Original before-case 1 incorrectly required a scroll for 'nudge this' without a referent. The original before evidence is retained; ambiguity must not force action.",
++                "rows": rows,
++            ], options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)
++            if environment["JARVIS_C1_SEMANTIC_EXPECT_NATIVE_GATES"] == "1" {
++                if let expected = item.expected {
++                    XCTAssertEqual(decision.kind, expected, item.text)
++                    XCTAssertEqual(decision.direction, item.direction, item.text)
++                    XCTAssertEqual(decision.small, item.small, item.text)
++                    if expected == .scroll {
++                        XCTAssertEqual(decision.windowScroll?.goal, item.text)
++                        XCTAssertEqual(decision.windowScroll?.application, "com.apple.TextEdit")
++                        XCTAssertEqual(decision.windowScroll?.windowID, item.window)
++                        XCTAssertEqual(decision.windowScroll?.lines, item.small ? 1 : 3)
++                        XCTAssertEqual(decision.windowScroll?.continuation != nil, item.anchored)
++                    }
++                } else {
++                    XCTAssertNotEqual(decision.kind, .scroll, item.text)
++                    XCTAssertNotEqual(decision.kind, .continueScroll, item.text)
++                    XCTAssertNil(decision.windowScroll, item.text)
++                }
++            }
++        }
+     }
+ 
+     func testConversationSelectionCannotOverrideWeakRequestSupport() throws {
+@@ -54,6 +303,40 @@
+         XCTAssertEqual(strong.scope, .window(app: "fixture.editor", id: 41))
+     }
+ 
++    func testR7SemanticScrollBindsOriginalTextAndObservedWindow() throws {
++        var scope = context()
++        scope.windowID = 41
++        let text = "A tiny scroll toward the bottom, please."
++        let request = try VoiceSemanticRouter.conversationRequest(text, context: scope, memory: .init())
++        let decision = try VoiceSemanticRouter.decodeConversation(conversationResponse(),
++            request: request, context: scope, memory: .init())
++        let native = try XCTUnwrap(decision.windowScroll)
++        XCTAssertEqual(native.goal, text)
++        XCTAssertEqual(native.direction, "down")
++        XCTAssertEqual(native.lines, 1)
++        XCTAssertTrue(native.matches(DriveTask(goal: text, application: "fixture.editor", windowID: 41)))
++        scope.windowID = 42
++        let changed = try VoiceSemanticRouter.decodeConversation(conversationResponse(),
++            request: request, context: scope, memory: .init())
++        XCTAssertEqual(changed.kind, .clarify)
++        XCTAssertNil(changed.windowScroll)
++    }
++
++    func testR7MissingOrMalformedBoundedJudgmentCannotAuthorizeNativeScroll() throws {
++        var scope = context()
++        scope.windowID = 41
++        let request = try VoiceSemanticRouter.conversationRequest("Scroll down a little.",
++            context: scope, memory: .init())
++        for value: Double? in [nil, .nan, 1.1, -0.1] {
++            var answers = try conversationResponse().answers
++            answers["bounded_window_scroll"] = value.map(Answer.noul)
++            let response = SystemOneResponse(model: "protocol-fixture-not-calibrated",
++                answers: answers, usage: nil)
++            XCTAssertThrowsError(try VoiceSemanticRouter.decodeConversation(response,
++                request: request, context: scope, memory: .init()))
++        }
++    }
++
+     func testConversationDoesNotActOnAmbientOrIncompleteSpeechOrMissingAnchor() throws {
+         var scope = context()
+         scope.windowID = 41
+@@ -63,7 +346,7 @@
+             request: request, context: scope, memory: memory).kind, .ignore)
+         XCTAssertEqual(try VoiceSemanticRouter.decodeConversation(conversationResponse(complete: 0.4),
+             request: request, context: scope, memory: memory).kind, .incomplete)
+-        XCTAssertEqual(try VoiceSemanticRouter.decodeConversation(conversationResponse(kind: "continue_scroll"),
++        XCTAssertEqual(try VoiceSemanticRouter.decodeConversation(conversationResponse(kind: "continue_scroll", extent: "ongoing"),
+             request: request, context: scope, memory: memory).kind, .clarify)
+     }
+ 
+--- R6/Tests/JevVoiceAppTests/VoiceTaskCoordinatorLaneTests.swift
++++ R7/Tests/JevVoiceAppTests/VoiceTaskCoordinatorLaneTests.swift
+@@ -8,6 +8,29 @@
+ /// a local command, and `cancelAllRunning` reaching agent turns.
+ @MainActor
+ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
++    func testR7CoordinatorRejectsRetargetedOrReplayedScrollBeforeAdmission() async throws {
++        let original = "Move the page down a little."
++        let request = try XCTUnwrap(WindowScrollRequest(goal: original,
++            application: "fixture.editor", windowID: 41, direction: "down", small: true))
++        for variant in ["goal", "app", "window", "literal", "plan", "repeat", "transcript", "cancelled"] {
++            let c = coordinator()
++            var lookups = 0
++            c.gazeContextProvider = { lookups += 1; return nil }
++            let result = await c.beginVoiceTask(
++                variant == "goal" ? original + " until Cedar is visible." : variant == "repeat" ? "do that again" : original,
++                app: variant == "app" ? "fixture.other" : "fixture.editor",
++                literalText: variant == "literal" ? "Cedar" : nil,
++                transcriptHint: variant == "transcript" ? original + " until Cedar is visible." : nil,
++                steps: variant == "plan" ? ["click Save"] : [],
++                pinnedWindowID: variant == "window" ? 42 : 41, windowScroll: request,
++                admissionIsCurrent: { variant != "cancelled" })
++            XCTAssertFalse(result.contains("\"status\":\"started\""), variant)
++            XCTAssertTrue(c.tasks.isEmpty, variant)
++            XCTAssertEqual(lookups, 0, variant)
++            c.shutdown()
++        }
++    }
++
+     func testContinuousOwnerWaitSurvivesItsQuestionUntilActualCancellation() async {
+         let c = coordinator()
+         c.audioFeedbackAllowed = { false }
+--- R6/scripts/verification-lane.sh
++++ R7/scripts/verification-lane.sh
+@@ -480,7 +480,7 @@
+     ;;
+   c1-package-stage)
+     [[ -f .build/release/JevVoice && "${2:-}" == "--label" &&
+-       ( "${3:-}" == "final-r3" || "${3:-}" == "final-r4" || "${3:-}" == "final-r5" || "${3:-}" == "final-r6" ) ]] || exit 2
++       ( "${3:-}" == "final-r3" || "${3:-}" == "final-r4" || "${3:-}" == "final-r5" || "${3:-}" == "final-r6" || "${3:-}" == "final-r7" ) ]] || exit 2
+     JARVIS_VERIFICATION_LANE_HELD=1 python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 2.75 -- \
+       python3 .agent/results/P4/jev-stage-candidate.py "${@:2}"
+     ;;

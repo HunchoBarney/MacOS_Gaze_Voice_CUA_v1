@@ -17,3 +17,7 @@ build/
 # Per-workspace Conductor overrides can contain local paths/settings.
 .conductor/settings.local.toml
 .empryo
+
+# Private P3 microphone recordings are local evidence only.
+/.agent/results/P3/audio/
+/.agent/results/P3/normal-voice-qualification/speed-comparison.html

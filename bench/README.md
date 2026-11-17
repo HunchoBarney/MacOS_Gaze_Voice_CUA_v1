@@ -22,6 +22,15 @@ bench/
 
 ## Run it
 
+The legacy `textedit.type` task is human-only and its reset fails closed:
+the old reset discarded every open document. Never re-enable that reset.
+Automated typing needs the P3 exact owned-document/window fixture and observer.
+Other reset scripts can still quit apps or change tabs; use the isolated
+benchmark account, not a personal desktop with unsaved work.
+
+Reports count only verified non-error `done`/`already` command rows as
+successes. Dry runs and preexisting end-state matches are not product passes.
+
 ```sh
 bench/run-suite.sh                      # local-safe corpus (default)
 BENCH_SET=test-user bench/run-suite.sh  # mutating corpus — test user only

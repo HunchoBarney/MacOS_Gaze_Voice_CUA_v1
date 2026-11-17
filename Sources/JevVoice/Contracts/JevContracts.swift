@@ -1,41 +1,16 @@
 import Foundation
 import JevVoiceCore
 
-// MARK: - Mini-Clicky shared contracts
+// MARK: - Shared contracts
 //
-// Wave-0 foundation of the subagent build. Every lane codes against these
-// types — a lane that needs a different shape changes THIS file (coordinator
-// approval) rather than inventing its own. Reference: Clicky mirror docs
-// `Clicky_Decompile/mirror/06-computer-use.md` (drive_until, consent gate,
-// jev-use) and `mirror/05-agent-runtime.md` (agents, routines, workspaces).
+// Every lane codes against these types — a lane that needs a different
+// shape changes THIS file rather than inventing its own. The drive loop
+// (`Drive/DriveLoop.swift`) owns step selection internally; what crosses
+// its boundary is `DriveTask` in, `DriveResult` out.
 
-// MARK: Drive-loop contract (Clicky `drive_until` / `suggest_action`)
+// MARK: Drive-loop contract
 
-/// What Jev decides at each step while driving a window. Jev picks an
-/// element + kind — it NEVER writes text. Caller-supplied literal text lives
-/// in `DriveTask.values`, keyed by field label.
-public struct StepJudgment: Sendable, Equatable {
-    public enum Kind: String, Sendable { case press, type, scroll, none }
-    /// Token identifying the chosen element in the loop's projected
-    /// interactive-element list (nil when `kind == .none` or `done`).
-    public var elementToken: String?
-    public var kind: Kind
-    public var confidence: Double
-    /// Model claims the goal is satisfied by observed state.
-    public var done: Bool
-    /// Model reports it cannot progress (reason for the user).
-    public var blocked: String?
-    /// Field-label tokens the model wants filled on a `type` step.
-    public var fillTokens: [String]
-    public init(elementToken: String? = nil, kind: Kind, confidence: Double,
-                done: Bool = false, blocked: String? = nil, fillTokens: [String] = []) {
-        self.elementToken = elementToken; self.kind = kind
-        self.confidence = confidence; self.done = done
-        self.blocked = blocked; self.fillTokens = fillTokens
-    }
-}
-
-/// Terminal status of a `driveUntil` run — mirrors Clicky's jev-use statuses.
+/// Terminal status of a `driveUntil` run.
 public enum DriveStatus: Sendable, Equatable {
     /// Settled only when at least one effect dispatched this run AND the
     /// postcondition was verified — "done" is an effect, never a claim.
@@ -56,6 +31,20 @@ public enum DriveStatus: Sendable, Equatable {
     case maxSteps(history: [String])
     case cancelled
 
+    /// Why a consent gate stopped the task — the agent-facing
+    /// `describe()` keys on this classification, never on reason-string
+    /// sniffing.
+    public enum ConsentBlock: Sendable, Equatable {
+        /// A protected-list hit, a denied tool, or the task's own deny
+        /// rule — no grant or approval reverses it.
+        case permanent
+        /// The standing grant is absent and no ask channel ran — the
+        /// one block the settings toggle actually fixes.
+        case missingGrant
+        /// A live confirm card ran and the user declined this action.
+        case declined
+    }
+
     public enum HandBackReason: Sendable, Equatable {
         /// confidence < 0.5 — guessing; hand to the planner/LLM.
         case lowConfidence
@@ -69,7 +58,7 @@ public enum DriveStatus: Sendable, Equatable {
         /// to choose among these candidate action descriptions.
         case needsChoice(options: [String])
 
-        /// Stable wire string — consumers (JevUseMCPServer) key on it.
+        /// Stable wire string — the MCP server keys on it.
         public var rawValue: String {
             switch self {
             case .lowConfidence: return "low_confidence"
@@ -101,8 +90,10 @@ public struct DriveTask: Sendable {
     /// Field-label → literal text supplied BY THE CALLER. Jev selects fields;
     /// it never generates text.
     public var values: [String: String]
-    /// Element labels Jev may never press — enforced in code, twice:
-    /// excluded from offered candidates AND re-checked on the model's answer.
+    /// Element labels Jev may never press — enforced at dispatch: every
+    /// effect (and the window-control shortcut) runs the label through the
+    /// policy gate with this list, and a deny match aborts the task. They
+    /// are NOT filtered out of the candidates offered to the model.
     public var deny: [String]
     /// Postcondition strings the verifier looks for after effects.
     public var successContains: [String]
@@ -110,20 +101,18 @@ public struct DriveTask: Sendable {
     /// raised once at drive start. Element-scoped and explicitly
     /// background work leaves this false so the user's front app survives.
     public var foreground: Bool
-    public var maxSteps: Int
     public init(goal: String, application: String? = nil, pid: Int? = nil,
                 windowID: Int? = nil, windowName: String? = nil,
                 previousContext: String? = nil,
                 scope: TaskSpec.Scope = .work, values: [String: String] = [:],
                 deny: [String] = [], successContains: [String] = [],
-                foreground: Bool = false, maxSteps: Int = 24) {
+                foreground: Bool = false) {
         self.goal = goal; self.application = application
         self.pid = pid; self.windowID = windowID; self.windowName = windowName
         self.previousContext = previousContext
         self.scope = scope; self.values = values
         self.deny = deny; self.successContains = successContains
         self.foreground = foreground
-        self.maxSteps = maxSteps
     }
 }
 
@@ -144,20 +133,25 @@ public struct DriveResult: Sendable {
     /// Why the loop settled blocked — the judge's own reason when it gave
     /// one, so callers speak "couldn't find 'Yanky'" instead of "(other)".
     public var blockedReason: String?
+    /// Which consent refusal ended a `.blockedByConsent` run — set by the
+    /// loop's policy gate, read by `describe` so the remedy it reports is
+    /// honest for that refusal class.
+    public var consentBlock: DriveStatus.ConsentBlock?
     public init(status: DriveStatus, history: [String] = [], pid: Int? = nil, windowID: Int? = nil,
                 bundleID: String? = nil, dispatchedEffect: Bool = false,
-                blockedReason: String? = nil) {
+                blockedReason: String? = nil,
+                consentBlock: DriveStatus.ConsentBlock? = nil) {
         self.status = status; self.history = history; self.pid = pid
         self.windowID = windowID; self.bundleID = bundleID
         self.dispatchedEffect = dispatchedEffect; self.blockedReason = blockedReason
+        self.consentBlock = consentBlock
     }
 }
 
 // MARK: Voice task contract
 
 /// App-level task description built from the realtime `computer_command`
-/// tool call. `CuaVoiceRuntime` resolves app/window to `DriveTask` for the loop.
-/// `CuaVoiceRuntime` resolves app/window to `DriveTask` for the loop.
+/// tool call. `VoiceTaskCoordinator` resolves it to `DriveTask`.
 public struct TaskSpec: Sendable {
     public enum Scope: String, Sendable { case open, create, work }
     public var goal: String
@@ -250,92 +244,6 @@ public struct Routine: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-// MARK: Consent gate (computer-use shim + voice path share this)
-
-/// A pending or resolved consent ask. Keyed per (agent, turn) — approving
-/// one agent never arms another.
-public struct ConsentRequest: Codable, Sendable, Identifiable {
-    public var id: String
-    /// Nil for the voice-companion's own direct path.
-    public var agentSlug: String?
-    /// The turn the gate arms; nil = voice single-shot task.
-    public var turnID: String?
-    /// Natural-language ask shown + spoken ("Inbox Desk wants to click and
-    /// type in Mail to send the reply").
-    public var summary: String
-    public var reason: String
-    public var state: State
-    public enum State: String, Codable, Sendable { case pending, approved, denied }
-    public init(id: String = UUID().uuidString, agentSlug: String? = nil,
-                turnID: String? = nil, summary: String, reason: String,
-                state: State = .pending) {
-        self.id = id; self.agentSlug = agentSlug; self.turnID = turnID
-        self.summary = summary; self.reason = reason; self.state = state
-    }
-}
-
-/// The gate the computer-use MCP shim and the voice path both consult.
-/// Input tools are refused until the requesting (agent, turn) is approved;
-/// observation tools are always permitted.
-public protocol ConsentGating: Sendable {
-    /// Throws `GateError.blockedByConsent` when input isn't permitted.
-    func assertPermitted(tool: String, agentSlug: String?, turnID: String?) throws
-    func approve(_ request: ConsentRequest)
-    func deny(_ request: ConsentRequest)
-    /// Currently-pending asks (bare voice "yes" resolves the sole pending one).
-    func pending() -> [ConsentRequest]
-}
-
-public enum GateError: Error, Sendable, Equatable {
-    case blockedByConsent(summary: String)
-}
-
-/// Consent contract for the computer-use shim (Clicky parity): observation
-/// tools are always open; EVERYTHING else is consent-gated. Fail-closed by
-/// construction — a new/unknown driver tool gates rather than leaks open.
-/// Tool list verified against the pinned driver's mcp-tools.mdx (0.32.0).
-public enum ConsentContract {
-    /// Driver tools permitted without consent (observation only).
-    public static let observationTools: Set<String> = [
-        "list_apps", "list_windows", "get_window_state",
-        "get_accessibility_tree", "get_desktop_state", "get_screen_size",
-        "get_cursor_position", "get_config", "get_recording_state",
-        "get_agent_cursor_state", "check_permissions", "health_report",
-        "check_for_update", "clipboard_read", "get_browser_state",
-        "get_session", "list_sessions", "get_session_state",
-        "parse_visual_regions", "verify_state",
-    ]
-    /// Anything not an observation tool is consent-gated input/action —
-    /// launch_app, kill_app, click*, type_*, press_key, hotkey, set_value,
-    /// scroll, drag, move_cursor, zoom, bring_to_front, set_window_frame,
-    /// browser_*, clipboard_write, page, recording/session/config mutators,
-    /// install_*, invoke_menu, escalate_session — including future tools.
-    public static func requiresConsent(_ tool: String) -> Bool {
-        !observationTools.contains(tool)
-    }
-    /// `delivery_mode` value required on every forwarded input call.
-    public static let requiredDeliveryMode = "background"
-    /// Detects desktop-scope requests in BOTH arg shapes: top-level
-    /// `scope:"desktop"` and the driver's preferred nested
-    /// `target:{kind:"desktop",…}` targeting object. Raw desktop-coordinate
-    /// control is always refused (no pointer hijack).
-    public static func requestsDesktopScope(_ args: JSONValue) -> Bool {
-        if args["scope"]?.string?.lowercased() == "desktop" { return true }
-        return containsDesktopTarget(args)
-    }
-    private static func containsDesktopTarget(_ value: JSONValue) -> Bool {
-        switch value {
-        case let .object(dict):
-            if dict["kind"]?.string?.lowercased() == "desktop" { return true }
-            return dict.values.contains(where: containsDesktopTarget)
-        case let .array(items):
-            return items.contains(where: containsDesktopTarget)
-        default:
-            return false
-        }
-    }
-}
-
 // MARK: Agent cursor identity
 
 /// Visual identity for an agent's overlay cursor — observability, never
@@ -349,11 +257,19 @@ public struct AgentCursor: Sendable, Equatable {
     public init(agentSlug: String? = nil, label: String, colorHex: String) {
         self.agentSlug = agentSlug; self.label = label; self.colorHex = colorHex
     }
-    /// Deterministic palette so each agent keeps a stable color.
+    /// Deterministic palette so each agent keeps a stable color — FNV-1a
+    /// over the slug's UTF-8. `hashValue` is process-randomized (colors
+    /// reshuffled every launch) and `abs(Int.min)` traps; unsigned
+    /// arithmetic avoids both.
     public static func palette(for slug: String?) -> String {
         let colors = ["#14b8a6", "#f59e0b", "#8b5cf6", "#ec4899", "#22c55e", "#3b82f6"]
         guard let slug else { return "#14b8a6" }
-        return colors[abs(slug.hashValue) % colors.count]
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in slug.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return colors[Int(hash % UInt64(colors.count))]
     }
 }
 
@@ -378,3 +294,4 @@ public protocol SpeechSynthesizing: Sendable {
 public protocol DictationDelivering: Sendable {
     func deliver(_ text: String) async throws
 }
+

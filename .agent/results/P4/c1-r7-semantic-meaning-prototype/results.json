@@ -1,0 +1,2211 @@
+{
+  "qualification": false,
+  "actions": 0,
+  "microphone": false,
+  "scope": "read-only question-meaning prototype using saved semantic fixture inputs",
+  "not_a_latency_benchmark": true,
+  "source_sha256": "756fd15fc71b6b8ace441699c468e2e9c9651828d26b2d32cd60bb1abee701b3",
+  "cases": 22,
+  "rows": [
+    {
+      "index": 0,
+      "utterance": "Scroll down.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 241.873083,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 1.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 1.0,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.0,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 1.0,
+            "stop": 0.0,
+            "task": 0.0
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.94,
+          "probabilities": {
+            "app_0": 0.04,
+            "clarify": 0.0,
+            "window": 0.96
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.34
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.97
+        }
+      }
+    },
+    {
+      "index": 1,
+      "utterance": "Could you nudge this down a bit?",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 150.06562500000004,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.89
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 0.98,
+          "probabilities": {
+            "small": 0.99,
+            "normal": 0.01,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.89
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.84,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.11,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.02,
+            "pause": 0.0,
+            "scroll": 0.86,
+            "stop": 0.0,
+            "task": 0.01
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.92,
+          "probabilities": {
+            "app_0": 0.05,
+            "clarify": 0.0,
+            "window": 0.95
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.31
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.88
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.84
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.09
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.92
+        }
+      }
+    },
+    {
+      "index": 2,
+      "utterance": "Move the page a little farther down, please.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 229.66070800000006,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 1.0,
+            "normal": 0.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.98,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.01,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.98,
+            "stop": 0.0,
+            "task": 0.01
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.96,
+          "probabilities": {
+            "app_0": 0.03,
+            "clarify": 0.0,
+            "window": 0.97
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.52
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.12
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.93
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.87
+        }
+      }
+    },
+    {
+      "index": 3,
+      "utterance": "A tiny scroll upward, please.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 141.019875,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 1.0,
+            "normal": 0.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "up",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 0.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 1.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 1.0,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.0,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 1.0,
+            "stop": 0.0,
+            "task": 0.0
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.94,
+          "probabilities": {
+            "app_0": 0.04,
+            "clarify": 0.0,
+            "window": 0.96
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.39
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.99
+        }
+      }
+    },
+    {
+      "index": 4,
+      "utterance": "Scroll the current window to the right a little.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 168.38545799999994,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 0.98,
+          "probabilities": {
+            "small": 0.99,
+            "normal": 0.0,
+            "clarify": 0.01
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.88
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "right",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 0.0,
+            "left": 0.0,
+            "right": 1.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.94,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.03,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.95,
+            "stop": 0.0,
+            "task": 0.02
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.96,
+          "probabilities": {
+            "app_0": 0.03,
+            "clarify": 0.0,
+            "window": 0.97
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.94
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.89
+        }
+      }
+    },
+    {
+      "index": 5,
+      "utterance": "Please scroll this window left.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 196.977792,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 0.98,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.99,
+            "clarify": 0.01
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.92
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "left",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 0.0,
+            "left": 1.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.98,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.01,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.98,
+            "stop": 0.0,
+            "task": 0.01
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.91,
+          "probabilities": {
+            "app_0": 0.06,
+            "clarify": 0.0,
+            "window": 0.94
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.54
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.95
+        }
+      }
+    },
+    {
+      "index": 6,
+      "utterance": "Scroll down until Cedar is visible.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 155.6008339999999,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.89,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.07,
+            "clarify": 0.93
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.72,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.02,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.75,
+            "stop": 0.0,
+            "task": 0.23
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.89,
+          "probabilities": {
+            "app_0": 0.07,
+            "clarify": 0.0,
+            "window": 0.93
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.39
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.93
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.01
+        }
+      }
+    },
+    {
+      "index": 7,
+      "utterance": "Scroll the sidebar down a little.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 218.61708300000004,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 1.0,
+            "normal": 0.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.92
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.98,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.01,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.98,
+            "stop": 0.0,
+            "task": 0.01
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.85,
+          "probabilities": {
+            "app_0": 0.08,
+            "clarify": 0.02,
+            "window": 0.9
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.54
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.9
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.87
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.08
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.26
+        }
+      }
+    },
+    {
+      "index": 8,
+      "utterance": "Scroll down exactly three pages.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 294.2505,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.0,
+            "clarify": 1.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.93
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.99,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.0,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.99,
+            "stop": 0.0,
+            "task": 0.01
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.96,
+          "probabilities": {
+            "app_0": 0.03,
+            "clarify": 0.0,
+            "window": 0.97
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.55
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.86
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.01
+        }
+      }
+    },
+    {
+      "index": 9,
+      "utterance": "Scroll down and click Save.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 143.67183299999996,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 1.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "task",
+          "confidence": 0.81,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.0,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.17,
+            "stop": 0.0,
+            "task": 0.83
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.83,
+          "probabilities": {
+            "app_0": 0.11,
+            "clarify": 0.0,
+            "window": 0.89
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.42
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.01
+        }
+      }
+    },
+    {
+      "index": 10,
+      "utterance": "Don't scroll down.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 218.14316700000003,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 0.31,
+          "probabilities": {
+            "small": 0.02,
+            "normal": 0.54,
+            "clarify": 0.44
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 0.46,
+          "probabilities": {
+            "clarify": 0.22,
+            "down": 0.57,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.21
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "stop",
+          "confidence": 0.57,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.01,
+            "continue_scroll": 0.01,
+            "ignore": 0.0,
+            "incomplete": 0.01,
+            "pause": 0.0,
+            "scroll": 0.21,
+            "stop": 0.62,
+            "task": 0.14
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.94,
+          "probabilities": {
+            "app_0": 0.04,
+            "clarify": 0.0,
+            "window": 0.96
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.25
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.62
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.04
+        }
+      }
+    },
+    {
+      "index": 11,
+      "utterance": "She said, 'scroll down a little'.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 167.37058399999992,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.13
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 1.0,
+            "normal": 0.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.79
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "ignore",
+          "confidence": 0.93,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.0,
+            "continue_scroll": 0.0,
+            "ignore": 0.94,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.06,
+            "stop": 0.0,
+            "task": 0.0
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.88,
+          "probabilities": {
+            "app_0": 0.07,
+            "clarify": 0.01,
+            "window": 0.92
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.18
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.1
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.29
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.33
+        }
+      }
+    },
+    {
+      "index": 12,
+      "utterance": "Did you scroll down?",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 178.82333299999996,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 0.8,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.87,
+            "clarify": 0.13
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.83
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 0.55,
+          "probabilities": {
+            "clarify": 0.36,
+            "down": 0.64,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.53,
+          "probabilities": {
+            "answer": 0.07,
+            "clarify": 0.58,
+            "continue_scroll": 0.01,
+            "ignore": 0.19,
+            "incomplete": 0.03,
+            "pause": 0.01,
+            "scroll": 0.01,
+            "stop": 0.0,
+            "task": 0.1
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.77,
+          "probabilities": {
+            "app_0": 0.09,
+            "clarify": 0.06,
+            "window": 0.85
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.15
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.5
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.17
+        }
+      }
+    },
+    {
+      "index": 13,
+      "utterance": "Scroll until the saved confirmation is visible.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 169.19370899999996,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.83,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.11,
+            "clarify": 0.89
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.94
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.86,
+          "probabilities": {
+            "clarify": 0.89,
+            "down": 0.11,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.49,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.08,
+            "continue_scroll": 0.01,
+            "ignore": 0.0,
+            "incomplete": 0.01,
+            "pause": 0.0,
+            "scroll": 0.55,
+            "stop": 0.0,
+            "task": 0.35
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.91,
+          "probabilities": {
+            "app_0": 0.06,
+            "clarify": 0.0,
+            "window": 0.94
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.35
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.92
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.41
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.22
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.11
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.02
+        }
+      }
+    },
+    {
+      "index": 14,
+      "utterance": "Scroll the other window down a bit.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 226.43366700000024,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 0.98,
+          "probabilities": {
+            "small": 0.99,
+            "normal": 0.01,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.72
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 0.99,
+          "probabilities": {
+            "clarify": 0.01,
+            "down": 0.99,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.54,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.36,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.01,
+            "pause": 0.0,
+            "scroll": 0.59,
+            "stop": 0.0,
+            "task": 0.04
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.67,
+          "probabilities": {
+            "app_0": 0.08,
+            "clarify": 0.78,
+            "window": 0.14
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.1
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.5
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.1
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.06
+        }
+      }
+    },
+    {
+      "index": 15,
+      "utterance": "Scroll down in Safari.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 170.13891700000005,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 1.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.9
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.93,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.02,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.94,
+            "stop": 0.0,
+            "task": 0.04
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.85,
+          "probabilities": {
+            "app_0": 0.02,
+            "clarify": 0.9,
+            "window": 0.08
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.64
+        }
+      }
+    },
+    {
+      "index": 16,
+      "utterance": "If Cedar is already visible, scroll down.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 300.86662499999983,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.89
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 0.83,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.89,
+            "clarify": 0.11
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.85
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 0.99,
+          "probabilities": {
+            "clarify": 0.01,
+            "down": 0.99,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.42,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.1,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.15,
+            "pause": 0.0,
+            "scroll": 0.48,
+            "stop": 0.0,
+            "task": 0.27
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.91,
+          "probabilities": {
+            "app_0": 0.05,
+            "clarify": 0.01,
+            "window": 0.94
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.37
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.82
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.58
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.25
+        }
+      }
+    },
+    {
+      "index": 17,
+      "utterance": "Scroll it down, actually don't.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 158.82416700000013,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.94
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.88,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.08,
+            "clarify": 0.92
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.73
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.64,
+          "probabilities": {
+            "clarify": 0.71,
+            "down": 0.27,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.02
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "stop",
+          "confidence": 0.6,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.02,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.09,
+            "pause": 0.01,
+            "scroll": 0.12,
+            "stop": 0.64,
+            "task": 0.12
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.91,
+          "probabilities": {
+            "app_0": 0.05,
+            "clarify": 0.01,
+            "window": 0.94
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.31
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.38
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.06
+        }
+      }
+    },
+    {
+      "index": 18,
+      "utterance": "Move that window down a little.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 162.0220419999998,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 1.0,
+            "normal": 0.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.89
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 0.98,
+          "probabilities": {
+            "clarify": 0.01,
+            "down": 0.98,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.01
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.57,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.06,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.62,
+            "stop": 0.0,
+            "task": 0.32
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.88,
+          "probabilities": {
+            "app_0": 0.07,
+            "clarify": 0.01,
+            "window": 0.92
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.34
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.76
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.9
+        }
+      }
+    },
+    {
+      "index": 19,
+      "utterance": "Scroll down without changing the sidebar.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 160.64599999999984,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "normal",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 1.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "down",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 1.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.93,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.02,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.94,
+            "stop": 0.0,
+            "task": 0.04
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.92,
+          "probabilities": {
+            "app_0": 0.05,
+            "clarify": 0.0,
+            "window": 0.95
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.48
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.91
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.65
+        }
+      }
+    },
+    {
+      "index": 20,
+      "utterance": "Do not scroll; tell me where the button is.",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 179.0614580000005,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 0.89,
+          "probabilities": {
+            "small": 0.0,
+            "normal": 0.07,
+            "clarify": 0.93
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.73
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "clarify",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 1.0,
+            "down": 0.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 0.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "task",
+          "confidence": 0.66,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.27,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.01,
+            "pause": 0.0,
+            "scroll": 0.0,
+            "stop": 0.02,
+            "task": 0.7
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.77,
+          "probabilities": {
+            "app_0": 0.13,
+            "clarify": 0.02,
+            "window": 0.85
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.41
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.85
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.0
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.0
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.0
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.0
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.01
+        }
+      }
+    },
+    {
+      "index": 21,
+      "utterance": "Can you scroll upwards just a touch?",
+      "model": "jev-1.14.0",
+      "elapsed_ms": 269.7614159999997,
+      "answers": {
+        "addressed": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "amount": {
+          "type": "choice",
+          "choice": "small",
+          "confidence": 1.0,
+          "probabilities": {
+            "small": 1.0,
+            "normal": 0.0,
+            "clarify": 0.0
+          }
+        },
+        "complete": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "continue_supported": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "direction": {
+          "type": "choice",
+          "choice": "up",
+          "confidence": 1.0,
+          "probabilities": {
+            "clarify": 0.0,
+            "down": 0.0,
+            "left": 0.0,
+            "right": 0.0,
+            "up": 1.0
+          }
+        },
+        "kind": {
+          "type": "choice",
+          "choice": "scroll",
+          "confidence": 0.98,
+          "probabilities": {
+            "answer": 0.0,
+            "clarify": 0.01,
+            "continue_scroll": 0.0,
+            "ignore": 0.0,
+            "incomplete": 0.0,
+            "pause": 0.0,
+            "scroll": 0.98,
+            "stop": 0.0,
+            "task": 0.01
+          }
+        },
+        "scope": {
+          "type": "choice",
+          "choice": "window",
+          "confidence": 0.94,
+          "probabilities": {
+            "app_0": 0.04,
+            "clarify": 0.0,
+            "window": 0.96
+          }
+        },
+        "scope_requested_app_0": {
+          "type": "noul",
+          "noul": 0.5
+        },
+        "scope_requested_window": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "scroll_supported_down": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_left": {
+          "type": "noul",
+          "noul": 0.01
+        },
+        "scroll_supported_right": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "scroll_supported_up": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "small_requested": {
+          "type": "noul",
+          "noul": 0.98
+        },
+        "bounded_window_scroll": {
+          "type": "noul",
+          "noul": 0.99
+        }
+      }
+    }
+  ]
+}

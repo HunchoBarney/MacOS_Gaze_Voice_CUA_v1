@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import OSLog
 import JevVoiceCore
 
 protocol CuaPermissionStatusClient {
@@ -29,21 +30,23 @@ enum CuaSetupFixture {
 @MainActor
 final class CuaSetup: ObservableObject {
     @Published private(set) var busy = false
-    @Published private(set) var message = "The pinned Cua Driver Local build must be installed and have Accessibility and Screen Recording access."
+    @Published private(set) var message = "The computer-control driver must be installed and have Accessibility and Screen Recording access."
     @Published private(set) var verified = false
     private var task: Task<Void, Never>?
+    private nonisolated static let log = Logger(subsystem: "com.chriswozniczek.jevvoice",
+                                              category: "cua-setup")
 
     func verify(apiKey: String, browser: Bool = false) {
         guard !busy else { return }
         guard !apiKey.isEmpty else { message = "Save your Jev API key first."; return }
         busy = true
         verified = false
-        message = "Connecting to Cua…"
+        message = "Connecting to computer control…"
         task = Task {
             let connection = CuaConnection()
             let label = "Jarvis setup \(UUID().uuidString.prefix(6))"
             do {
-                try await connection.connect()
+                try await connection.connect(socket: CuaDaemonHost.shared.socket())
                 // The permission read and the session mint are independent
                 // roundtrips on the same transport — issue them together; the
                 // cleanup below ends the session even when a grant is missing.
@@ -64,7 +67,11 @@ final class CuaSetup: ObservableObject {
             }
             // Cleanup must not inherit cancellation of the requesting task.
             await Task.detached {
-                _ = try? await connection.call("end_session", arguments: ["session": .string(label)], timeout: 5)
+                do {
+                    _ = try await connection.call("end_session", arguments: ["session": .string(label)], timeout: 5)
+                } catch {
+                    Self.log.error("end_session cleanup failed: \(error.localizedDescription, privacy: .public)")
+                }
                 await connection.close()
             }.value
             busy = false
@@ -80,7 +87,7 @@ final class CuaSetup: ObservableObject {
         if permissions["screen_recording"] != .bool(true) { missing.append("Screen Recording") }
         let owner: String
         switch permissions["source"]?["attribution"]?.string {
-        case "driver-daemon": owner = "the CuaDriver app"
+        case "driver-daemon": owner = "the computer-control driver (CuaDriver)"
         case "caller": owner = "the app that launched the driver (its answer may not reflect the driver's own grants)"
         default: owner = "Jev Voice"
         }
@@ -92,7 +99,7 @@ final class CuaSetup: ObservableObject {
     /// serves real requests. No disposable app, no model call — the
     /// driver's own status is the report.
     private func verifyControlPlane(_ connection: CuaConnection) async throws {
-        message = "Probing the driver control plane…"
+        message = "Checking computer control…"
         let started = ContinuousClock.now
         // list_apps takes no arguments — the empty input contract rejects
         // a session field.
@@ -101,7 +108,7 @@ final class CuaSetup: ObservableObject {
         let apps = inventory["apps"]?.array ?? []
         let running = apps.filter { ($0["pid"]?.integer ?? 0) > 0 }.count
         verified = true
-        message = "Verified: Cua answered permissions, minted a session, and listed \(running) running app(s) out of \(apps.count) in \(started.duration(to: .now))."
+        message = "Verified: computer control answered permissions, opened a session, and listed \(running) running app(s) out of \(apps.count) in \(started.duration(to: .now))."
     }
 
     private func verifyBrowser(_ connection: CuaConnection, label: String, apiKey: String) async throws {
@@ -141,8 +148,24 @@ final class CuaSetup: ObservableObject {
             throw DriverConnectionError.refused("Jev did not select an observed link. Nothing was clicked.")
         }
         try Task.checkCancellation()
-        _ = try await connection.call("browser_click", arguments: ["target_id": target, "tab_id": tab,
-            "session": .string(label), "ref": ref, "input_route": .string("dom_event")])
+        // The same actuation path the drive loop dispatches — a
+        // `browser_click` on the `dom_event` route (the standalone-window
+        // `trusted` route refuses on macOS). The driver reports the
+        // synthetic click as `unverifiable`; the fresh browser-state read
+        // below is the real postcondition check.
+        let clickBinding = BrowserSupport.Binding(targetID: target.string ?? "",
+                                                  tabID: tab.string ?? "",
+                                                  tabs: [], pageURL: nil)
+        let click = await BrowserActuation.actuate(
+            [BrowserActuation.clickRequest(ref: ref.string ?? "",
+                                           binding: clickBinding,
+                                           session: label)],
+            via: { tool, arguments in
+                try await connection.call(tool, arguments: arguments)
+            })
+        guard click.dispatched else {
+            throw DriverConnectionError.refused(click.detail ?? "The browser click was not dispatched.")
+        }
         let after = try await connection.call("get_browser_state", arguments: args)
         guard let urlText = after["page"]?["url"]?.string, let url = URL(string: urlText),
               ["iana.org", "www.iana.org"].contains(url.host ?? ""), url.path.contains("domains") else {
@@ -150,7 +173,7 @@ final class CuaSetup: ObservableObject {
         }
         try Task.checkCancellation()
         verified = true
-        message = "Verified: Jev selected a browser link, Cua clicked it, and a fresh browser observation confirmed the IANA domain-information page."
+        message = "Verified: Jev selected a browser link, computer control clicked it, and a fresh browser observation confirmed the IANA domain-information page."
     }
 
     func cancel() { task?.cancel() }

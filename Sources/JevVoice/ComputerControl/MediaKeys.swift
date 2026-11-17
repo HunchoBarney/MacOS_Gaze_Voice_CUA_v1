@@ -17,6 +17,21 @@ enum MediaKeys {
         case playPause = 16      // NX_KEYTYPE_PLAY
         case nextTrack = 17      // NX_KEYTYPE_NEXT
         case previousTrack = 18  // NX_KEYTYPE_PREVIOUS
+
+        /// The human word for the key — feed lines, consent prompts, and
+        /// the deny-scan corpus all read it (never the raw NX number).
+        var spokenName: String {
+            switch self {
+            case .volumeUp: return "volume up"
+            case .volumeDown: return "volume down"
+            case .brightnessUp: return "brightness up"
+            case .brightnessDown: return "brightness down"
+            case .mute: return "mute"
+            case .playPause: return "play/pause"
+            case .nextTrack: return "next track"
+            case .previousTrack: return "previous track"
+            }
+        }
     }
 
     /// Why the last production post refused — the Bool seam can only report

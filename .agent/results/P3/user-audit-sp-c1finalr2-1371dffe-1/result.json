@@ -1,0 +1,152 @@
+{
+  "captured_binding_matches" : true,
+  "decoy_unchanged" : true,
+  "desktop_ownership_release_safe" : true,
+  "driver_inventory_prewarm" : {
+    "attempts" : 1,
+    "cancelled" : 0,
+    "completed" : 1,
+    "failed" : 0,
+    "last_settled_at" : 1595067.3092878335,
+    "last_started_at" : 1595064.1230776669,
+    "pending" : 0,
+    "reads_dispatched" : 1,
+    "settled_elapsed_ms" : 3186.2101666629314
+  },
+  "elapsed_ms" : 2730.7672917377204,
+  "exact_insertion" : true,
+  "executable_sha256" : "eac804975c9504c4dfc6aada473ed087f0c90535e855cbae9de0510a0eae52a8",
+  "focus_diagnostics" : {
+    "accessibility_trusted" : true,
+    "document_matches" : true,
+    "focused_element_matches" : true,
+    "focused_role" : "AXTextArea",
+    "has_document" : true,
+    "last_ax_error" : -25212,
+    "stage" : "matched"
+  },
+  "human_confirmed" : false,
+  "no_model_rounds" : true,
+  "normal_controller_no_audit_binding" : true,
+  "observed_window" : 61933,
+  "outcomes" : [
+    "done"
+  ],
+  "physical_input" : false,
+  "status" : "passed",
+  "task_literal_matches" : true,
+  "task_window" : 61933,
+  "trace" : [
+    {
+      "monotonic" : 1595069.7916988335,
+      "stage" : "contextBegin",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.4124307502,
+      "stage" : "contextEnd",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.4799247084,
+      "stage" : "admissionLocal",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.4832436251,
+      "stage" : "localBegin",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.4853470419,
+      "stage" : "coordinatorBegin",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.4885584167,
+      "stage" : "keyBegin",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.4885865001,
+      "stage" : "keyEnd",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.4922810835,
+      "stage" : "gazeBegin",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.5396432918,
+      "stage" : "gazeEnd",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.5405502501,
+      "stage" : "referentBegin",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.5412215001,
+      "stage" : "referentEnd",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.5440128751,
+      "stage" : "workCreated",
+      "task" : "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.5453195418,
+      "stage" : "localEnd",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.7106752084,
+      "stage" : "executorBegin",
+      "task" : "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.7113106251,
+      "stage" : "resolveBegin",
+      "task" : "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595070.7181295,
+      "stage" : "resolveEnd",
+      "task" : "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595072.0762325001,
+      "stage" : "nativeTextInsertionBegin",
+      "task" : "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+      "tool" : "typeText",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595072.0942340002,
+      "stage" : "nativeTextInsertionEnd",
+      "task" : "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+      "tool" : "typeText",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    },
+    {
+      "monotonic" : 1595072.1123230418,
+      "stage" : "executorEnd",
+      "task" : "2F771006-094D-4CF4-9E76-FC944F3C8E15",
+      "turn" : "AE1AE929-32AB-44CC-9F60-04FDED9235ED"
+    }
+  ],
+  "tracker_startup_state" : "renderer_started",
+  "tracker_startup_wait_ms" : 5686.2632918637246,
+  "type_dispatches" : 1,
+  "typing_proof" : [
+    "Native focused typing proof: delivered=true current=true exact=true"
+  ],
+  "work_count" : 1
+}

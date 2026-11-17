@@ -48,6 +48,24 @@ function validBounds(bounds) {
   return bounds && Number.isFinite(bounds.x) && Number.isFinite(bounds.y) && bounds.width > 0 && bounds.height > 0;
 }
 
+// Calibration schema generations the runtime can still load. Anything else
+// (clipped legacy files, unknown future versions) is reported as legacy.
+const KNOWN_RAW_PROJECTIONS = new Set(["unclipped-v1", "unclipped-v2", "featuremap-v3"]);
+
+// rbf/feature_rbf corrections carry centers+weights arrays sized to the
+// sample pool (up to ~1200 [x,y] pairs each) — the same wire-weight problem
+// as the raw pools below. Surface the correction's extent (center count +
+// sigma); the renderer re-reads the full coordinates from the file itself.
+function summarizeRbf(value) {
+  if (!value || typeof value !== "object" || !Array.isArray(value.centers)) {
+    return undefined;
+  }
+  return compactObject({
+    center_count: integer(value.centers.length),
+    sigma: finiteNumber(value.sigma)
+  });
+}
+
 function readCalibrationPayload(path, readCalibrationFile) {
   if (!path || typeof readCalibrationFile !== "function") {
     return {};
@@ -58,19 +76,38 @@ function readCalibrationPayload(path, readCalibrationFile) {
       return {};
     }
     const payload = JSON.parse(text);
-    if (payload.raw_projection !== "unclipped-v1" && payload.raw_projection !== "unclipped-v2") {
+    if (!KNOWN_RAW_PROJECTIONS.has(payload.raw_projection)) {
       return { legacy_calibration: true };
     }
     const affine = Array.isArray(payload.affine) ? payload.affine : undefined;
-    const rbf = payload.rbf && typeof payload.rbf === "object" ? payload.rbf : undefined;
+    const rbf = summarizeRbf(payload.rbf);
     const geometry = payload.geometry && typeof payload.geometry === "object" ? payload.geometry : undefined;
     const sourceBounds = payload.source_bounds && typeof payload.source_bounds === "object" ? payload.source_bounds : undefined;
-    const samples = Array.isArray(payload.samples) ? payload.samples : undefined;
+    // The raw sample pool is ~1200 labelled points — far too heavy to embed
+    // in every snapshot and re-serialize on every ~20Hz WS update (the v3
+    // feature_samples pool is already count-only for the same reason).
+    // Surface presence + count only; no consumer reads the coordinates.
+    const samples = Array.isArray(payload.samples)
+      ? { count: payload.samples.length, loaded: true }
+      : undefined;
     const validation = Array.isArray(payload.validation) ? payload.validation : undefined;
+    // featuremap-v3 carries the refittable pool — the coeffs and full-feature
+    // samples are far too large for the state snapshot, so surface presence
+    // and counts instead of the arrays themselves.
+    const featureMap = payload.feature_map && typeof payload.feature_map === "object" ? true : undefined;
+    const featureRbf = summarizeRbf(payload.feature_rbf);
+    const featureSamples = Array.isArray(payload.feature_samples) ? payload.feature_samples.length : undefined;
+    const verifyVerdict = payload.verify_verdict && typeof payload.verify_verdict === "object" ? payload.verify_verdict : undefined;
+    const outputOffset = Array.isArray(payload.output_offset) ? payload.output_offset : undefined;
     return compactObject({
       raw_projection: stringValue(payload.raw_projection),
       affine,
       rbf,
+      feature_map: featureMap,
+      feature_rbf: featureRbf,
+      feature_samples: featureSamples,
+      verify_verdict: verifyVerdict,
+      output_offset: outputOffset,
       geometry,
       source_bounds: sourceBounds,
       samples,
@@ -98,7 +135,10 @@ function createInitialSnapshot(startedAt) {
       gaze: null
     },
     status: null,
-    preview: null
+    preview: null,
+    paused: false,
+    calibration_status: null,
+    settings: null
   };
 }
 
@@ -106,9 +146,46 @@ class GazeStateStore {
   constructor(options = {}) {
     this.now = options.now || defaultNow;
     this.readCalibrationFile = options.readCalibrationFile;
+    // Freshness probe for the calibration payload cache — returns
+    // {mtimeMs, size} or null when the path can't be stat'd. A 2Hz stream
+    // of "pursuit_sampled" calibration messages must not re-read+re-parse
+    // a file that only changes on commitPending.
+    this.statCalibrationFile = options.statCalibrationFile;
+    this.calibrationFileCache = null;
     const startedAt = options.startedAt || this.now();
     this.state = createInitialSnapshot(startedAt);
     this.listeners = new Set();
+  }
+
+  // Re-reads the calibration file only when its (path, mtime, size)
+  // signature moved — identical bytes parse to the identical payload, so
+  // an unchanged stat serves the cached object. No stat seam (tests) or
+  // an unstat'able path re-reads every message, exactly as before.
+  calibrationPayload(path) {
+    let signature = null;
+    if (path && typeof this.statCalibrationFile === "function") {
+      try {
+        const stat = this.statCalibrationFile(path);
+        if (stat && Number.isFinite(stat.mtimeMs) && Number.isFinite(stat.size)) {
+          signature = { mtimeMs: stat.mtimeMs, size: stat.size };
+        }
+      } catch {
+        // A stat that can't answer can't vouch for freshness — re-read.
+      }
+    }
+    const cache = this.calibrationFileCache;
+    if (
+      signature &&
+      cache &&
+      cache.path === path &&
+      cache.mtimeMs === signature.mtimeMs &&
+      cache.size === signature.size
+    ) {
+      return cache.payload;
+    }
+    const payload = readCalibrationPayload(path, this.readCalibrationFile);
+    this.calibrationFileCache = signature ? { path, ...signature, payload } : null;
+    return payload;
   }
 
   getSnapshot() {
@@ -137,7 +214,6 @@ class GazeStateStore {
 
     this.state.runtime = compactObject({
       name: stringValue(config?.runtime) || stringValue(webConfig?.runtime),
-      backend: stringValue(webConfig?.backend) || stringValue(options.backend),
       accelerator: undefined,
       updated_at: updatedAt
     });
@@ -166,7 +242,7 @@ class GazeStateStore {
     });
     this.state.calibration = compactObject({
       path: calibrationFile,
-      ...readCalibrationPayload(calibrationFile, this.readCalibrationFile),
+      ...this.calibrationPayload(calibrationFile),
       updated_at: updatedAt
     });
     this.state.updated_at = updatedAt;
@@ -192,6 +268,11 @@ class GazeStateStore {
             }
           : {};
       this.state.gaze = compactObject({
+        // An away heartbeat carries no coords — the rebuild below drops the
+        // last real position rather than leaving a stale-but-fresh target
+        // that a consumer could read as live. `away` marks the slice as a
+        // liveness beat: fresh updated_at, no valid gaze.
+        away: payload.away === true ? true : undefined,
         x_norm: xNorm,
         y_norm: yNorm,
         raw_x_norm: finiteNumber(payload.raw_x_norm),
@@ -251,7 +332,7 @@ class GazeStateStore {
         count: integer(payload.count),
         saved_path: stringValue(payload.path),
         message: stringValue(payload.message),
-        ...readCalibrationPayload(path, this.readCalibrationFile),
+        ...this.calibrationPayload(path),
         updated_at: updatedAt
       });
       changed.add("calibration");
@@ -263,6 +344,52 @@ class GazeStateStore {
         updated_at: updatedAt
       });
       changed.add("preview");
+    }
+
+    if (changed.size === 0) {
+      return [];
+    }
+    this.state.updated_at = updatedAt;
+    const changedList = Array.from(changed);
+    this.notify(changedList);
+    return changedList;
+  }
+
+  // Cross-process shared state — arrives via the renderer's report-state IPC
+  // and the main-side set-paused/set-settings writers rather than as typed
+  // backend messages. Only keys present in the report are touched, and only
+  // slices whose value actually changed notify subscribers.
+  updateSharedState(report) {
+    if (!report || typeof report !== "object") {
+      return [];
+    }
+    const updatedAt = this.now();
+    const changed = new Set();
+
+    if (report.paused !== undefined) {
+      const paused = Boolean(report.paused);
+      if (this.state.paused !== paused) {
+        this.state.paused = paused;
+        changed.add("paused");
+      }
+    }
+    if (report.calibration_status !== undefined) {
+      const status =
+        report.calibration_status === null ? null : (stringValue(report.calibration_status) ?? null);
+      if (this.state.calibration_status !== status) {
+        this.state.calibration_status = status;
+        changed.add("calibration_status");
+      }
+    }
+    if (report.settings !== undefined) {
+      const settings =
+        report.settings && typeof report.settings === "object" && !Array.isArray(report.settings)
+          ? clone(report.settings)
+          : null;
+      if (JSON.stringify(this.state.settings) !== JSON.stringify(settings)) {
+        this.state.settings = settings;
+        changed.add("settings");
+      }
     }
 
     if (changed.size === 0) {
@@ -326,10 +453,20 @@ class GazeStateStore {
   }
 
   notify(changed) {
+    // Nobody listening — skip the event build entirely (this is the common
+    // case whenever the external API isn't running).
+    if (this.listeners.size === 0) {
+      return;
+    }
+    // The event carries the live state object, not a deep clone: every
+    // current listener is the WS send path, which runs JSON.stringify
+    // synchronously inside this call, so the clone was dead work at ~20Hz.
+    // Contract: listeners must consume the event synchronously and must not
+    // retain or mutate it — the store keeps mutating `state` afterwards.
     const event = {
       type: "update",
       changed,
-      snapshot: this.getSnapshot()
+      snapshot: this.state
     };
     for (const listener of this.listeners) {
       listener(event);
@@ -360,8 +497,50 @@ function providerToAccelerator(provider) {
   return String(provider).replace(/ExecutionProvider$/u, "");
 }
 
+// settings.json merge semantics shared by the set-settings IPC, the tray
+// menu, and POST /control writers: top-level keys overwrite, nested plain
+// objects (diagnostics) merge key-by-key so one toggle can't clobber others.
+function mergeSettings(base, patch) {
+  const merged = { ...(base && typeof base === "object" && !Array.isArray(base) ? base : {}) };
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    return merged;
+  }
+  for (const [key, value] of Object.entries(patch)) {
+    const existing = merged[key];
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      existing &&
+      typeof existing === "object" &&
+      !Array.isArray(existing)
+    ) {
+      merged[key] = { ...existing, ...value };
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+// Missing/corrupt settings.json is a normal state (first run, truncated
+// write) — callers always get a plain object, never a throw.
+function parseSettingsPayload(text) {
+  if (!text) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 module.exports = {
   GazeStateStore,
   SCHEMA_VERSION,
-  providerToAccelerator
+  providerToAccelerator,
+  mergeSettings,
+  parseSettingsPayload
 };

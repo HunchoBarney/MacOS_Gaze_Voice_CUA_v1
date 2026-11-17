@@ -1,0 +1,92 @@
+[
+  {
+    "label": "before",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/undici@7.28.0/node_modules/undici/lib/llhttp/.gitkeep",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  },
+  {
+    "label": "before",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/node-addon-api@5.0.0/node_modules/node-addon-api/nothing.c",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  },
+  {
+    "label": "before",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/timm@1.7.1/node_modules/timm/.flowconfig",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100755"
+  },
+  {
+    "label": "before",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/tr46@0.0.3/node_modules/tr46/lib/.gitkeep",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  },
+  {
+    "label": "before",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/mime@1.6.0/node_modules/mime/.npmignore",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  },
+  {
+    "label": "final-r2",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/undici@7.28.0/node_modules/undici/lib/llhttp/.gitkeep",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  },
+  {
+    "label": "final-r2",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/node-addon-api@5.0.0/node_modules/node-addon-api/nothing.c",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  },
+  {
+    "label": "final-r2",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/timm@1.7.1/node_modules/timm/.flowconfig",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100755"
+  },
+  {
+    "label": "final-r2",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/tr46@0.0.3/node_modules/tr46/lib/.gitkeep",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  },
+  {
+    "label": "final-r2",
+    "relative": "Resources/EyeTracker/node_modules/.pnpm/mime@1.6.0/node_modules/mime/.npmignore",
+    "bytes": 0,
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sealed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "matches": true,
+    "mode": "0o100644"
+  }
+]

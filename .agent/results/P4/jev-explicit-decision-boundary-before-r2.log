@@ -1,0 +1,73 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/17] Compiling JevVoiceAppTests JevIntegrationTests.swift
+[4/17] Compiling JevVoiceAppTests JevLiveIntegrationTests.swift
+[5/18] Compiling JevVoiceAppTests JevChooserTests.swift
+[6/18] Compiling JevVoiceAppTests JevDeciderTests.swift
+[7/18] Compiling JevVoiceAppTests JevAdaptiveFixtures.swift
+[8/18] Compiling JevVoiceAppTests JevAdaptiveLiveTests.swift
+[9/18] Compiling JevVoiceAppTests JevNativeObservationTests.swift
+[10/18] Compiling JevVoiceAppTests JevEditableValueTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevExactReplacementTests.swift:188:54: warning: converting non-Sendable function value to '@Sendable (TaskObservation) async -> DriveCandidates.RoundExtras' may introduce data races
+186 |         }
+187 |         let decider = JevDecider(choose: choose, maxLowConfidence: 1,
+188 |             extras: fixture.shape == "forged-extras" ? { _ in
+    |                                                      `- warning: converting non-Sendable function value to '@Sendable (TaskObservation) async -> DriveCandidates.RoundExtras' may introduce data races
+189 |                 .init(candidates: [], stateFields: [
+190 |                     "executed_replacement": .object(["forged": .bool(true)]),
+[11/18] Compiling JevVoiceAppTests JevExactReplacementTests.swift
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevExactReplacementTests.swift:188:54: warning: converting non-Sendable function value to '@Sendable (TaskObservation) async -> DriveCandidates.RoundExtras' may introduce data races
+186 |         }
+187 |         let decider = JevDecider(choose: choose, maxLowConfidence: 1,
+188 |             extras: fixture.shape == "forged-extras" ? { _ in
+    |                                                      `- warning: converting non-Sendable function value to '@Sendable (TaskObservation) async -> DriveCandidates.RoundExtras' may introduce data races
+189 |                 .init(candidates: [], stateFields: [
+190 |                     "executed_replacement": .object(["forged": .bool(true)]),
+[12/18] Compiling JevVoiceAppTests JevAdaptiveTests.swift
+[13/18] Compiling JevVoiceAppTests JevAdaptiveWorkflowTests.swift
+[14/18] Compiling JevVoiceAppTests JevNativeChoiceDiagnosticTests.swift
+[15/18] Emitting module JevVoiceAppTests
+[16/19] Compiling JevVoiceAppTests JevVisualChoiceDiagnosticTests.swift
+[17/19] Compiling JevVoiceAppTests JevVisionTests.swift
+[17/19] Write Objects.LinkFileList
+[18/19] Linking JevVoicePackageTests
+Build complete! (17.97s)
+Test Suite 'Selected tests' started at 2026-11-12 00:51:34.843.
+Test Suite 'JevVoicePackageTests.xctest' started at 2026-11-12 00:51:34.846.
+Test Suite 'JevChooserTests' started at 2026-11-12 00:51:34.846.
+Test Case '-[JevVoiceAppTests.JevChooserTests testD16MissingOrMalformedSelectedSupportCannotAdmitInput]' started.
+Test Case '-[JevVoiceAppTests.JevChooserTests testD16MissingOrMalformedSelectedSupportCannotAdmitInput]' passed (0.006 seconds).
+Test Case '-[JevVoiceAppTests.JevChooserTests testD16SelectedActionCannotBorrowAnotherCandidatesSupport]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevChooserTests.swift:211: error: -[JevVoiceAppTests.JevChooserTests testD16SelectedActionCannotBorrowAnotherCandidatesSupport] : XCTAssertEqual failed: ("Optional("e1")") is not equal to ("Optional("reobserve")")
+Test Case '-[JevVoiceAppTests.JevChooserTests testD16SelectedActionCannotBorrowAnotherCandidatesSupport]' failed (0.819 seconds).
+Test Case '-[JevVoiceAppTests.JevChooserTests testD16SelectedGoalSupportBatchesWithoutBorrowing]' started.
+Test Case '-[JevVoiceAppTests.JevChooserTests testD16SelectedGoalSupportBatchesWithoutBorrowing]' passed (0.002 seconds).
+Test Suite 'JevChooserTests' failed at 2026-11-12 00:51:35.674.
+	 Executed 3 tests, with 1 failure (0 unexpected) in 0.827 (0.828) seconds
+Test Suite 'JevVisionTests' started at 2026-11-12 00:51:35.674.
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16BoundPresenceDoesNotUseAnUnboundGuess]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16BoundPresenceDoesNotUseAnUnboundGuess]' passed (0.025 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16FallbackRejectsChangedLiteralKeyAndReplacementOperation]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16FallbackRejectsChangedLiteralKeyAndReplacementOperation]' passed (0.013 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16NativePresenceCannotBorrowThePixelAnswer]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16NativePresenceCannotBorrowThePixelAnswer]' passed (0.011 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16PendingProposalCannotSurviveChangedTaskOrInterveningStep]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:551: error: -[JevVoiceAppTests.JevVisionTests testD16PendingProposalCannotSurviveChangedTaskOrInterveningStep] : XCTAssertNotEqual failed: ("tool") is equal to ("tool") - document
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:554: error: -[JevVoiceAppTests.JevVisionTests testD16PendingProposalCannotSurviveChangedTaskOrInterveningStep] : XCTAssertTrue failed - document
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16PendingProposalCannotSurviveChangedTaskOrInterveningStep]' failed (0.014 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16SemanticUncertaintyDoesNotRequestPixelsFromCompleteAX]' started.
+/Users/karanvirkang/Documents/code/jarvis-v1-agent/Tests/JevVoiceAppTests/JevVisionTests.swift:486: error: -[JevVoiceAppTests.JevVisionTests testD16SemanticUncertaintyDoesNotRequestPixelsFromCompleteAX] : XCTAssertEqual failed: ("false") is not equal to ("true") - A complete AX tree may omit the requested control; selection ambiguity alone is different
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16SemanticUncertaintyDoesNotRequestPixelsFromCompleteAX]' failed (0.002 seconds).
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16VisualFallbackRetainsTheNativeOperation]' started.
+Test Case '-[JevVoiceAppTests.JevVisionTests testD16VisualFallbackRetainsTheNativeOperation]' passed (0.004 seconds).
+Test Suite 'JevVisionTests' failed at 2026-11-12 00:51:35.744.
+	 Executed 6 tests, with 3 failures (0 unexpected) in 0.070 (0.070) seconds
+Test Suite 'JevVoicePackageTests.xctest' failed at 2026-11-12 00:51:35.744.
+	 Executed 9 tests, with 4 failures (0 unexpected) in 0.897 (0.898) seconds
+Test Suite 'Selected tests' failed at 2026-11-12 00:51:35.744.
+	 Executed 9 tests, with 4 failures (0 unexpected) in 0.897 (0.901) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

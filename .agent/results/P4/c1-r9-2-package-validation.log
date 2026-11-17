@@ -1,0 +1,15 @@
+{
+  "candidate_verified": true,
+  "release_ready": false,
+  "release_blockers": [
+    "external speech model: parakeet-ultra; portable bundling belongs to C3",
+    "external speech model: parakeet-eou-streaming/160ms; portable bundling belongs to C3",
+    "pending C3 portable-package qualification"
+  ],
+  "speech_models": [
+    "parakeet-ultra",
+    "parakeet-eou-streaming/160ms"
+  ],
+  "installed": false,
+  "binary_sha256": "79e8859b32d849e2777c741cefec099123cae9e18a6d081de8bab440cabb276b"
+}

@@ -1,0 +1,16 @@
+{
+  "command": [
+    "scripts/verification-lane.sh",
+    "c1-package-release"
+  ],
+  "source_snapshot": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r2-candidate-source-r4/manifest.json",
+  "before_free_bytes": 3351887872,
+  "started_at": "2026-11-16T14:38:59.547025+00:00",
+  "status": "passed",
+  "exit_code": 0,
+  "after_free_bytes": 3099963392,
+  "finished_at": "2026-11-16T14:42:24.389974+00:00",
+  "log_sha256": "bc72a44a408690cf1e311ed0845bc89fe2fa84ce1adf6b114577fe5431b624a7",
+  "binary_sha256": "b968f9615fd53f1d420c56b9a688fbab84ad7208df2fcfcc274d2441b5ad20a1",
+  "binary_bytes": 31463128
+}

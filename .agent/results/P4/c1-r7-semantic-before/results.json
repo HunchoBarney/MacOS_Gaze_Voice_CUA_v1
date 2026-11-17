@@ -1,0 +1,148 @@
+{
+  "context" : "controlled semantic fixture; no live window authority",
+  "microphone_proven" : false,
+  "native_actions" : 0,
+  "rows" : [
+    {
+      "direction" : null,
+      "elapsed_ms" : 329.80858325026929,
+      "expected_bounded_scroll" : true,
+      "kind" : "ignore",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Scroll down."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 90.333750005811453,
+      "expected_bounded_scroll" : true,
+      "kind" : "clarify",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Could you nudge this down a bit?"
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 167.05883340910077,
+      "expected_bounded_scroll" : true,
+      "kind" : "ignore",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Move the page a little farther down, please."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 255.15829166397452,
+      "expected_bounded_scroll" : true,
+      "kind" : "incomplete",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "A tiny scroll upward, please."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 132.55233340896666,
+      "expected_bounded_scroll" : true,
+      "kind" : "incomplete",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Scroll the current window to the right a little."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 120.34699996002018,
+      "expected_bounded_scroll" : true,
+      "kind" : "incomplete",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Please scroll this window left."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 100.01616668887436,
+      "expected_bounded_scroll" : false,
+      "kind" : "clarify",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Scroll down until Cedar is visible."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 153.25195831246674,
+      "expected_bounded_scroll" : false,
+      "kind" : "ignore",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Scroll the sidebar down a little."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 141.08570828102529,
+      "expected_bounded_scroll" : false,
+      "kind" : "incomplete",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Scroll down exactly three pages."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 113.46466653048992,
+      "expected_bounded_scroll" : false,
+      "kind" : "clarify",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Scroll down and click Save."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 132.8686666674912,
+      "expected_bounded_scroll" : false,
+      "kind" : "clarify",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Don't scroll down."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 330.28737502172589,
+      "expected_bounded_scroll" : false,
+      "kind" : "ignore",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "She said, 'scroll down a little'."
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 131.7200418561697,
+      "expected_bounded_scroll" : false,
+      "kind" : "clarify",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Did you scroll down?"
+    },
+    {
+      "direction" : null,
+      "elapsed_ms" : 307.67920822836459,
+      "expected_bounded_scroll" : false,
+      "kind" : "clarify",
+      "model" : "jev-1.14.0",
+      "questions" : 14,
+      "small" : false,
+      "text" : "Scroll until the saved confirmation is visible."
+    }
+  ],
+  "semantic_only" : true
+}

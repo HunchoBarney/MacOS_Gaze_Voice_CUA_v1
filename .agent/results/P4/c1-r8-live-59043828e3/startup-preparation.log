@@ -1,0 +1,17 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-16 20:06:10.090 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:06:10.520 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input elapsed_ms=429.663458
+2026-11-16 20:06:10.520 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=local_prewarm begin
+2026-11-16 20:06:10.521 Df JevVoice[68856:1c29613] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=final_models begin
+2026-11-16 20:09:24.899 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:09:50.520 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:11:05.614 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:11:13.054 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:11:15.637 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:19:30.611 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:22:13.066 Df JevVoice[68856:1c29613] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=final_models elapsed_ms=962545.488250
+2026-11-16 20:22:13.071 Df JevVoice[68856:1c29613] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=partial_models begin
+2026-11-16 20:22:16.945 Df JevVoice[68856:1c2de11] [com.chriswozniczek.jevvoice.voice:local-final] prepare stage=partial_models elapsed_ms=3873.554125
+2026-11-16 20:23:48.815 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:23:58.561 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
+2026-11-16 20:23:59.617 Df JevVoice[68856:1c29026] [com.chriswozniczek.jevvoice.voice:realtime] prepare stage=microphone_input begin
