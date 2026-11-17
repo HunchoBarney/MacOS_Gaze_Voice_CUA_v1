@@ -14,7 +14,7 @@ LOCAL_DIR ?= $(HOME)/jarvis-local
 LOCAL_APP = $(LOCAL_DIR)/Jev Voice.app
 STAGE_APP ?= $(APP)
 
-.PHONY: setup build app run local stage test test-tools dist clean vendor tracker-deps bundle-tracker check-tracker install-tracker
+.PHONY: setup build app run local stage stage-core test test-tools dist clean vendor tracker-deps bundle-tracker check-tracker install-tracker
 
 setup:
 	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
@@ -31,7 +31,7 @@ vendor:
 	ThirdParty/Cua/fetch-embedded-binaries.sh "$(VENDOR)"
 
 # Assemble the bundle without signing — STAGE_APP picks the destination.
-stage: build vendor
+stage-core: build vendor
 	mkdir -p "$(STAGE_APP)/Contents/MacOS"
 	cp "$(BINARY)" "$(STAGE_APP)/Contents/MacOS/JevVoice"
 	cp Info.plist "$(STAGE_APP)/Contents/Info.plist"
@@ -47,6 +47,8 @@ stage: build vendor
 	mkdir -p "$(STAGE_APP)/Contents/Resources/ThirdParty/CuaDriver"
 	cp ThirdParty/Cua/LICENSE.md ThirdParty/Cua/THIRD_PARTY_NOTICES.md "$(STAGE_APP)/Contents/Resources/ThirdParty/CuaDriver/"
 	python3 scripts/bundle-conversation-vad.py --app "$(STAGE_APP)"
+
+stage: stage-core
 	# Tracker payload — staged into Contents/Resources/EyeTracker/ when the
 	# EyeTracking checkout can produce a complete one (built dist/ + a pnpm
 	# node_modules), warned and skipped when it can't: a bare app must still
@@ -64,7 +66,7 @@ app: stage
 ifndef SKIP_TRACKER_DEPS
 tracker-deps:
 	@NODE=""; \
-	for c in /opt/homebrew/bin/node /usr/local/bin/node "$$(command -v node 2>/dev/null)"; do \
+	for c in "$$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node; do \
 		if [ -n "$$c" ] && [ -x "$$c" ]; then NODE="$$c"; break; fi; \
 	done; \
 	if [ -z "$$NODE" ]; then \
@@ -75,21 +77,13 @@ tracker-deps:
 	echo "tracker-deps: node = $$NODE"; \
 	export PATH="$$(dirname "$$NODE"):$$PATH"; \
 	cd "$(CURDIR)/EyeTracking" || exit 1; \
-	if [ ! -d node_modules ]; then \
-		echo "tracker-deps: node_modules missing — corepack pnpm install --frozen-lockfile"; \
-		corepack pnpm install --frozen-lockfile || exit 1; \
-	fi; \
-	if [ ! -f dist/index.html ]; then \
-		echo "tracker-deps: dist/index.html missing — corepack pnpm build"; \
-		corepack pnpm build > /tmp/jev-tracker-build.log 2>&1 \
-			|| { tail -n 25 /tmp/jev-tracker-build.log >&2; \
-			     echo "tracker-deps: pnpm build failed — full log at /tmp/jev-tracker-build.log" >&2; exit 1; }; \
-		tail -n 3 /tmp/jev-tracker-build.log; \
-	fi; \
-	if [ -f scripts/fetch-models.sh ]; then \
-		echo "tracker-deps: running scripts/fetch-models.sh"; \
-		bash scripts/fetch-models.sh \
-			|| echo "tracker-deps: fetch-models.sh ended nonzero — it prints any manual step itself; continuing"; \
+	corepack pnpm install --frozen-lockfile --ignore-scripts || exit 1; \
+	(unset ELECTRON_OVERRIDE_DIST_PATH ELECTRON_SKIP_BINARY_DOWNLOAD; node node_modules/electron/install.js) || exit 1; \
+	test -x node_modules/electron/dist/Electron.app/Contents/MacOS/Electron || exit 1; \
+	bash scripts/fetch-models.sh || exit 1; \
+	if [ "$(REBUILD_TRACKER)" = 1 ] || [ ! -f dist/index.html ] || \
+	    ! (cd dist/models && shasum -a 256 -c ../../scripts/required-models.sha256 >/dev/null 2>&1); then \
+		corepack pnpm build || exit 1; \
 	fi; \
 	if [ -f scripts/patch-electron-app.sh ]; then \
 		echo "tracker-deps: running scripts/patch-electron-app.sh"; \
@@ -180,8 +174,10 @@ local: tracker-deps
 # verified path. Layout contract: Contents/Resources/EyeTracker/ with
 # scripts/start-prod.cjs, dist/, electron/, a pruned pnpm node_modules and
 # bin/node — see the header of scripts/bundle-tracker.sh.
-bundle-tracker: tracker-deps stage
-	scripts/bundle-tracker.sh "$(STAGE_APP)"
+bundle-tracker: REBUILD_TRACKER=1
+bundle-tracker: tracker-deps stage-core
+	scripts/bundle-tracker.sh --require "$(STAGE_APP)"
+	python3 scripts/check-packaged-tracker.py "$(STAGE_APP)"
 
 # Report which tracker resolution path the staged app would use
 # (env / sibling checkout / app-support install / bundled payload).
@@ -200,16 +196,17 @@ install-tracker:
 # rebuild throws away every TCC grant anyway.
 run: local
 
-test: test-tools
-	swift test
+test:
+	scripts/verification-lane.sh all
 
 test-tools:
-	python3 -B -m unittest discover -s Tests/Tooling -v
+	scripts/verification-lane.sh tools
 
 # Zip suitable for a GitHub release asset / Homebrew cask (ditto preserves signatures).
-dist: app
+dist: bundle-tracker
+	scripts/sign-app.sh "$(STAGE_APP)"
 	rm -f "$(ZIP)"
-	ditto -c -k --keepParent "$(APP)" "$(ZIP)"
+	ditto -c -k --keepParent "$(STAGE_APP)" "$(ZIP)"
 	shasum -a 256 "$(ZIP)"
 
 clean:

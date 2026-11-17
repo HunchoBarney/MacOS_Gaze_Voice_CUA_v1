@@ -60,7 +60,7 @@
 #                                        files don't dirty the bundle
 #
 # Env: TRACKER_SRC (default <repo>/EyeTracking) picks the source checkout;
-# SKIP_TRACKER_BUNDLE=1 turns every mode into a no-op.
+# SKIP_TRACKER_BUNDLE=1 skips only opportunistic staging.
 set -euo pipefail
 
 MODE="require"
@@ -87,6 +87,7 @@ warn() { echo "bundle-tracker: WARNING — $*" >&2; }
 skip() { warn "$1 — tracker payload NOT staged"; [[ "$MODE" == "if-present" ]] && exit 0; exit 1; }
 
 if [[ "${SKIP_TRACKER_BUNDLE:-}" == "1" ]]; then
+	[[ "$MODE" == "if-present" ]] || { echo "strict tracker staging cannot be skipped" >&2; exit 1; }
 	log "SKIP_TRACKER_BUNDLE=1 — skipped"
 	exit 0
 fi
@@ -117,9 +118,6 @@ done
 if [[ -z "$(ls -A "$TRACKER_SRC/dist/models" 2>/dev/null || true)" ]]; then
 	warn "dist/models is empty — the tracker will boot but report model errors; run \`make tracker-deps\` to fetch ONNX models"
 fi
-for f in "$TRACKER_SRC/dist/runtime-assets/onnxruntime-web/ort-wasm-simd-threaded.wasm"; do
-	[[ -f "$f" ]] || warn "$(basename "$f") missing from dist/runtime-assets — wasm fallback may not load"
-done
 
 # --- fingerprint: skip a restage when nothing that feeds it changed ---------
 # Cheap honest check — not a hash of 800M: the inputs that actually change
@@ -238,7 +236,7 @@ done
 cat > "$STAGE/node_modules/.bin/electron" <<'EOF'
 #!/bin/sh
 # Relocatable electron launcher (replaces the pnpm shim — see bundle-tracker.sh).
-exec node "$(dirname "$0")/../electron/cli.js" "$@"
+exec "$(dirname "$0")/../../bin/node" "$(dirname "$0")/../electron/cli.js" "$@"
 EOF
 chmod +x "$STAGE/node_modules/.bin/electron"
 
@@ -253,6 +251,9 @@ if [[ -L "$ORT_SEED_LINK" ]]; then
 		ORT_RESOLVED="$(cd "$TRACKER_SRC" && node -e 'try{console.log(require.resolve("onnxruntime-web/wasm"))}catch(e){process.exit(1)}' 2>/dev/null || true)"
 	fi
 	if [[ -n "$ORT_RESOLVED" && -f "$ORT_RESOLVED" && -d "$ORT_PKG" ]]; then
+		mkdir -p "$STAGE/dist/runtime-assets/onnxruntime-web"
+		cp -X "$(dirname "$ORT_RESOLVED")"/ort-wasm-simd-threaded.*.{wasm,mjs} \
+			"$(dirname "$ORT_RESOLVED")"/ort-wasm-simd-threaded.{wasm,mjs} "$STAGE/dist/runtime-assets/onnxruntime-web/"
 		find "$ORT_PKG/dist" -type f -delete 2>/dev/null || true
 		mkdir -p "$ORT_PKG/dist"
 		cp -X "$ORT_RESOLVED" "$ORT_PKG/dist/$(basename "$ORT_RESOLVED")"
@@ -263,7 +264,7 @@ fi
 # A bundled node removes the last external dependency — TrackerHost resolves
 # nodeBinary() and can prefer <trackerDir>/bin/node once it knows to look.
 NODE_BIN=""
-for c in /opt/homebrew/bin/node /usr/local/bin/node "$(command -v node 2>/dev/null || true)"; do
+for c in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node; do
 	[[ -n "$c" && -x "$c" ]] && NODE_BIN="$c" && break
 done
 if [[ -n "$NODE_BIN" ]]; then

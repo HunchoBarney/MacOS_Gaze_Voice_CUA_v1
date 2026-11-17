@@ -98,9 +98,7 @@ final class LocalSpeechTests: XCTestCase {
         guard let modelPath = ProcessInfo.processInfo.environment["JARVIS_CONVERSATION_VAD_RESOURCE"] else {
             throw XCTSkip("Pinned conversation VAD resource required")
         }
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let audio = root.appendingPathComponent(".agent/results/P3/audio")
+        let audio = privateReplayInputs
         let manifest = try XCTUnwrap(try JSONSerialization.jsonObject(
             with: Data(contentsOf: audio.appendingPathComponent("manifest.json"))) as? [String: Any])
         let recordings = try XCTUnwrap(manifest["recordings"] as? [[String: Any]])
@@ -534,9 +532,7 @@ final class LocalSpeechTests: XCTestCase {
     /// finalize safely with the real incumbent models and unchanged watchdog.
     @MainActor
     func testRecordedNaturalReleaseWithNativeSizedBuffers() async throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let audio = root.appendingPathComponent(".agent/results/P3/audio")
+        let audio = privateReplayInputs
         guard let bytes = try? Data(contentsOf: audio.appendingPathComponent("manifest.json")),
               let manifest = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
               let recordings = manifest["recordings"] as? [[String: Any]],
@@ -598,9 +594,7 @@ final class LocalSpeechTests: XCTestCase {
               ["incumbent", "partial-gpu", "decoder-cpu"].contains(variant) else {
             throw XCTSkip("explicit serial native-compute experiment required")
         }
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let audio = root.appendingPathComponent(".agent/results/P3/audio")
+        let audio = privateReplayInputs
         let bytes = try Data(contentsOf: audio.appendingPathComponent("manifest.json"))
         let manifest = try XCTUnwrap(try JSONSerialization.jsonObject(with: bytes) as? [String: Any])
         let recordings = try XCTUnwrap(manifest["recordings"] as? [[String: Any]])
@@ -711,9 +705,7 @@ final class LocalSpeechTests: XCTestCase {
 
     @MainActor
     func testRealVoiceActivityIsOwnedThroughFinalCancelAndStaleCompletion() async throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let audio = root.appendingPathComponent(".agent/results/P3/audio")
+        let audio = privateReplayInputs
         guard FileManager.default.fileExists(atPath: audio.appendingPathComponent("manifest.json").path),
               FileManager.default.fileExists(atPath: LocalModelPaths.root.appendingPathComponent("parakeet-ultra").path) else {
             throw XCTSkip("confirmed recording and installed real models required")
@@ -783,9 +775,7 @@ final class LocalSpeechTests: XCTestCase {
     /// from the real confirmed recording and installed incumbent models.
     @MainActor
     func testWholeHoldFinalAndNextCaptureNeverJoinBlockedProvisionalWork() async throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let audio = root.appendingPathComponent(".agent/results/P3/audio")
+        let audio = privateReplayInputs
         guard let bytes = try? Data(contentsOf: audio.appendingPathComponent("manifest.json")),
               let manifest = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
               let recordings = manifest["recordings"] as? [[String: Any]],
@@ -906,7 +896,6 @@ final class LocalSpeechTests: XCTestCase {
         let sawPartial = LockedBox(0)
         t.onPartial = { _ in sawPartial.set(1) }
         t.onFinal = { _ in }
-        t.onUtteranceEnd = { }
         t.onProgress = { _ in }
         t.eouDebounceMs = 800
         XCTAssertEqual(t.eouDebounceMs, 800)

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 BENCH = Path(__file__).resolve().parent
@@ -218,6 +219,18 @@ class WilsonCase(unittest.TestCase):
 class RunnerCase(unittest.TestCase):
     """(f) run.py --stub --dry-run end-to-end on a fixture corpus."""
 
+    def test_empty_selection_refuses_before_side_effects(self):
+        import run
+        with tempfile.TemporaryDirectory() as directory, patch.object(run, "resolve_binary") as binary, \
+                patch.object(run, "require_api_key") as credentials:
+            out = Path(directory) / "new" / "results.jsonl"
+            for selection in (["--tag", "no-such-tag"], ["--task", "textedit.type"],
+                              ["--task", "calc.open", "--set", "test-user"]):
+                self.assertEqual(run.main([*selection, "--out", str(out)]), 2)
+            binary.assert_not_called()
+            credentials.assert_not_called()
+            self.assertFalse(out.parent.exists())
+
     def test_dry_run_rows(self):
         import run as run_mod
         with tempfile.TemporaryDirectory() as d:
@@ -277,6 +290,15 @@ class RunnerCase(unittest.TestCase):
 
 class ReportCase(unittest.TestCase):
     """(g) report.py on a fixture jsonl -> baseline.json fields."""
+
+    def test_no_rows_do_not_publish_a_report(self):
+        import report
+        with tempfile.TemporaryDirectory() as directory:
+            rows = Path(directory) / "rows.jsonl"
+            rows.write_text("\n{incomplete")
+            out = Path(directory) / "out"
+            self.assertEqual(report.main([str(rows), "--outdir", str(out)]), 2)
+            self.assertFalse(out.exists())
 
     def test_report(self):
         import report as report_mod
@@ -375,9 +397,13 @@ class SafetyCase(unittest.TestCase):
                 path.write_text(body)
                 path.chmod(0o700)
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"])
-            run = subprocess.run(["bash", str(REPO_ROOT / "scripts/sign-app.sh"), str(app)],
+            signer = base / "scripts/sign-app.sh"
+            signer.parent.mkdir()
+            signer.write_bytes((REPO_ROOT / "scripts/sign-app.sh").read_bytes())
+            run = subprocess.run(["bash", str(signer), str(app)],
                                  env=env, capture_output=True, text=True, timeout=20)
             self.assertNotEqual(run.returncode, 0, "failed strict signature cannot produce a successful package")
+            self.assertIn("codesign --verify --deep --strict failed", run.stderr)
 
 
 if __name__ == "__main__":

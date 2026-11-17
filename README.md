@@ -38,7 +38,7 @@ speech/TTS; consult `Package.swift` before changing that dependency.
 
 ```sh
 make setup       # check the local toolchain; no credentials or downloads
-make test        # default suite; live checks are normally skipped
+make test        # CI lane: Swift + P3 evidence, tracker typecheck/Vitest, tooling
 make local       # daily driver: build → sign → install to ~/jarvis-local,
                  # relaunch, then wait for the tracker API's /ready
 make run         # alias for `make local`
@@ -49,8 +49,11 @@ make check-tracker   # report which tracker path a staged app resolves
 make dist        # package the bundle as a zip
 ```
 
-`make local` requires `node` (and `pnpm` via corepack) for the tracker
-checkout; `SKIP_TRACKER_DEPS=1` skips that when the tracker isn't wanted.
+`make test` and `make local` use Node (CI: 24.11.0) and Corepack to
+install the tracker dependencies pinned by the pnpm lockfile. Source tests
+don't download models or qualify a signed app. `SKIP_TRACKER_DEPS=1`
+skips tracker preparation only: `make local` still launches the app and
+requires HTTP 200 from the tracker's `/ready` endpoint.
 
 Computer control requires the exact pinned Cua runtime and compatible
 SDK/source contracts; an arbitrary installed driver is not interchangeable.
@@ -58,17 +61,27 @@ The retired perception extension is not a setup prerequisite. Development
 staging may omit the tracker; release qualification requires the strict
 complete bundle. See [Cua integration](ThirdParty/Cua/README.md).
 
-Eye tracking resolves in order: `JARVIS_EYE_TRACKER_DIR`, an `EyeTracking/`
-sibling of the bundle, `~/Library/Application Support/JevVoice/EyeTracking`
-(`make local` symlinks this repo there; `make install-tracker` writes real
-files instead — the no-checkout path), or a payload bundled at
-`Contents/Resources/EyeTracker` (probed via its `EyeTracking` alias).
+The host prefers the launcher in `Contents/Resources/EyeTracker`. Without
+it, the host tries `JARVIS_EYE_TRACKER_DIR`, a sibling `EyeTracking/`
+checkout, then `~/Library/Application Support/JevVoice/EyeTracking`
+(`make local` links the checkout there; `make install-tracker` writes
+real files). Release validation accepts only the bundled payload.
 `make stage` bundles the tracker when the checkout can produce a complete
 payload (built `dist/` + `node_modules`), warns and skips otherwise
 (`SKIP_TRACKER_BUNDLE=1` bypasses);
 `make bundle-tracker` is the strict verified path and `make check-tracker`
 reports which resolution a staged app would use. Boot output lands in
 `~/Library/Application Support/JevVoice/tracker.log`.
+
+For P3 replay, restore the private index and audio under the ignored
+`.context/c1-local/p3-audio/`, or point `JARVIS_P3_RECORDINGS_ROOT` at
+an authorized external directory. The wrapper also accepts
+`--recordings-root PATH`. Replay requires the matching recorded release
+build; it's not a physical mic check. The interactive recorder still writes
+to its ignored phase-owned directory. Keep recordings and replay reports private.
+
+For signed candidate and rollback identities, see the
+[retention inventory](.agent/RETENTION.md).
 
 ## Use the app
 
@@ -109,6 +122,6 @@ offline. Keys stay in Keychain. Do not assume only app names leave the device.
 
 This project originated from [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).
 FluidVoice attribution is in [ThirdParty/FluidVoice](ThirdParty/FluidVoice/NOTICE.md).
-The retained Homebrew cask and release workflow describe the upstream distribution;
-they are not the installation path for this local Cua integration. Publishing or
-retargeting that distribution is outside this cleanup.
+The retained Homebrew cask points at the upstream distribution until this
+repository publishes a tagged release. That workflow updates the cask URL
+and checksum to the archive it published. Use `make local` for development.

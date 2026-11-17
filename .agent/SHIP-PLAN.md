@@ -406,12 +406,12 @@ normal-product proof.
 For future live runs, the common wrapper is:
 
 ```sh
-python3 scripts/with-desktop-lock.py python3 bench/run.py --tag p5 --set test-user --runs 5 --timeout 120 --binary "$JEV_CANDIDATE_BINARY" --out "$JEV_PHASE_RESULTS"
+python3 scripts/with-desktop-lock.py python3 bench/run.py --tag "${JEV_PHASE_TAG:?set a tag from the approved corpus}" --set test-user --runs 5 --timeout 120 --binary "$JEV_CANDIDATE_BINARY" --out "$JEV_PHASE_RESULTS" &&
 python3 bench/report.py "$JEV_PHASE_RESULTS"
 ```
 
 The phase owns its tag/manifest and exact controlled tasks; substitute its
-declared tag. `JEV_CANDIDATE_BINARY` identifies the frozen signed executable,
+declared tag (`p5` is a placeholder, not a shipped task tag). `JEV_CANDIDATE_BINARY` identifies the frozen signed executable,
 and `JEV_PHASE_RESULTS` is a new ignored output file chosen in G2.
 Missing credentials, zero selected tasks, stub/dry-run, wrong subject or
 wrong injector fails qualification. Human-only cases remain human-only.

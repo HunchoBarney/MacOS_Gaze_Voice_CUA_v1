@@ -209,6 +209,13 @@ def main(argv=None):
         return 2
     for t, why in skipped:
         print("skip %s — %s" % (t["id"], why))
+    if not chosen:
+        print("harness error: no runnable tasks match --task/--tag and --set %s"
+              % args.bench_set, file=sys.stderr)
+        return 2
+    if args.runs is not None and args.runs < 1:
+        print("harness error: --runs must be positive", file=sys.stderr)
+        return 2
     stub = args.stub or os.environ.get("BENCH_STUB", "") not in ("", "0")
     binary, api_key = None, None
     if not args.dry_run and not stub:

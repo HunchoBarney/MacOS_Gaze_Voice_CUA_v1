@@ -3,7 +3,7 @@
 # build a half-frozen tree — every build/test goes through this script,
 # in order, failing on the first red step.
 #
-# Usage: scripts/verification-lane.sh [swift|p3|p3-speech-report|p3-release|p3-evidence|eyes|speech|speech-release|all]
+# Default source checks: [all|swift|eyes|tools]. Use release-dist to stage a signed archive.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -21,10 +21,16 @@ run_swift() {
 }
 
 run_eyes() {
+  (cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts)
   echo "== [2/3] EyeTracking typecheck =="
-  (cd EyeTracking && npm run typecheck)
+  (cd EyeTracking && corepack pnpm run typecheck)
   echo "== [3/3] EyeTracking vitest =="
-  (cd EyeTracking && npx --no-install vitest run)
+  (cd EyeTracking && corepack pnpm test)
+}
+
+run_tools() {
+  python3 -B bench/selftest.py
+  python3 -B scripts/test-release.py
 }
 
 case "$scope" in
@@ -610,7 +616,7 @@ PY
   p3-current-replay)
     output=".agent/results/P3/native-current-replay.json"
     [[ ! -e "$output" ]] || { echo "Refusing to overwrite prior replay" >&2; exit 2; }
-    python3 scripts/verify-p3.py replay --recordings-root .agent/results/P3/audio --out "$output"
+    python3 scripts/verify-p3.py replay --out "$output"
     ;;
   p3-normal-closeout)
     run_swift
@@ -807,8 +813,10 @@ PY
     fi
     ;;
   eyes) run_eyes ;;
-  all) run_swift; run_eyes ;;
-  *) echo "usage: $0 [swift|p3|p3-speech-report|p3-release|p3-evidence|eyes|speech|speech-release|all]" >&2; exit 2 ;;
+  tools) run_tools ;;
+  release-dist) make dist ;;
+  all) run_swift; run_eyes; run_tools ;;
+  *) echo "usage: $0 [all|swift|eyes|tools|release-dist|<phase-specific scope>]" >&2; exit 2 ;;
 esac
 
 echo "verification lane green"

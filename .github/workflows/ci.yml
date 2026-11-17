@@ -10,7 +10,10 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Build
-        run: swift build
-      - name: Test
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.0'
+      - name: Run the serialized verification lane
         run: make test

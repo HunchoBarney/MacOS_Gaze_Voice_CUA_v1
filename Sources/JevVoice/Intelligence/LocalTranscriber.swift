@@ -109,7 +109,6 @@ actor LocalTranscriber: LocalTranscriptProvider {
     private let partialCell = CallbackCell<String>()
     private let finalCell = CallbackCell<String>()
     private let progressCell = CallbackCell<Double>()
-    private let utteranceEndCell = VoidCallbackCell()
     private let modelsDirectory: URL
     private let beforePartialProcess: (@Sendable () async -> Void)?
     private let beforeFinalDecode: (@Sendable () async -> Void)?
@@ -192,10 +191,6 @@ actor LocalTranscriber: LocalTranscriptProvider {
         get { progressCell.get() }
         set { progressCell.set(newValue) }
     }
-    nonisolated var onUtteranceEnd: (@Sendable () -> Void)? {
-        get { utteranceEndCell.get() }
-        set { utteranceEndCell.set(newValue) }
-    }
 
     func prepare() async throws {
         if asr != nil, eou != nil { return }
@@ -273,8 +268,6 @@ actor LocalTranscriber: LocalTranscriptProvider {
         partialResets += 1
         await eou.setPartialCallback { text in partial(turn, text) }
         partialCallbackInstalls += 1
-        // EOU may aid display diagnostics but never clears the whole-hold bank.
-        await eou.setEouCallback { [utteranceEndCell] _ in utteranceEndCell.call() }
         guard activeHold == turn, !invalidated else { throw LocalSpeechError.stale }
         partialsEnabled = true
     }

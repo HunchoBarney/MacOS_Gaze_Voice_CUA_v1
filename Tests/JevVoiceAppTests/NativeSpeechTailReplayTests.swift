@@ -93,7 +93,7 @@ final class NativeSpeechTailReplayTests: XCTestCase {
     }
 
     private func confirmedFixture() throws -> URL {
-        let audio = projectRoot.appendingPathComponent(".agent/results/P3/audio")
+        let audio = privateReplayInputs
         let manifest = try XCTUnwrap(JSONSerialization.jsonObject(
             with: Data(contentsOf: audio.appendingPathComponent("manifest.json"))) as? [String: Any])
         let recordings = try XCTUnwrap(manifest["recordings"] as? [[String: Any]])

@@ -60,6 +60,7 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
 const env = { ...process.env, NODE_ENV: "production" };
 delete env.VITE_DEV_SERVER_URL;
 delete env.ELECTRON_RUN_AS_NODE;
+delete env.ELECTRON_OVERRIDE_DIST_PATH;
 
 electron = spawn(electronBin, [".", ...args], {
   cwd: repoRoot,
