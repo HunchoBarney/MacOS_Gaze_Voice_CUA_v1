@@ -27,7 +27,7 @@ def verify(app):
     for name in ("bin/node", "node_modules/.bin/electron",
                  "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"):
         require(name, executable=True)
-    for name in ("TRACKER_BUNDLE.json", "scripts/start-prod.cjs", "electron/main.cjs",
+    for name in ("TRACKER_BUNDLE.json", "scripts/start-prod.cjs", "electron/main.cjs", "electron/preload.cjs",
                  "node_modules/electron/cli.js", "dist/index.html"):
         require(name)
     assets = re.findall(r'(?:src|href)="(\./assets/[^"]+)"', (root / "dist/index.html").read_text())
@@ -35,6 +35,16 @@ def verify(app):
         raise ValueError("renderer index has no bundled script")
     for asset in assets:
         require("dist/" + asset)
+    chunks = json.loads(require("dist/.vite/manifest.json").read_text())
+    entry = require("dist/" + chunks["index.html"]["file"])
+    for chunk in chunks.values():
+        for name in [chunk["file"], *chunk.get("css", []), *chunk.get("assets", [])]:
+            require("dist/" + name)
+    workers = re.findall(r"""['"`](?:\./)?(inferenceWorker-[\w-]+\.js)['"`]""", entry.read_text())
+    if not workers:
+        raise ValueError("renderer entry has no inference worker")
+    for worker in workers:
+        require(str((entry.parent / worker).relative_to(root)))
     for variant in ("", "jsep.", "asyncify.", "jspi."):
         for ext in ("mjs", "wasm"):
             require(f"dist/runtime-assets/onnxruntime-web/ort-wasm-simd-threaded.{variant}{ext}")
@@ -49,9 +59,17 @@ def verify(app):
         raise ValueError("packaged Electron does not match its pin")
     subprocess.run([str(root / "bin/node"), "-e", """
         const path = require('node:path');
-        for (const id of ['electron', 'ws', '@nut-tree-fork/nut-js', 'onnxruntime-web/wasm']) {
-          if (!require.resolve(id).startsWith(process.cwd() + path.sep)) throw Error(id);
-        }
+        const {createRequire} = require('node:module');
+        const local = (loader, id) => {
+          const file = loader.resolve(id);
+          if (!file.startsWith(process.cwd() + path.sep)) throw Error(id);
+          return file;
+        };
+        for (const id of ['electron', 'ws', 'onnxruntime-web/wasm']) local(require, id);
+        const nut = createRequire(local(require, '@nut-tree-fork/nut-js'));
+        const lib = createRequire(local(nut, '@nut-tree-fork/libnut'));
+        const darwin = createRequire(local(lib, '@nut-tree-fork/libnut-darwin'));
+        local(darwin, './build/Release/libnut.node');
     """], cwd=root, env={"PATH": "/usr/bin:/bin"}, check=True)
 
 
@@ -60,5 +78,5 @@ if __name__ == "__main__":
     parser.add_argument("app", type=Path)
     try:
         verify(parser.parse_args().app)
-    except (ValueError, OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+    except (ValueError, KeyError, OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"invalid packaged tracker: {exc}\n")

@@ -66,6 +66,44 @@ class ReleaseTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b"does not resolve inside the app", result.stderr)
 
+    def test_missing_worker_and_dynamic_import_fail_before_signing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "fixture.app"
+            root = app / "Contents/Resources/EyeTracker"
+            for name in ("bin/node", "node_modules/.bin/electron", "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+                         "TRACKER_BUNDLE.json", "scripts/start-prod.cjs", "electron/main.cjs", "electron/preload.cjs",
+                         "node_modules/electron/cli.js", "dist/index.html", "dist/assets/index.js", "dist/.vite/manifest.json"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture")
+                path.chmod(0o700)
+            (root.parent / "EyeTracking").symlink_to("EyeTracker")
+            (root / "dist/index.html").write_text('<script src="./assets/index.js"></script>')
+            (root / "dist/assets/index.js").write_text('new URL("inferenceWorker-123.js", import.meta.url)')
+            (root / "dist/.vite/manifest.json").write_text(json.dumps({
+                "index.html": {"file": "assets/index.js"}, "dynamic": {"file": "assets/inference.js"}}))
+            for missing in ("inference.js", "inferenceWorker-123.js"):
+                result = subprocess.run(["python3", str(ROOT / "scripts/check-packaged-tracker.py"), str(app)],
+                                        capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(("dist/assets/" + missing).encode(), result.stderr)
+                (root / "dist/assets" / missing).write_text("fixture")
+
+    def test_launcher_does_not_inherit_electron_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("dist", "scripts", "node_modules/.bin"):
+                (root / name).mkdir(parents=True)
+            (root / "dist/index.html").touch()
+            launcher = root / "scripts/start-prod.cjs"
+            launcher.write_bytes((ROOT / "EyeTracking/scripts/start-prod.cjs").read_bytes())
+            probe = root / "node_modules/.bin/electron"
+            probe.write_text('#!/bin/sh\ntest -z "${ELECTRON_OVERRIDE_DIST_PATH+x}" && echo fixture-launcher\n')
+            probe.chmod(0o700)
+            result = subprocess.run(["node", launcher], env=dict(os.environ, ELECTRON_OVERRIDE_DIST_PATH="/stale"),
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout.strip(), "fixture-launcher")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

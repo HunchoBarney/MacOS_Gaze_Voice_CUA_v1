@@ -20,6 +20,7 @@ export default defineConfig({
     format: "iife"
   },
   build: {
+    manifest: true,
     outDir: "dist",
     emptyOutDir: true
   }

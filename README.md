@@ -61,11 +61,11 @@ The retired perception extension is not a setup prerequisite. Development
 staging may omit the tracker; release qualification requires the strict
 complete bundle. See [Cua integration](ThirdParty/Cua/README.md).
 
-Eye tracking resolves in order: `JARVIS_EYE_TRACKER_DIR`, an `EyeTracking/`
-sibling of the bundle, `~/Library/Application Support/JevVoice/EyeTracking`
-(`make local` symlinks this repo there; `make install-tracker` writes real
-files instead — the no-checkout path), or a payload bundled at
-`Contents/Resources/EyeTracker` (probed via its `EyeTracking` alias).
+The host prefers the launcher in `Contents/Resources/EyeTracker`. Without
+it, the host tries `JARVIS_EYE_TRACKER_DIR`, a sibling `EyeTracking/`
+checkout, then `~/Library/Application Support/JevVoice/EyeTracking`
+(`make local` links the checkout there; `make install-tracker` writes
+real files). Release validation accepts only the bundled payload.
 `make stage` bundles the tracker when the checkout can produce a complete
 payload (built `dist/` + `node_modules`), warns and skips otherwise
 (`SKIP_TRACKER_BUNDLE=1` bypasses);
@@ -122,6 +122,6 @@ offline. Keys stay in Keychain. Do not assume only app names leave the device.
 
 This project originated from [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).
 FluidVoice attribution is in [ThirdParty/FluidVoice](ThirdParty/FluidVoice/NOTICE.md).
-The retained Homebrew cask and release workflow describe the upstream distribution;
-they are not the installation path for this local Cua integration. Publishing or
-retargeting that distribution is outside this cleanup.
+The retained Homebrew cask points at the upstream distribution until this
+repository publishes a tagged release. That workflow updates the cask URL
+and checksum to the archive it published. Use `make local` for development.
