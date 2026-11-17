@@ -12862,3 +12862,17 @@ old-lane deletions). Staged by named paths, not -A. origin/main merge-base
 C1 acceptance remains OPEN (no acceptance JSON flipped; G6 human speech
 still pending). Staging worktree jarvis-v1-p2d also has its own dirty
 state on ship/v1-p2d, not swept in.
+
+WORKSPACE CLEANUP (user directive): all C1 work committed to main —
+f054002 C1 commit (6564 files) then 45865ef research-note preserve.
+origin/main fast-forwarded 5081f4b -> 45865ef; ship/v1-p3 pushed same.
+Staging worktree (ship/v1-p2d, main worktree) held strictly OLDER
+superseded copies; only unique file was
+development/JevVoice/model-architecture-research.md, preserved in 45865ef.
+Deleted 8 linked worktrees (jarvis-v1-p3-semantic-closeout, p4-m1,
+vision-driver, 5 capy) + staging dir itself after migrating .git into
+jarvis-v1-agent, which is now the sole worktree on main@45865ef clean.
+~8.8GB freed (staging 4.6G + linked trees ~4.2G incl. vision-driver 2.8G).
+Safety net: 5 git stashes hold every deleted worktree's uncommitted state
+(stash@{0} staging p2d, stash@{1-4} capy/jarvis trees) — recoverable via
+`git stash list`. C1 acceptance still OPEN: live G6 speech check pending.
