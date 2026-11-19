@@ -1,6 +1,0 @@
-direct {'baseline': 0.88, 'direct_or_preparation': 0.91}
-opposite {'baseline': 0.02, 'direct_or_preparation': 0.02}
-other-window {'baseline': 0.15, 'direct_or_preparation': 0.17}
-status-only {'baseline': 0.02, 'direct_or_preparation': 0.02}
-explicit-page {'baseline': 0.91, 'direct_or_preparation': 0.91}
-sidebar {'baseline': 0.12, 'direct_or_preparation': 0.13}

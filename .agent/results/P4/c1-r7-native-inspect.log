@@ -1,7 +1,0 @@
-Waiting for the Jarvis desktop test lock…
-Traceback (most recent call last):
-  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r7-native-inspect.py", line 56, in <module>
-    main()
-  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-r7-native-inspect.py", line 31, in main
-    assert len(rows) == 1 and target.stem in rows[0].get("title", rows[0].get("window_title", ""))
-AssertionError

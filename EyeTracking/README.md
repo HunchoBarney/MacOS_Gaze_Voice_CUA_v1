@@ -1,11 +1,8 @@
 # Screen Eye Tracking
 
-> **Drift note (2026-10-18):** this file is upstream-derived reference
-> documentation — CLI flags, API endpoints, model layout. Program
-> direction (P2a Core ML spike, P8/P11 tracker phases, fps/calibration
-> bars) lives in `.agent/PROGRAM.md` and `.agent/phases/`; where this
-> README's runtime claims disagree with current code or the harness,
-> the harness wins.
+> **Note:** this file is upstream-derived reference documentation — CLI
+> flags, API endpoints, model layout. Where it disagrees with the current
+> code, the code wins.
 
 This workspace copy of [PINTO0309/screen-eye-tracking](https://github.com/PINTO0309/screen-eye-tracking)
 at source commit `48b7e37` includes the local calibration and projection changes.

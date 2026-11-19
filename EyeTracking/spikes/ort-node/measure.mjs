@@ -3,7 +3,8 @@
 // model per execution provider (cpu|coreml|wasm), proves CoreML binding in
 // a separate profiling pass, and composes the cadence-weighted chain.
 // Roles/cadences verified against EyeTracking/web/src/inference/*.ts — see
-// .agent/phases/P2a-coreml-tracker.md for the source-line inventory.
+// .agent/phases/P2a-coreml-tracker.md (harness-archive-2026-11-19 tag) for the
+// source-line inventory.
 import { execFileSync } from "node:child_process";
 import {
   existsSync,

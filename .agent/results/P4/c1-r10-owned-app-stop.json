@@ -1,7 +1,0 @@
-{
-  "pid": 84041,
-  "app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-2-ksh975zx/Jev Voice.app",
-  "stopped": true,
-  "method": "NSRunningApplication terminate; JXA zero-argument invocation returned an error after the quit request; process exit independently verified",
-  "daily_app_changed": false
-}

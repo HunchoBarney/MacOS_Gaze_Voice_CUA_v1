@@ -1,4 +1,0 @@
-Timestamp               Ty Process[PID:TID]
-2026-11-16 05:59:38.283 Df JevVoice[2620:1b741d2] [com.chriswozniczek.jevvoice:jev-decision] pick request size state=204471B questions=123553B count=28
-2026-11-16 05:59:38.286 Df JevVoice[2620:1b741d2] [com.chriswozniczek.jevvoice:jev-decision] wire request size state=99383B questions=129321B count=28
-2026-11-16 05:59:38.590 Df JevVoice[2620:1b74297] [com.chriswozniczek.jevvoice:jev-decision] Action decision outcome=requestFailed candidates=20 selectedP=-1.0 support=-1.0 floor=0.7 supportFloor=0.9 accepted=unknown

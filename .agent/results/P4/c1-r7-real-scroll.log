@@ -1,8 +1,0 @@
-Waiting for the Jarvis desktop test lock…
-c1-owned-scroll-0 blocked verified=False wall_ms=1199.924040999999
-Traceback (most recent call last):
-  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 164, in <module>
-    main()
-  File "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll.py", line 144, in main
-    assert row["strict_success"] and not row["false_done"]
-AssertionError
