@@ -27,7 +27,7 @@ jobs:
         run: SIGN_IDENTITY=- make release
       - name: Check the packaged app
         run: |
-          app="build/Jev Voice.app"
+          app="build/Jarvis.app"
           codesign --verify --deep --strict "$app"
           python3 scripts/check-packaged-tracker.py "$app"
           test "$app/Contents/Resources/CodexRuntime/codex" -ef "$app/Contents/Resources/CodexRuntime/bin/codex"

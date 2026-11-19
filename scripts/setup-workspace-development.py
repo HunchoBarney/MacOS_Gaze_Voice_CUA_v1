@@ -2,7 +2,7 @@
 """Prepare workspace-local development directories in a worktree.
 
 The repo is self-contained: cua-source is tracked, everything else under
-development/JevVoice is local generated output. This script verifies the
+development/Jarvis is local generated output. This script verifies the
 tracked source is complete, creates the local output directories, and
 writes the workspace asset note.
 """
@@ -20,12 +20,12 @@ LOCAL_DIRS = ('build', 'staging', 'probe', 'verification', 'perception-export-en
 def tracked_source_files(workspace):
     result = subprocess.run(
         ['git', '-C', str(workspace), 'ls-files', '-z', '--',
-         'development/JevVoice/cua-source/'],
+         'development/Jarvis/cua-source/'],
         capture_output=True, check=False,
     )
     if result.returncode:
         return set()
-    prefix = 'development/JevVoice/cua-source/'
+    prefix = 'development/Jarvis/cua-source/'
     return {name.decode()[len(prefix):] for name in result.stdout.split(b'\0')
             if name}
 
@@ -43,11 +43,11 @@ def setup(workspace):
         raise RuntimeError('Workspace tracks only part of the preserved Cua source')
     if not tracked:
         raise RuntimeError(
-            'development/JevVoice/cua-source is not tracked on this branch; '
+            'development/Jarvis/cua-source is not tracked on this branch; '
             'worktrees need a branch where it is')
     if development.is_symlink():
         development.unlink()  # Only the link, never its target.
-    local = development / 'JevVoice'
+    local = development / 'Jarvis'
     local.mkdir(parents=True, exist_ok=True)
     if local.is_symlink() or (local / 'cua-source').is_symlink():
         raise RuntimeError('Local source/output directories must not be symlinks')
@@ -66,7 +66,7 @@ def setup(workspace):
         target.mkdir(exist_ok=True)
     (development / 'AGENTS.md').write_text('''# Workspace development assets
 
-`JevVoice/` is workspace-local. Git tracks `cua-source/` and small text
+`Jarvis/` is workspace-local. Git tracks `cua-source/` and small text
 files; everything else here is generated output and stays ignored.
 Keep all new build/test/export output inside this workspace.
 ''')

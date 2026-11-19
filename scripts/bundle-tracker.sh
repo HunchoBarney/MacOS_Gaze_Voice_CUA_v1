@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stage the eye tracker into the app bundle (or another destination) so a
-# bare `Jev Voice.app` can run gaze without a sibling checkout, a symlink,
+# bare `Jarvis.app` can run gaze without a sibling checkout, a symlink,
 # or env vars.
 #
 # Produces a tracker root whose layout mirrors an EyeTracking checkout —
@@ -55,7 +55,7 @@
 #                                        instead of inside an app — the
 #                                        installed-layout path
 #                                        (~/Library/Application Support/
-#                                        JevVoice/EyeTracking), which is
+#                                        Jarvis/EyeTracking), which is
 #                                        writable at runtime so calibration
 #                                        files don't dirty the bundle
 #
@@ -79,7 +79,7 @@ done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TRACKER_SRC="${TRACKER_SRC:-$ROOT/EyeTracking}"
-[[ -n "$APP" ]] || APP="$ROOT/build/Jev Voice.app"
+[[ -n "$APP" ]] || APP="$ROOT/build/Jarvis.app"
 [[ -n "$DEST" ]] || DEST="$APP/Contents/Resources/EyeTracker"
 
 log()  { echo "bundle-tracker: $*"; }
@@ -289,8 +289,8 @@ fi
 STAGED_EAPP="$STAGE/node_modules/electron/dist/Electron.app"
 [[ -d "$STAGED_EAPP" ]] || STAGED_EAPP="$STAGE/node_modules/.pnpm/electron@"*/node_modules/electron/dist/Electron.app
 if [[ -d "$STAGED_EAPP" ]]; then
-	USAGE="Jev Voice uses the camera for eye tracking."
-	PRODUCT="Jev Voice Eye Tracking"
+	USAGE="Jarvis uses the camera for eye tracking."
+	PRODUCT="Jarvis Eye Tracking"
 	patched=1
 	for plist in "$STAGED_EAPP/Contents/Info.plist" "$STAGED_EAPP"/Contents/Frameworks/Electron\ Helper*.app/Contents/Info.plist; do
 		[[ -f "$plist" ]] || continue

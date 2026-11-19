@@ -30,10 +30,10 @@ RESULTS = os.path.join(SPIKE, "results")
 RESULTS_JSON = os.path.join(RESULTS, "results.json")
 
 CUA_BIN = os.path.expanduser(
-    "~/jarvis-local/Jev Voice.app/Contents/Resources/cua-driver")
+    "~/jarvis-local/Jarvis.app/Contents/Resources/cua-driver")
 CUA_SOCKET_HINT = os.path.expanduser(
-    "~/Library/Application Support/JevVoice/cua.socket")
-HOST_BUNDLE_ID = "com.chriswozniczek.jevvoice"
+    "~/Library/Application Support/Jarvis/cua.socket")
+HOST_BUNDLE_ID = "com.karanvirkang.jarvis"
 DEVTOOLS_BIN = os.path.join(
     SPIKE, "node_modules", ".bin", "chrome-devtools-mcp")
 DEVTOOLS_PORT_FILE = os.path.expanduser(

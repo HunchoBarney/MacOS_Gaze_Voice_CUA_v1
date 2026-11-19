@@ -5,14 +5,14 @@ build/
 .swiftpm
 /.context/
 /development/AGENTS.md
-/development/JevVoice/**
-!/development/JevVoice/cua-source/**
-!/development/JevVoice/**/
-!/development/JevVoice/**/*.json
-!/development/JevVoice/**/*.md
-!/development/JevVoice/**/*.txt
-!/development/JevVoice/**/*.log
-/development/JevVoice/**/*.app/**
+/development/Jarvis/**
+!/development/Jarvis/cua-source/**
+!/development/Jarvis/**/
+!/development/Jarvis/**/*.json
+!/development/Jarvis/**/*.md
+!/development/Jarvis/**/*.txt
+!/development/Jarvis/**/*.log
+/development/Jarvis/**/*.app/**
 
 # Per-workspace Conductor overrides can contain local paths/settings.
 .conductor/settings.local.toml

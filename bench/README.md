@@ -1,6 +1,6 @@
 # jev bench
 
-Unattended bench for Jev Voice: drives the real `DriveLoop` through the
+Unattended bench for Jarvis: drives the real `DriveLoop` through the
 app's `--mcp-stdio` MCP surface (`drive_until`), verifies end-state
 independently (zero-false-Done discipline), and reports Wilson-CI success
 rates + wall-clock latency. Python 3 stdlib only — no third-party deps.
@@ -51,12 +51,12 @@ The report also rejects an input with no rows; diagnostic rows from a
 nonempty dry run remain reportable.
 
 - The app installed and running so the Cua daemon socket exists
-  (`~/Library/Application Support/JevVoice/cua.socket`) — `make local`.
+  (`~/Library/Application Support/Jarvis/cua.socket`) — `make local`.
 - `TYPESAFE_API_KEY`: taken from the environment, else fetched from the
-  Keychain item `com.chriswozniczek.jevvoice` / `typesafeAPIKey`. The
+  Keychain item `com.karanvirkang.jarvis` / `typesafeAPIKey`. The
   value is never logged or written. Unavailable → every run's row is
   `blocked:keychain` (a result, not a crash).
-- Mutating calls need `policy.json` `standingGrant: true` (Jev Voice
+- Mutating calls need `policy.json` `standingGrant: true` (Jarvis
   settings); without it `drive_until` returns the missing-grant
   `Blocked:` text — recorded as data.
 - `ax_state`/`app_frontmost`/`dom_state` verifiers drive `osascript` —

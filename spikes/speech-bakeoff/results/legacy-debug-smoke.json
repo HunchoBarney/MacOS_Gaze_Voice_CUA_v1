@@ -2,7 +2,7 @@
   "probe" : {
     "date" : "2026-10-20T00:43:29Z",
     "speech_locale" : "en_US supported=true installed=true",
-    "parakeet_models_root" : "\/Users\/karanvirkang\/Library\/Application Support\/JevVoice\/Models",
+    "parakeet_models_root" : "\/Users\/karanvirkang\/Library\/Application Support\/Jarvis\/Models",
     "fluidaudio_pin" : "0.17.5",
     "os" : "Version 26.2 (Build 25C56)",
     "parakeet_models_bytes" : "1385967076"

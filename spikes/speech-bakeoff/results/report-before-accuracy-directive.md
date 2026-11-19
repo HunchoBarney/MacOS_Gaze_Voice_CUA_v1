@@ -122,7 +122,7 @@ Apple shared service observations (not causally attributable to this process):
 - [verified] speechanalyzer-fast: 45/45 rows emit a partial before scheduled audio end; feed lag p50 10.6 ms; per-turn prepare p50 30.6 ms.
 - speechanalyzer-fast target hits: first partial <=300 ms 0/45, final <=200 ms 41/45; partial-update gap p50/p95 0.1/964.6 ms. Missing partials are misses, not zero latency.
 - [verified] This is chunked-file replay, not the app's Fn/microphone front door. Mid-stream output does not establish production routing is correct or that first partials meet 300 ms.
-- [code-inspected] Concrete display-wiring gap: `Sources/JevVoice/main.swift:599-613` connects local partials only to LocalCommandRouter when spotting is enabled, and clears callbacks in STT-only mode. `LocalCommandRouter.swift:146-157` uses partials for command speculation, not transcript display.
+- [code-inspected] Concrete display-wiring gap: `Sources/Jarvis/main.swift:599-613` connects local partials only to LocalCommandRouter when spotting is enabled, and clears callbacks in STT-only mode. `LocalCommandRouter.swift:146-157` uses partials for command speculation, not transcript display.
 - [code-inspected] The visible partial event instead comes from remote transcript deltas (`RealtimeVoiceLane.swift:716-720`), which `VoiceController.swift:988-993` copies into the overlay. P3 must wire turn-tagged LOCAL partials to that display path without dispatching actions twice.
 - [unverified] Fn-up/start races, local model-readiness drops and backlog remain additional integration hypotheses. The shipped app's physical Fn/mic path still needs a live check after the P3 wiring fix.
 

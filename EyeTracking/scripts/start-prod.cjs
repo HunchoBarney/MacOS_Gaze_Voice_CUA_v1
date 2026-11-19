@@ -1,4 +1,4 @@
-// Production launch without pnpm — the host (Jev Voice) spawns this
+// Production launch without pnpm — the host (Jarvis) spawns this
 // directly, so nothing here may depend on the package manager being on
 // PATH. `pnpm build` must have already produced dist/.
 const { spawn } = require("child_process");

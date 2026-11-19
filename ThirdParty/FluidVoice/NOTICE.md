@@ -4,4 +4,4 @@ Selected visual and panel patterns are adapted from [FluidVoice](https://github.
 
 Sources: `Sources/Fluid/Views/BottomOverlayView.swift` (panel configuration and center-weighted waveform), `Sources/Fluid/Theme/Components/ThemedCard.swift` (card shape/material treatment), and `Sources/Fluid/Theme/AppTheme.swift` (spacing and corner scales).
 
-Adapted into `Sources/JevVoice/VoiceStyle.swift` and `Sources/JevVoice/VoiceWindows.swift`. Application services, speech engines, persistence, analytics, updates, and model code were not imported. The shortcut state machine is a separate implementation informed by the upstream event-tap approach.
+Adapted into `Sources/Jarvis/VoiceStyle.swift` and `Sources/Jarvis/VoiceWindows.swift`. Application services, speech engines, persistence, analytics, updates, and model code were not imported. The shortcut state machine is a separate implementation informed by the upstream event-tap approach.

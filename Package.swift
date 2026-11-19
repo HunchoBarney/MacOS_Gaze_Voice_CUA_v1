@@ -2,27 +2,27 @@
 import PackageDescription
 
 let package = Package(
-    name: "JevVoice",
+    name: "Jarvis",
     platforms: [.macOS("26.0")],
     targets: [
         .target(
-            name: "JevVoiceCore",
-            path: "Sources/JevVoiceCore"
+            name: "JarvisCore",
+            path: "Sources/JarvisCore"
         ),
         .executableTarget(
-            name: "JevVoice",
-            dependencies: ["JevVoiceCore"],
-            path: "Sources/JevVoice"
+            name: "Jarvis",
+            dependencies: ["JarvisCore"],
+            path: "Sources/Jarvis"
         ),
         .testTarget(
-            name: "JevVoiceTests",
-            dependencies: ["JevVoiceCore"],
-            path: "Tests/JevVoiceTests"
+            name: "JarvisTests",
+            dependencies: ["JarvisCore"],
+            path: "Tests/JarvisTests"
         ),
         .testTarget(
-            name: "JevVoiceAppTests",
-            dependencies: ["JevVoice", "JevVoiceCore"],
-            path: "Tests/JevVoiceAppTests"
+            name: "JarvisAppTests",
+            dependencies: ["Jarvis", "JarvisCore"],
+            path: "Tests/JarvisAppTests"
         ),
     ]
 )

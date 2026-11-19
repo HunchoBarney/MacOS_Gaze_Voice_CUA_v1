@@ -28,7 +28,7 @@ def sh(cmd):
         return ""
 
 
-support = os.path.expanduser("~/Library/Application Support/JevVoice")
+support = os.path.expanduser("~/Library/Application Support/Jarvis")
 
 sock_path = os.environ.get("JEV_CUA_SOCKET") or None
 if not sock_path:
@@ -62,7 +62,7 @@ except Exception:
     ram_gb = None
 
 plist = os.path.expanduser(
-    "~/jarvis-local/Jev Voice.app/Contents/Info.plist")
+    "~/jarvis-local/Jarvis.app/Contents/Info.plist")
 try:
     with open(plist, "rb") as fh:
         app_version = plistlib.load(fh).get(

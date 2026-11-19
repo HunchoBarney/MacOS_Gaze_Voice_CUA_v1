@@ -154,7 +154,7 @@ function hasFlag(args, name) {
   return args.includes(name);
 }
 
-// "--no-tray" is the hosted-mode marker: Jev Voice launches the tracker as
+// "--no-tray" is the hosted-mode marker: Jarvis launches the tracker as
 // `node scripts/dev.cjs --external-api --no-tray`, and the host's menu-bar
 // item owns every control (pause/recalibrate route through POST /control).
 // Detection keys on the flag, never on JARVIS_* env vars — a shell can leak
@@ -780,7 +780,7 @@ function rebuildTrayMenu() {
       ]
     },
     { type: "separator" },
-    // Only reachable in standalone dev — the Jev Voice-spawned tracker
+    // Only reachable in standalone dev — the Jarvis-spawned tracker
     // always passes --no-tray, so this never competes with the host's quit.
     { label: "Quit", click: () => app.quit() }
   ]);
@@ -814,7 +814,7 @@ function maybeCreateTray(args) {
   }
 }
 
-// Under Jev Voice the tracker is a background service — the host's menu-bar
+// Under Jarvis the tracker is a background service — the host's menu-bar
 // item owns all chrome, so any Electron surface (Dock tile, Cmd-Tab entry,
 // menu bar if the process is ever activated) reads as a second app. macOS
 // only: app.dock and the activation policy don't exist elsewhere, and the
@@ -837,7 +837,7 @@ function applyHostedChromePolicy() {
     // Cosmetic only — system surfaces that still resolve a name show the
     // tracker rather than "Electron". Nothing reads app.getName() or the
     // userData path, so this shifts nothing.
-    app.setName("Jev Voice Eye Tracking");
+    app.setName("Jarvis Eye Tracking");
   } catch (error) {
     console.error(`Failed to suppress Electron chrome in hosted mode: ${error instanceof Error ? error.message : error}`);
   }
@@ -1033,7 +1033,7 @@ function createWindow() {
     // OS surfaces that read a window title (screen-share pickers, a11y
     // tools) should name the product, not "Electron". The page-title-updated
     // pin below keeps the renderer's <title> from overwriting it on load.
-    title: "Jev Voice Eye Tracking",
+    title: "Jarvis Eye Tracking",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -1423,9 +1423,9 @@ ipcMain.on("set-settings", (_event, patch) => {
 
 app.whenReady().then(async () => {
   // First in line — every beat of Dock/menu-bar visibility reads as a
-  // second app next to Jev Voice.
+  // second app next to Jarvis.
   applyHostedChromePolicy();
-  // Host-death watchdog: Jev Voice passes --host-pid so a spawned tracker
+  // Host-death watchdog: Jarvis passes --host-pid so a spawned tracker
   // can never outlive the app — a crashed, force-quit, or wedged-shutdown
   // host means this process must be gone too (the graceful /control quit
   // only covers an orderly stop). Predicate + polling semantics live in
@@ -1498,7 +1498,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  // Hosted mode is a background service — Jev Voice owns the lifecycle and
+  // Hosted mode is a background service — Jarvis owns the lifecycle and
   // terminates the process itself, so window teardown must never quit it
   // (that would sever POST /control). The overlay has no close affordance,
   // so reaching here means an explicit app.quit() is already in flight —

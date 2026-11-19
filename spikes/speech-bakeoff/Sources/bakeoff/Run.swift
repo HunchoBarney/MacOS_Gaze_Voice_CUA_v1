@@ -97,7 +97,7 @@ enum Run {
             switch engine {
             case "parakeet":
                 let root = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/JevVoice/Models")
+                    .appendingPathComponent("Library/Application Support/Jarvis/Models")
                 let drv = ParakeetDriver(modelsRoot: root)
                 do {
                     try await drv.load()
