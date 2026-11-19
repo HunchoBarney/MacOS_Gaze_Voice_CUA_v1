@@ -15,11 +15,11 @@
     "@mediapipe/tasks-vision": "1.2.3",
     "@nut-tree-fork/nut-js": "4.2.6",
     "@vitejs/plugin-react": "6.0.2",
-    "electron": "42.4.1",
+    "electron": "42.11.16",
     "onnxruntime-web": "1.30.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "vite": "8.0.16",
+    "vite": "8.1.6",
     "ws": "8.21.0"
   },
   "devDependencies": {
