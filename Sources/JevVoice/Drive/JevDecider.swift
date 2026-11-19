@@ -596,18 +596,19 @@ actor JevDecider: Decider {
     /// "(under your eyes)". Native AX frames and gaze are both global
     /// top-left screen points. The smallest containing frame wins; a
     /// hint, never a filter or reorder.
+    /// Gaze narrows the pick without filtering it: the smallest control
+    /// under the gaze point reads "(under your eyes)", and up to two more
+    /// inside the user's measured error band (2σ) read "(near your gaze)",
+    /// so a near-miss fixation still points the chooser at the right one.
     private func markGazeHit(_ candidates: inout [Candidate],
                              point: GazeSample) {
-        var hit: (index: Int, area: Double)?
-        for (i, c) in candidates.enumerated() {
-            guard let element = c.element,
-                  let frame = DriveLoop.nativeAXScreenRect(element),
-                  frame.contains(CGPoint(x: point.x, y: point.y))
-            else { continue }
-            let area = element.frame.w * element.frame.h
-            if hit == nil || area < hit!.area { hit = (i, area) }
+        let frames = candidates.map { $0.element.flatMap { DriveLoop.nativeAXScreenRect($0) } }
+        let near = GazeErrorBand.nearest(frames: frames, to: CGPoint(x: point.x, y: point.y),
+                                         bandPt: 2 * GazeErrorBand.sigmaPt())
+        for (rank, hit) in near.prefix(3).enumerated() {
+            candidates[hit.index].description += rank == 0 && hit.distance == 0
+                ? " (under your eyes)" : " (near your gaze)"
         }
-        if let hit { candidates[hit.index].description += " (under your eyes)" }
     }
 
     /// The state the pick sees — text only, same shape the loop's

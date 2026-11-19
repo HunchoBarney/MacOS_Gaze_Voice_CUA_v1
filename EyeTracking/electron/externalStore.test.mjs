@@ -440,8 +440,9 @@ describe("external API control endpoint", () => {
     }
     expect(calls).toHaveLength(CONTROL_ACTIONS.size - 1);
     // Coverage pin: a new action must join this loop deliberately, not slip
-    // in unwired — 12 today (11 menu actions + quit, which routes to onQuit).
-    expect(CONTROL_ACTIONS.size).toBe(12);
+    // in unwired — 13 today (12 menu actions incl. accuracy_check + quit,
+    // which routes to onQuit).
+    expect(CONTROL_ACTIONS.size).toBe(13);
   });
 
   it("set_paused requires a boolean value — non-booleans are 400", async () => {

@@ -3,6 +3,21 @@ import { createRoot } from "react-dom/client";
 import type { AcceleratorName, BackendMessage, CalibrationTier, OverlayRegion, RendererConfig, RuntimeName, UserSettings, VerifyVerdict } from "./global";
 import { startWebRuntime, type WebRuntimeController } from "./inference/webRuntime";
 import { regionOfTarget } from "./inference/core";
+import {
+  ACCURACY_GRID,
+  buildHitTrials,
+  heldOutReport,
+  hitRateReport,
+  HIT_RADII_DEG,
+  HIT_TIMEOUT_MS,
+  HIT_TRIALS_PER_RADIUS,
+  median,
+  mmPerPoint,
+  shuffled,
+  updateHitTrial,
+  type Geometry,
+  type HitTrial
+} from "./accuracyProtocol";
 import { logStatus } from "./logger";
 import { advanceDotSpring, GAZE_STALE_MS, headTilted, isSaccadeJump, leadTarget, schedulePreviewExpiry, shouldRetryCalibrationCapture, TILT_CLEAR_MS } from "./uiState";
 import "./styles.css";
@@ -100,16 +115,16 @@ const VERIFY_SPEED = 0.7;
 const VERIFY_DWELL_MS = 700;
 const VERIFY_LEAD_IN_MS = 700;
 
-// Accuracy test (--accuracy-test): after calibration, stare at each point for
-// a dwell while the gaze stream is scored against it — the instrument that
-// turns "feels accurate" into a number, split by screen region.
-const ACCURACY_POINTS: [number, number][] = [
-  [0.5, 0.5],
-  [0.06, 0.06], [0.94, 0.06], [0.94, 0.94], [0.06, 0.94],
-  [0.5, 0.06], [0.94, 0.5], [0.5, 0.94], [0.06, 0.5]
-];
-const ACCURACY_DWELL_MS = 2600;
-const ACCURACY_SETTLE_MS = 800;
+// Accuracy test (--accuracy-test): after calibration, the JARA-27 protocol
+// v1 held-out grid — 16 targets in random order, 1.5 s each, scoring only
+// what lands after the first 0.5 s on frames not flagged blink/held.
+// --hit-test appends protocol step 3 (circular-target hit rate). Both run as
+// one modal: steps past the grid are hit trials.
+const ACCURACY_DWELL_MS = 1500;
+const ACCURACY_SETTLE_MS = 500;
+const HIT_STEPS = HIT_RADII_DEG.length * HIT_TRIALS_PER_RADIUS;
+
+type AccuracyStep = { kind: "grid"; target: [number, number] } | { kind: "hit"; trial: HitTrial };
 
 // Result/warning messages get this long on the status line before the ~15Hz
 // gaze stream is allowed to reassert "tracking" over them.
@@ -135,6 +150,8 @@ interface AccuracyBucket {
   target: [number, number];
   collectFrom: number;
   errors: number[];
+  points: [number, number][];
+  distances: number[];
   inference: number[];
   intervals: number[];
 }
@@ -311,6 +328,23 @@ function App() {
   const accuracyCollectRef = useRef<AccuracyBucket | null>(null);
   const accuracyBucketsRef = useRef<AccuracyBucket[]>([]);
   const accuracyStartedRef = useRef(false);
+  const accuracyPlanRef = useRef<AccuracyStep[]>([]);
+  const hitStateRef = useRef<{ onset: number; insideSince: number | null } | null>(null);
+  const hitGeometryRef = useRef<Geometry | null>(null);
+  const finalizeAccuracyTestRef = useRef<() => void>(() => undefined);
+  // Protocol step 1: wall time from countdown to save, and whether the
+  // verify gate passed on the first capture.
+  const calibrationStartedAtRef = useRef<number | null>(null);
+  const calibrationRunRef = useRef<{ wall_ms: number; first_try_pass: boolean } | null>(null);
+  // --calibrate-if-missing: the host's first enable starts calibration itself
+  // instead of showing the invitation card.
+  const [autoCalibrate, setAutoCalibrate] = useState(false);
+  // A Settings-initiated accuracy check: runs grid + hit test like
+  // --accuracy-test --hit-test, after its own calibration.
+  const [accuracyCheck, setAccuracyCheck] = useState(false);
+  const accuracyCheckRef = useRef(false);
+  const autoCalibrateRef = useRef(false);
+  autoCalibrateRef.current = autoCalibrate;
   const lastDriftTriggerRef = useRef(0);
   const calibrationActiveRef = useRef(false);
   const accuracyIndexRef = useRef<number | null>(null);
@@ -491,6 +525,7 @@ function App() {
     rejectedFitRetriesRef.current = 0;
     setCalibrationTier(tier);
     setCalibrationNotice("calibrating — just look at the dot when it stops");
+    calibrationStartedAtRef.current = Date.now();
     setCalibrationCountdown(3);
   }, [applyPausedState]);
 
@@ -600,15 +635,32 @@ function App() {
       if (headTilted(payload.yaw_deg, payload.pitch_deg)) {
         poseBlockedUntilRef.current = receivedAt + TILT_CLEAR_MS;
       }
-      // Accuracy-test collection: error in display pixels, plus perf counters.
+      // Accuracy-test collection in display points, plus perf counters.
+      // Blink, held and head-turned frames are the protocol's discards.
+      const bounds = configRef.current?.displayBounds;
+      const w = bounds?.width ?? window.innerWidth;
+      const h = bounds?.height ?? window.innerHeight;
+      const usable = !payload.blink && !payload.held_reason && !payload.head_turned;
       const bucket = accuracyCollectRef.current;
-      if (bucket && receivedAt >= bucket.collectFrom) {
-        const bounds = configRef.current?.displayBounds;
-        const w = bounds?.width ?? window.innerWidth;
-        const h = bounds?.height ?? window.innerHeight;
+      if (bucket && receivedAt >= bucket.collectFrom && usable) {
         bucket.errors.push(Math.hypot((payload.x_norm - bucket.target[0]) * w, (payload.y_norm - bucket.target[1]) * h));
+        bucket.points.push([payload.x_norm * w, payload.y_norm * h]);
+        if (Number.isFinite(payload.distance_m)) bucket.distances.push(payload.distance_m);
         if (payload.inference_ms !== undefined) bucket.inference.push(payload.inference_ms);
         if (payload.frame_interval_ms !== undefined) bucket.intervals.push(payload.frame_interval_ms);
+      }
+      const step = accuracyIndexRef.current !== null ? accuracyPlanRef.current[accuracyIndexRef.current] : undefined;
+      const hitState = hitStateRef.current;
+      const hitGeometry = hitGeometryRef.current;
+      if (step?.kind === "hit" && hitState && hitGeometry && step.trial.hit === null) {
+        const gazePt: [number, number] | null = usable ? [payload.x_norm * w, payload.y_norm * h] : null;
+        if (updateHitTrial(step.trial, hitState, gazePt, hitGeometry, receivedAt)) {
+          const next = accuracyIndexRef.current! + 1;
+          setAccuracyIndex(next < accuracyPlanRef.current.length ? next : null);
+          if (next >= accuracyPlanRef.current.length) {
+            finalizeAccuracyTestRef.current();
+          }
+        }
       }
     } else if (payload.type === "status") {
       if (!payload.logged) {
@@ -659,10 +711,16 @@ function App() {
         window.gazeBridge.reportState?.({ calibration_status: payload.status });
       }
       if (payload.status === "missing") {
-        // First run: no calibration on disk — invite, don't hijack.
+        // First run: no calibration on disk — invite, don't hijack. Under the
+        // host's --calibrate-if-missing (first enable) it starts directly; a
+        // "not now" from an earlier run still holds.
         if (!calibrationActiveRef.current && accuracyIndexRef.current === null && !onboardingDismissedRef.current) {
-          onboardingRef.current = true;
-          setOnboarding(true);
+          if (configRef.current?.calibrateIfMissing) {
+            setAutoCalibrate(true);
+          } else {
+            onboardingRef.current = true;
+            setOnboarding(true);
+          }
         }
       } else if (payload.status === "loaded" || payload.status === "invalid") {
         onboardingRef.current = false;
@@ -684,9 +742,36 @@ function App() {
         );
       }
       if (payload.status === "saved") {
+        if (calibrationStartedAtRef.current !== null) {
+          calibrationRunRef.current = {
+            wall_ms: Date.now() - calibrationStartedAtRef.current,
+            first_try_pass: rejectedFitRetriesRef.current === 0
+          };
+          calibrationStartedAtRef.current = null;
+        }
+        // The verify pass's held-out error, in display points, is the
+        // host's measured gaze spread until an accuracy test supersedes it
+        // (GazeErrorBand reads whichever report is newer). Verify errors are
+        // normalized, so √(w·h) converts them without an axis bias.
+        const verdict = payload.verdict ?? lastVerdictRef.current;
+        if (verdict) {
+          const bounds = configRef.current?.displayBounds;
+          const scale = Math.sqrt((bounds?.width ?? window.innerWidth) * (bounds?.height ?? window.innerHeight));
+          void window.gazeBridge
+            .writeReport("calibration_report.json", {
+              kind: "calibration",
+              created_at: new Date().toISOString(),
+              detector: configRef.current?.webInference?.detector,
+              verdict,
+              median_pt: verdict.median * scale,
+              p90_pt: verdict.p90 * scale,
+              calibration_run: calibrationRunRef.current
+            })
+            .catch((error) => console.error("Calibration report write failed", error));
+        }
         rejectedFitRetriesRef.current = 0;
         // The accuracy run shows its own report flow — no confetti on top.
-        if (!configRef.current?.accuracyTest) {
+        if (!configRef.current?.accuracyTest && !configRef.current?.hitTest && !accuracyCheckRef.current) {
           setCalibratedFlash(true);
         }
         dismissOnboarding();
@@ -744,6 +829,16 @@ function App() {
       } else if (payload.action === "recalibrate") {
         // Menu entry — the same quick top-up ⌘⇧G performs.
         beginCalibration("quick");
+      } else if (payload.action === "accuracy_check") {
+        // Settings → "Check eye-tracking accuracy": a full calibration, then
+        // the held-out grid and the hit test, without any launch flags.
+        if (calibrationActiveRef.current || accuracyIndexRef.current !== null) {
+          return;
+        }
+        accuracyStartedRef.current = false;
+        accuracyCheckRef.current = true;
+        setAccuracyCheck(true);
+        beginCalibration("full");
       } else if (payload.action === "dot_scale") {
         const scale =
           typeof payload.value === "number" && Number.isFinite(payload.value)
@@ -935,7 +1030,7 @@ function App() {
   }, [calibratedFlash]);
 
   useEffect(() => {
-    if (!config?.calibrate || calibrationDone || calibrationStartedRef.current) {
+    if (!(config?.calibrate || autoCalibrate) || calibrationDone || calibrationStartedRef.current) {
       return;
     }
     if (!gazePresence.live) {
@@ -953,8 +1048,9 @@ function App() {
     rejectedFitRetriesRef.current = 0;
     setCalibrationTier(config?.calibrationTier ?? "full");
     setCalibrationNotice("calibrating — just look at the dot when it stops");
+    calibrationStartedAtRef.current = Date.now();
     setCalibrationCountdown(3);
-  }, [config?.calibrate, config?.calibrationTier, calibrationDone, gazePresence.live]);
+  }, [config?.calibrate, config?.calibrationTier, autoCalibrate, calibrationDone, gazePresence.live]);
 
   // ⌘⇧G (registered globally in the main process) is the user-invoked
   // recalibration path — also what the drift notice points at. It's the
@@ -1104,13 +1200,39 @@ function App() {
     };
   }, [pursuitActive, pursuitRun, calibrationTier]);
 
+  // Display points, physical scale and viewing distance for angular scoring:
+  // the tape distance when the run was given one, else the tracker's own.
+  const protocolGeometry = useCallback((distances: number[]): Geometry => {
+    const current = configRef.current;
+    const widthPt = current?.displayBounds?.width ?? window.innerWidth;
+    const heightPt = current?.displayBounds?.height ?? window.innerHeight;
+    const tapeCm = current?.viewingDistanceCm;
+    return {
+      widthPt,
+      heightPt,
+      mmPerPt: mmPerPoint(current?.webInference?.displaySizeInch ?? 13.3, widthPt, heightPt),
+      distanceM: tapeCm && tapeCm > 0 ? tapeCm / 100 : median(distances) ?? 0.6
+    };
+  }, []);
+
+  const appendHitTrials = useCallback(() => {
+    if (!configRef.current?.hitTest && !accuracyCheckRef.current) {
+      return;
+    }
+    const geometry = protocolGeometry(accuracyBucketsRef.current.flatMap((b) => b.distances));
+    hitGeometryRef.current = geometry;
+    accuracyPlanRef.current.push(...buildHitTrials(geometry).map((trial): AccuracyStep => ({ kind: "hit", trial })));
+  }, [protocolGeometry]);
+
   // Accuracy test start: after calibration when both flags are set, otherwise
   // once tracking is live. The test measures whatever map is loaded.
   useEffect(() => {
-    if (!config?.accuracyTest || accuracyStartedRef.current) {
+    const runGrid = Boolean(config?.accuracyTest || accuracyCheck);
+    const runHit = Boolean(config?.hitTest || accuracyCheck);
+    if (!config || !(runGrid || runHit) || accuracyStartedRef.current) {
       return;
     }
-    if (config.calibrate && !calibrationDone) {
+    if ((config.calibrate || autoCalibrate || accuracyCheck) && !calibrationDone) {
       return;
     }
     if (!gazePresence.live || calibrationCountdown !== null || pursuitActive) {
@@ -1119,17 +1241,28 @@ function App() {
     accuracyStartedRef.current = true;
     accuracyIndexRef.current = 0;
     accuracyBucketsRef.current = [];
+    hitGeometryRef.current = null;
+    // Hit trials are sized from the grid's measured distance, so they're
+    // appended when the grid finishes (or right away for --hit-test alone).
+    accuracyPlanRef.current = runGrid ? shuffled(ACCURACY_GRID).map((target): AccuracyStep => ({ kind: "grid", target })) : [];
+    if (!runGrid) {
+      appendHitTrials();
+    }
     // The test owns the screen — a first-run card still up must not linger
     // over the modal (same teardown the calibration paths do).
     onboardingRef.current = false;
     setOnboarding(false);
     setAccuracyIndex(0);
     showStatus("accuracy test — stare at each dot", "info");
-  }, [config, calibrationDone, gazePresence.live, calibrationCountdown, pursuitActive, showStatus]);
+  }, [config, autoCalibrate, accuracyCheck, calibrationDone, gazePresence.live, calibrationCountdown, pursuitActive, showStatus, appendHitTrials]);
 
   const finalizeAccuracyTest = useCallback(() => {
+    accuracyCheckRef.current = false;
+    setAccuracyCheck(false);
     const buckets = accuracyBucketsRef.current;
     const display = configRef.current?.displayBounds;
+    const geometry = hitGeometryRef.current ?? protocolGeometry(buckets.flatMap((b) => b.distances));
+    const hitTrials = accuracyPlanRef.current.flatMap((step) => (step.kind === "hit" ? [step.trial] : []));
     const summarize = (values: number[]) => {
       const sorted = values.slice().sort((a, b) => a - b);
       return sorted.length
@@ -1151,10 +1284,27 @@ function App() {
     }
     const report = {
       kind: "accuracy-test",
+      protocol: "jara27-gaze-v1",
       created_at: new Date().toISOString(),
       display: display ? { width: display.width, height: display.height } : null,
       runtime: configRef.current?.runtime,
+      detector: configRef.current?.webInference?.detector,
+      geometry: {
+        mm_per_pt: geometry.mmPerPt,
+        display_size_inch: configRef.current?.webInference?.displaySizeInch,
+        distance_m: geometry.distanceM,
+        distance_source: configRef.current?.viewingDistanceCm ? "tape" : "tracker",
+        tracker_distance_median_m: median(buckets.flatMap((b) => b.distances))
+      },
+      calibration_run: calibrationRunRef.current,
       calibration_verdict: lastVerdictRef.current,
+      held_out: buckets.length
+        ? heldOutReport(
+            buckets.map((b) => ({ target: b.target, samplesPt: b.points })),
+            geometry
+          )
+        : null,
+      hit_test: hitTrials.length ? hitRateReport(hitTrials) : null,
       error_px: {
         overall: summarize(allErrors),
         regions,
@@ -1177,37 +1327,66 @@ function App() {
         console.error("Accuracy report write failed", error);
         showStatus("accuracy report failed to write", "warning");
       });
-  }, [showStatus]);
+  }, [showStatus, protocolGeometry]);
 
-  // Advance through the grid: each point gets a settle window (saccade +
-  // pursuit lag) then a collect window of raw per-frame errors.
+  useEffect(() => {
+    finalizeAccuracyTestRef.current = finalizeAccuracyTest;
+  }, [finalizeAccuracyTest]);
+
+  // Grid steps: a settle window, then raw per-frame collection. Hit steps:
+  // the gaze handler scores each frame and advances early on a hit; this
+  // timer only closes a miss at the 2 s limit.
   useEffect(() => {
     if (accuracyIndex === null) {
       return;
     }
-    const bucket: AccuracyBucket = {
-      target: ACCURACY_POINTS[accuracyIndex],
-      collectFrom: Date.now() + ACCURACY_SETTLE_MS,
-      errors: [],
-      inference: [],
-      intervals: []
-    };
-    accuracyCollectRef.current = bucket;
-    accuracyBucketsRef.current.push(bucket);
-    const timer = window.setTimeout(() => {
+    const step = accuracyPlanRef.current[accuracyIndex];
+    if (step === undefined) {
+      return;
+    }
+    const advance = () => {
       accuracyCollectRef.current = null;
-      if (accuracyIndex + 1 < ACCURACY_POINTS.length) {
+      const isLastGrid = step.kind === "grid" && accuracyPlanRef.current[accuracyIndex + 1] === undefined;
+      if (isLastGrid) {
+        appendHitTrials();
+      }
+      if (accuracyIndex + 1 < accuracyPlanRef.current.length) {
         setAccuracyIndex(accuracyIndex + 1);
       } else {
         setAccuracyIndex(null);
         finalizeAccuracyTest();
       }
-    }, ACCURACY_DWELL_MS);
+    };
+    if (step.kind === "hit") {
+      hitStateRef.current = { onset: Date.now(), insideSince: null };
+      const timer = window.setTimeout(() => {
+        if (step.trial.hit === null) {
+          step.trial.hit = false;
+          advance();
+        }
+      }, HIT_TIMEOUT_MS + 50);
+      return () => {
+        window.clearTimeout(timer);
+        hitStateRef.current = null;
+      };
+    }
+    const bucket: AccuracyBucket = {
+      target: step.target,
+      collectFrom: Date.now() + ACCURACY_SETTLE_MS,
+      errors: [],
+      points: [],
+      distances: [],
+      inference: [],
+      intervals: []
+    };
+    accuracyCollectRef.current = bucket;
+    accuracyBucketsRef.current.push(bucket);
+    const timer = window.setTimeout(advance, ACCURACY_DWELL_MS);
     return () => {
       window.clearTimeout(timer);
       accuracyCollectRef.current = null;
     };
-  }, [accuracyIndex, finalizeAccuracyTest]);
+  }, [accuracyIndex, finalizeAccuracyTest, appendHitTrials]);
 
   // Gaze staleness is driven by the single watchdog armed per frame in the
   // message handler — this just returns it on unmount.
@@ -1315,6 +1494,9 @@ function App() {
   }, [clickEffect]);
 
   const calibrationActive = calibrationCountdown !== null || pursuitActive;
+  const accuracyStep = accuracyIndex !== null ? accuracyPlanRef.current[accuracyIndex] : undefined;
+  const accuracyStepTotal =
+    (config?.accuracyTest || accuracyCheck ? ACCURACY_GRID.length : 0) + (config?.hitTest || accuracyCheck ? HIT_STEPS : 0);
   const modalActive = calibrationActive || accuracyIndex !== null;
   const markerShown = markerVisible || calibrationCountdown !== null || Boolean(config?.showCameraMarker);
 
@@ -1352,7 +1534,15 @@ function App() {
     accuracyStartedRef.current = true;
     accuracyBucketsRef.current = [];
     accuracyCollectRef.current = null;
+    accuracyPlanRef.current = [];
+    hitStateRef.current = null;
+    accuracyCheckRef.current = false;
+    setAccuracyCheck(false);
     lastVerdictRef.current = null;
+    // Escaping a first-enable auto run is a "not now" that sticks.
+    if (autoCalibrateRef.current) {
+      dismissOnboarding();
+    }
     setCalibrationCountdown(null);
     setPursuitActive(false);
     setPursuitPhase("capture");
@@ -1370,7 +1560,7 @@ function App() {
     statusHoldUntilRef.current = 0;
     setStatus("tracking");
     setStatusLevel("info");
-  }, []);
+  }, [dismissOnboarding]);
 
   useEffect(() => {
     if (!calibrationActive && accuracyIndex === null && !onboarding) {
@@ -1493,7 +1683,7 @@ function App() {
         <div className="calibration-progress">
           <i
             style={{
-              transform: `scaleX(${pursuitActive ? pursuitProgress : accuracyIndex !== null ? (accuracyIndex + 1) / ACCURACY_POINTS.length : 0})`
+              transform: `scaleX(${pursuitActive ? pursuitProgress : accuracyIndex !== null ? (accuracyIndex + 1) / accuracyStepTotal : 0})`
             }}
           />
         </div>
@@ -1560,19 +1750,37 @@ function App() {
           <div className="pursuit-dot" />
         </div>
       )}
-      {accuracyIndex !== null && (
+      {accuracyIndex !== null && accuracyStep?.kind === "grid" && (
         <>
           <div
             ref={calibrationTargetRef}
             className="calibration-target accuracy"
             style={{
-              transform: `translate(${ACCURACY_POINTS[accuracyIndex][0] * window.innerWidth}px, ${ACCURACY_POINTS[accuracyIndex][1] * window.innerHeight}px)`
+              transform: `translate(${accuracyStep.target[0] * window.innerWidth}px, ${accuracyStep.target[1] * window.innerHeight}px)`
             }}
           >
             <div />
           </div>
           <div ref={accuracyProgressRef} className="accuracy-progress">
-            Look at each dot · {accuracyIndex + 1}/{ACCURACY_POINTS.length}
+            Look at each dot · {accuracyIndex + 1}/{accuracyStepTotal}
+          </div>
+        </>
+      )}
+      {accuracyIndex !== null && accuracyStep?.kind === "hit" && (
+        <>
+          <div
+            ref={calibrationTargetRef}
+            className="hit-target"
+            style={{
+              width: `${accuracyStep.trial.radiusPt * 2}px`,
+              height: `${accuracyStep.trial.radiusPt * 2}px`,
+              transform: `translate(${accuracyStep.trial.target[0] * window.innerWidth - accuracyStep.trial.radiusPt}px, ${
+                accuracyStep.trial.target[1] * window.innerHeight - accuracyStep.trial.radiusPt
+              }px)`
+            }}
+          />
+          <div ref={accuracyProgressRef} className="accuracy-progress">
+            Look inside each circle · {accuracyIndex + 1}/{accuracyStepTotal}
           </div>
         </>
       )}

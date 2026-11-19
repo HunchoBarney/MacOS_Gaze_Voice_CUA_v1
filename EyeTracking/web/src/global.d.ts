@@ -61,6 +61,15 @@ export interface SharedStateReport {
 export interface RendererConfig {
   calibrate: boolean;
   accuracyTest: boolean;
+  // --hit-test: the appendix protocol's step 3 (circular-target hit rate)
+  // after the held-out accuracy grid.
+  hitTest?: boolean;
+  // --calibrate-if-missing: the host's first-enable path — start the full
+  // calibration on its own when no usable calibration loads.
+  calibrateIfMissing?: boolean;
+  // --viewing-distance-cm: the tape-measured eye-to-screen distance the
+  // accuracy protocol scores angles against (else the tracker's estimate).
+  viewingDistanceCm?: number;
   calibrationTier: CalibrationTier;
   displayIndex: number;
   requestedDisplayIndex: number;
@@ -91,7 +100,9 @@ export interface WebInferenceConfig {
   runtime: RuntimeName;
   webInferenceWorker: WebInferenceWorkerMode;
   webAccelerator: "auto" | "webgpu" | "wasm";
-  detector: "retinaface" | "yolo";
+  detector: "mediapipe" | "retinaface" | "yolo";
+  mediapipeWasmBaseUrl?: string;
+  mediapipeDelegate?: "cpu" | "gpu";
   backend: string;
   camera: string;
   cameraResolutionName?: string;

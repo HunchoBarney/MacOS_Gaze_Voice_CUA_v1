@@ -35,6 +35,7 @@ import {
   type Detection,
   width
 } from "./core";
+import { headFaceWidthRatio as headFaceWidthRatioFor } from "./mediapipe";
 import { createRuntimeModels, setGpuDeviceLostListener, warmupRuntimeModels, withTimeout, type RuntimeModels } from "./runtimes";
 
 type MainToWorkerMessage =
@@ -570,7 +571,7 @@ async function initialize(nextConfig: WebInferenceConfig): Promise<void> {
   // so a wedged load()/save() unwinds instead of hanging forever.
   settlePendingCalibrationRequests("runtime re-initialized");
   requestId = 0;
-  const headFaceWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : 1;
+  const headFaceWidthRatio = headFaceWidthRatioFor(config);
   projector = new ScreenProjector(
     new DisplayGeometry(config.displayWidth, config.displayHeight, config.displaySizeInch),
     config.flipX,
@@ -644,7 +645,8 @@ async function initialize(nextConfig: WebInferenceConfig): Promise<void> {
       cameraScreenY: nextConfig.cameraScreenY,
       flipX: nextConfig.flipX,
       flipY: nextConfig.flipY,
-      appearanceActive: Boolean(nextConfig.appearanceModelUrl)
+      appearanceActive: Boolean(nextConfig.appearanceModelUrl),
+      detector: nextConfig.detector
     });
     // Inside the try: a load() rejection must surface as an error status, not
     // leave initializing=true forever with nothing reported.
@@ -820,7 +822,7 @@ async function processFrameMessage(message: Extract<MainToWorkerMessage, { type:
       return;
     }
     const frame = decodeFrame(message);
-    const headFaceWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : 1;
+    const headFaceWidthRatio = headFaceWidthRatioFor(config);
     const previewWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : null;
     const previewInterval = 1000 / Math.max(0.5, config.previewFps);
     const detectStart = performance.now();
@@ -830,10 +832,13 @@ async function processFrameMessage(message: Extract<MainToWorkerMessage, { type:
     // of CPU for nothing.
     const noFaceMs = noFaceSince === 0 ? 0 : detectStart - noFaceSince;
     const searchInterval = noFaceMs > 5000 ? 1000 : 250;
+    // MediaPipe's landmarker is detector and gaze model in one call, so it
+    // runs every frame and the boxes are always fresh.
     const detectDue =
-      lastDetection === null || forceRedetect
+      config.detector === "mediapipe" ||
+      (lastDetection === null || forceRedetect
         ? detectStart - lastDetectMs > searchInterval
-        : detectStart - lastDetectMs > DETECT_INTERVAL_MS;
+        : detectStart - lastDetectMs > DETECT_INTERVAL_MS);
     let head: Detection | null;
     let eyes: Detection[];
     let mouth: Detection | null;
@@ -1468,7 +1473,7 @@ async function recoverSessions(
       // Dead-session rejects may have tripped the appearance channel's
       // failure cap — the rebuilt session deserves a fresh counter.
       appearanceChannel.reset();
-      emitModelsLoaded(config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : 1, `Models reloaded with ${target}`);
+      emitModelsLoaded(headFaceWidthRatioFor(config), `Models reloaded with ${target}`);
       if (target === "webgpu") {
         // The fast path is live again — a later demotion earns a fresh
         // re-promotion budget.

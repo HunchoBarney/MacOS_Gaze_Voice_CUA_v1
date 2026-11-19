@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8" />
+<script>
+  (async () => {
+    try {
+      const q = new URLSearchParams(location.search);
+      const blob = await (await fetch(q.get("image"))).blob();
+      const bitmap = await createImageBitmap(blob);
+      const worker = new Worker("bench-worker.js");
+      worker.onmessage = (event) => {
+        if (event.data.phase) window.bench.phase(event.data.phase);
+        if (event.data.done) window.bench.done(event.data.done);
+        if (event.data.error) window.bench.fail(event.data.error);
+      };
+      worker.onerror = (event) => window.bench.fail(String(event.message));
+      worker.postMessage(
+        { bitmap, root: q.get("root"), delegate: q.get("delegate"), seconds: Number(q.get("seconds")), fps: Number(q.get("fps")) },
+        [bitmap]
+      );
+    } catch (error) {
+      window.bench.fail(String(error && error.stack || error));
+    }
+  })();
+</script>

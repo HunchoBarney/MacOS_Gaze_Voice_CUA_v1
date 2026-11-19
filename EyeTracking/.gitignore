@@ -220,6 +220,7 @@ __marimo__/
 *.engine
 *.profile
 *.onnx
+*.task
 *.tflite
 *.tar.gz
 demo_deimv2_torch_wholebody49_ins.py

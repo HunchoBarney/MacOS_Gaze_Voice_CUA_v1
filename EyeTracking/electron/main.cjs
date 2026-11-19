@@ -287,6 +287,25 @@ function readWebAccelerator(args) {
   return normalized === "webgpu" ? "webgpu" : "wasm";
 }
 
+// MediaPipe Face Landmarker (Apache-2.0) is the default gaze front end. The
+// five legacy ONNX weights (RetinaFace, YOLO wholebody, the 160² gaze mesh,
+// VSDLM lip motion, MobileOne appearance) carry no license grant, so they
+// load only for a developer A/B behind --legacy-models; --legacy-models
+// alone selects the old RetinaFace pipeline.
+function readDetector(args) {
+  const legacyModels = hasFlag(args, "--legacy-models");
+  const requested = readOption(args, "--detector", legacyModels ? "retinaface" : "mediapipe");
+  if (!["mediapipe", "retinaface", "yolo"].includes(requested)) {
+    console.warn(`--detector ${requested} is not supported; using mediapipe`);
+    return "mediapipe";
+  }
+  if (requested !== "mediapipe" && !legacyModels) {
+    console.warn(`--detector ${requested} needs the unlicensed legacy weights; pass --legacy-models to opt in. Using mediapipe.`);
+    return "mediapipe";
+  }
+  return requested;
+}
+
 function resolveRepoPath(value) {
   const raw = value || "";
   return path.resolve(repoRoot, raw);
@@ -302,6 +321,13 @@ function rendererStaticDir() {
 
 function rendererModelDir() {
   return path.join(rendererStaticDir(), "models");
+}
+
+// Relative "models/x" resolves against the *worker's* script URL
+// (dist/assets/), not the page's — so prod hands the worker an absolute
+// file:// URL into dist/.
+function rendererAssetPrefix() {
+  return useDevServer() ? "/" : `${require("url").pathToFileURL(rendererStaticDir()).href}/`;
 }
 
 function copyFileForRenderer(sourcePath, relativeDir) {
@@ -320,11 +346,7 @@ function copyFileForRenderer(sourcePath, relativeDir) {
   } catch (error) {
     console.error(`Failed to copy renderer asset ${source} -> ${target}: ${error.message}`);
   }
-  // Relative "models/x.onnx" resolves against the *worker's* script URL
-  // (dist/assets/), not the page's — so prod must hand the worker an
-  // absolute file:// URL into dist/.
-  const prefix = useDevServer() ? "/" : `${require("url").pathToFileURL(rendererStaticDir()).href}/`;
-  return `${prefix}${relativeDir}/${encodeURIComponent(path.basename(source))}`;
+  return `${rendererAssetPrefix()}${relativeDir}/${encodeURIComponent(path.basename(source))}`;
 }
 
 function copyModelForRenderer(modelPath) {
@@ -339,7 +361,7 @@ function copyRuntimeAssetsForRenderer(sourceDir, relativeDir, predicate) {
   // Same worker-relative fix as copyFileForRenderer — ORT loads its wasm
   // assets inside the inference worker, where a relative dir resolves
   // against dist/assets/ and never resolves at all.
-  return `${useDevServer() ? "/" : `${require("url").pathToFileURL(rendererStaticDir()).href}/`}${relativeDir}/`;
+  return `${rendererAssetPrefix()}${relativeDir}/`;
 }
 
 function copyOnnxRuntimeAssetsForRenderer() {
@@ -351,7 +373,8 @@ function copyOnnxRuntimeAssetsForRenderer() {
 }
 
 function webInferenceConfig(args, displayBounds) {
-  const detector = readOption(args, "--detector", "retinaface");
+  const detector = readDetector(args);
+  const legacy = detector !== "mediapipe";
   const cameraResolution = readCameraResolutionOption(args);
   const calibrationFile = resolveRepoPath(readOption(args, "--calibration-file", defaultCalibrationFile));
   const retinafaceModel = resolveRepoPath(
@@ -360,13 +383,14 @@ function webInferenceConfig(args, displayBounds) {
   const yoloModel = resolveRepoPath(
     readOption(args, "--yolo-model", "public/models/yolomit_t_wholebody28_1x3x480x640.onnx")
   );
-  const defaultDetectorModel = detector === "yolo" ? yoloModel : retinafaceModel;
+  const mediapipeModel = resolveRepoPath(readOption(args, "--mediapipe-model", "public/models/face_landmarker.task"));
+  const defaultDetectorModel = detector === "mediapipe" ? mediapipeModel : detector === "yolo" ? yoloModel : retinafaceModel;
   const detectorModel = resolveRepoPath(readOption(args, "--detector-model", defaultDetectorModel));
-  const gazeModel = resolveRepoPath(readOption(args, "--gaze-model", "public/models/gaze_1x3x160x160.onnx"));
-  const lipMotionModel = resolveRepoPath(readOption(args, "--lip-motion-model", "public/models/vsdlm_l.onnx"));
+  const gazeModel = legacy ? resolveRepoPath(readOption(args, "--gaze-model", "public/models/gaze_1x3x160x160.onnx")) : null;
+  const lipMotionModel = legacy ? resolveRepoPath(readOption(args, "--lip-motion-model", "public/models/vsdlm_l.onnx")) : null;
   // Phase-4 ensemble signal: MobileOne-S0 gaze net (~5MB). Runs async at ~5Hz
   // alongside the mesh pipeline; the feature map fuses it with geometry.
-  const appearanceModel = hasFlag(args, "--no-appearance-model")
+  const appearanceModel = !legacy || hasFlag(args, "--no-appearance-model")
     ? null
     : resolveRepoPath(readOption(args, "--appearance-model", "public/models/mobileone_s0_gaze.onnx"));
   const enableLipMotion = hasFlag(args, "--enable-lip-motion") && detector === "yolo";
@@ -393,13 +417,18 @@ function webInferenceConfig(args, displayBounds) {
     displayHeight: displayBounds.height,
     calibrationFile,
     detectorModel,
-    lipMotionModel,
+    lipMotionModel: lipMotionModel ?? "",
     // Only *ModelUrl fields cross the bridge — the renderer loads models by
     // URL; on-disk paths stay in main (detectorModel covers the active one).
     detectorModelUrl: copyModelForRenderer(detectorModel),
-    gazeModelUrl: copyModelForRenderer(gazeModel),
-    lipMotionModelUrl: copyModelForRenderer(lipMotionModel),
-    onnxWasmBaseUrl: copyOnnxRuntimeAssetsForRenderer(),
+    gazeModelUrl: gazeModel ? copyModelForRenderer(gazeModel) : "",
+    lipMotionModelUrl: lipMotionModel ? copyModelForRenderer(lipMotionModel) : "",
+    onnxWasmBaseUrl: legacy ? copyOnnxRuntimeAssetsForRenderer() : "",
+    // The vite build emits the landmarker's wasm into dist/runtime-assets/
+    // mediapipe/ and the dev server serves it from node_modules (see
+    // vite.config.ts), so nothing is copied at boot.
+    mediapipeWasmBaseUrl: legacy ? undefined : `${rendererAssetPrefix()}runtime-assets/mediapipe/`,
+    mediapipeDelegate: readOption(args, "--mediapipe-delegate", "gpu") === "cpu" ? "cpu" : "gpu",
     appearanceModelUrl: appearanceModel ? copyModelForRenderer(appearanceModel) : undefined,
     smoothingAlpha: readNumberOption(args, "--smoothing-alpha", 0.65),
     smoothingAlphaY: readNumberOption(args, "--smoothing-alpha-y", 0.45),
@@ -524,6 +553,12 @@ function requestRecalibration(source) {
 function handleControlAction(action, value) {
   if (action === "recalibrate") {
     requestRecalibration("control api");
+    return;
+  }
+  if (action === "accuracy_check") {
+    // Same lip-click shield as a recalibration: the check opens with one.
+    lipClickController?.setCalibrationActive(true);
+    dispatchMenuAction("accuracy_check");
     return;
   }
   // set_paused carries the target state (the host's screen-lock parking),
@@ -817,7 +852,7 @@ function createNutMouseAdapter() {
 }
 
 function configureLipClickController(args, displayBounds) {
-  const detector = readOption(args, "--detector", "retinaface");
+  const detector = readDetector(args);
   const requested = hasFlag(args, "--enable-lip-motion");
   lipClickController = createLipClickController({
     mouse: createNutMouseAdapter(),
@@ -945,6 +980,9 @@ function createWindow() {
   rendererConfig = {
     calibrate: hasFlag(args, "--calibrate"),
     accuracyTest: hasFlag(args, "--accuracy-test"),
+    hitTest: hasFlag(args, "--hit-test"),
+    calibrateIfMissing: hasFlag(args, "--calibrate-if-missing"),
+    viewingDistanceCm: readNumberOption(args, "--viewing-distance-cm", 0) > 0 ? readNumberOption(args, "--viewing-distance-cm", 0) : undefined,
     calibrationTier: ["full", "standard", "quick"].includes(readOption(args, "--calibration-tier", "full"))
       ? readOption(args, "--calibration-tier", "full")
       : "full",
@@ -1215,8 +1253,12 @@ ipcMain.handle("write-calibration", async (_event, filePath, payload) => {
 // Generic JSON report writer (accuracy test, diagnostics) — unlike
 // write-calibration it must not emit a calibration-saved message into the
 // external store, since the payload isn't a calibration.
+// Relative report names land beside the calibration file: a bundled tracker
+// lives in a sealed Resources dir, and the host already redirects the
+// calibration (and reads accuracy_report.json) from Application Support.
 ipcMain.handle("write-report", async (_event, filePath, payload) => {
-  const resolved = resolveRepoPath(filePath);
+  const calibrationFile = rendererConfig?.webInference?.calibrationFile;
+  const resolved = calibrationFile ? path.resolve(path.dirname(calibrationFile), filePath) : resolveRepoPath(filePath);
   try {
     await writeJsonFileAtomic(resolved, payload);
     return { ok: true, path: resolved };

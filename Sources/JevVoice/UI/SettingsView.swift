@@ -26,6 +26,7 @@ struct SettingsView: View {
     @ObservedObject var navigation: SettingsNavigation
     var collapse: () -> Void
     @StateObject private var cuaSetup = CuaSetup()
+    @StateObject private var accuracyCheck = AccuracyCheck()
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = false
     @State private var openAIKeyDraft = ""
@@ -366,6 +367,12 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Text("Dot size and dwell lock are tracker-side settings — read back when this opens, applied on change.")
                         .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Check eye-tracking accuracy") { accuracyCheck.start() }
+                            .disabled(accuracyCheck.running || !config.gazeTracking)
+                        if accuracyCheck.running { ProgressView().controlSize(.small) }
+                    }
+                    Text(accuracyCheck.message).font(.caption).foregroundStyle(.secondary)
                     DisclosureGroup("Tracker geometry") {
                         VStack(alignment: .leading, spacing: 10) {
                             Picker("Display size", selection: Binding(
