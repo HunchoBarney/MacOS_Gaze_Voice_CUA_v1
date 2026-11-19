@@ -9,7 +9,7 @@ struct OverlayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var showText: Bool { !controller.transcript.isEmpty && controller.status != .done }
-    private var message: String {
+    var message: String {
         if case .error(let text) = controller.status { return text }
         if case .awaitingAnswer(let prompt) = controller.status { return prompt }
         if controller.status == .done { return controller.resultMessage }
@@ -26,7 +26,9 @@ struct OverlayView: View {
     /// idle card while VoiceWindows lingers the panel on a fresh outcome.
     /// `lastActivity` is the settle-time proxy (see VoiceWindows).
     private var latestOutcome: VoiceTaskCoordinator.Work? {
-        controller.cuaTasks.filter { $0.outcome != nil }.max { $0.lastActivity < $1.lastActivity }
+        let turn = controller.handsFreeCaptionTurn
+        return controller.cuaTasks.filter { $0.outcome != nil && (turn == nil || $0.captureID == turn) }
+            .max { $0.lastActivity < $1.lastActivity }
     }
     /// Idle-card presentation of the settled task: verdict glyph, status
     /// word, and the work row's own outcome line.
@@ -52,7 +54,12 @@ struct OverlayView: View {
         return .mint
     }
     private var statusTitle: String {
-        if controller.handsFreeEnabled, controller.captureState == .idle { return controller.handsFreeLabel }
+        if hasAsks { return "Waiting for your answer" }
+        switch controller.status {
+        case .error, .awaitingAnswer, .awaitingConfirm, .reviewTranscript: return controller.status.title
+        default: break
+        }
+        if controller.quietHandsFreePresentation { return controller.handsFreeLabel }
         if controller.status == .idle, let outcome = latestOutcome { return outcome.statusText }
         return controller.status.title
     }
@@ -72,6 +79,10 @@ struct OverlayView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let state = HandsFreeIndicator.State.current(controller) {
+                Text("Hands-free: \(state.title)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if showText {
                 Text(controller.partialLive ? controller.transcript + "…" : controller.transcript)
                     .font(.system(size: 14, weight: .medium))
@@ -102,14 +113,6 @@ struct OverlayView: View {
                 }
                 Text(statusTitle).font(.system(size: 12, weight: .medium)).lineLimit(1)
                 Spacer(minLength: 4)
-                if controller.handsFreeEnabled {
-                    Button(controller.handsFreeListening ? "Pause" : "Resume") {
-                        if controller.handsFreeListening { controller.pauseHandsFree() }
-                        else { controller.resumeHandsFree() }
-                    }
-                    .buttonStyle(.plain).font(.system(size: 11))
-                    .accessibilityLabel(controller.handsFreeListening ? "Pause hands-free voice" : "Resume hands-free voice")
-                }
                 if controller.status == .listening {
                     Text("fn").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.6))
                         .padding(.horizontal, 6).padding(.vertical, 3)
@@ -150,6 +153,10 @@ struct OverlayView: View {
             }
             if hiddenAsks > 0 {
                 Text("+\(hiddenAsks) more").font(.caption2).foregroundStyle(.white.opacity(0.5))
+            }
+            if hasAsks, let status = controller.parkedDesktopStatus {
+                Text(status.message).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if showsActions {
                 HStack(spacing: 10) {

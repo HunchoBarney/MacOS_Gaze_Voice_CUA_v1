@@ -142,16 +142,17 @@ def frontdoor():
     private = RESULTS / "audio/manifest.json"
     before = sha(private) if private.is_file() else None
     checks = [
-        (["--p3-record-holdouts"], "interactive terminal"),
-        (["--p3-voice-replay"], "Missing replay argument"),
-        (["--p3-live"], "interactive terminal"),
-        (["--p3-live", "--self-test", "--out", str(RESULTS / "live.json")], "self-test.json"),
+        (["--p3-record-holdouts"], 2, "retired from this app"),
+        (["--p3-voice-replay"], 2, "retired from this app"),
+        (["--p3-live", "--p3-record-holdouts"], 2, "retired from this app"),
+        (["--p3-live"], 1, "interactive terminal"),
+        (["--p3-live", "--self-test", "--out", str(RESULTS / "live.json")], 1, "self-test.json"),
     ]
     rows = []
-    for flags, expected in checks:
+    for flags, code, expected in checks:
         result = subprocess.run([str(binary), *flags], cwd=ROOT, input="", text=True,
                                 capture_output=True, timeout=15)
-        assert result.returncode == 1 and expected in result.stderr, "CLI refusal did not use the headless front door"
+        assert result.returncode == code and expected in result.stderr, "CLI refusal did not use the headless front door"
         rows.append({"flags": flags, "exit": result.returncode, "verified": True})
     assert (sha(private) if private.is_file() else None) == before, "CLI refusal changed private recordings"
     (RESULTS / "frontdoor.json").write_text(json.dumps(
@@ -270,46 +271,8 @@ def hygiene():
 
 
 def replay(args):
-    # Replay evidence and physical evidence are different artifacts — a shared
-    # --out default previously let `replay` clobber live.json with replay output.
-    output = ROOT / (args.out or ".agent/results/P3/replay.json")
-    if not args.recordings_root:
-        raise Blocked("--recordings-root is required")
-    directory = Path(args.recordings_root).resolve()
-    assert directory.is_dir(), "recording directory missing"
-    binary = ROOT / ".build/release/JevVoice"
-    build = read(RESULTS / "build.json")
-    assert binary.is_file() and sha(binary) == build["artifact_sha256"], "release artifact not current"
-    assert build["source_hashes"] == source_hashes(), "source changed since release build"
-    main_source = (ROOT / "Sources/JevVoice/main.swift").read_text()
-    if '"--p3-voice-replay"' not in main_source:
-        raise Blocked("production replay entry point is not implemented; refusing to boot the GUI")
-    result = subprocess.run(
-        [str(binary), "--p3-voice-replay", "--manifest", str(MANIFEST), "--recordings-root", str(directory), "--out", str(output)],
-        cwd=ROOT, timeout=600,
-    )
-    if result.returncode == 2:
-        raise Blocked("replay incomplete; see missing sources/authorization in artifact")
-    assert result.returncode == 0, f"production replay failed (exit {result.returncode}); inspect {output}"
-    data = read(output)
-    assert data["schema_version"] == 1 and data["wrong_critical_actions"] == 0
-    assert data["artifact_sha256"] == build["artifact_sha256"] and data["manifest_sha256"] == sha(MANIFEST)
-    assert data["regression_count"] == 15 and data["holdout_count"] == 20 and not data["missing"]
-    manifest = read(MANIFEST)
-    cases = manifest["acoustic_regression_labels"] + manifest["acoustic_holdout"]
-    assert Counter(row["case_id"] for row in data["rows"]) == Counter(row["id"] for row in cases)
-    by_id = {row["id"]: row for row in cases}
-    for row in data["rows"]:
-        expected = by_id[row["case_id"]]
-        assert row["status"] == "ok" and row["verification_passed"]
-        assert row["population"] == expected["population"] and row["actual_route"] == expected["route"]
-        assert row["actual_dispatches"] == expected["dispatch_count"] and row["effect_count"] == 0
-        assert row["verification_kind"] == "production-admission-boundary-not-physical"
-        assert row["artifact_sha256"] == build["artifact_sha256"] and row["source_sha256"]
-        assert row["model_assets_sha256"] == data["model_assets_sha256"]
-    assert data["clear_correct"] / data["clear_total"] >= 0.95
-    assert data["extra_clarifications"] / data["clear_total"] <= 0.05
-    print("PASS real production-adapter replay (not physical/server validation)")
+    raise Blocked("Local speech replay is retired from this app. Use the historical developer checkout at "
+                  "073fedeb1101d50466ff46b7c007d085e08d9e15.")
 
 
 def read_attempts(data):
@@ -601,7 +564,7 @@ def coverage(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("scope", "accuracy", "contracts", "hygiene", "replay", "live", "remote", "coverage", "record-build", "record-install", "installation", "frontdoor"))
-    parser.add_argument("--recordings-root")
+    parser.add_argument("--recordings-root", help=argparse.SUPPRESS)
     parser.add_argument("--out")
     args = parser.parse_args()
     try:

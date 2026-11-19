@@ -10,6 +10,193 @@ import AVFoundation
 /// exercised without a socket or a microphone.
 @MainActor
 final class VoiceLaneAuditTests: XCTestCase {
+    func testControlQuestionRealtimeVoiceOnsetsNeverArmSpeculativeWindowHints() async {
+        let config = testConfig(), coordinator = testCoordinator(config)
+        let lane = RealtimeVoiceLane(apiKey: { "" }, client: .init(wireFactory: { _ in RecordedVoiceWire() }))
+        let controller = VoiceController(config: config, speech: lane, authorize: { false },
+            frontmost: { nil }, cuaRuntime: coordinator, speaker: FakeSpeaker())
+        let initial = coordinator.listenHintGeneration
+        controller.presentConversation(.began(UUID(), 0))
+        XCTAssertEqual(coordinator.listenHintGeneration, initial)
+        controller.cancel()
+        controller.begin()
+        XCTAssertEqual(coordinator.listenHintGeneration, initial)
+        controller.cancel()
+        await controller.shutdown()
+        XCTAssertEqual(coordinator.listenHintGeneration, initial)
+    }
+    func testC1AutomaticOnsetDoesNotReplaceThePendingManualReply() async throws {
+        let config = testConfig(), capture = StubCapture()
+        config.handsFreeEnabled = true
+        let coordinator = testCoordinator(config)
+        let controller = VoiceController(config: config, speech: capture, authorize: { true },
+            cuaRuntime: coordinator, speaker: FakeSpeaker())
+        addTeardownBlock { await controller.shutdown() }
+        controller.begin(); coordinator.endListeningHint()
+        await poll(until: { controller.status == .listening })
+        let manual = try XCTUnwrap(capture.startedID)
+        controller.finish()
+        capture.onEvent?(manual, .heardFinal("Manual input"))
+        let ambient = UUID()
+        controller.presentConversation(.began(ambient, 10)); coordinator.endListeningHint()
+        XCTAssertEqual(controller.transcript, "Manual input")
+        XCTAssertEqual(controller.status, .executing)
+        capture.onEvent?(manual, .assistant("Manual answer"))
+        capture.onEvent?(manual, .turnEnded)
+        XCTAssertEqual(controller.status, .replied)
+        XCTAssertEqual(controller.resultMessage, "Manual answer")
+    }
+
+    func testDelegatedStatusWithdrawalReleasesOnlyItsManualCard() async throws {
+        let config = testConfig(), capture = StubCapture(), coordinator = testCoordinator(config)
+        let controller = VoiceController(config: config, speech: capture, authorize: { true },
+            frontmost: { nil }, cuaRuntime: coordinator, speaker: FakeSpeaker())
+        addTeardownBlock { await controller.shutdown() }
+        controller.begin(); coordinator.endListeningHint()
+        await poll(until: { controller.status == .listening })
+        let manual = try XCTUnwrap(capture.startedID)
+        controller.finish()
+        capture.onEvent?(manual, .heardFinal("Has my delegated task finished?"))
+        controller.withdrawDelegatedStatus(UUID())
+        XCTAssertEqual(controller.status, .executing)
+        let work = VoiceTaskCoordinator.Work(label: "Other task", request: "Other request", spec: DriveTask(goal: "Other task"))
+        work.captureID = UUID(); work.active = true; work.message = "Other task in progress"
+        coordinator.tasks = [work]
+        XCTAssertFalse(controller.showLocalAnswer("Must not display", for: manual))
+        controller.withdrawDelegatedStatus(manual)
+        XCTAssertEqual(controller.status, .idle)
+        XCTAssertEqual(controller.detail, "Other task in progress")
+        work.active = false; work.outcome = .done
+        coordinator.onChange()
+        let next = UUID()
+        controller.presentConversation(.began(next, 1)); coordinator.endListeningHint()
+        controller.presentConversation(.final(next, "Next turn"))
+        controller.withdrawDelegatedStatus(manual)
+        XCTAssertEqual(controller.status, .thinking)
+        XCTAssertEqual(controller.transcript, "Next turn")
+    }
+
+    func testC1HandsFreeCaptionBelongsToCurrentTurn() async throws {
+        let config = testConfig(), coordinator = testCoordinator(config)
+        config.handsFreeEnabled = true
+        config.ttsEnabled = false
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = RealtimeVoiceLane(apiKey: { "fixture" }, client: client)
+        let controller = VoiceController(config: config, speech: lane, authorize: { false },
+            frontmost: { nil }, cuaRuntime: coordinator, speaker: FakeSpeaker())
+        addTeardownBlock { await controller.shutdown() }
+        let pill = OverlayView(controller: controller, openReview: {}, openSettings: {})
+        let show = try XCTUnwrap(lane.conversation.onEvent)
+        var turns: [UUID] = []
+        lane.conversation.onEvent = { event in
+            show(event)
+            if case .began(let id, _) = event {
+                turns.append(id)
+                coordinator.endListeningHint()
+            }
+        }
+        lane.conversation.readContext = { VoiceAdmissionContext() }
+        lane.conversation.remote = nil
+        lane.conversation.interpret = { _, _, _ in .init(kind: .ignore) }
+        try await lane.prepareRealtimeTransport(.conversation)
+        try lane.beginRealtimeConversation(session: UUID())
+        lane.onConversationState?(.listening)
+        func input(_ payload: String) throws {
+            let envelope = try XCTUnwrap(RealtimeVoiceClient.decodeWire(payload, connectionID: client.connectionID))
+            client.onWireEvent?(envelope)
+        }
+        try input(#"{"type":"input_audio_buffer.speech_started","item_id":"prior"}"#)
+        await poll(until: { turns.count == 1 })
+        let prior = try XCTUnwrap(turns.first)
+        show(.final(prior, "Prior spoken words."))
+        show(.feedback(prior, "Distinct assistant reply."))
+        XCTAssertEqual(controller.detail, "Distinct assistant reply.")
+        let work = VoiceTaskCoordinator.Work(label: "Earlier task", request: "Prior spoken words.",
+                                             spec: DriveTask(goal: "Earlier task"))
+        work.captureID = prior; work.active = false; work.outcome = .done; work.message = "Older outcome."
+        coordinator.tasks = [work]
+        try input(#"{"type":"input_audio_buffer.speech_started","item_id":"current"}"#)
+        await poll(until: { turns.count == 2 })
+        let current = try XCTUnwrap(turns.last)
+        XCTAssertNotEqual(prior, current)
+        XCTAssertEqual(controller.transcript, "")
+        XCTAssertNotEqual(controller.detail, "Distinct assistant reply.")
+        XCTAssertFalse(pill.message.contains("Older outcome"))
+        try input(#"{"type":"conversation.item.input_audio_transcription.delta","item_id":"current","delta":"partial sentinel"}"#)
+        try input(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"foreign","transcript":"foreign sentinel"}"#)
+        await Task.yield()
+        XCTAssertEqual(controller.transcript, "")
+        try input(#"{"type":"input_audio_buffer.committed","item_id":"prior"}"#)
+        try input(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"prior","transcript":"prior final"}"#)
+        let mixed = "Résumé 中文 — café."
+        var displayedFinal: String?
+        lane.conversation.onEvent = { event in
+            show(event)
+            if case .final(let id, _) = event, id == current { displayedFinal = controller.transcript }
+        }
+        try input(#"{"type":"input_audio_buffer.committed","item_id":"current"}"#)
+        try input(#"{"type":"conversation.item.input_audio_transcription.completed","item_id":"current","transcript":"Résumé 中文 — café."}"#)
+        await poll(until: { displayedFinal != nil })
+        XCTAssertEqual(displayedFinal, mixed)
+        for clear in [ConversationPresentation.ignored(current), .waiting(current)] {
+            show(.final(current, mixed))
+            show(.ignored(prior)); show(.waiting(prior))
+            XCTAssertEqual(controller.transcript, mixed)
+            show(clear)
+            XCTAssertEqual(controller.transcript, "")
+            XCTAssertEqual(pill.message, "Listening…")
+            show(.feedback(current, "Current reply."))
+            XCTAssertEqual(controller.transcript, "")
+        }
+        work.captureID = current
+        work.active = true; work.outcome = nil; work.message = "Working on the current task."
+        show(.final(current, mixed))
+        coordinator.onChange()
+        show(.waiting(current))
+        XCTAssertEqual(controller.status, .executing)
+        XCTAssertEqual(pill.message, work.message)
+        work.active = false
+        work.message = "Requested Desktop 2. Switch unverified."
+        work.outcome = .uncertain(work.message)
+        work.desktopDecision = .pressAcceptedUnverified
+        coordinator.onChange()
+        XCTAssertEqual(controller.status, .replied)
+        XCTAssertEqual(controller.detail, work.message)
+        XCTAssertFalse(VoiceWindows.showsPanel(status: controller.status, automatic: controller.quietHandsFreePresentation,
+            hasAsk: false, linger: false, microphoneTest: false))
+        work.active = true; work.outcome = nil; work.desktopDecision = nil
+        work.ask = .confirm("Confirm the current task?")
+        work.agentAskID = "fixture"
+        coordinator.onChange()
+        show(.ignored(current))
+        XCTAssertEqual(controller.pendingTaskApproval?.id, work.id)
+        XCTAssertEqual(pill.message, "Confirm the current task?")
+        work.agentAskID = nil; work.ask = nil; work.active = false; work.outcome = .blocked("Current blocker.")
+        coordinator.onChange()
+        show(.waiting(current))
+        XCTAssertEqual(controller.status, .error("Current blocker."))
+        XCTAssertEqual(pill.message, "Current blocker.")
+        let ambient = UUID()
+        show(.began(ambient, 7)); coordinator.endListeningHint()
+        show(.feedback(ambient, "Ambient informational reply."))
+        XCTAssertEqual(controller.status, .error("Current blocker."))
+        XCTAssertEqual(pill.message, "Current blocker.")
+        let parked = VoiceTaskCoordinator.Work(label: "Another task", request: "Another task",
+                                               spec: DriveTask(goal: "Another task"))
+        parked.captureID = UUID()
+        parked.ask = .confirm("Approve the other task?"); parked.agentAskID = "other-fixture"
+        coordinator.tasks = [parked]
+        show(.feedback(current, "Unrelated prior feedback."))
+        let newer = UUID()
+        show(.began(newer, 8)); coordinator.endListeningHint()
+        XCTAssertEqual(pill.message, "Approve the other task?")
+        show(.ignored(newer))
+        XCTAssertEqual(pill.message, "Approve the other task?")
+        XCTAssertEqual(controller.pendingTaskApproval?.id, parked.id)
+        parked.agentAskID = nil
+    }
+
     func testRealtimeFeedbackAndPauseNeverFallBackToLegacySpeech() async {
         for paused in [false, true] {
             let config = testConfig()
@@ -39,6 +226,81 @@ final class VoiceLaneAuditTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(capture.prepareCalls, 0)
         XCTAssertEqual(controller.handsFreeState, .paused)
+    }
+
+    func testSettingsAndMenuOfferOnlyTheCurrentHandsFreeAction() async {
+        let config = testConfig()
+        config.handsFreeEnabled = true
+        let lane = RealtimeVoiceLane(apiKey: { "" })
+        let controller = VoiceController(config: config, speech: lane, authorize: { false },
+            frontmost: { nil }, cuaRuntime: testCoordinator(config), speaker: FakeSpeaker())
+        defer { controller.cancel() }
+        controller.missingPermissions = []
+        for state: ConversationListeningState in [.preparing, .listening] {
+            lane.onConversationState?(state)
+            XCTAssertEqual(controller.handsFreeControls.toggle, .pause)
+        }
+        lane.onConversationState?(.preparing)
+        controller.applyHandsFreeToggle(.pause) { XCTFail("Pause does not request permission"); return false }
+        XCTAssertTrue(config.handsFreePaused)
+        XCTAssertEqual(controller.handsFreeState, .paused)
+        XCTAssertEqual(controller.handsFreeControls.toggle, .resume)
+        controller.handsFreeSessionAvailable = { false }
+        XCTAssertNil(controller.handsFreeControls.toggle)
+        controller.applyHandsFreeToggle(.resume) { XCTFail("Inactive session"); return true }
+        controller.handsFreeSessionAvailable = { true }
+        controller.missingPermissions = [.microphone]
+        XCTAssertNil(controller.handsFreeControls.toggle)
+        XCTAssertTrue(controller.handsFreeDetail.contains("Privacy & Security"))
+        controller.missingPermissions = []
+        controller.applyHandsFreeToggle(.resume) { false }
+        XCTAssertTrue(config.handsFreePaused)
+        lane.onConversationState?(.unavailable("Check the selected input."))
+        XCTAssertNil(controller.handsFreeControls.toggle)
+        XCTAssertEqual(controller.handsFreeDetail, "Check the selected input.")
+        let previousBlocker = controller.handsFreeControls
+        lane.onConversationState?(.unavailable("Check the connection."))
+        XCTAssertNotEqual(previousBlocker, controller.handsFreeControls)
+        controller.applyHandsFreeToggle(.resume) { XCTFail("Stale blocked action"); return true }
+        lane.onConversationState?(.paused)
+        controller.applyHandsFreeToggle(.resume) { true }
+        XCTAssertFalse(config.handsFreePaused)
+        lane.onConversationState?(.paused)
+        XCTAssertNil(controller.handsFreeControls.toggle)
+        XCTAssertEqual(controller.handsFreeControls.label, "Hands-free on hold")
+        lane.onConversationState?(.listening)
+        XCTAssertEqual(controller.handsFreeControls.toggle, .pause)
+        await controller.shutdown()
+    }
+
+    func testHandsFreePermissionRecoveryPreservesTheListeningPreference() async {
+        for paused in [false, true] {
+            let config = testConfig(), capture = StubCapture()
+            config.handsFreeEnabled = true
+            config.handsFreePaused = paused
+            let missing = LockedBox<[Permission]>([.microphone])
+            let controller = VoiceController(config: config, speech: capture, authorize: { false },
+                cuaRuntime: testCoordinator(config), permissionStatusReader: { missing.value })
+            controller.missingPermissions = []
+            var recoveries = 0
+            func refresh() {
+                controller.refreshPermissionsInBackground(canPrepareMicrophone: { true }) {
+                    recoveries += 1
+                    controller.prepareMicrophone()
+                }
+            }
+            refresh()
+            await poll { controller.missingPermissions.contains(.microphone) }
+            XCTAssertFalse(controller.wantsHandsFreeListening)
+            missing.set([])
+            refresh()
+            await poll { recoveries == 1 && (paused || capture.prepareCalls == 1) }
+            XCTAssertEqual(recoveries, 1)
+            XCTAssertEqual(config.handsFreePaused, paused)
+            XCTAssertEqual(controller.wantsHandsFreeListening, !paused)
+            XCTAssertEqual(capture.prepareCalls, paused ? 0 : 1)
+            await controller.shutdown()
+        }
     }
 
     func testPauseDuringPreparationCannotReopenTheMicrophone() async {
@@ -630,6 +892,49 @@ final class VoiceLaneAuditTests: XCTestCase {
         capture.onEvent?(id, .final("hello world"))
         await poll(until: { !dictation.delivered.isEmpty })
         XCTAssertEqual(dictation.delivered, ["hello world"])
+    }
+
+    func testQuotedDictationEditsAreLiteralForOwnedChordAndLatchedFinals() async throws {
+        for text in ["\"scratch that\"", "`scratch that`", "'undo that'", "«delete last sentence»", "say “try ‘one’ then scratch that”",
+                     "say “scratch  that” exactly.", "quote “newline"] {
+            XCTAssertEqual(DictationDelivery.editTokens(text), [.insert(text)])
+        }
+        XCTAssertEqual(DictationDelivery.editTokens("don't change “new line” new line two"),
+                       [.insert("don't change “new line”"), .insert("\n"), .insert("two")])
+        for latched in [false, true] {
+            let config = testConfig()
+            config.dictationHotkey = true
+            let capture = StubCapture(), calls = Flags()
+            let delivery = DictationDelivery(
+                insertText: { calls.strings.append($0); return true },
+                pasteText: { _ in XCTFail("Unexpected paste"); return false },
+                deleteBackward: { calls.ints.append($0); return true })
+            try await delivery.deliver("cedar")
+            let cua = testCoordinator(config)
+            let controller = VoiceController(config: config, speech: capture, authorize: { true },
+                cuaRuntime: cua, dictation: delivery, speaker: FakeSpeaker())
+            defer { controller.cancel(); cua.shutdown() }
+            if latched { controller.startDictation() } else { controller.beginDictation() }
+            await poll(until: { controller.isListening })
+            let id = try XCTUnwrap(capture.startedID)
+            let literal = "“scratch that”"
+            capture.onEvent?(UUID(), .final("undo that"))
+            capture.onEvent?(id, .partial("scratch that"))
+            if latched {
+                controller.begin()
+                capture.onEvent?(id, .final(literal))
+            } else {
+                capture.onEvent?(id, .final(literal))
+                XCTAssertEqual(calls.strings, ["cedar"])
+                controller.finish()
+            }
+            capture.onEvent?(id, .final(literal))
+            await poll(until: { controller.status == .done })
+            XCTAssertEqual(calls.strings, ["cedar", literal])
+            XCTAssertEqual(calls.ints, [])
+            try await delivery.deliver("Scratch that!")
+            XCTAssertEqual(calls.ints, [literal.count])
+        }
     }
 
     /// The hotkey gate still applies — a disabled dictation feature

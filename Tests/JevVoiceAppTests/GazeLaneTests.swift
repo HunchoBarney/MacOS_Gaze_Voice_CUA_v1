@@ -6,6 +6,18 @@ import JevVoiceCore
 /// tracker point, and refuse honestly when the tracker can't say where the
 /// user is looking.
 final class GazeLaneTests: XCTestCase {
+    private var priorTracker: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
+
+    override func setUp() {
+        super.setUp()
+        priorTracker = TrackerControl.transport
+        TrackerControl.transport = { _ in throw URLError(.notConnectedToInternet) }
+    }
+
+    override func tearDown() {
+        if let priorTracker { TrackerControl.transport = priorTracker }
+        super.tearDown()
+    }
 
     // MARK: - Parse + resolve
 
@@ -93,24 +105,66 @@ final class GazeLaneTests: XCTestCase {
                      updatedAt: Date()) }
     }
 
-    /// "click" dispatches a desktop-scope click at the gaze point in the
-    /// driver's pixel space (points × the display's backing scale).
-    func testClickDispatchesAtGazePixel() async {
+
+    private func button(at p: CGPoint) -> IntentCandidate {
+        let r = CGRect(x: p.x - 10, y: p.y - 10, width: 20, height: 20)
+        return IntentCandidate(id: "ax:42:7:fixture", kind: .axElement, frame: r, motorRect: r,
+                               role: "AXButton", label: "Save", pid: 42, windowID: 7)
+    }
+
+    @MainActor
+    func testGenericVoiceLoopCannotTurnARewrittenPayloadIntoAGazeClick() async throws {
+        let loop = DriveLoop(call: { tool, _ in XCTFail(tool); return .null },
+            choose: { _, _ in XCTFail("Unexpected chooser"); return nil }, ask: nil, granted: { true },
+            directSession: "voice-direct",
+            gaze: { XCTFail("Unexpected gaze read"); throw CancellationError() },
+            gazeCommit: { XCTFail("Unexpected target selection"); return nil },
+            gazeClick: { _, _ in XCTFail("Unexpected actuation"); return true })
+        for phrase in ["click", "right click", "double click"] {
+            let resolved = try XCTUnwrap(DriveLoop.resolveFastLane(goal: phrase, apps: [], frontmostBundle: nil))
+            var history: [String] = [], confirmed = true
+            let result = try await loop.runFastLane(resolved, task: DriveTask(goal: "fixture payload"),
+                session: "fixture", history: &history, confirmed: &confirmed)
+            guard case .blocked? = result?.status else { return XCTFail(phrase) }
+            XCTAssertFalse(result?.dispatchedEffect ?? true, phrase)
+        }
+    }
+
+    @MainActor
+    func testClickDispatchesOnlyTheVerifiedElementAtTheGazePoint() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
         let point = CGPoint(x: 500, y: 400)
-        let expected = DriveLoop.desktopPixels(point)
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
-                             choose: { _, _ in nil }, ask: nil, granted: { true },
-                             gaze: gaze(500, 400))
+        let button = button(at: point)
+        var presses = 0
+        let loop = DriveLoop(call: { try driver.call($0, $1) }, choose: { _, _ in nil }, ask: nil, granted: { true },
+            gaze: gaze(500, 400), gazeCommit: { (button, 1) }, gazeClick: { c, verb in
+                await VoiceTaskCoordinator.dispatchCommitted(verb: verb, current: { c == button }, press: { presses += 1; return true })
+            })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
         XCTAssertEqual(result.status, .done)
-        let clicks = driver.calls.filter { $0.tool == "click" }
-        XCTAssertEqual(clicks.count, 1)
-        XCTAssertEqual(clicks[0].args["scope"], .string("desktop"))
-        XCTAssertEqual(clicks[0].args["x"], .number(expected.x))
-        XCTAssertEqual(clicks[0].args["y"], .number(expected.y))
-        XCTAssertNil(clicks[0].args["pid"], "a gaze click needs no pid")
+        XCTAssertEqual(presses, 1)
+        XCTAssertFalse(driver.calls.contains { $0.tool == "click" })
+    }
+
+    @MainActor
+    func testMissingCommitOrRevocationBeforeSendCannotFallBackToRawPoint() async {
+        let driver = FakeDriver(), point = CGPoint(x: 500, y: 400)
+        let candidate = button(at: point)
+        for hasBinding in [false, true] {
+            var validations = 0
+            let loop = DriveLoop(call: { try driver.call($0, $1) }, choose: { _, _ in nil }, ask: nil,
+                granted: { true }, gaze: gaze(500, 400), gazeCommit: { hasBinding ? (candidate, 1) : nil },
+                gazeClick: { _, verb in
+                    await VoiceTaskCoordinator.dispatchCommitted(verb: verb, current: {
+                        validations += 1; return false
+                    }, press: { XCTFail("Revoked gaze press"); return false })
+                })
+            let result = await loop.run(DriveTask(goal: "click"), session: "t")
+            guard case .blocked = result.status else { return XCTFail("Expected refused click") }
+            XCTAssertEqual(validations, hasBinding ? 1 : 0)
+        }
+        XCTAssertFalse(driver.calls.contains { $0.tool == "click" })
     }
 
     /// No tracker → an honest refusal naming the missing piece; no click
@@ -174,26 +228,22 @@ final class GazeLaneTests: XCTestCase {
         XCTAssertTrue(driver.calls.filter { $0.tool == "click" }.isEmpty)
     }
 
-    /// Right and double clicks post through the host HID seam — the driver
-    /// never sees them (its pixel forms need a pid + window-local px).
-    func testRightAndDoubleClickPostHostSide() async {
-        var posts: [(GazePointer.Kind, CGPoint)] = []
+    @MainActor
+    func testRightAndDoubleClickCannotFallBackToGlobalPointerEvents() async {
         let old = GazePointer.poster
         defer { GazePointer.poster = old }
-        GazePointer.poster = { kind, point in posts.append((kind, point)); return true }
-
+        GazePointer.poster = { _, _ in XCTFail("Ungrounded pointer event"); return false }
+        let target = button(at: CGPoint(x: 200, y: 100))
         for goal in ["right click", "double click"] {
             let driver = FakeDriver()
-            driver.responses["list_apps"] = [.object(["apps": .array([])])]
-            let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
-                                 choose: { _, _ in nil }, ask: nil,
-                                 granted: { true }, gaze: gaze(200, 100))
+            let loop = DriveLoop(call: { try driver.call($0, $1) }, choose: { _, _ in nil }, ask: nil,
+                granted: { true }, gaze: gaze(200, 100), gazeCommit: { (target, 1) },
+                gazeClick: { _, verb in await VoiceTaskCoordinator.dispatchCommitted(verb: verb, current: { true },
+                    press: { XCTFail("Wrong gesture"); return false }) })
             let result = await loop.run(DriveTask(goal: goal), session: "t")
-            XCTAssertEqual(result.status, .done, goal)
+            guard case .blocked = result.status else { return XCTFail(goal) }
+            XCTAssertFalse(driver.calls.contains { $0.tool == "click" })
         }
-        XCTAssertEqual(posts.map(\.0), [.right, .double])
-        XCTAssertEqual(posts[0].1, CGPoint(x: 200, y: 100),
-                       "host posts take the gaze point verbatim — CGEvent space is global points")
     }
 
     func testScrollDownRequiresFreshWindowAndRegionBindingAtGazePoint() async {
@@ -231,9 +281,7 @@ final class GazeLaneTests: XCTestCase {
         XCTAssertFalse(driver.calls.contains { ["scroll", "hotkey", "press_key"].contains($0.tool) })
     }
 
-    /// "type X here" with a live tracker clicks the field at the gaze
-    /// point, then types into that window's focused element.
-    func testDeicticTypeUsesGazePoint() async {
+    func testDeicticTypeRefusesEvenWithFreshGaze() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [
             .object(["apps": .array([appRow("Notes", "com.apple.Notes", pid: 42)])])]
@@ -252,13 +300,9 @@ final class GazeLaneTests: XCTestCase {
                              frontmostBundleID: { "com.apple.Notes" })
         let result = await loop.run(DriveTask(goal: "type hello there here"),
                                     session: "t")
-        XCTAssertEqual(result.status, .done)
-        let tools = driver.calls.map(\.tool)
-        XCTAssertTrue(tools.contains("click"), "the field at the gaze point is clicked to focus")
-        let typed = driver.calls.first { $0.tool == "type_text" }
-        XCTAssertEqual(typed?.args["text"], .string("hello there"))
-        XCTAssertEqual(typed?.args["pid"], .number(42),
-                       "the window under the gaze point owns the typing target")
+        guard case .blocked = result.status else { return XCTFail("Expected refusal") }
+        XCTAssertFalse(result.dispatchedEffect)
+        XCTAssertTrue(driver.calls.isEmpty)
     }
 
     /// "what is this" reads the deepest element under the gaze point —
@@ -408,9 +452,7 @@ final class GazeLaneTests: XCTestCase {
                      "physical-pixel values would only hit on a 2x misread")
     }
 
-    /// End-to-end: "type X here" must type into the window the user can
-    /// *see* at the gaze point — the frontmost row — not the one behind.
-    func testDeicticTypeTargetsFrontmostWindow() async {
+    func testDeicticTypeCannotRetargetTheWindowUnderGaze() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [
             .object(["apps": .array([appRow("Notes", "com.apple.Notes", pid: 42)])])]
@@ -431,10 +473,9 @@ final class GazeLaneTests: XCTestCase {
                              frontmostBundleID: { "com.apple.Notes" })
         let result = await loop.run(DriveTask(goal: "type hello there here"),
                                     session: "t")
-        XCTAssertEqual(result.status, .done)
-        let typed = driver.calls.first { $0.tool == "type_text" }
-        XCTAssertEqual(typed?.args["pid"], .number(9),
-                       "the frontmost window under the gaze owns the typing target")
+        guard case .blocked = result.status else { return XCTFail("Expected refusal") }
+        XCTAssertTrue(driver.calls.isEmpty)
+        XCTAssertFalse(result.dispatchedEffect)
     }
 
     // MARK: - Client decode gates

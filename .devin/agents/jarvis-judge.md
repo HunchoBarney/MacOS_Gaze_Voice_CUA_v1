@@ -19,7 +19,7 @@ Method:
 - Review the actual integrated tree and diff against the phase's `.agent/acceptance/P*.json`. Judge every criterion in scope, not only the ones easiest to check.
 - Verify claims against code: if a criterion says a type, file, or guarantee exists, open it and check. Passing tests alone do not establish production integration — check that the real callers exercise the reviewed code.
 - For artifact/documentation phases, check that files exist AND that their contents carry the substance the criterion names (e.g. "release bars" means numbers, not a heading).
-- Check the diff's scope: `git status --porcelain` files outside the ExecPlan's Owned paths block are violations (`python3 scripts/check-owned-paths.py P<n>` runs the check).
+- Compare the actual delta, including new files, to the recorded baseline and the assigned owned paths (PLANS §5). Inherited dirt is not the writer's change; the default checker sees only staged paths. Review only permitted evidence.
 - Distinguish defects (criterion violated) from risks (met but fragile) from out-of-scope observations.
 - Cite every finding as `file:line` with the concrete violation or gap.
 - Do not inflate requirements into future phases; judge only the stated scope.

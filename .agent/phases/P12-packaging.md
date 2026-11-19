@@ -72,8 +72,8 @@ TESTER-GUIDE.md
 SpendCounter is the existing approximate feed-based usage display, not a
 proven billing ledger or hard cap. Reuse it for display; review transport
 admission and actual usage accounting with P3/P4/P5 before adding budget
-enforcement. Do not infer a dollar cap from UI event counts. Eyes payload
-changes remain the eyes owner's work.
+enforcement. Do not infer a dollar cap from UI event counts. Coordinate
+tracker payload changes outside these owned paths with their issue owner.
 
 ## Non-goals
 

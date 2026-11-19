@@ -152,6 +152,7 @@ class GazeStateStore {
     // a file that only changes on commitPending.
     this.statCalibrationFile = options.statCalibrationFile;
     this.calibrationFileCache = null;
+    this.lastCaptureMs = 0;
     const startedAt = options.startedAt || this.now();
     this.state = createInitialSnapshot(startedAt);
     this.listeners = new Set();
@@ -259,6 +260,13 @@ class GazeStateStore {
     if (payload.type === "gaze") {
       const xNorm = finiteNumber(payload.x_norm);
       const yNorm = finiteNumber(payload.y_norm);
+      const receivedMs = Date.parse(updatedAt);
+      const sourceMs = payload.captured_at_ms;
+      const held = payload.away === true || payload.blink === true || payload.head_turned === true || Boolean(payload.held_reason);
+      const proven = !this.state.paused && !held && Number.isFinite(payload.x_norm) && Number.isFinite(payload.y_norm) &&
+        Number.isFinite(sourceMs) && sourceMs > this.lastCaptureMs && sourceMs < receivedMs + 1;
+      if (proven) this.lastCaptureMs = sourceMs;
+      else if (held && Number.isFinite(receivedMs)) this.lastCaptureMs = Math.max(this.lastCaptureMs, receivedMs);
       const bounds = this.state.display?.bounds;
       const pixels =
         xNorm !== undefined && yNorm !== undefined && validBounds(bounds)
@@ -273,6 +281,7 @@ class GazeStateStore {
         // that a consumer could read as live. `away` marks the slice as a
         // liveness beat: fresh updated_at, no valid gaze.
         away: payload.away === true ? true : undefined,
+        captured_at_ms: proven ? sourceMs : undefined,
         x_norm: xNorm,
         y_norm: yNorm,
         raw_x_norm: finiteNumber(payload.raw_x_norm),
@@ -371,6 +380,11 @@ class GazeStateStore {
       if (this.state.paused !== paused) {
         this.state.paused = paused;
         changed.add("paused");
+        if (paused && this.state.gaze?.captured_at_ms !== undefined) {
+          delete this.state.gaze.captured_at_ms;
+          changed.add("gaze");
+        }
+        if (!paused) this.lastCaptureMs = Math.max(this.lastCaptureMs, Date.parse(updatedAt) + 1);
       }
     }
     if (report.calibration_status !== undefined) {

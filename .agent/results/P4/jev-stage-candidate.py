@@ -19,6 +19,16 @@ RETAINED_BASE_APP = Path.home() / "jarvis-local/c1-candidates/jev-c1-final-r9-2-
 RETAINED_BASE_RECEIPT = ROOT / ".agent/results/P12/c1-final-r9-2-stage.json"
 RETAINED_BASE_RECEIPT_SHA = "972d1ce3cfc04f0d3ef8c101c1cabfe377ee223b2aae0c93e98f35e76e6714f0"
 RETAINED_BASE_SHA = "79e8859b32d849e2777c741cefec099123cae9e18a6d081de8bab440cabb276b"
+RETEST = "final-first-minute-1"
+GAZE = "final-gaze-quiet-1"
+RETEST_LABELS = (RETEST, "final-spaces-diagnostic-1", "final-first-minute-quiet-1", GAZE)
+
+
+def tracker_overlay():
+    spec = importlib.util.spec_from_file_location("c1_tracker_overlay", HERE.parent / "P12/c1_tracker_overlay.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def helper():
@@ -50,8 +60,8 @@ def retained_base_metadata():
 
 
 def verify_retained_base(stage, label, metadata=None):
-    if label != "final-r10":
-        raise RuntimeError("The retained base is admitted only final-r10")
+    if label not in ("final-r10", *RETEST_LABELS):
+        raise RuntimeError("The retained base is admitted only final-r10 or a reviewed retest label")
     if os.path.lexists(DAILY_APP):
         raise RuntimeError("The original daily path must be absent, not partial or a symlink")
     expected = retained_base_metadata()
@@ -79,12 +89,30 @@ def verify_retained_base(stage, label, metadata=None):
 
 
 def choose_base(stage, label, use_retained):
+    if label in RETEST_LABELS and not use_retained:
+        raise RuntimeError("The first-minute retest requires the pinned retained base")
     if use_retained:
         metadata = verify_retained_base(stage, label)
         return RETAINED_BASE_APP, RETAINED_BASE_SHA, metadata
     if stage.digest(DAILY_APP / "Contents/MacOS/JevVoice") != ROLLBACK_SHA:
         raise RuntimeError("Daily rollback differs from the approved identity")
     return DAILY_APP, ROLLBACK_SHA, {"rollback_role": "original_daily"}
+
+
+def reserve_retest(root, receipt, component, label=RETEST):
+    if label not in RETEST_LABELS:
+        raise RuntimeError("Unknown retest label")
+    for path in (receipt, component):
+        if os.path.lexists(path):
+            raise FileExistsError(path)
+    parent = root / f"jev-c1-{label}"
+    parent.mkdir(mode=0o700)
+    return parent
+
+
+def verify_retest_release(snapshot, unsigned, label=RETEST):
+    if label not in RETEST_LABELS or snapshot.get("label") != label or snapshot.get("built_unsigned_main_sha256") != unsigned:
+        raise RuntimeError("The release executable does not match its first-minute source freeze")
 
 
 def clone_file(source, destination):
@@ -98,20 +126,27 @@ def clone_file(source, destination):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--label", choices=("before", "after", "after-r2", "after-r3", "final", "final-r2", "final-r3", "final-r4", "final-r5", "final-r6", "final-r7", "final-r8", "final-r9", "final-r9-2", "final-r10"), required=True)
+    parser.add_argument("--label", choices=("before", "after", "after-r2", "after-r3", "final", "final-r2", "final-r3", "final-r4", "final-r5", "final-r6", "final-r7", "final-r8", "final-r9", "final-r9-2", "final-r10", *RETEST_LABELS), required=True)
     parser.add_argument("--snapshot", type=Path, required=True)
     parser.add_argument("--retained-base", action="store_true")
     args = parser.parse_args()
     if os.environ.get("JARVIS_VERIFICATION_LANE_HELD") != "1":
         raise RuntimeError("Run through scripts/verification-lane.sh p4-stage-candidate")
     stage = helper()
+    snapshot_hash = stage.digest(args.snapshot)
     snapshot = json.loads(args.snapshot.read_text())
+    if (snapshot.get("label") == GAZE) != (args.label == GAZE):
+        raise RuntimeError("Gaze release freeze cannot be relabelled")
     expected = {name: digest for name, digest in snapshot["source_sha256"].items()
                 if name.startswith("Sources/") or name in
                 ("Info.plist", "Package.swift", "Package.resolved")}
     if not expected or source_identity(stage) != expected:
         raise RuntimeError("Current build inputs differ from the frozen source")
     executable = ROOT / ".build/release/JevVoice"
+    gaze = args.label == GAZE
+    if gaze:
+        overlay = tracker_overlay()
+        overlay.verify_freeze(stage, args.snapshot, snapshot, ROOT)
     rollback, rollback_sha, base_metadata = choose_base(stage, args.label, args.retained_base)
     original_main = rollback / "Contents/MacOS/JevVoice"
     run(["codesign", "--verify", "--deep", "--strict", str(rollback)])
@@ -136,21 +171,30 @@ def main():
     if output.exists():
         raise FileExistsError(output)
     unsigned_main = stage.digest(executable)
+    if gaze:
+        base_receipt = overlay.retained_receipt(RETAINED_BASE_RECEIPT, RETAINED_BASE_RECEIPT_SHA, RETAINED_BASE_SHA)
+        overlay.verify_tools(base_receipt, pin_hash, pins, base_receipt["driver"], base_receipt["codex"],
+                             expected, ROOT / "Sources/JevVoice/ComputerControl/CuaDependency.swift", original_resources)
     candidate_root = Path.home() / "jarvis-local/c1-candidates"
     candidate_root.mkdir(mode=0o700, exist_ok=True)
     info = candidate_root.lstat()
     if (candidate_root.is_symlink() or not candidate_root.is_dir()
             or info.st_uid != os.getuid() or info.st_mode & 0o777 != 0o700):
         raise RuntimeError("Candidate storage must be a private owned directory")
-    parent = Path(tempfile.mkdtemp(prefix=f"jev-c1-{args.label}-", dir=candidate_root))
+    if args.label in RETEST_LABELS:
+        verify_retest_release(snapshot, unsigned_main, args.label)
+        parent = reserve_retest(candidate_root, output, output.with_name(f"c1-manifest-{args.label}.json"), args.label)
+    else:
+        parent = Path(tempfile.mkdtemp(prefix=f"jev-c1-{args.label}-", dir=candidate_root))
     parent.chmod(0o700)
     app = parent / "Jev Voice.app"
     shutil.copytree(rollback, app, symlinks=True, copy_function=clone_file)
     shutil.copyfile(executable, app / "Contents/MacOS/JevVoice")
     shutil.copyfile(ROOT / "Info.plist", app / "Contents/Info.plist")
-    shutil.copyfile(driver, app / "Contents/Resources/cua-driver")
-    shutil.copyfile(codex, app / "Contents/Resources/CodexRuntime/codex")
-    if args.label.startswith("final"):
+    if not gaze:
+        shutil.copyfile(driver, app / "Contents/Resources/cua-driver")
+        shutil.copyfile(codex, app / "Contents/Resources/CodexRuntime/codex")
+    if args.label.startswith("final") and not gaze:
         fluid = ROOT / ".build/checkouts/FluidAudio"
         pin = next(p for p in json.loads((ROOT / "Package.resolved").read_text())["pins"]
                    if p["identity"].lower() == "fluidaudio")
@@ -171,12 +215,25 @@ def main():
         shutil.copyfile(ROOT / ".agent/results/P12/speech-attribution.md", destination / "NOTICE.md")
     if args.label == "final-r8":
         run(["python3", "scripts/bundle-conversation-vad.py", "--app", str(app)], timeout=600)
-    signed = run(["scripts/sign-app.sh", str(app)], timeout=600)
+    if gaze:
+        overlay.apply_overlay(stage, app, args.snapshot, snapshot, ROOT, base_receipt["resource_manifest"])
+        if stage.digest(app / "Contents/MacOS/JevVoice") != unsigned_main:
+            raise RuntimeError("Cloned app does not contain the attested unsigned release")
+        info_path = app / "Contents/Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        if info.get("JevVoiceInputProvider") != "openai-realtime":
+            raise RuntimeError("Gaze candidate must not depend on local speech assets")
+        info["JevCuaDriverSHA256"] = base_receipt["driver"]["signed_sha256"]
+        info_path.write_bytes(plistlib.dumps(info))
+        signed = run(["/usr/bin/codesign", "--force", "--sign", "f8aeb104eed4b249fe9869c0fa2d328b643dbb21",
+                      str(app)], timeout=600)
+    else:
+        signed = run(["scripts/sign-app.sh", str(app)] + (["--existing-only"] if args.label in RETEST_LABELS else []), timeout=600)
     signature = run(["codesign", "--verify", "--deep", "--strict", str(app)])
     if stage.requirement(app) != original_requirement or stage.signing_metadata(app) != original_signing:
         raise RuntimeError("The candidate changed the stable app signing identity or entitlements")
     if (source_identity(stage) != expected or stage.digest(executable) != unsigned_main
-            or stage.digest(pins_path) != pin_hash):
+            or stage.digest(pins_path) != pin_hash or stage.digest(args.snapshot) != snapshot_hash):
         raise RuntimeError("Build inputs changed during staging")
     if (stage.digest(original_main) != rollback_sha
             or stage.digest(rollback / "Contents/Info.plist") != original_info
@@ -192,6 +249,9 @@ def main():
     if version != "cua-driver 0.38.0":
         raise RuntimeError("Signed driver reports an unexpected generation")
     resources = stage.resources(app)
+    if gaze:
+        overlay.verify_freeze(stage, args.snapshot, snapshot, ROOT)
+        proof = overlay.verify_resources(app, resources, base_receipt["resource_manifest"])
     receipt = {
         "schema_version": 1, "label": args.label, "app": str(app),
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -201,7 +261,7 @@ def main():
         "source_snapshot": str(args.snapshot.resolve()),
         "source_snapshot_sha256": stage.digest(args.snapshot),
         "staging_helper_sha256": stage.digest(Path(__file__)),
-        "signing_helper_sha256": stage.digest(ROOT / "scripts/sign-app.sh"),
+        "signing_helper_sha256": stage.digest(Path(__file__) if gaze else ROOT / "scripts/sign-app.sh"),
         "resource_helper_sha256": stage.digest(ROOT / ".agent/results/P12/c1_manifest.py"),
         "conversation_resource_receipt_sha256": stage.digest(ROOT / ".agent/results/P12/c1-r2-vad-resource.json"),
         "conversation_resource_helper_sha256": stage.digest(ROOT / "scripts/bundle-conversation-vad.py"),
@@ -222,6 +282,7 @@ def main():
         "signing_output": signed.stdout + signed.stderr,
         "physical_input_verified": False, "release_preflight_verified": False,
         **base_metadata,
+        **({"tracker_overlay": proof, "tracker_overlay_helper_sha256": stage.digest(Path(overlay.__file__))} if gaze else {}),
     }
     with output.open("x") as stream:
         json.dump(receipt, stream, indent=2, sort_keys=True)

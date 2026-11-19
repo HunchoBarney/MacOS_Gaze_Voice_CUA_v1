@@ -139,16 +139,14 @@ def emit_row(row, writer, n, runs):
 
 
 def run_task(task, runs, writer, *, stub, binary, env, timeout,
-             dry_run, verbose, keyless):
+             dry_run, verbose):
     tid = task["id"]
-    if keyless:
-        # One row per run — every attempted run produces exactly one row.
+    if not stub and not dry_run:
         for n in range(1, runs + 1):
             emit_row(make_row(
                 tid, n, 0.0, "", True, "error",
-                "TYPESAFE_API_KEY unavailable (env + Keychain item "
-                "com.chriswozniczek.jevvoice/typesafeAPIKey)",
-                status="blocked:keychain"), writer, n, runs)
+                "BLOCKED: trusted operator handoff unavailable",
+                status="blocked:operator_handoff"), writer, n, runs)
         return
     client = None
 
@@ -210,27 +208,15 @@ def main(argv=None):
     for t, why in skipped:
         print("skip %s — %s" % (t["id"], why))
     stub = args.stub or os.environ.get("BENCH_STUB", "") not in ("", "0")
-    binary, api_key = None, None
-    if not args.dry_run and not stub:
-        try:
-            binary = resolve_binary(REPO_ROOT, args.binary)
-        except MCPError as exc:
-            print("harness error: %s" % exc, file=sys.stderr)
-            return 2
-        api_key = require_api_key()  # None -> blocked:keychain rows
     out_path = Path(args.out) if args.out else out_default()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "a") as writer:
         for task in chosen:
             child_env = dict(os.environ)
-            if api_key:
-                child_env["TYPESAFE_API_KEY"] = api_key
             run_task(task, args.runs or task["runs"], writer,
-                     stub=stub, binary=binary, env=child_env,
+                     stub=stub, binary=args.binary, env=child_env,
                      timeout=args.timeout, dry_run=args.dry_run,
-                     verbose=args.verbose,
-                     keyless=(api_key is None and not stub
-                              and not args.dry_run))
+                     verbose=args.verbose)
     print("results: %s" % out_path)
     return 0
 

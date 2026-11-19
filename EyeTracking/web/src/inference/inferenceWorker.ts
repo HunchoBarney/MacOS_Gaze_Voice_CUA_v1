@@ -227,8 +227,7 @@ function emitHold(reason: string, rejectedRaw?: [number, number]): void {
         type: "gaze",
         away: true,
         held_reason: "no_face",
-        confidence: 0,
-        captured_at_ms: Date.now()
+        confidence: 0
       });
     }
     return;
@@ -240,7 +239,6 @@ function emitHold(reason: string, rejectedRaw?: [number, number]): void {
     y_norm: coasted[1],
     raw_x_norm: rejectedRaw?.[0],
     raw_y_norm: rejectedRaw?.[1],
-    captured_at_ms: Date.now(),
     confidence: 0.2,
     distance_m: lastEmitCore.distance,
     yaw_deg: lastEmitCore.yaw,
@@ -1016,7 +1014,6 @@ async function processFrameMessage(message: Extract<MainToWorkerMessage, { type:
           type: "gaze",
           x_norm: coasted[0],
           y_norm: coasted[1],
-          captured_at_ms: Date.now(),
           confidence: 0,
           distance_m: distanceM,
           iris_distance_m: irisDistanceM,
@@ -1277,7 +1274,7 @@ async function processFrameMessage(message: Extract<MainToWorkerMessage, { type:
       y_norm: clamp01(smoothed[1]),
       raw_x_norm: latestRaw[0],
       raw_y_norm: latestRaw[1],
-      captured_at_ms: message.capturedAtMs ?? Date.now(),
+      captured_at_ms: message.capturedAtMs,
       confidence,
       distance_m: distanceM,
       iris_distance_m: irisDistanceM,
@@ -1795,4 +1792,3 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   }
   return `data:${blob.type};base64,${btoa(binary)}`;
 }
-

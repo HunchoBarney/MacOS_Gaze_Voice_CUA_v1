@@ -3,9 +3,16 @@ import LocalAuthentication
 import Security
 
 protocol APIKeyStore {
+    var noninteractive: APIKeyStore { get }
     func read() throws -> String?
     func save(_ apiKey: String) throws
+    func migrateLegacyKey(_ apiKey: String) throws
     func delete() throws
+}
+
+extension APIKeyStore {
+    var noninteractive: APIKeyStore { self }
+    func migrateLegacyKey(_ apiKey: String) throws { try save(apiKey) }
 }
 
 struct KeychainAPIKeyStore: APIKeyStore {
@@ -26,6 +33,10 @@ struct KeychainAPIKeyStore: APIKeyStore {
     private let service: String
     private let account: String
     private let allowUserInteraction: Bool
+
+    var noninteractive: APIKeyStore {
+        KeychainAPIKeyStore(service: service, account: account, allowUserInteraction: false)
+    }
 
     init(
         service: String = "com.chriswozniczek.jevvoice",
@@ -92,5 +103,12 @@ struct KeychainAPIKeyStore: APIKeyStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw StoreError.status(status)
         }
+    }
+
+    func migrateLegacyKey(_ apiKey: String) throws {
+        var item = query
+        item[kSecValueData as String] = Data(apiKey.utf8)
+        let status = SecItemAdd(item as CFDictionary, nil)
+        guard status == errSecSuccess else { throw StoreError.status(status) }
     }
 }

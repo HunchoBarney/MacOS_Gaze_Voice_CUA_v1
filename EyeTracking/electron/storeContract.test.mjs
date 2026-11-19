@@ -114,6 +114,63 @@ describe("update listener contract", () => {
     pitch_deg: -2
   };
 
+  it("keeps capture provenance separate from receipt, including held, away and reordered input", () => {
+    const epoch = Date.UTC(2026, 0, 1);
+    let now = epoch + 50;
+    const store = new GazeStateStore({ now: () => new Date(now++).toISOString() });
+    const send = (fields) => {
+      store.updateFromBackendMessage({ ...gazeFrame, ...fields });
+      const gaze = store.getSlice("gaze");
+      expect(Date.parse(gaze.updated_at)).toBe(now - 1);
+      return gaze.captured_at_ms;
+    };
+    expect(send({ captured_at_ms: epoch })).toBe(epoch);
+    expect(send({ captured_at_ms: epoch })).toBeUndefined();
+    expect(send({ captured_at_ms: epoch - 1 })).toBeUndefined();
+    expect(send({})).toBeUndefined();
+    expect(send({ captured_at_ms: epoch + 999 })).toBeUndefined();
+    expect(send({ captured_at_ms: String(epoch + 1) })).toBeUndefined();
+    expect(send({ captured_at_ms: epoch + 1, y_norm: null })).toBeUndefined();
+    for (const fields of [{ held_reason: "no_face" }, { away: true }, { blink: true }, { head_turned: true }]) {
+      expect(send({ captured_at_ms: now - 1, ...fields })).toBeUndefined();
+      expect(send({ captured_at_ms: now - 2 })).toBeUndefined();
+    }
+    const fresh = now - 0.2;
+    expect(send({ captured_at_ms: fresh })).toBe(fresh);
+  });
+
+  it("revokes a published observation on pause and requires a post-resume capture for the next one", () => {
+    const epoch = Date.UTC(2026, 0, 1);
+    let now = epoch + 10;
+    const store = new GazeStateStore({ now: () => new Date(now).toISOString() });
+    const events = [];
+    store.subscribe(event => events.push(JSON.parse(JSON.stringify(event))));
+    const send = (captured_at_ms, x_norm) => {
+      store.updateFromBackendMessage({ ...gazeFrame, x_norm, captured_at_ms });
+      return store.getSlice("gaze");
+    };
+    expect(send(epoch, 0.1).captured_at_ms).toBe(epoch);
+    now += 10;
+    expect(store.updateSharedState({ paused: true })).toEqual(["paused", "gaze"]);
+    expect(events.at(-1).snapshot).toMatchObject({ paused: true, gaze: { x_norm: 0.1 } });
+    expect(events.at(-1).snapshot.gaze.captured_at_ms).toBeUndefined();
+    expect(store.getSlice("gaze").updated_at).toBe(new Date(epoch + 10).toISOString());
+    now += 10;
+    expect(send(now - 1, 0.2).captured_at_ms).toBeUndefined();
+    expect(store.getSlice("gaze").x_norm).toBe(0.2);
+    now += 10;
+    const resume = now;
+    store.updateSharedState({ paused: false });
+    expect(store.getSlice("gaze").captured_at_ms).toBeUndefined();
+    now += 10;
+    for (const stale of [epoch + 1, resume - 0.1, resume + 0.9]) {
+      expect(send(stale, 0.3).captured_at_ms).toBeUndefined();
+    }
+    expect(send(resume + 2, 0.4).captured_at_ms).toBe(resume + 2);
+    expect(store.updateSharedState({ paused: false })).toEqual([]);
+    expect(store.getSlice("gaze").captured_at_ms).toBe(resume + 2);
+  });
+
   it("delivers {type:update, changed, snapshot} synchronously per update", () => {
     const store = heavyStore();
     const events = [];

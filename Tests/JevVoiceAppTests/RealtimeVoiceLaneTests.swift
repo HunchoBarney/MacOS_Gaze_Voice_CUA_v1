@@ -1,4 +1,5 @@
 import AVFoundation
+import JevVoiceCore
 import Synchronization
 import XCTest
 @testable import JevVoice
@@ -89,6 +90,102 @@ final class RealtimeVoiceLaneTests: XCTestCase {
     }
 
     private func lane() -> RealtimeVoiceLane { RealtimeVoiceLane(apiKey: { "test-key" }) }
+
+    func testRemoteChoiceIsSpokenByWorkOnlyWhileUnownedRepliesStillSpeak() async throws {
+        let goal = "Organize these files by date."
+        let question = "Which folder?"
+        let numbered = "Which folder? Which one, 1) Cedar, 2) Maple?"
+        for (parked, validGoal) in [(true, true), (false, true), (false, false)] {
+            let wire = DesktopReplyWire(goal: validGoal ? goal : "Use a different goal.")
+            let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+            let lane = RealtimeVoiceLane(apiKey: { "fixture" }, client: client)
+            defer { lane.stopConversation() }
+            var spoken: [String] = []
+            var executions = 0
+            lane.conversation.readContext = { VoiceAdmissionContext(targetAppID: "fixture.app", windowID: 17) }
+            lane.conversation.interpret = { _, _, _ in .init(kind: .task, scope: .window(app: "fixture.app", id: 17)) }
+            lane.conversation.execute = { _ in
+                executions += 1
+                if parked { spoken.append(numbered) }
+                return .init(verified: false, waitingForAnswer: parked, message: question)
+            }
+            lane.conversation.onControl = { _ in }
+            let ended = expectation(description: "Remote desktop reply settled")
+            lane.onEvent = { _, event in
+                if case .toolSay(let text) = event { spoken.append(text) }
+                if case .turnEnded = event { ended.fulfill() }
+            }
+            try await lane.prepareRealtimeTransport(.conversation)
+            try lane.beginRealtimeConversation(session: UUID())
+            let now = ProcessInfo.processInfo.systemUptime
+            let input = try lane.conversation.beginExternal(input: .init(connectionID: client.connectionID, itemID: "item"), at: now)
+            XCTAssertTrue(lane.conversation.commitExternal(input, at: now))
+            await lane.conversation.finishExternal(input, text: goal, at: now)
+            await fulfillment(of: [ended], timeout: 3)
+            let output = await wire.output
+            let result = try XCTUnwrap(output)
+            let summary = try XCTUnwrap(result["summary"]?.string)
+            XCTAssertEqual(executions, validGoal ? 1 : 0)
+            if parked { XCTAssertEqual(result["status"]?.string, "clarification") }
+            if validGoal {
+                XCTAssertEqual(summary, question)
+            } else {
+                XCTAssertEqual(result["status"]?.string, "blocked")
+                XCTAssertFalse(summary.isEmpty)
+            }
+            XCTAssertEqual(spoken, [parked ? numbered : summary])
+        }
+    }
+
+    func testCancelledTurnDoesNotSpeakALateToolQuestion() {
+        let lane = lane(), id = UUID()
+        var spoken: [String] = []
+        lane.onEvent = { _, event in
+            if case .toolSay(let text) = event { spoken.append(text) }
+        }
+        lane.turnID = id
+        lane.cancel()
+        lane.settleToolCall(output: VoiceToolCatalog.result(status: "clarification", summary: "Which folder?"),
+                            session: id)
+        XCTAssertTrue(spoken.isEmpty)
+        XCTAssertNil(lane.turnID)
+    }
+
+    private actor DesktopReplyWire: RealtimeVoiceWire {
+        let goal: String
+        private let inbound = AsyncStream<String>.makeStream()
+        private(set) var output: JSONValue?
+
+        init(goal: String) { self.goal = goal }
+
+        func send(_ text: String) throws {
+            let frame = try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+            func reply(_ frame: [String: JSONValue]) throws {
+                inbound.continuation.yield(String(decoding: try JSONEncoder().encode(frame), as: UTF8.self))
+            }
+            switch frame["type"]?.string {
+            case "session.update":
+                try reply(["type": .string("session.updated"), "session": frame["session"] ?? .null])
+            case "response.create":
+                let args = String(decoding: try JSONEncoder().encode(["goal": goal]), as: UTF8.self)
+                let call: JSONValue = .object(["type": .string("function_call"), "name": .string("computer_task"),
+                                               "call_id": .string("call"), "arguments": .string(args)])
+                try reply(["type": .string("response.created"), "response": .object(["id": .string("reply")])])
+                try reply(["type": .string("response.done"), "response": .object(["id": .string("reply"), "output": .array([call])])])
+            default:
+                if let text = frame["item"]?["output"]?.string {
+                    output = try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+                }
+            }
+        }
+
+        func receive() async throws -> String {
+            for await text in inbound.stream { return text }
+            throw CancellationError()
+        }
+
+        func close() { inbound.continuation.finish() }
+    }
 
     // MARK: - tool-result contract
 

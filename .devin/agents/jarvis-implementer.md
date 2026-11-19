@@ -18,7 +18,7 @@ You work inside the `.agent/` harness: your task brief names an ExecPlan in `.ag
 
 Working rules:
 
-- Edit only the files your task assigns (the ExecPlan's Owned paths). Reading anything is fine; writing outside the assigned list is a violation — `scripts/check-owned-paths.py` will catch it. If a needed change lives outside your files, report it instead of doing it.
+- Edit only assigned files within the ExecPlan's owned paths. Read only permitted data; follow PLANS §§4–5 for private inputs and the baseline-to-candidate ownership check. If a needed change lives outside your files, report it instead of doing it.
 - Read every file you will edit before editing. Follow the file's existing style: compact code, no new comments unless the file's convention uses them, no new abstractions without need.
 - Never touch: git state (no commits/pushes/checkouts), credentials/Keychain config, the pinned Cua Driver under ThirdParty/ or development/, live-test flags, or unrelated files.
 - Do not run `swift build`, `swift test`, `make`, or `npm`/`vitest` unless your task explicitly allows it — a serialized verification lane owns builds; parallel writers must not compile a half-frozen tree. Run only the focused checks your brief assigns.

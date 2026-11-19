@@ -38,6 +38,9 @@ a thin product adapter. Keep TaskLoop, Cua, Codex and existing JSON types.
 
 ## Owned paths
 
+For KAR-15 the P3 integrator owns the shared RealtimeVoiceClient wire changes
+and the new ControlReplyEnvelope decoder/tests. P5 has no competing writer.
+
 ```text
 Sources/JevVoiceCore/Models/OpenAIResponsesClient.swift
 Sources/JevVoiceCore/Models/ComputerUseProposal.swift
@@ -78,7 +81,7 @@ bench/reset/p5-*
 No ASR replacement, separate execution loop, desktop code-as-action,
 automatic safety acknowledgment, model-written permission/confidence
 tokens, provider/pricing change without its decision, or new background
-agent features. No source edits in the eyes worktree.
+agent features. EyeTracking source is outside this phase's owned paths.
 
 ## Milestones
 
@@ -183,6 +186,7 @@ not establish support for every computer-use/safety/transport event.
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-11-17 | Accept only the P3 host's isolated, non-executing Close/Minimize answer ticket | It cannot enter Jev/Terra routing, the shared tool catalog, generic context or any executor. No new provider or model. |
 | 2026-11-15 | SDK-first adapter; model comparison remains a bounded proposal | Reuse infrastructure and compare fairly without changing pricing/policy silently |
 | 2026-11-15 | User retained Jev and approved Terra API fallback; planned RecoveryDecider supersedes the Sol-specific name | Compare the value of recovery rather than running a replacement-model tournament |
 

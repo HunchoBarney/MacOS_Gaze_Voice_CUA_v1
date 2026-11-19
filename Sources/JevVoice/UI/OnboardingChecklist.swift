@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// First-run setup checklist — the card that makes "nothing works yet"
@@ -20,7 +21,7 @@ final class OnboardingChecklistModel: ObservableObject {
         let id: RowID
         let title: String
         /// What the grant buys, one clause — "to hear you when you hold Fn".
-        let detail: String
+        var detail: String
         /// The natural prompt this row unlocks — shown, never a grammar list.
         let tryIt: String?
         /// Button label for the fix affordance; nil = nothing to press
@@ -52,6 +53,7 @@ final class OnboardingChecklistModel: ObservableObject {
     var screenRecordingGranted: () -> Bool = { Permission.screenRecording.isGranted }
     var trackerEnabled: () -> Bool = { Config.shared.gazeTracking }
     var trackerRunning: () async -> Bool = { await TrackerHost.shared.state == .running }
+    var cameraAuthorization: () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .video) }
     var voiceKeyConfigured: () -> Bool = { !Config.shared.openAIAPIKey.isEmpty }
 
     // MARK: - Fix actions (production defaults; tests inject)
@@ -91,10 +93,10 @@ final class OnboardingChecklistModel: ObservableObject {
                 tryIt: nil,
                 fixLabel: "Open Settings"),
             Row(id: .tracker,
-                title: "Eye tracking",
-                detail: "so “click this” knows where you're looking",
-                tryIt: "try: look at a button and say “click this”",
-                fixLabel: "Enable"),
+                title: "Eye tracking (optional)",
+                detail: "Gaze hasn’t been verified.",
+                tryIt: nil,
+                fixLabel: nil),
             Row(id: .voiceService,
                 title: "OpenAI API key",
                 detail: "add your key below to use realtime voice",
@@ -111,7 +113,26 @@ final class OnboardingChecklistModel: ObservableObject {
             case .microphone: rows[index].done = microphoneGranted()
             case .accessibility: rows[index].done = accessibilityGranted()
             case .screenRecording: rows[index].done = screenRecordingGranted()
-            case .tracker: rows[index].done = trackerEnabled() && trackerUp
+            case .tracker:
+                let enabled = trackerEnabled()
+                let camera = cameraAuthorization()
+                rows[index].fixLabel = !enabled && camera == .authorized ? "Enable" : nil
+                switch camera {
+                case .denied:
+                    rows[index].detail = "Camera access was denied for Jev. Allow it in System Settings → Privacy & Security → Camera."
+                case .restricted:
+                    rows[index].detail = "Camera access is restricted for Jev."
+                case .notDetermined:
+                    rows[index].detail = "Camera access hasn’t been decided for Jev. To allow it, use Camera under Permissions below."
+                case .authorized where !enabled:
+                    rows[index].detail = "Eye tracking is off."
+                case .authorized:
+                    rows[index].detail = trackerUp
+                        ? "The tracker responded. Gaze hasn’t been verified."
+                        : "Camera access is allowed for Jev. Gaze hasn’t been verified."
+                @unknown default:
+                    rows[index].detail = "Camera access is unknown. Gaze hasn’t been verified."
+                }
             case .voiceService: rows[index].done = voiceKeyConfigured()
             }
         }
@@ -129,6 +150,7 @@ final class OnboardingChecklistModel: ObservableObject {
         case .screenRecording:
             Task { await requestScreenRecording(); afterFix(); await refresh() }
         case .tracker:
+            guard !trackerEnabled(), cameraAuthorization() == .authorized else { return }
             enableTracker()
             afterFix()
             Task { await refresh() }

@@ -101,8 +101,91 @@ struct FnInputState {
     }
 }
 
+struct RestrictedFnTapInventory {
+    static let keyboardMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
+        | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+    private var own: [UInt32: Bool] = [:]
+
+    init?<Rows: Sequence>(_ rows: Rows, owner: pid_t) where Rows.Element == CGEventTapInformation {
+        for row in rows where row.tappingProcess == owner {
+            guard own[row.eventTapID] == nil else { return nil }
+            own[row.eventTapID] = row.processBeingTapped == 0 && row.tapPoint == .cgSessionEventTap
+                && row.options == .defaultTap && row.eventsOfInterest == Self.keyboardMask && row.enabled
+        }
+    }
+
+    static func installedID(before: Self?, after: Self?) -> UInt32? {
+        guard let before, let after, before.own.keys.allSatisfy({ after.own[$0] != nil }) else { return nil }
+        let added = after.own.keys.filter { before.own[$0] == nil }
+        guard added.count == 1, let id = added.first, after.own[id] == true else { return nil }
+        return id
+    }
+
+    static func read() -> Self? {
+        var count: UInt32 = 0
+        guard CGGetEventTapList(0, nil, &count) == .success, count < 4096 else { return nil }
+        let capacity = count + 1
+        var rows = Array(repeating: CGEventTapInformation(), count: Int(capacity))
+        let result = rows.withUnsafeMutableBufferPointer {
+            CGGetEventTapList(capacity, $0.baseAddress, &count)
+        }
+        guard result == .success, count < capacity else { return nil }
+        return Self(rows.prefix(Int(count)), owner: ProcessInfo.processInfo.processIdentifier)
+    }
+}
+
+struct RestrictedFnObservation {
+    private(set) var generation: UUID?
+    private var lastSample: ContinuousClock.Instant?
+    static let maximumGap: Duration = .milliseconds(500)
+
+    mutating func invalidate() {
+        generation = nil
+        lastSample = nil
+    }
+
+    mutating func sample(fnDown: Bool?, at now: ContinuousClock.Instant, heartbeat: Bool) {
+        guard fnDown == false else { invalidate(); return }
+        if let lastSample, lastSample.duration(to: now) > Self.maximumGap {
+            invalidate()
+            return
+        }
+        if heartbeat {
+            lastSample = now
+            if generation == nil { generation = UUID() }
+        }
+    }
+
+    static func passThrough(_ type: CGEventType, _ event: CGEvent,
+                            invalidate: () -> Void, escape: () -> Void) -> Unmanaged<CGEvent> {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput
+            || (type == .flagsChanged && event.flags.contains(.maskSecondaryFn)) {
+            invalidate()
+        } else if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 {
+            invalidate()
+            escape()
+        }
+        return Unmanaged.passUnretained(event)
+    }
+}
+
 @MainActor
 final class FnInputMonitor: ObservableObject {
+    enum Mode { case normal, restrictedObservation }
+    private let mode: Mode
+    private var observing = false
+    private var observation = RestrictedFnObservation()
+    private var restrictedTapID: UInt32?
+    private var restrictedInstallFailed = false
+    var onRestrictedObservationChanged: (UUID?) -> Void = { _ in }
+    var onRestrictedEscape: () -> Void = {}
+
+    var restrictedObservationGeneration: UUID? {
+        guard mode == .restrictedObservation, observing else { return nil }
+        sampleRestricted(heartbeat: false)
+        return observation.generation
+    }
+
     @Published private(set) var ready = false
     @Published private(set) var message = "Checking Fn shortcut…"
     var canBegin: () -> Bool = { false }
@@ -133,12 +216,15 @@ final class FnInputMonitor: ObservableObject {
     private var releaseCandidate: TimeInterval?
     private(set) var beginHandlingMs: Double = 0
 
-    init(state: FnInputState = FnInputState()) {
+    init(state: FnInputState = FnInputState(), mode: Mode = .normal) {
         self.state = state
+        self.mode = mode
     }
 
     func start() {
+        observing = true
         refresh()
+        guard observing else { return }
         guard healthTimer == nil else { return }
         healthTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkHealth() }
@@ -147,33 +233,47 @@ final class FnInputMonitor: ObservableObject {
     }
 
     func stop() {
+        observing = false
         healthTimer?.invalidate(); healthTimer = nil
         teardown()
+        restrictedInstallFailed = false
     }
 
     func refresh() {
+        if mode == .restrictedObservation, !observing || restrictedInstallFailed { return }
         guard AXIsProcessTrusted() else {
-            interrupt("Enable Accessibility to use Fn hold-to-talk.")
+            if mode == .normal { interrupt("Enable Accessibility to use Fn hold-to-talk.") }
             teardown()
             message = "Accessibility access needed for Fn"
             return
         }
-        if let tap, CGEvent.tapIsEnabled(tap: tap) {
+        if mode == .restrictedObservation, IsSecureEventInputEnabled() {
+            teardown()
+            return
+        }
+        if let tap, CGEvent.tapIsEnabled(tap: tap), mode == .normal || restrictedTapID != nil {
+            if mode == .restrictedObservation { sampleRestricted(heartbeat: true); return }
             ready = !IsSecureEventInputEnabled()
             message = ready ? "Hold Fn to speak, release to finish" : "Fn is unavailable while secure keyboard input is active"
             return
         }
         teardown()
-        let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
-            | (1 << CGEventType.keyUp.rawValue)
+        if mode == .restrictedObservation, !observing { return }
+        let before = mode == .restrictedObservation ? RestrictedFnTapInventory.read() : nil
+        if mode == .restrictedObservation, before == nil {
+            restrictedInstallFailed = true
+            message = "Keyboard observation could not be verified"
+            return
+        }
         tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-                               eventsOfInterest: CGEventMask(mask), callback: { _, type, event, context in
+                               eventsOfInterest: RestrictedFnTapInventory.keyboardMask, callback: { _, type, event, context in
             guard let context else { return Unmanaged.passUnretained(event) }
             return MainActor.assumeIsolated {
                 Unmanaged<FnInputMonitor>.fromOpaque(context).takeUnretainedValue().handle(type, event)
             }
         }, userInfo: Unmanaged.passUnretained(self).toOpaque())
         guard let tap, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            if mode == .restrictedObservation { restrictedInstallFailed = true }
             teardown()
             message = "Could not register Fn. Check Accessibility and relaunch."
             return
@@ -181,11 +281,29 @@ final class FnInputMonitor: ObservableObject {
         self.source = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        if mode == .restrictedObservation {
+            guard let id = RestrictedFnTapInventory.installedID(before: before, after: RestrictedFnTapInventory.read()) else {
+                restrictedInstallFailed = true
+                teardown()
+                message = "Keyboard observation could not be verified"
+                return
+            }
+            restrictedTapID = id
+            sampleRestricted(heartbeat: true)
+            return
+        }
         ready = CGEvent.tapIsEnabled(tap: tap) && !IsSecureEventInputEnabled()
         message = ready ? "Hold Fn to speak, release to finish" : "Fn is temporarily unavailable"
     }
 
     func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+        if mode == .restrictedObservation {
+            guard observing else { return Unmanaged.passUnretained(event) }
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { restrictedTapID = nil }
+            return RestrictedFnObservation.passThrough(type, event, invalidate: {
+                self.updateRestricted(fnDown: nil, heartbeat: false)
+            }, escape: { self.onRestrictedEscape() })
+        }
         let handlingStarted = ProcessInfo.processInfo.systemUptime
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             interrupt("Keyboard monitoring was interrupted. Hold Fn again to retry.")
@@ -239,6 +357,7 @@ final class FnInputMonitor: ObservableObject {
     }
 
     private func checkHealth() {
+        if mode == .restrictedObservation { refresh(); return }
         if IsSecureEventInputEnabled() {
             interrupt("Secure keyboard input interrupted recording.")
             ready = false
@@ -294,6 +413,23 @@ final class FnInputMonitor: ObservableObject {
             || CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
     }
 
+    private func sampleRestricted(heartbeat: Bool) {
+        let healthy = observing && restrictedTapID != nil && AXIsProcessTrusted() && !IsSecureEventInputEnabled()
+            && tap.map { CFMachPortIsValid($0) && CGEvent.tapIsEnabled(tap: $0) } == true
+        if !healthy { restrictedTapID = nil }
+        updateRestricted(fnDown: healthy ? physicalFnDown : nil, heartbeat: heartbeat)
+    }
+
+    private func updateRestricted(fnDown: Bool?, heartbeat: Bool) {
+        let prior = observation.generation
+        observation.sample(fnDown: fnDown, at: .now, heartbeat: heartbeat)
+        let generation = observation.generation
+        if prior != generation {
+            ready = generation != nil
+            if observation.generation == generation { onRestrictedObservationChanged(generation) }
+        }
+    }
+
     private func interrupt(_ reason: String) {
         releaseCandidate = nil
         observedPhysicalHold = false
@@ -305,7 +441,9 @@ final class FnInputMonitor: ObservableObject {
     }
 
     private func teardown() {
-        ready = false
+        restrictedTapID = nil
+        if mode == .restrictedObservation { updateRestricted(fnDown: nil, heartbeat: false) }
+        else { ready = false }
         if let tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         tap = nil; source = nil

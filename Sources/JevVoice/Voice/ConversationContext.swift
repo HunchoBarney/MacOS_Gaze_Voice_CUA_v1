@@ -46,7 +46,22 @@ struct ConversationDecision: Sendable {
     var direction: String?
     var small = false
     var windowScroll: WindowScrollRequest?
+    var space: DesktopSpaceTarget?
     var local = false
+
+    func matchesCurrentScope(_ current: VoiceAdmissionContext, captured: VoiceAdmissionContext, final: String) -> Bool {
+        guard let scope, scope.matches(current) else { return false }
+        if space != nil {
+            return captured.desktopDisplayID == current.desktopDisplayID && current.currentAsks.isEmpty
+        }
+        if local, case .application(let entity) = scope {
+            guard current.currentAsks.isEmpty else { return false }
+            if captured.entities == current.entities { return true }
+            let fresh = VoiceAdmissionPolicy.propose(final, context: current, speech: true)
+            return fresh.route == .local && fresh.intent == "open" && fresh.slots["target_id"] == entity.id
+        }
+        return true
+    }
 
     var scrollGoal: String? {
         guard let direction, ["up", "down", "left", "right"].contains(direction) else { return nil }
@@ -80,15 +95,20 @@ struct ConversationContext: Sendable {
     @MainActor
     func localDecision(_ text: String, context: VoiceAdmissionContext,
                        policy: VoiceProposal) -> ConversationDecision? {
-        guard policy.route != .refuse, policy.risk == .clear,
-              !text.contains(where: { "\"“”«»".contains($0) }) else { return nil }
-        let command = VoiceAdmissionPolicy.commandText(text, context: context)
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.hasPrefix("'"), !trimmed.hasPrefix("‘"), !trimmed.hasPrefix("’") else { return nil }
+        guard policy.route != .refuse, policy.risk == .clear else { return nil }
         if policy.route == .local, policy.intent == "respond" {
             return .init(kind: .answer, local: true)
         }
+        guard !text.contains(where: { "\"“”«»".contains($0) }) else { return nil }
+        let command = VoiceAdmissionPolicy.commandText(text, context: context)
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.hasPrefix("'"), !trimmed.hasPrefix("‘"), !trimmed.hasPrefix("’") else { return nil }
         guard context.currentAsks.isEmpty, context.capturedAsks.isEmpty else { return nil }
+        if policy.intent == "switch_space", policy.route == .local,
+           let target = DesktopSpaceTarget(command: text) {
+            guard let scope = ConversationScope.window(context) else { return .init(kind: .clarify, local: true) }
+            return .init(kind: .task, scope: scope, space: target, local: true)
+        }
         let normalized = VoiceAdmissionPolicy.normalized(command)
         if let scroll, scroll.scope.matches(context),
            case .window(let app, let window) = scroll.scope {
@@ -131,13 +151,11 @@ struct ConversationContext: Sendable {
     }
 
     static func localControl(_ text: String) -> ConversationDecision.Kind? {
-        let text = VoiceAdmissionPolicy.normalized(
-            VoiceAdmissionPolicy.commandText(text, context: VoiceAdmissionContext()))
-        if ["stop", "stop scrolling", "stop please", "stop now", "no stop", "ok stop", "okay stop",
-            "cancel", "cancel that", "never mind", "nevermind", "that s enough"]
-            .contains(text) { return .stop }
-        if ["pause listening", "stop listening", "pause jev", "pause jarvis"].contains(text) { return .pause }
-        return nil
+        switch HandsFreeActionSyntax.parse(text) {
+        case .stop: return .stop
+        case .pause: return .pause
+        default: return nil
+        }
     }
 
     static func isNegativeFragment(_ text: String) -> Bool {
@@ -203,8 +221,10 @@ enum ConversationPresentation {
     case source(UUID, VoiceRealtimeInput)
     case sealed(UUID, TimeInterval)
     case final(UUID, String)
+    case processing(UUID)
     case routed(UUID, local: Bool, startedAt: TimeInterval, endedAt: TimeInterval)
     case feedback(UUID, String)
+    case literalRefusal(UUID, String)
     case ignored(UUID)
     case waiting(UUID)
     case scrolling(UUID, Bool)
@@ -230,7 +250,7 @@ struct ConversationEffect: Sendable {
 @MainActor
 final class ConversationSession {
     private struct Pending: Sendable {
-        let utterance: ConversationCapture.Utterance
+        let utterance: ConversationUtterance
         let context: VoiceAdmissionContext
     }
     private struct Final: Sendable {
@@ -252,13 +272,25 @@ final class ConversationSession {
 
     typealias RemoteExecutor = @MainActor () async throws -> ConversationEffect?
     var remote: ((VoiceAdmission, LocalSpeechSession, @escaping RemoteExecutor) async throws -> Void)?
-    let capture: ConversationCapture
+    var controlQuestion: ((VoiceAdmission, LocalSpeechSession, Bool, @escaping @MainActor () -> Bool) async -> Void)?
+    var localStatusQuestion: ((VoiceAdmission, LocalSpeechSession, @escaping @MainActor () -> Bool) async -> Bool)?
+    private var latestInput: UUID?
+    private var literalTarget: SpokenLiteralTarget? {
+        didSet { if literalTarget == nil { literalExpiry?.cancel(); literalExpiry = nil } }
+    }
+    private var literalExpiry: Task<Void, Never>?
+    var captureLiteralTarget: ((String, Int) -> SpokenLiteralTarget?)?
+    var literalInputPermitted: ((VoiceRealtimeInput) -> Bool)?
+    private let capture: (any ConversationSegmenter)?
     var makeSpeechSession: ((VoiceAdmissionContext) throws -> LocalSpeechSession)?
     var readContext: (() -> VoiceAdmissionContext)?
+    var spokenGazeClick: ((VoiceAdmission, LocalSpeechSession, @escaping @MainActor @Sendable () -> Bool) async -> Bool)?
+    var readPendingAsks: (() -> [VoiceAdmissionContext.Ask])?
     var interpret: (@MainActor @Sendable (String, VoiceAdmissionContext, ConversationContext) async throws -> ConversationDecision)?
     var execute: ((ConversationCommand) async throws -> ConversationEffect)?
     var beforeAction: (() async -> Void)?
     var onControl: ((ConversationDecision.Kind) -> Void)?
+    var pendingDesktopEffect: (() -> String?)?
     var onBargeIn: (() -> Void)?
     var onCancelRepetition: (() -> Void)?
     var onEvent: ((ConversationPresentation) -> Void)?
@@ -280,13 +312,23 @@ final class ConversationSession {
     private var previousFinal: String?
     private var external = false
 
-    init(capture: ConversationCapture = ConversationCapture()) { self.capture = capture }
+    private let literalOnly: Bool
 
-    func prepare() async throws { try await capture.prepare() }
+    init(capture: (any ConversationSegmenter)? = nil, literalOnly: Bool = false) {
+        self.capture = capture
+        self.literalOnly = literalOnly
+    }
+
+    private func diagnosticCapture() throws -> any ConversationSegmenter {
+        guard let capture else { throw VoiceError("No diagnostic conversation segmenter was supplied.") }
+        return capture
+    }
+
+    func prepare() async throws { try await diagnosticCapture().prepare() }
 
     func startExternal(session: UUID) throws {
         guard id == nil, makeSpeechSession != nil, readContext != nil,
-              interpret != nil, execute != nil, onControl != nil else {
+              literalOnly || (interpret != nil && execute != nil), onControl != nil else {
             throw VoiceError("Hands-free voice is not ready.")
         }
         id = session
@@ -296,14 +338,26 @@ final class ConversationSession {
         external = true
     }
 
-    func beginExternal(input: VoiceRealtimeInput, at detectedAt: TimeInterval) throws -> RemoteCapture {
+    func beginExternal(input: VoiceRealtimeInput, at detectedAt: TimeInterval, gazeClickLease: UUID? = nil) throws -> RemoteCapture {
         guard external, let session = id, let context = readContext?(), let make = makeSpeechSession else {
             throw CancellationError()
         }
         let owner = try make(context)
         let turn = owner.beginRemoteCapture(id: UUID(), mode: .command,
-                                           connection: input.connectionID, now: detectedAt)
+                                           connection: input.connectionID, now: detectedAt, gazeClickLease: gazeClickLease)
         owners[turn.id] = owner
+        latestInput = turn.id
+        literalTarget = nil
+        if context.capturedAsks.isEmpty, context.currentAsks.isEmpty, literalInputPermitted?(input) == true,
+           let app = context.targetAppID, !literalOnly || app == "com.apple.TextEdit", let window = context.windowID {
+            literalTarget = captureLiteralTarget?(app, window)
+            if literalTarget != nil {
+                literalExpiry = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                    if self?.latestInput == turn.id { self?.literalTarget = nil }
+                }
+            }
+        }
         stopRepetition()
         onBargeIn?()
         onEvent?(.began(turn.id, detectedAt))
@@ -320,25 +374,36 @@ final class ConversationSession {
     }
 
     func discardExternal(_ record: RemoteCapture) {
+        if latestInput == record.turn.id { literalTarget = nil }
         record.owner.cancel(record.turn)
         owners.removeValue(forKey: record.turn.id)
         if id == record.session, epoch == record.epoch { onEvent?(.ignored(record.turn.id)) }
     }
 
-    func finishExternal(_ record: RemoteCapture, text: String, at now: TimeInterval) async {
+    func finishExternal(_ record: RemoteCapture, text: String, at now: TimeInterval, gazeClickLease: UUID? = nil) async {
         guard id == record.session, epoch == record.epoch,
               record.owner.gate.state == .finishing else { return }
         record.owner.context = readContext?() ?? VoiceAdmissionContext()
         guard let admission = await record.owner.finishRemoteCapture(text, turn: record.turn,
-            input: record.input, now: now) else {
+            input: record.input, now: now, gazeClickLease: gazeClickLease) else {
+            traceBoundary(.admissionRejected, turn: record.turn.id)
             discardExternal(record)
             return
         }
         guard id == record.session, epoch == record.epoch, !Task.isCancelled else { return }
-        onEvent?(.final(record.turn.id, admission.text))
+        onEvent?(literalOnly ? .processing(record.turn.id) : .final(record.turn.id, admission.text))
+#if DEBUG
+        if !literalOnly, await record.owner.consumeReservedFixture(record.turn, input: record.input, current: { [weak self] in
+            self?.id == record.session && self?.epoch == record.epoch && self?.latestInput == record.turn.id
+                && self?.fixtureInputIsCurrent?(record.input) == true
+        }) {
+            owners.removeValue(forKey: record.turn.id)
+            return
+        }
+#endif
         let localControl = ConversationContext.localControl(admission.text, after: previousFinal)
         previousFinal = admission.text
-        if let localControl, record.owner.consumeAdmission(record.turn) != nil {
+        if admission.intent == "conversation_control", let localControl, record.owner.consumeAdmission(record.turn) != nil {
             owners.removeValue(forKey: record.turn.id)
             control(localControl, turn: record.turn.id)
             return
@@ -348,7 +413,12 @@ final class ConversationSession {
         processNext()
     }
 
+#if DEBUG
+    var fixtureInputIsCurrent: ((VoiceRealtimeInput) -> Bool)?
+#endif
+
     func start(feed: ConvertedAudioFeed, session: UUID) async throws {
+        let capture = try diagnosticCapture()
         guard id == nil, makeSpeechSession != nil, readContext != nil,
               interpret != nil, execute != nil, onControl != nil else {
             throw VoiceError("Hands-free voice is not ready.")
@@ -389,7 +459,6 @@ final class ConversationSession {
                 self?.fail(session: session, message: error.localizedDescription)
             }
         }
-        let capture = self.capture
         feedTask = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 for try await buffer in feed.stream {
@@ -408,6 +477,7 @@ final class ConversationSession {
     func stop() {
         guard let prior = id else { return }
         id = nil
+        literalTarget = nil
         epoch = UUID()
         feedTask?.cancel(); feedTask = nil
         eventTask?.cancel(); eventTask = nil
@@ -422,12 +492,13 @@ final class ConversationSession {
         }
         owners = [:]; contexts = [:]; pending = []; finals = []
         memory = ConversationContext()
-        if !external { Task { await capture.stop(session: prior) } }
+        if !external, let capture { Task { await capture.stop(session: prior) } }
     }
 
     func cancelExternalWork() {
         guard external, id != nil else { return }
         epoch = UUID()
+        literalTarget = nil
         commandTask?.cancel(); commandTask = nil
         stopRepetition()
         for owner in owners.values {
@@ -500,7 +571,7 @@ final class ConversationSession {
                     self.onEvent?(.final(turn.id, admission.text))
                     let localControl = ConversationContext.localControl(admission.text, after: self.previousFinal)
                     self.previousFinal = admission.text
-                    if let control = localControl,
+                    if admission.intent == "conversation_control", let control = localControl,
                        owner.consumeAdmission(turn) != nil {
                         await self.acknowledge(pending)
                         self.control(control, turn: turn.id)
@@ -523,12 +594,13 @@ final class ConversationSession {
 
     private func acknowledge(_ pending: Pending) async {
         owners.removeValue(forKey: pending.utterance.id)
-        await capture.acknowledge(pending.utterance)
+        await capture?.acknowledge(pending.utterance)
     }
 
     private func acknowledge(_ record: Final) async {
+        if latestInput == record.admission.turn.id { literalTarget = nil }
         owners.removeValue(forKey: record.admission.turn.id)
-        if let pending = record.pending { await capture.acknowledge(pending.utterance) }
+        if let pending = record.pending { await capture?.acknowledge(pending.utterance) }
     }
 
     private func control(_ kind: ConversationDecision.Kind, turn: UUID) {
@@ -542,8 +614,14 @@ final class ConversationSession {
             Task { await acknowledge(record) }
         }
         memory.discardFragment()
+        let desktopEffect = literalOnly ? nil : pendingDesktopEffect?()
         onControl?(kind)
-        onEvent?(.feedback(turn, kind == .pause ? "Hands-free voice is paused." : "Stopped."))
+        let message = kind == .pause ? "Hands-free voice is paused." : "Stopped."
+        onEvent?(.feedback(turn, message + (desktopEffect.map { " " + $0 } ?? "")))
+    }
+
+    private func reportLiteralRefusal(_ turn: UUID, _ message: String) {
+        onEvent?(literalOnly ? .literalRefusal(turn, message) : .feedback(turn, message))
     }
 
     private func processNext() {
@@ -574,8 +652,94 @@ final class ConversationSession {
                          priorMemory: ConversationContext? = nil) async throws -> ConversationEffect? {
         let admission = record.admission
         guard record.epoch == epoch, record.owner.gate.isCurrent(admission.turn),
-              let interpret, let execute, let readContext else { throw LocalSpeechError.stale }
+              literalOnly || (interpret != nil && execute != nil), let readContext else { throw LocalSpeechError.stale }
         let resolutionMemory = priorMemory ?? memory
+        let literalCommand = HandsFreeActionSyntax.withoutCourtesy(admission.text)
+        if let input = admission.realtimeInput, record.pending == nil, admission.turn.mode == .command,
+           admission.intent != "respond", admission.reason != "unbound_pointing",
+           VoiceAdmissionPolicy.isSpokenTypeRequest(literalCommand) {
+            func current(_ state: VoiceTurnGate.State) -> Bool {
+                id == session && epoch == record.epoch && latestInput == admission.turn.id && !Task.isCancelled
+                    && record.owner.gate.isCurrent(admission.turn) && record.owner.gate.state == state && record.owner.gate.realtimeInput == input
+                    && literalInputPermitted?(input) == true && readPendingAsks?().isEmpty == true
+            }
+            guard latestInput == admission.turn.id else { return nil }
+            let target = literalTarget
+            literalTarget = nil
+            memory.discardRequest()
+            traceBoundary(admission.route == .local && admission.intent == "type" ? .localType : .otherAdmission, turn: admission.turn.id)
+            traceBoundary(target == nil ? .fieldMissing : .fieldBound, turn: admission.turn.id)
+            guard resolutionMemory.fragment == nil, record.context.capturedAsks.isEmpty,
+                  record.context.currentAsks.isEmpty, current(.admitted),
+                  let text = VoiceAdmissionPolicy.standaloneLiteral(literalCommand, admission: admission),
+                  let target, record.owner.consumeAdmission(admission.turn) != nil,
+                  await DictationDelivery.sharedLease.tryAcquire() else {
+                traceBoundary(.executionRejected, turn: admission.turn.id)
+                if id == session, epoch == record.epoch, latestInput == admission.turn.id {
+                    reportLiteralRefusal(admission.turn.id, "No text was sent. Focus one field and say “type” followed by the text. Quote anything that could be a second instruction.")
+                }
+                return nil
+            }
+            let result = target.insert(text) { current(.completed) }
+            if result != .notSent { traceBoundary(.nativeAttempt, turn: admission.turn.id) }
+            traceBoundary(result == .verified ? .nativeExact : result == .unverified ? .unverified : .executionRejected, turn: admission.turn.id)
+            await DictationDelivery.sharedLease.release()
+            guard id == session, epoch == record.epoch, latestInput == admission.turn.id else { return nil }
+            switch result {
+            case .verified: onEvent?(.feedback(admission.turn.id, "Typed the text."))
+            case .notSent: reportLiteralRefusal(admission.turn.id, "The typing target wasn’t available. No text was sent.")
+            case .unverified: reportLiteralRefusal(admission.turn.id, "I couldn’t verify the insertion. Check the field before trying again.")
+            }
+            return nil
+        }
+        if literalOnly {
+            memory.discardRequest()
+            reportLiteralRefusal(admission.turn.id, "No text was sent. This profile only types a literal into TextEdit.")
+            return nil
+        }
+        guard let interpret, let execute else { throw LocalSpeechError.stale }
+        if admission.realtimeInput != nil, admission.turn.mode == .command, admission.intent != "respond",
+           VoiceAdmissionPolicy.isBareGazeClick(admission.text) {
+            let standalone = resolutionMemory.fragment == nil
+            memory.discardRequest()
+            let current: @MainActor @Sendable () -> Bool = { [weak self] in
+                self?.id == session && self?.epoch == record.epoch && self?.latestInput == admission.turn.id
+            }
+            if standalone, record.pending == nil,
+               await spokenGazeClick?(admission, record.owner, current) == true { return nil }
+            if current() { onEvent?(.ignored(admission.turn.id)) }
+            return nil
+        }
+        if admission.isLocalStatusQuestion {
+            let standalone = resolutionMemory.fragment == nil
+            memory.discardRequest()
+            let current = { @MainActor [weak self] in
+                self?.id == session && self?.epoch == record.epoch && self?.latestInput == admission.turn.id
+            }
+            if standalone, record.pending == nil,
+               await localStatusQuestion?(admission, record.owner, current) == true { return nil }
+            if current() { onEvent?(.ignored(admission.turn.id)) }
+            return nil
+        }
+        if admission.reason == "unbound_pointing" {
+            memory.discardRequest()
+            onEvent?(.feedback(admission.turn.id, "Please name the control you want to use."))
+            return nil
+        }
+        if admission.route == .clarify, admission.reason == "ambiguous_ask" {
+            memory.discardRequest()
+            onEvent?(.waiting(admission.turn.id))
+            return nil
+        }
+        if admission.intent == "screen_question" || ScreenQuestionObservation.isScreenInquiry(admission.text, context: record.context) {
+            let standalone = resolutionMemory.fragment == nil
+            memory.discardRequest()
+            await controlQuestion?(admission, record.owner, standalone) { [weak self] in
+                self?.id == session && self?.epoch == record.epoch
+                    && (record.pending != nil || self?.latestInput == admission.turn.id)
+            }
+            return nil
+        }
         let text = try resolutionMemory.combined(admission.text, context: record.context)
         if ConversationContext.isNegativeFragment(text) {
             memory.hold(text, scope: .window(record.context))
@@ -583,11 +747,26 @@ final class ConversationSession {
             return nil
         }
         var refreshedContext = record.context
-        refreshedContext.currentAsks = readContext().currentAsks
+        refreshedContext.currentAsks = readPendingAsks?() ?? readContext().currentAsks
         let currentContext = refreshedContext
         let policy = VoiceAdmissionPolicy.propose(text, context: currentContext, speech: true)
-        guard policy.route != .refuse, policy.risk == .clear,
-              policy.reason != "target_changed", policy.reason != "ask_changed" else {
+        let boundClickReply = admission.intent == "respond" && VoiceAdmissionPolicy.isBareGazeClick(admission.text)
+        if boundClickReply || policy.reason == "unbound_pointing"
+            || FastAction.retiredTargetRequest(admission.text) != nil || FastAction.retiredTargetRequest(text) != nil,
+           policy.intent != "respond" || admission.intent != "respond" || text != admission.text {
+            memory.discardRequest()
+            onEvent?(.feedback(admission.turn.id, "Please name the control you want to use."))
+            return nil
+        }
+        let syntax = HandsFreeActionSyntax.parse(text)
+        let protected = syntax == .nonAction || syntax == .space(.next) || syntax == .space(.previous)
+        let appLostAuthority = admission.intent == "open" && admission.route == .local
+            && (!currentContext.currentAsks.isEmpty || !currentContext.capturedAsks.isEmpty)
+        guard !protected || policy.intent == "respond" || policy.intent == "type",
+              !appLostAuthority,
+              policy.route != .refuse, policy.risk == .clear,
+              !["target_changed", "ask_changed", "ambiguous_target"].contains(admission.reason),
+              !["target_changed", "ask_changed", "ambiguous_target"].contains(policy.reason) else {
             memory.discardRequest()
             onEvent?(.feedback(admission.turn.id, "Please restate the action you want me to take."))
             return nil
@@ -626,21 +805,32 @@ final class ConversationSession {
             onEvent?(.feedback(admission.turn.id, "Please clarify what you want me to do and where."))
             return nil
         case .stop, .pause:
-            control(decision.kind, turn: admission.turn.id)
+            memory.discardRequest()
+            onEvent?(.feedback(admission.turn.id, "Say stop or pause listening to interrupt."))
             return nil
         default: break
         }
         await beforeAction?()
         guard id == session, record.epoch == epoch, !Task.isCancelled else { throw LocalSpeechError.stale }
         if decision.kind == .answer {
+            let liveAsks = readPendingAsks?() ?? readContext().currentAsks
+            if boundClickReply || FastAction.retiredTargetRequest(admission.text) != nil {
+                var fresh = record.context
+                fresh.currentAsks = liveAsks
+                guard VoiceAdmissionPolicy.propose(admission.text, context: fresh, speech: true).intent == "respond" else {
+                    throw VoiceError("That question changed. Please answer the current question.")
+                }
+            }
             guard admission.intent == "respond", admission.route == .local,
                   let task = admission.slots["task_id"].flatMap(UUID.init(uuidString:)),
                   let ask = admission.slots["ask_id"].flatMap(UUID.init(uuidString:)),
-                  readContext().currentAsks.contains(where: { $0.taskID == task && $0.askID == ask }) else {
+                  liveAsks.contains(where: {
+                      $0.taskID == task && $0.askID == ask
+                  }) else {
                 throw VoiceError("That question changed. Please answer the current question.")
             }
         } else {
-            guard let scope = decision.scope, scope.matches(readContext()) else {
+            guard decision.matchesCurrentScope(readContext(), captured: record.context, final: admission.text) else {
                 throw VoiceError("The target changed while you were speaking. Please restate the request.")
             }
         }
@@ -722,6 +912,10 @@ final class ConversationSession {
     func recordScroll(_ scroll: NativeWindowObservation.VerifiedScroll, for command: ConversationCommand) {
         guard isCurrent(command), repetitionID != nil else { return }
         accept(.init(verified: true, waitingForAnswer: false, message: "", scroll: scroll))
+    }
+
+    private func traceBoundary(_ stage: NoFnTrace.Stage, turn: UUID? = nil) {
+        if !literalOnly { NoFnTrace.mark(stage, turn: turn) }
     }
 
     private func stopRepetition() {

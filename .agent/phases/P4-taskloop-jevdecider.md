@@ -1,7 +1,7 @@
 # P4 — taskloop-jevdecider ExecPlan
 
 > Status: open; recorded source milestones pass, full live/latency and latest-candidate independent qualification remain incomplete
-> Track: agent+voice · Depends on: P1 · Current work: `ship/v1-p3`; no P4 milestone commit
+> Track: agent+voice · Depends on: P1 · Original work: `ship/v1-p3`; see SHIP-PLAN for current placement
 > Acceptance: `.agent/acceptance/P4.json` · Contracts touched: CONTRACTS §1 `Decider`/`TaskLoop`, §2 `CaptureSource` (implementation of frozen v0 interfaces; amendments need Decision Log entry)
 
 ## Shipping update — 2026-11-15
@@ -227,6 +227,17 @@ verification-lane green, G4 judge, handoff.
 
 ## Decision Log
 
+2026-11-17, KAR-28: a native gaze click must press the proven retained
+object, not target coordinates, active focus, or a delayed token from
+another observation. A gaze-selected field, window or app cannot
+authorize typing, closing or hiding. Named controls, explicitly bound
+foreground typing and the captured-window scroll path remain separate.
+
+2026-11-17, KAR-25: [the exact agent-window constraint](../CONTRACTS.md#decision-log-p4-exact-agent-window-target-2026-11-09)
+does not authorize the caller to share a person's input. Refuse stdio drive
+and preview before decode or preparation; preserve the direct foreground
+execution and native verification paths. No positive concurrency claim.
+
 ### C1 candidate handoff, 2026-11-16
 
 Independent source/candidate G4 PASS follows the authority/identity
@@ -408,7 +419,7 @@ outcome proof at the existing thresholds, followed by qualifying G5/G4.
 Do not repeat prompt variants until one says yes, count censored calls
 as success, or infer a timing cause without a paired per-stage trace.
 
-## Current Handoff: General Visual Fallback Research
+## Historical Handoff: General Visual Fallback Research
 
 The user rejected app-enablement workarounds as a product solution and
 requested investigating Jev screenshots for missing/incomplete AX.
@@ -427,7 +438,7 @@ claim follows. The unchanged owned document was closed and retained.
 `results/P4/jev-vision-plan.md` proposes the general demand-driven path,
 frozen-contract/consumer amendment, owned paths, fail-first checks and
 signed real-app A/B. It is NOT yet approved or implemented. G1 and an
-independent G2 review are required; no helper agent has been authorized.
+independent G2 review were required; no helper was authorized at that point.
 No app-specific flags, new capture backend, driver upgrade, default
 round ceiling, slower per-action model or threshold reduction proposed.
 

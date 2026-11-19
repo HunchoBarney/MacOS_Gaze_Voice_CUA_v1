@@ -57,30 +57,43 @@ struct DictationDelivery: DictationDelivering {
     /// newline, another line. Internal for tests.
     static func editTokens(_ transcript: String) -> [EditToken] {
         var tokens: [EditToken] = []
-        var pending: [String] = []
+        var pending: Range<String.Index>?
         func flush() {
-            guard !pending.isEmpty else { return }
-            tokens.append(.insert(pending.joined(separator: " ")))
-            pending = []
+            guard let range = pending else { return }
+            tokens.append(.insert(String(transcript[range])))
+            pending = nil
         }
         let words = transcript.split(whereSeparator: \.isWhitespace)
-        func stripped(_ word: Substring) -> String {
-            String(word).lowercased()
-                .trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        let quotes: [Character: Character] = ["\"": "\"", "'": "'", "“": "”", "‘": "’", "«": "»", "`": "`"]
+        var closing: [Character] = []
+        let commands: [String] = words.map { word in
+            var literal = !closing.isEmpty
+            for index in word.indices {
+                let mark = word[index]
+                if (mark == "'" || mark == "’"), index != word.startIndex,
+                   word.index(after: index) != word.endIndex,
+                   word[word.index(before: index)].isLetter, word[word.index(after: index)].isLetter { continue }
+                if mark == closing.last {
+                    closing.removeLast()
+                } else if let end = quotes[mark] {
+                    if mark == "'", index != word.startIndex, word[word.index(before: index)].isLetter { continue }
+                    closing.append(end)
+                    literal = true
+                }
+            }
+            return literal ? "" : word.lowercased().trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         }
         var i = words.startIndex
         while i < words.endIndex {
             let rest = words[i...]
             if rest.count >= 3,
-               stripped(rest[rest.startIndex]) == "delete",
-               stripped(rest[rest.index(after: rest.startIndex)]) == "last",
-               stripped(rest[rest.index(rest.startIndex, offsetBy: 2)]) == "sentence" {
+               commands[i] == "delete", commands[i + 1] == "last", commands[i + 2] == "sentence" {
                 flush(); tokens.append(.deleteSentence)
                 i = rest.index(rest.startIndex, offsetBy: 3); continue
             }
             if rest.count >= 2 {
-                let first = stripped(rest[rest.startIndex])
-                let second = stripped(rest[rest.index(after: rest.startIndex)])
+                let first = commands[i]
+                let second = commands[i + 1]
                 if first == "scratch", second == "that" {
                     flush(); tokens.append(.scratch)
                     i = rest.index(rest.startIndex, offsetBy: 2); continue
@@ -94,11 +107,11 @@ struct DictationDelivery: DictationDelivering {
                     i = rest.index(rest.startIndex, offsetBy: 2); continue
                 }
             }
-            if stripped(rest[rest.startIndex]) == "newline" {
+            if commands[i] == "newline" {
                 flush(); tokens.append(.insert("\n"))
                 i = rest.index(after: rest.startIndex); continue
             }
-            pending.append(String(rest[rest.startIndex]))
+            pending = (pending?.lowerBound ?? words[i].startIndex)..<words[i].endIndex
             i = rest.index(after: rest.startIndex)
         }
         flush()

@@ -10,6 +10,211 @@ import JevVoiceCore
 /// never blocks the audio tap, and the voice surface speaks through an
 /// injected engine with a working stop.
 final class LocalSpeechTests: XCTestCase {
+    func testConversationDeicticControlQuestionsNeverBecomeUnobservedGenericAnswers() {
+        let context = VoiceAdmissionContext()
+        for (words, expected) in [("What does this button do?", "screen_question"),
+                                  ("What does that button do?", "screen_question"),
+                                  ("What is that window?", "screen_question"),
+                                  ("What is a button?", "question")] {
+            let proposal = VoiceAdmissionPolicy.propose(words, context: context, speech: true)
+            XCTAssertEqual(proposal.intent, expected, words)
+            XCTAssertEqual(proposal.route, .remote)
+            XCTAssertTrue(proposal.slots.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testConversationRemoteFinalDesktopWaitsForAnOpenedEmptyListWithoutRelaunching() async {
+        var inspections = 0, opens = 0, presses: [Int] = []
+        let result = await DesktopSpaceSwitch.perform(number: 2, invalidation: { nil }, inspect: {
+            inspections += 1
+            let edges = [0: inspections == 1 ? [7] : [1], 1: [2], 2: [3], 3: [4], 4: inspections == 2 ? [] : [5]]
+            let attrs: [Int: [String: Any]] = [
+                1: ["AXIdentifier": "mc"], 2: ["AXIdentifier": "mc.display", "AXDisplayID": 9],
+                3: ["AXIdentifier": "mc.spaces"], 4: ["AXIdentifier": "mc.spaces.list", "AXRole": "AXList"],
+                5: ["AXDescription": "exit to Desktop 2", "AXRole": "AXButton"], 7: ["AXRole": "AXList"]
+            ]
+            return DesktopSpaceSwitch.overview(root: 0, displayID: 9, expected: "exit to Desktop 2",
+                children: { edges[$0] }, attr: { attrs[$0]?[$1] }, pressable: { _ in true })
+        }, open: { opens += 1 }, pause: {}, press: { presses.append($0); return true }, note: { _ in })
+        XCTAssertEqual(inspections, 4); XCTAssertEqual(opens, 1); XCTAssertEqual(presses, [5])
+        XCTAssertEqual(result.code, .pressAcceptedUnverified)
+        XCTAssertEqual(result.origin, .launchRequested)
+    }
+
+    @MainActor
+    func testConversationRemoteFinalDesktopInspectorClassifiesTheFirstFailingRead() throws {
+        let dock = try XCTUnwrap(Bundle(url: URL(fileURLWithPath: "/System/Library/CoreServices/Dock.app")))
+        let desktop = dock.localizedString(forKey: "DesktopNum", value: "", table: "Localizable")
+        let exit = dock.localizedString(forKey: "AXExitToDesktop", value: "", table: "Accessibility")
+        XCTAssertEqual(desktop.components(separatedBy: "%@").count, 2)
+        XCTAssertEqual(exit.components(separatedBy: "%@").count, 2)
+        let expected = exit.replacingOccurrences(of: "%@", with: desktop.replacingOccurrences(of: "%@", with: "2"))
+        var edges = [0: [1], 1: [2], 2: [3], 3: [4], 4: [6, 5]]
+        var attributes: [Int: [String: Any]] = [
+            1: ["AXIdentifier": "mc"], 2: ["AXIdentifier": "mc.display", "AXDisplayID": NSNumber(value: 9)],
+            3: ["AXIdentifier": "mc.spaces"], 4: ["AXIdentifier": "mc.spaces.list", "AXRole": "AXList"],
+            5: ["AXRole": "AXButton", "AXDescription": expected], 6: ["AXRole": "AXButton", "AXDescription": "fixture"],
+            7: ["AXRole": "AXList"]
+        ]
+        var allow = true, checked: [Int] = []
+        func inspect(displayID: UInt32 = 9) -> DesktopSpaceSwitch.Overview<Int> {
+            checked = []
+            return DesktopSpaceSwitch.overview(root: 0, displayID: displayID, expected: expected, children: { edges[$0] },
+                attr: { attributes[$0]?[$1] }, pressable: { checked.append($0); return allow })
+        }
+        func refusal(_ code: DesktopSpaceSwitch.Code, checked count: Int = 0, displayID: UInt32 = 9, line: UInt = #line) {
+            switch inspect(displayID: displayID) {
+            case .openWithoutTarget(let observed), .unavailable(let observed): XCTAssertEqual(observed, code, line: line)
+            default: XCTFail("Expected refusal", line: line)
+            }
+            XCTAssertEqual(checked.count, count, line: line)
+        }
+        guard case .target(5) = inspect() else { return XCTFail("Unique target not resolved") }
+        XCTAssertEqual(checked, [5])
+        let aliases: [(NSNumber, UInt32)] = [
+            (NSNumber(value: UInt64(4_294_967_305)), 9), (NSNumber(value: 9.5), 9),
+            (NSNumber(value: true), 1), (NSNumber(value: Int64(-1)), .max), (NSNumber(value: 0), 0)
+        ]
+        for (raw, captured) in aliases {
+            attributes[2]?["AXDisplayID"] = raw
+            refusal(.displayBindingUnavailable, displayID: captured)
+        }
+        attributes[2]?["AXDisplayID"] = NSNumber(value: UInt32.max)
+        guard case .target(5) = inspect(displayID: .max) else { return XCTFail("Valid UInt32 refused") }
+        attributes[2]?["AXDisplayID"] = NSNumber(value: 9)
+        allow = false; refusal(.targetNotPressable, checked: 1)
+        attributes[6]?["AXDescription"] = expected; refusal(.targetAmbiguous)
+        attributes[5]?["AXDescription"] = nil; refusal(.malformedThumbnail)
+        edges[4] = []; refusal(.emptySpacesList)
+        edges[4] = nil; refusal(.spacesListUnavailable)
+        edges[2] = []; refusal(.spacesGroupUnavailable)
+        attributes[2]?["AXDisplayID"] = NSNumber(value: 99); refusal(.displayBindingUnavailable)
+        edges[1] = nil; refusal(.overviewUnreadable)
+        edges[0] = [7]; guard case .closed = inspect() else { return XCTFail("Expected closed overview") }
+        attributes[7]?["AXRole"] = "AXGroup"; refusal(.rootUnrecognized)
+        edges[0] = nil; refusal(.rootUnreadable)
+    }
+
+    @MainActor
+    func testConversationRemoteFinalDesktopBoundaries() async {
+        XCTAssertEqual(DesktopSpaceTarget(command: "Please switch to Space two."), .numbered(2))
+        XCTAssertEqual(DesktopSpaceTarget(command: "next desktop"), .next)
+        XCTAssertEqual(DesktopSpaceTarget(command: "go to the previous space"), .previous)
+        for other in ["next window", "Mission Control", "type go to Desktop 2", "don't go to Desktop 2",
+                      "go to Desktop 2 then click", "go to Desktop 2 on the other monitor",
+                      "‘go to Desktop 2’", "Desktop 2", "go to Desktop 2?"] {
+            XCTAssertNil(DesktopSpaceTarget(command: other), other)
+        }
+        let expected = "quitter vers Bureau 2"
+        let rows = [("quitter vers Bureau 2 en plein écran", 10), (expected, 41), ("quitter vers Bureau 1", 72)]
+        typealias State = DesktopSpaceSwitch.Overview<Int>
+        func run(_ states: [State], authorized: Bool = true, revokeOnOpen: Bool = false,
+                 openFails: Bool = false, pollFails: Bool = false, pressAccepted: Bool = true)
+            async -> (opens: Int, presses: [Int], notes: [String], message: String, code: DesktopSpaceSwitch.Code, origin: DesktopSpaceSwitch.Origin?) {
+            var states = states, current = authorized, opens = 0, presses: [Int] = [], notes: [String] = []
+            let result = await DesktopSpaceSwitch.perform(number: 2, invalidation: { current ? nil : .authorityNotCurrent },
+                inspect: { states.isEmpty ? .unavailable(.rootUnreadable) : states.removeFirst() },
+                open: { opens += 1; if openFails { throw CancellationError() }; if revokeOnOpen { current = false } },
+                pause: { if pollFails { throw CancellationError() } }, press: {
+                    presses.append($0); return pressAccepted
+                }, note: { notes.append($0) })
+            return (opens, presses, notes, result.message, result.code, result.origin)
+        }
+        let target = DesktopSpaceSwitch.matchButton(rows, matching: expected)
+        let delivered = await run([.closed, .closed, target, target])
+        XCTAssertEqual(delivered.code, .pressAcceptedUnverified)
+        XCTAssertEqual(delivered.opens, 1); XCTAssertEqual(delivered.presses, [41])
+        XCTAssertTrue(delivered.message.contains("Switch unverified"))
+        XCTAssertTrue(delivered.message.contains("Mission Control may be open"))
+        XCTAssertTrue(delivered.notes.last?.contains("Mission Control may be open") == true)
+        XCTAssertTrue(delivered.notes.last?.contains("selection may have been sent") == true)
+        let existing = await run([.target(41), .target(41)])
+        XCTAssertEqual(existing.origin, .startedOpen)
+        XCTAssertEqual(existing.opens, 0); XCTAssertEqual(existing.presses, [41])
+        let revoked = await run([.closed, .target(41)], revokeOnOpen: true)
+        XCTAssertEqual(revoked.opens, 1); XCTAssertTrue(revoked.presses.isEmpty)
+        XCTAssertTrue(revoked.message.contains("Mission Control may be open"))
+        XCTAssertTrue(revoked.notes.first?.contains("Mission Control") == true)
+        XCTAssertEqual(revoked.code, .authorityNotCurrent)
+        let refused = await run([target, target], pressAccepted: false)
+        XCTAssertEqual(refused.code, .pressRefused); XCTAssertEqual(refused.presses, [41])
+        let cases: [([State], DesktopSpaceSwitch.Code, Int)] = [
+            ([.unavailable(.rootUnrecognized)], .rootUnrecognized, 0),
+            ([DesktopSpaceSwitch.matchButton(rows + [(expected, 32)], matching: expected)], .targetAmbiguous, 0),
+            ([DesktopSpaceSwitch.matchButton(rows.map(Optional.some) + [nil], matching: expected)], .malformedThumbnail, 0),
+            ([.closed, DesktopSpaceSwitch.matchButton(rows, matching: "exit to Desktop 2")], .targetMissing, 1),
+            ([target, .unavailable(.spacesListUnavailable)], .spacesListUnavailable, 0),
+            ([target, .closed], .overviewClosedOnRecheck, 0), ([target, .target(42)], .targetChanged, 0),
+            ([.openWithoutTarget(.emptySpacesList), target], .emptySpacesList, 0),
+            ([.closed, .openWithoutTarget(.emptySpacesList), .closed, target], .overviewClosedOnRecheck, 1),
+            ([.closed, .unavailable(.displayBindingUnavailable), target], .displayBindingUnavailable, 1),
+            ([.closed] + Array(repeating: .openWithoutTarget(.emptySpacesList), count: 12) + [target], .emptySpacesList, 1),
+            (Array(repeating: .closed, count: 13), .overviewNotReady, 1)
+        ]
+        for (states, code, opens) in cases {
+            let result = await run(states)
+            XCTAssertEqual(result.code, code); XCTAssertEqual(result.opens, opens); XCTAssertTrue(result.presses.isEmpty)
+            switch states.first {
+            case .target?, .openWithoutTarget?: XCTAssertEqual(result.origin, .startedOpen)
+            case .closed?: XCTAssertEqual(result.origin, .launchRequested)
+            default: XCTAssertNil(result.origin)
+            }
+        }
+        let denied = await run([.closed], authorized: false)
+        XCTAssertEqual(denied.code, .authorityNotCurrent); XCTAssertEqual(denied.opens, 0); XCTAssertTrue(denied.presses.isEmpty)
+        let launch = await run([.closed], openFails: true)
+        XCTAssertEqual(launch.code, .openFailed); XCTAssertEqual(launch.opens, 1); XCTAssertTrue(launch.presses.isEmpty)
+        let poll = await run([.closed, .closed], pollFails: true)
+        XCTAssertEqual(poll.code, .pollInterrupted); XCTAssertEqual(poll.opens, 1); XCTAssertTrue(poll.presses.isEmpty)
+    }
+
+    @MainActor
+    func testConversationRemoteFinalDesktopSwitchUsesOriginalFinalOnce() async throws {
+        let conversation = ConversationSession()
+        var context = VoiceAdmissionContext()
+        context.targetAppID = "fixture.editor"; context.windowID = 42
+        context.targetID = "fixture.editor.42"
+        conversation.readContext = { context }
+        conversation.makeSpeechSession = { captured in
+            let owner = LocalSpeechSession { _ in XCTFail("queue owns execution") }
+            owner.context = captured
+            return owner
+        }
+        let routed = expectation(description: "desktop request routed")
+        var commands: [String] = []
+        conversation.interpret = { _, _, _ in
+            XCTFail("Desktop 2 missed the native route")
+            routed.fulfill()
+            return .init(kind: .clarify)
+        }
+        conversation.execute = { command in
+            XCTAssertTrue(command.decision.local)
+            XCTAssertEqual(command.admission.intent, "switch_space")
+            commands.append(command.admission.text)
+            routed.fulfill()
+            return .init(verified: false, waitingForAnswer: false, message: "Unverified.")
+        }
+        var pending: String? = "A selection may have been sent. Mission Control may be open."
+        conversation.pendingDesktopEffect = { pending }
+        conversation.onControl = { _ in pending = nil }
+        try conversation.startExternal(session: UUID())
+        defer { conversation.stop() }
+        let item = try conversation.beginExternal(input: .init(connectionID: UUID(), itemID: "desktop"), at: 1)
+        XCTAssertTrue(conversation.commitExternal(item, at: 2))
+        let final = "Go to Desktop 2."
+        await conversation.finishExternal(item, text: final, at: 2.1)
+        await conversation.finishExternal(item, text: final, at: 2.2)
+        await fulfillment(of: [routed], timeout: 2)
+        XCTAssertEqual(commands, [final])
+        var spoken: String?
+        conversation.onEvent = { if case .feedback(_, let text) = $0 { spoken = text } }
+        let stop = try conversation.beginExternal(input: .init(connectionID: UUID(), itemID: "stop"), at: 3)
+        XCTAssertTrue(conversation.commitExternal(stop, at: 4))
+        await conversation.finishExternal(stop, text: "stop", at: 4.1)
+        XCTAssertEqual(spoken, "Stopped. A selection may have been sent. Mission Control may be open.")
+    }
+
     @MainActor
     func testConversationRemoteFinalRecoversFromEmptyAndUsesExistingNativeAdmissionOnce() async throws {
         let conversation = ConversationSession()

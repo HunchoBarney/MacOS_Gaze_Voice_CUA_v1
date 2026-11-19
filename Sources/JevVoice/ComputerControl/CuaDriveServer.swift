@@ -1,21 +1,6 @@
 import Foundation
-import Synchronization
 import JevVoiceCore
 
-/// `JevVoice --mcp-stdio --agent <slug>` — the MCP server every agent's
-/// codex app-server spawns to reach computer use. Newline-delimited
-/// JSON-RPC over stdio (the MCP stdio transport). Exposes `drive_until`
-/// and `suggest_action`, both running the same DriveLoop the voice path
-/// runs against the app's shared daemon.
-///
-/// Trust model (per the megaplan):
-/// - The daemon socket path arrives via the well-known file the app
-///   rewrites on every re-mint — never a baked-in path that goes stale.
-/// - Consent is the app's policy file: the standing grant and nothing
-///   else. No grant → mutation calls refuse with guidance; the deny list
-///   is code-compiled and identical for voice and agents.
-/// - `TYPESAFE_API_KEY` reaches this process through codex's `env_vars`
-///   pass-through — never written into config.toml.
 enum CuaDriveServer {
     /// The app's support root — the socket-path and policy files live here,
     /// shared with AgentWorkspace's parent directory.
@@ -66,40 +51,12 @@ enum CuaDriveServer {
     /// runs on the main thread — the task hops the serve loop off it so
     /// RunLoop.main can pump stdin and stdio writes stay ordered.
     static func main() -> Never {
-        let slug = Self.argument("--agent") ?? "agent"
-        Task { await serve(agent: slug); exit(0) }
+        Task { await serve(); exit(0) }
         RunLoop.main.run()
         fatalError("unreachable")
     }
 
-    private static func argument(_ flag: String) -> String? {
-        let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: flag), args.indices.contains(i + 1) else { return nil }
-        return args[i + 1]
-    }
-
-    /// The daemon socket: `JEV_CUA_SOCKET` wins (tests), else the hint file.
-    private static func socketPath() throws -> String {
-        if let env = ProcessInfo.processInfo.environment["JEV_CUA_SOCKET"],
-           !env.isEmpty { return env }
-        let path = try String(contentsOf: socketHintFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty else { throw DriverConnectionError.unavailable }
-        return path
-    }
-
-    private static func standingGrant() -> Bool {
-        guard let data = try? Data(contentsOf: policyFile),
-              let object = try? JSONDecoder().decode(JSONValue.self, from: data) else { return false }
-        return object["standingGrant"]?.bool ?? false
-    }
-
-    // MARK: - Serve loop
-
-    private static func serve(agent slug: String) async {
-        let driver = CuaConnection()
-        let session = AgentSession(agent: slug)
-        let liveCalls = Mutex<[String: Task<Void, Never>]>([:])
+    private static func serve() async {
         // A blocking read pump on a background queue — AsyncBytes stalled
         // after the first line in practice, while `availableData` on a
         // pipe is boring and reliable: data or EOF, nothing else.
@@ -122,47 +79,32 @@ enum CuaDriveServer {
         for await line in stdinLines {
             guard let data = line.data(using: .utf8),
                   let frame = try? JSONDecoder().decode(JSONValue.self, from: data),
-                  let method = frame["method"]?.string else { continue }
-            let id = frame["id"]
-            let idKey = id.flatMap { try? String(decoding: JSONEncoder().encode($0), as: UTF8.self) }
-            switch method {
-            case "initialize":
-                respond(id, .object([
-                    "protocolVersion": .string(frame["params"]?["protocolVersion"]?.string ?? "2025-06-18"),
-                    "capabilities": .object(["tools": .object([:])]),
-                    "serverInfo": .object(["name": .string("jev-drive"), "version": .string("1")])
-                ]))
-            case "ping":
-                respond(id, .object([:]))
-            case "tools/list":
-                respond(id, .object(["tools": .array(toolList)]))
-            case "notifications/initialized":
-                break
-            case "notifications/cancelled":
-                if let target = frame["params"]?["requestId"],
-                   let key = try? String(decoding: JSONEncoder().encode(target), as: UTF8.self) {
-                    liveCalls.withLock { $0[key]?.cancel() }
-                }
-            case "tools/call":
-                guard let id, let idKey else { break }
-                let name = frame["params"]?["name"]?.string ?? ""
-                let args = frame["params"]?["arguments"] ?? .object([:])
-                let task = Task { [driver] in
-                    let result = await callTool(name, args: args, session: session, driver: driver)
-                    liveCalls.withLock { $0[idKey] = nil }
-                    respond(id, result)
-                }
-                liveCalls.withLock { $0[idKey] = task }
-            default:
-                if id != nil {
-                    respond(id, .object(["error": .object([
-                        "code": .number(-32601),
-                        "message": .string("Unknown method \(method)")])]))
-                }
-            }
+                  let id = frame["id"], let response = response(to: frame) else { continue }
+            respond(id, response)
         }
-        for task in liveCalls.withLock({ $0.values.map { $0 } }) { task.cancel() }
-        await driver.close()
+    }
+
+    static func response(to frame: JSONValue) -> JSONValue? {
+        guard frame["id"] != nil, let method = frame["method"]?.string else { return nil }
+        switch method {
+        case "initialize":
+            return .object([
+                "protocolVersion": .string(frame["params"]?["protocolVersion"]?.string ?? "2025-06-18"),
+                "capabilities": .object(["tools": .object([:])]),
+                "serverInfo": .object(["name": .string("jev-drive"), "version": .string("1")])
+            ])
+        case "ping": return .object([:])
+        case "tools/list": return .object(["tools": .array(toolList)])
+        case "tools/call":
+            switch frame["params"]?["name"]?.string {
+            case "drive_until", "suggest_action":
+                return toolError("Blocked: trusted operator handoff unavailable. The worker did not access the desktop.")
+            default: return toolError("Unknown tool.")
+            }
+        default:
+            return .object(["error": .object(["code": .number(-32601),
+                "message": .string("Unknown method \(method)")])])
+        }
     }
 
     private static let taskInputSchema: JSONValue = .object([
@@ -199,12 +141,12 @@ enum CuaDriveServer {
     private static let toolList: [JSONValue] = [
         .object([
             "name": .string("drive_until"),
-            "description": .string("Drive the user's Mac toward a goal: open apps, click, type, scroll, navigate browsers. The loop observes the window, picks actions, and verifies — report its result verbatim. Requires the computer-use grant in Jev Voice settings; without it every mutation refuses."),
+            "description": .string("Desktop execution requires a trusted operator handoff, unavailable to this worker."),
             "inputSchema": taskInputSchema
         ]),
         .object([
             "name": .string("suggest_action"),
-            "description": .string("Observe the target app's window and report the single best next action without dispatching it — a read-only preview of the drive loop's choice."),
+            "description": .string("Desktop preview is unavailable because observation can change shared state."),
             "inputSchema": taskInputSchema
         ])
     ]
@@ -228,6 +170,9 @@ enum CuaDriveServer {
         guard let goal = args["goal"]?.string,
               !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TaskArgumentsError.invalid("`goal` is required.")
+        }
+        if FastAction.retiredTargetRequest(goal) != nil {
+            throw TaskArgumentsError.invalid("Please name the control you want to use.")
         }
         if let app = args["app"] {
             guard let name = app.string, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -272,75 +217,6 @@ enum CuaDriveServer {
                              windowID: windowID,
                              values: values, deny: strings("deny"),
                              successContains: strings("success_contains"))
-    }
-
-    private static func callTool(_ name: String, args: JSONValue,
-                                 session: AgentSession, driver: CuaConnection) async -> JSONValue {
-        let task: DriveTask
-        do {
-            task = try decodeTask(args)
-        } catch {
-            return toolError(error.localizedDescription)
-        }
-
-        let apiKey = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"] ?? ""
-        guard !apiKey.isEmpty else {
-            return toolError("TYPESAFE_API_KEY is not configured for this agent.")
-        }
-
-        do {
-            let socket = try socketPath()
-            try await bindTransport(driver, session: session, socket: socket)
-            let call: DriveLoop.Call = { tool, callArgs in
-                do {
-                    return try await driver.call(tool, arguments: callArgs)
-                } catch let error as DriverConnectionError {
-                    if error == .closed, CuaConnection.isReadOnly(tool, arguments: callArgs),
-                       let fresh = try? socketPath(), fresh != socket,
-                       (try? await bindTransport(driver, session: session, socket: fresh)) != nil {
-                        // The reconnected transport is a new session
-                        // owner — the old label is tombstoned to the
-                        // dead one, so the retry rides a fresh label.
-                        var callArgs = callArgs
-                        if callArgs["session"] != nil {
-                            callArgs["session"] = .string(session.label)
-                        }
-                        return try await driver.call(tool, arguments: callArgs)
-                    }
-                    throw error
-                }
-            }
-            // Park + notify: the ask lands in the shared asks dir, the app
-            // surfaces it (feed + overlay), and the answer file resumes us.
-            // Timeout or dismissal reads as decline — never silent approval.
-            // Agent-authored goals are autonomous effects, not a spoken
-            // command — `explicitConsent: false` puts every fast-lane and
-            // bind-phase dispatch on the standing grant / per-task
-            // confirm like the model-picked loop candidates.
-            let imageClient = JevChooser.experimentalWindowImages
-                ? JevClient(apiKey: apiKey, model: "jev-1.14.0") : nil
-            let loop = DriveLoop(call: call, choose: JevChooser.make(apiKey: apiKey),
-                                 ask: { await AgentAskChannel.request($0, agent: session.slug) },
-                                 granted: { standingGrant() },
-                                 explicitConsent: false,
-                                 scopedCall: imageClient.map { _ in
-                                     { try await driver.callScoped($0, arguments: $1, origin: $2) }
-                                 },
-                                 visualChoose: imageClient.map { JevChooser.makeVisual(client: $0) },
-                                 verifyVisual: imageClient.map { JevChooser.makeVisualVerifier(client: $0) },
-                                 config: .init(windowOnly: task.windowID != nil))
-            if name == "suggest_action" {
-                let text = try await loop.preview(task, session: session.label)
-                return toolText(text)
-            }
-            guard name == "drive_until" else { return toolError("Unknown tool \(name).") }
-            let result = await loop.run(task, session: session.label)
-            return toolText(describe(result))
-        } catch is CancellationError {
-            return toolError("Cancelled.")
-        } catch {
-            return toolError(error.localizedDescription)
-        }
     }
 
     /// DriveResult → the text the agent reports. `.done` is only claimed
@@ -388,10 +264,6 @@ enum CuaDriveServer {
         }
     }
 
-    private static func toolText(_ text: String) -> JSONValue {
-        .object(["content": .array([.object([
-            "type": .string("text"), "text": .string(text)])])])
-    }
     private static func toolError(_ text: String) -> JSONValue {
         .object(["content": .array([.object([
             "type": .string("text"), "text": .string(text)])]),
@@ -405,16 +277,20 @@ enum CuaDriveServer {
     private static let writeLock = NSLock()
     private static func respond(_ id: JSONValue?, _ payload: JSONValue) {
         guard let id else { return }
-        var frame = payload.object ?? [:]
-        frame["jsonrpc"] = .string("2.0")
-        if frame["error"] == nil && frame["result"] == nil {
-            frame = ["result": payload]
-        }
-        frame["id"] = id
-        guard let data = try? JSONEncoder().encode(JSONValue.object(frame)),
+        guard let data = try? JSONEncoder().encode(envelope(id: id, payload: payload)),
               let text = String(data: data, encoding: .utf8) else { return }
         writeLock.lock()
         FileHandle.standardOutput.write(Data((text + "\n").utf8))
         writeLock.unlock()
+    }
+
+    static func envelope(id: JSONValue, payload: JSONValue) -> JSONValue {
+        var frame = payload.object ?? [:]
+        if frame["error"] == nil && frame["result"] == nil {
+            frame = ["result": payload]
+        }
+        frame["id"] = id
+        frame["jsonrpc"] = .string("2.0")
+        return .object(frame)
     }
 }

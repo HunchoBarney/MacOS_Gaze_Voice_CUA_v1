@@ -1,0 +1,50 @@
+id	split	context	final	expected
+D01	design	single	Go to Desktop 2.	space:2
+D02	design	single	take me to my second desktop	space:2
+D03	design	single	switch over to desktop two	space:2
+D04	design	single	Please switch to Space two.	space:2
+D05	design	duplicate-final	Go to Desktop 2.	space:2
+A01	design	single	open Notes	launch:fixture.notes
+A02	design	single	Focus Notes.	focus:fixture.notes
+A03	design	single	Bring Notes to the front.	focus:fixture.notes
+S01	design	running	stop	control:stop
+S02	design	running	pause listening	control:pause
+S03	design	running	“stop”	no_effect
+S04	design	running	stop?	no_effect
+S05	design	editable	type the word "stop"	literal:stop
+S06	design	dictation	go to Desktop 2	dictation_verbatim
+N01	design	single	don't go to Desktop 2	no_effect
+N02	design	single	Am I on Desktop 2?	no_effect
+N03	design	single	go to Desktop 2?	no_effect
+N04	design	single	go to the next desktop	no_effect
+N05	design	single	switch to desktop 2 or 3	no_effect
+N06	design	single	go to desktop 2, no actually don't	no_effect
+N07	design	single	go to desktop 2, no, desktop 3	no_effect
+N08	design	single	‘go to Desktop 2’	no_effect
+N09	design	single	she said go to Desktop 2	no_effect
+N10	design	single	if Notes is open, go to Desktop 2	no_effect
+N11	design	single	go to desktop 2 on the other monitor	no_effect
+N12	design	ask-appears	go to Desktop 2	no_effect
+N13	design	window-changes	go to Desktop 2	no_effect
+N14	design	display-changes	go to Desktop 2	no_effect
+N15	design	app-removed	Focus Notes.	no_effect
+N16	design	duplicate-app	open Notes	no_effect
+H01	holdout	single	Please take me to the third space.	space:3
+H02	holdout	single	Switch over to my first desktop!	space:1
+H03	holdout	single	Go to the fourth desktop.	space:4
+H04	holdout	single	Switch to Space sixteen.	space:16
+H05	holdout	single	Raise Notes.	focus:fixture.notes
+H06	holdout	running	'pause listening'	no_effect
+H07	holdout	single	Did you switch over to my first desktop?	no_effect
+H08	holdout	single	Take me to my second desktop unless Notes is open.	no_effect
+H09	holdout	single	Go to Space 17.	no_effect
+H10	holdout	single	Switch over to the previous space.	no_effect
+H11	holdout	single	Take me to my first or second desktop.	no_effect
+H12	holdout	dictation	Stop. Switch over to desktop two.	dictation_verbatim
+H13	holdout	negative-fragment	stop	no_effect
+H14	holdout	single	Is Notes open?	no_effect
+H15	holdout	single	Do not focus Notes.	no_effect
+H16	holdout	single	Switch over to Desktop 2 and open Notes.	no_effect
+H17	holdout	single	Please take me to the Desktop folder.	no_space
+H18	holdout	single	Show the desktop.	existing_show_desktop
+H19	holdout	single	What's on Desktop 2?	no_effect

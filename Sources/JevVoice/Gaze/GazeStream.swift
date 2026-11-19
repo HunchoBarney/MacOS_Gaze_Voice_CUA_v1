@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Live gaze on the tracker's `/events` WebSocket — the stream the halo
 /// and dwell hit-testing read, replacing per-verb `/snapshot` polling at
@@ -16,6 +17,32 @@ actor GazeStream {
     /// low-confidence samples throw in decode — we keep the last GOOD one
     /// and let `isFresh` gate the reader).
     private(set) var latestSample: GazeSample?
+
+    struct Observations: Sendable {
+        fileprivate var revision: UInt64 = 0
+        var epoch: UInt64 = 0
+        var samples: [GazeSample] = []
+    }
+
+    static let continuityWindow: TimeInterval = 0.25
+    private let observations = OSAllocatedUnfairLock(initialState: Observations())
+    private var newestSourceTime: Date?
+
+    nonisolated func liveObservations() -> Observations {
+        observations.withLock { $0 }
+    }
+
+    nonisolated func isCurrent(_ snapshot: Observations) -> Bool {
+        observations.withLock { $0.revision == snapshot.revision }
+    }
+
+    private func breakContinuity() {
+        observations.withLock {
+            $0.revision &+= 1
+            $0.epoch &+= 1
+            $0.samples.removeAll(keepingCapacity: true)
+        }
+    }
 
     /// Injectable event source — production opens the real WebSocket,
     /// tests feed canned JSON lines. Each element is one WS text frame.
@@ -55,11 +82,14 @@ actor GazeStream {
         defer {
             // Only the live pump owns the flag — a superseded pump's
             // teardown can't mark its replacement dead.
-            if pumpGeneration == generation { streaming = false }
+            if pumpGeneration == generation {
+                breakContinuity()
+                streaming = false
+            }
         }
         do {
             for try await frame in frames() {
-                if Task.isCancelled { return }
+                if Task.isCancelled || pumpGeneration != generation { return }
                 ingest(frame)
             }
         } catch { /* socket died — streaming flips false; callers re-start */ }
@@ -69,6 +99,7 @@ actor GazeStream {
     /// termination hook hangs up the WebSocket) and drops the held
     /// sample: a stopped stream has no gaze to offer, stale or not.
     func stop() {
+        breakContinuity()
         pump?.cancel()
         pump = nil
         streaming = false
@@ -79,14 +110,45 @@ actor GazeStream {
     private func ingest(_ frame: String) {
         guard let data = frame.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }
+        else { breakContinuity(); return }
         // Only update-bearing frames matter; a bare snapshot handshake also
         // carries the gaze slice, so both shapes funnel through the slice.
         let snapshot = (obj["snapshot"] as? [String: Any]) ?? obj
-        guard let gaze = snapshot["gaze"] as? [String: Any],
-              let gazeData = try? JSONSerialization.data(withJSONObject: gaze),
-              let sample = try? GazeClient.decode(gazeData) else { return }
+        let changed = obj["changed"] as? [String]
+        if snapshot["paused"] as? Bool == true || changed?.contains("paused") == true {
+            latestSample = nil
+            breakContinuity()
+            return
+        }
+        if let changed, !changed.contains("gaze") { return }
+        guard let gaze = snapshot["gaze"] as? [String: Any] else {
+            if snapshot.keys.contains("gaze") || changed?.contains("gaze") == true { breakContinuity() }
+            return
+        }
+        guard let gazeData = try? JSONSerialization.data(withJSONObject: gaze),
+              let sample = try? GazeClient.decode(gazeData), let stamp = sample.observedAt else {
+            if let stamp = GazeClient.captureTime(gaze["captured_at_ms"]) ?? GazeClient.receiptTime(gaze["updated_at"]),
+               stamp <= Date(),
+               stamp > (newestSourceTime ?? .distantPast) { newestSourceTime = stamp }
+            breakContinuity()
+            return
+        }
+        if let prior = newestSourceTime {
+            if stamp == prior {
+                var previous = latestSample
+                previous?.updatedAt = sample.updatedAt
+                if previous == nil || previous == sample { return }
+            }
+            guard stamp > prior else { breakContinuity(); return }
+            if stamp.timeIntervalSince(prior) > Self.continuityWindow { breakContinuity() }
+        }
+        newestSourceTime = stamp
         latestSample = sample
+        observations.withLock {
+            $0.revision &+= 1
+            $0.samples.append(sample)
+            if $0.samples.count > 64 { $0.samples.removeFirst() }
+        }
     }
 
     /// The production WebSocket — URLSession's task sends no Origin header,

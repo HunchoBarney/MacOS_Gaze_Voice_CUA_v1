@@ -8,6 +8,87 @@ import JevVoiceCore
 /// a local command, and `cancelAllRunning` reaching agent turns.
 @MainActor
 final class VoiceTaskCoordinatorLaneTests: XCTestCase {
+    func testHandsFreeTaskCannotAcquireCoordinatorCancellation() async {
+        let c = coordinator()
+        defer { c.shutdown() }
+        let work = VoiceTaskCoordinator.Work(label: "Existing", request: "existing", spec: DriveTask(goal: "existing"))
+        c.tasks = [work]
+        _ = await c.beginVoiceTask("Should I stop?", taskOnly: true, captureID: UUID())
+        XCTAssertTrue(work.active); XCTAssertEqual(c.tasks.count, 1)
+        var current = true
+        c.gazeContextProvider = { nil }
+        c.onCommandStage = { _, _, stage, _ in if stage == .referentEnd { current = false } }
+        _ = await c.beginVoiceTask("Focus Stop.", app: "fixture.stop", taskOnly: true,
+                                   captureID: UUID(), admissionIsCurrent: { current })
+        XCTAssertFalse(current); XCTAssertTrue(work.active); XCTAssertEqual(c.tasks.count, 1)
+    }
+    func testDesktopSwitchRefusesUntypedTasksAndNeverVerifiesAPressReceipt() async throws {
+        let c = coordinator()
+        c.audioFeedbackAllowed = { false }
+        defer { c.shutdown() }
+        let words = "Go to Desktop 2."
+        var sends = 0
+        c.switchDesktop = { number, display, current, note in
+            XCTAssertEqual(number, 2); XCTAssertEqual(display, 77); XCTAssertTrue(current())
+            sends += 1
+            note("Mission Control may be open.")
+            if sends == 2, let work = c.tasks.last { c.cancel(work.id) }
+            return .init(.pressAcceptedUnverified, "Requested Desktop 2; active desktop unverified.", origin: .startedOpen)
+        }
+        for variant in ["no binding", "rewritten", "stale", "plan"] {
+            _ = await c.beginVoiceTask(words, app: "fixture.editor",
+                transcriptHint: variant == "rewritten" ? "Go to Desktop 1." : words,
+                steps: variant == "plan" ? ["press a key"] : [], captureID: UUID(),
+                pinnedWindowID: 42, desktopDisplay: variant == "no binding" ? nil : 77,
+                admissionIsCurrent: { variant != "stale" })
+            XCTAssertTrue(c.tasks.isEmpty, variant)
+        }
+        for cancel in [false, true] {
+            _ = await c.beginVoiceTask(words, app: "fixture.editor", transcriptHint: words,
+                captureID: UUID(), pinnedWindowID: 42, desktopDisplay: 77)
+            let work = try XCTUnwrap(c.tasks.last)
+            _ = await c.waitForConversationBoundary(work.id)
+            XCTAssertFalse(work.dispatchedEffect)
+            if cancel {
+                XCTAssertEqual(work.outcome, .cancelled)
+                XCTAssertNil(work.desktopDecision)
+                XCTAssertTrue(work.message.contains("Mission Control may be open"))
+            } else {
+                XCTAssertEqual(work.outcome, .uncertain("Requested Desktop 2; active desktop unverified."))
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false,
+                                                       attributes: [.posixPermissions: 0o700])
+                defer { try? FileManager.default.removeItem(at: folder) }
+                let evidence = try XCTUnwrap(VoiceTurnEvidence(environment: ["JARVIS_VOICE_EVIDENCE_DIR": folder.path]))
+                let turn = try XCTUnwrap(work.captureID)
+                evidence.open(turn: turn, input: "voice", beganAt: 1)
+                let other = VoiceTaskCoordinator.Work(label: "other", request: "other", spec: DriveTask(goal: "other"))
+                other.captureID = UUID(); other.desktopDecision = .targetChanged
+                evidence.flush(turn: turn, terminal: "settled", status: "blocked", uptime: 2, trace: [], works: [work, other])
+                let row = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: evidence.fileURL)) as? [String: Any])
+                let works = try XCTUnwrap(row["works"] as? [[String: Any]])
+                XCTAssertEqual(works[0]["desktop_decisions"] as? [String: Int], ["pressAcceptedUnverified": 1])
+                XCTAssertNil(works[1]["desktop_decisions"])
+                XCTAssertEqual(works[0]["desktop_overview_origin"] as? String, "startedOpen")
+                XCTAssertNil(works[1]["desktop_overview_origin"])
+            }
+        }
+        XCTAssertEqual(sends, 2)
+    }
+
+    func testDesktopSwitchQuestionAndRewrittenQuestionCannotCreateWork() async {
+        let c = coordinator()
+        defer { c.shutdown() }
+        c.gazeContextProvider = { XCTFail("Unexpected target lookup"); return nil }
+        c.switchDesktop = { _, _, _, _ in XCTFail("Unexpected desktop request"); return .init(.policyDenied, "") }
+        for instruction in ["Did it switch?", "Open Notes."] {
+            let reply = await c.beginVoiceTask(instruction, app: "fixture.notes",
+                transcriptHint: "Did it switch?", captureID: UUID(), pinnedWindowID: 42)
+            XCTAssertEqual(VoiceToolResult(jsonString: reply)?.status, VoiceToolResult.Status.refused)
+            XCTAssertTrue(c.tasks.isEmpty)
+        }
+    }
+
     func testR7CoordinatorRejectsRetargetedOrReplayedScrollBeforeAdmission() async throws {
         let original = "Move the page down a little."
         let request = try XCTUnwrap(WindowScrollRequest(goal: original,
@@ -85,6 +166,27 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
         XCTAssertFalse(owned.active)
         XCTAssertTrue(other.active)
         c.cancel(other.id)
+    }
+
+    func testDesktopSwitchPendingBoundaryCancellationStillOwnsRunningWork() async {
+        let c = coordinator()
+        defer { c.shutdown() }
+        c.audioFeedbackAllowed = { false }
+        let work = VoiceTaskCoordinator.Work(label: "Desktop", request: "Go to Desktop 2.", spec: DriveTask(goal: "Switch"))
+        c.tasks = [work]
+        var entered = false
+        let waiting = Task {
+            entered = true
+            return await c.waitForConversationBoundary(work.id)
+        }
+        let ready = await waitFor { entered }
+        XCTAssertTrue(ready)
+        XCTAssertTrue(work.active)
+        XCTAssertFalse(work.awaitingAnswer)
+        waiting.cancel()
+        let result = await waiting.value
+        XCTAssertEqual(result, .finished(.cancelled))
+        XCTAssertEqual(work.outcome, .cancelled)
     }
 
     private struct MemoryKeys: APIKeyStore {
@@ -475,6 +577,25 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
     }
 
     // MARK: - Universal cancel
+
+    func testAgentCancellationNeverTakesItsTargetFromGaze() async {
+        let c = coordinator()
+        defer { c.shutdown() }
+        let bridge = FakeBridge()
+        c.agentBridge = bridge
+        let rect = CGRect(x: 0, y: 0, width: 80, height: 40)
+        let other = IntentCandidate(id: "agent:other", kind: .agentCursor, frame: rect,
+                                    motorRect: rect, role: "agent", label: "Other")
+        let scorer = c.gazeService.scorer
+        for _ in 0..<3 {
+            _ = await scorer.update(candidates: [other], at: CGPoint(x: 20, y: 20), isSaccade: false)
+        }
+        let hit = await scorer.commitTarget(recordSelection: false)
+        XCTAssertEqual(hit?.0.id, other.id)
+        _ = await c.cancelVoiceTask("requested")
+        _ = await c.cancelVoiceTask()
+        XCTAssertEqual(bridge.interruptHints, ["requested", nil])
+    }
 
     /// `cancelAllRunning` retires every active task AND interrupts every
     /// live agent turn — one "stop" never leaves sibling work behind.

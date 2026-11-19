@@ -17,7 +17,7 @@ from lib.verifiers import VERIFIER_KINDS
 STATUSES = ("done", "already", "blocked", "refused_permanent", "stuck",
             "needs_input", "ambiguous", "maxsteps", "cancelled", "error")
 # Harness-level row statuses — counted as runs (failures), never latency.
-HARNESS_STATUSES = ("dry_run", "setup_error", "blocked:keychain")
+HARNESS_STATUSES = ("dry_run", "setup_error", "blocked:keychain", "blocked:operator_handoff")
 HERO_JOBS = ("inbox", "browser", "gaze", "calendar", "notes", "utility")
 REQUIRES = ("local-safe", "test-user", "human")
 TIERS = ("T0", "T1", "T2", "T3", "TB", "T4")

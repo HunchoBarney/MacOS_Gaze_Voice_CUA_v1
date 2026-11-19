@@ -602,6 +602,19 @@ final class MicrophoneInput: @unchecked Sendable {
             },
             stop: { [weak self] in
                 self?.withPlaybackNode(channel, generation: generation) { $0.stop() }
+            }, playVerified: { [weak self] data, completed in
+                guard let self else { return false }
+                return self.queue.sync {
+                    guard self.engineID == generation, self.outputGeneration.value == generation,
+                          let player = self.playbackNodes[channel], let format = self.playbackFormat,
+                          let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(data.count / 2)),
+                          let target = buffer.int16ChannelData?[0] else { return false }
+                    buffer.frameLength = buffer.frameCapacity
+                    data.copyBytes(to: UnsafeMutableRawBufferPointer(start: target, count: data.count))
+                    player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in completed() }
+                    player.play()
+                    return true
+                }
             })
     }
 }

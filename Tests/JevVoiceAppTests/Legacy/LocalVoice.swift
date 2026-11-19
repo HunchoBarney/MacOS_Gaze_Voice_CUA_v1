@@ -1,6 +1,7 @@
 import FluidAudio
 import Foundation
 import OSLog
+@testable import JevVoice
 
 // MARK: - Engine seam
 
@@ -150,9 +151,8 @@ final class PocketVoiceEngine: LocalVoiceEngine, VoicePlaybackRouting, Immediate
 
 /// The local `SpeechSynthesizing` — synchronous protocol over an async
 /// engine, matching how `SpeechOutput` wraps AVSpeechSynthesizer: `speak`
-/// launches work, `stop` silences. Composition assigns
-/// `controller.speaker = LocalVoice.shared` when `Config.ttsEnabled` is on
-/// and `await prepare()` succeeds; otherwise SpeechOutput stays the lane.
+/// launches work, `stop` silences. This historical adapter is retained
+/// only for the local speech compatibility tests.
 final class LocalVoice: SpeechSynthesizing, VoicePlaybackRouting, @unchecked Sendable {
     private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice.intelligence",
                                     category: "voice")

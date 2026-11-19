@@ -74,6 +74,16 @@ final class VoiceAgentBridgeTests: XCTestCase {
         XCTAssertEqual(reply?.status, "refused")
     }
 
+    func testStatusReadCannotStartAnAgentOrReconnect() async {
+        let subject = VoiceAgentBridge(runtime: nil, ensureRuntime: {
+            XCTFail("A status read cannot construct a runtime")
+            return nil
+        })
+        var ledger = WorkerTurnLedger(agent: "w", thread: "t")
+        let status = await subject.status(of: ledger.accept("1", start: ledger.begin()))
+        XCTAssertEqual(status, .unknown)
+    }
+
     func testBareStopWithNoTurnsAnswersNothingRunning() async throws {
         let (runtime, store) = makeRuntime()
         _ = try await store.found(name: "Idle", role: "r", description: "d", root: root)

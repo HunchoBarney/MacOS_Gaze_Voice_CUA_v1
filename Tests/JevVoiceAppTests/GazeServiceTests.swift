@@ -19,9 +19,9 @@ final class GazeServiceTests: XCTestCase {
 
     /// One gaze frame in the `/events` wire shape.
     private func gazeFrame(_ x: Double, _ y: Double,
-                           state: String = "fixation") -> String {
-        let stamp = Self.iso.string(from: Date())
-        return #"{"type":"snapshot","snapshot":{"gaze":{"x_px":\#(x),"y_px":\#(y),"confidence":0.9,"gaze_state":"\#(state)","updated_at":"\#(stamp)"}}}"#
+                           state: String = "fixation", at date: Date = Date()) -> String {
+        let stamp = Self.iso.string(from: date)
+        return #"{"type":"snapshot","snapshot":{"gaze":{"x_px":\#(x),"y_px":\#(y),"confidence":0.9,"gaze_state":"\#(state)","captured_at_ms":\#(date.timeIntervalSince1970 * 1000),"updated_at":"\#(stamp)"}}}"#
     }
 
     /// A stream that yields the fixture frames then idles open — like a
@@ -57,10 +57,29 @@ final class GazeServiceTests: XCTestCase {
         role: "AXButton", label: "Save", pid: 42, windowID: 7,
         appName: "Test", windowTitle: "Doc")
 
+    private func feed(_ source: Source, count: Int, x: Double = 100) async throws {
+        for _ in 0..<count {
+            source.yield(gazeFrame(x, 100))
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    private func fixture(stream: GazeStream, defaults: UserDefaults? = nil) -> GazeService {
+        let suite = "GazeServiceTests." + UUID().uuidString
+        let store = defaults ?? UserDefaults(suiteName: suite)!
+        if defaults == nil { addTeardownBlock { store.removePersistentDomain(forName: suite) } }
+        let service = GazeService(stream: stream, defaults: store)
+        service.cursorPoint = { nil }
+        service.eventSink = { _ in }; service.gazePointSink = { _ in }; service.staleSink = { _ in }
+        service.labels = ImplicitLabeler(post: { _, _ in }, displayBounds: { nil })
+        return service
+    }
+
     /// A started service with a fresh sample scores the batch, emits
     /// the acquire, and answers commits through the scorer.
     func testServiceScoresAndCommits() async throws {
-        let service = GazeService(stream: stream(yielding: [gazeFrame(100, 100)]))
+        let source = Source()
+        let service = fixture(stream: GazeStream(frames: { source.stream() }))
         var enumerations = 0
         var events: [IntentEvent] = []
         var points: [CGPoint] = []
@@ -74,7 +93,7 @@ final class GazeServiceTests: XCTestCase {
         service.dwellPolicy = DwellPolicy(mode: .off, deniedApps: [], userMultiplier: 1)
         service.start()
         defer { service.stop() }
-        try await Task.sleep(for: .milliseconds(300))
+        try await feed(source, count: 10)
         XCTAssertGreaterThanOrEqual(enumerations, 1)
         XCTAssertFalse(points.isEmpty)
         XCTAssertTrue(events.contains {
@@ -122,7 +141,7 @@ final class GazeServiceTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         DwellPolicy(mode: .safe, deniedApps: [], userMultiplier: 1).save(to: defaults)
         let source = Source()
-        let service = GazeService(stream: GazeStream(frames: { source.stream() }), defaults: defaults)
+        let service = fixture(stream: GazeStream(frames: { source.stream() }), defaults: defaults)
         service.enumerate = { _ in
             .init(candidates: [self.saveButton], windowID: 7)
         }
@@ -155,28 +174,36 @@ final class GazeServiceTests: XCTestCase {
 
     /// Suppressed dwell — a parked ask or armed overlay — never fires.
     func testDwellSuppressed() async throws {
-        let service = GazeService(stream: stream(yielding: [gazeFrame(100, 100)]))
+        let source = Source()
+        let suite = "GazeServiceTests.suppressed." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        DwellPolicy(mode: .safe, deniedApps: [], userMultiplier: 1).save(to: defaults)
+        let service = fixture(stream: GazeStream(frames: { source.stream() }), defaults: defaults)
         service.enumerate = { _ in
             .init(candidates: [self.saveButton], windowID: 7)
         }
         service.windowIDUnder = { _ in 7 }
-        service.eventSink = { _ in }
+        var furthestHold = 0.0
+        service.eventSink = {
+            if case .hold(_, let progress) = $0 { furthestHold = max(furthestHold, progress) }
+        }
         service.gazePointSink = { _ in }
         var fired: [String] = []
         service.actuate = { fired.append($0.id); return true }
         service.dwellSuppressed = { true }
-        service.dwellPolicy = DwellPolicy(mode: .safe, deniedApps: [],
-                                        userMultiplier: 1)
         service.start()
         defer { service.stop() }
-        try await Task.sleep(for: .milliseconds(1100))
+        try await feed(source, count: 36)
+        XCTAssertGreaterThanOrEqual(furthestHold, 1)
         XCTAssertTrue(fired.isEmpty)
     }
 
     /// The referent context line a task gets — the live fixation's
     /// "Looking at" line once the focal gate has crossed.
     func testReferentContext() async throws {
-        let service = GazeService(stream: stream(yielding: [gazeFrame(100, 100)]))
+        let source = Source()
+        let service = fixture(stream: GazeStream(frames: { source.stream() }))
         service.enumerate = { _ in
             .init(candidates: [self.saveButton], windowID: 7)
         }
@@ -187,7 +214,7 @@ final class GazeServiceTests: XCTestCase {
         service.start()
         defer { service.stop() }
         // Past the focal gate (~180ms of argmax) — the referent exists.
-        try await Task.sleep(for: .milliseconds(500))
+        try await feed(source, count: 12)
         let context = await service.referentContext()
         XCTAssertNotNil(context)
         XCTAssertTrue(context?.contains("Looking at:") == true)
@@ -197,7 +224,7 @@ final class GazeServiceTests: XCTestCase {
     /// A cold feed answers commits with nil — callers keep the
     /// raw-point fallback, never a guessed candidate.
     func testColdCommitIsNil() async {
-        let service = GazeService(stream: stream(yielding: []))
+        let service = fixture(stream: stream(yielding: []))
         service.start()
         defer { service.stop() }
         let hit = await service.commitTarget()
@@ -209,8 +236,9 @@ final class GazeServiceTests: XCTestCase {
     /// Stop drops the socket and clears scorer state — a commit after
     /// stop has no stale winner to return.
     func testStopClearsState() async throws {
-        let stream = stream(yielding: [gazeFrame(100, 100)])
-        let service = GazeService(stream: stream)
+        let source = Source()
+        let stream = GazeStream(frames: { source.stream() })
+        let service = fixture(stream: stream)
         service.enumerate = { _ in
             .init(candidates: [self.saveButton], windowID: 7)
         }
@@ -218,7 +246,9 @@ final class GazeServiceTests: XCTestCase {
         service.eventSink = { _ in }
         service.gazePointSink = { _ in }
         service.start()
-        try await Task.sleep(for: .milliseconds(300))
+        try await feed(source, count: 10)
+        let live = await service.commitTarget(recordSelection: false)
+        XCTAssertNotNil(live)
         service.stop()
         try await Task.sleep(for: .milliseconds(80))
         let streaming = await stream.streaming
@@ -231,7 +261,8 @@ final class GazeServiceTests: XCTestCase {
     /// candidate so the overlay can play the shrink-back, then the
     /// teardown hook hard-clears whatever the events can't reach.
     func testStopRetiresRingAndCallsTeardown() async throws {
-        let service = GazeService(stream: stream(yielding: [gazeFrame(100, 100)]))
+        let source = Source()
+        let service = fixture(stream: GazeStream(frames: { source.stream() }))
         service.enumerate = { _ in
             .init(candidates: [self.saveButton], windowID: 7)
         }
@@ -243,7 +274,7 @@ final class GazeServiceTests: XCTestCase {
         service.overlayTeardown = { teardowns += 1 }
         service.start()
         defer { service.stop() }
-        try await Task.sleep(for: .milliseconds(300))
+        try await feed(source, count: 8)
         XCTAssertTrue(events.contains {
             if case .acquire = $0 { return true }; return false
         }, "need a live ring to retire — got \(events)")
@@ -267,7 +298,7 @@ final class GazeServiceTests: XCTestCase {
     /// and a single 0 reports recovery.
     func testStaleSinkReportsOutageDuration() async throws {
         let source = Source()
-        let service = GazeService(
+        let service = fixture(
             stream: GazeStream(frames: { source.stream() }))
         var fakeT: TimeInterval = 100
         service.now = { fakeT }
@@ -299,23 +330,21 @@ final class GazeServiceTests: XCTestCase {
     /// `.safe` forever.
     func testPolicyReloadsOnDefaultsChange() async throws {
         let key = DwellPolicy.modeKey
-        let prior = UserDefaults.standard.object(forKey: key)
-        defer {
-            if let prior { UserDefaults.standard.set(prior, forKey: key) }
-            else { UserDefaults.standard.removeObject(forKey: key) }
-        }
-        let service = GazeService(stream: stream(yielding: []))
+        let suite = "GazeServiceTests.policy." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = fixture(stream: stream(yielding: []), defaults: defaults)
         service.eventSink = { _ in }
         service.gazePointSink = { _ in }
         service.staleSink = { _ in }
         service.start()
         defer { service.stop() }
-        UserDefaults.standard.set("all", forKey: key)
+        defaults.set("all", forKey: key)
         for _ in 0..<200 where service.dwellPolicy.mode != .all {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(service.dwellPolicy.mode, .all)
-        UserDefaults.standard.set("off", forKey: key)
+        defaults.set("off", forKey: key)
         for _ in 0..<200 where service.dwellPolicy.mode != .off {
             try await Task.sleep(for: .milliseconds(10))
         }

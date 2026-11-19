@@ -4,11 +4,11 @@ Source of truth for "done". Derived from the tester megaplan
 (`~/.devin/plans/plan-dd7484c27c0b1db0.md`, historical). If this file and
 the megaplan disagree, this file wins; amend it via a Decision Log entry.
 
-Current delivery detail: [SHIP-PLAN.md](SHIP-PLAN.md). Reuse choices:
+Current delivery and versioned P0–P13 mapping: [SHIP-PLAN v2](SHIP-PLAN.md). Reuse choices:
 [REUSE.md](REUSE.md). Competitive method: [COMPETITIVE.md](COMPETITIVE.md).
-The 2026-11-15 documentation update is authorized;
-new phase implementation, independent review and live/provider spending
-still follow their gates. Historical acceptance and evidence remain intact.
+KAR-22 authorizes building across C1–C3 within the existing gates.
+Historical acceptance and evidence remain intact. This is not authority
+for a live session, a billed run, installation or release.
 
 ## Goal
 
@@ -23,10 +23,10 @@ founders prefer daily for four hero jobs:
 4. **Calendar, reminders, notes**
 
 Built through a phased agentic harness: repo-local self-contained phase
-plans, per-milestone commits on `ship/v1-<phase>` branches, an enforced
-gate loop, at most two write tracks in parallel, all reusing proven tech
+plans, authorized milestone commits on `ship/v1-<phase>` branches, and
+phase gates under [PLANS](PLANS.md), all reusing proven tech
 (Cua, Jev decisions, OpenAI `gpt-6.1-terra` recovery, Chrome DevTools MCP, Safari
-Apple-Events JS, onnxruntime-node Core ML, SpeechAnalyzer/Parakeet,
+Apple-Events JS, onnxruntime-node Core ML, OpenAI Realtime,
 Browser-Use speed techniques) and proven by a bench that races Codex
 Computer Use and Browser Use.
 
@@ -39,17 +39,18 @@ Computer Use and Browser Use.
 | Testers | User + 1–2 people, hand-installed, local signing identity |
 | Vendors / keys | OpenAI + TypeSafe only; keys embedded at build time from Keychain; rotate after testing |
 | Vision/reasoning model | Jev remains primary for semantic UI decisions; direct grounded operations need no model call. GPT-6.1 Terra via the user-authorized API is the recovery/planning/generation route when needed. Jev 1.14 image/Box remains experimental and default off until qualification. No automatic replacement-model tournament or deeper model escalation. |
-| Voice brain | C1 R10 approved target: OpenAI Realtime always-on voice, direct native controls, Jev/Cua unfamiliar desktop work. Matching committed input transcription is the final authority; local models are not a default readiness requirement. Implementation and signed/human gates remain open. |
+| Voice brain | R10 landed OpenAI Realtime conversation, direct native controls and Jev/Cua for unfamiliar desktop work. Matching committed input transcription is the final authority. Local speech models are diagnostic only. R10 source/artifact review is not acceptance of a later candidate or a physical turn. |
+| Manual control | Hands-free is optional: typing and pointer use take priority. No numbered grid or “show numbers” coaching. Use descriptions, a brief clarification or a fresh resolved gaze target; pause foreground work rather than commandeer input. |
 | UI decision-making | One `TaskLoop`: direct typed operations, progress-driven `JevDecider`, and a P5 recovery adapter configured for Terra. `BrowserDecider` is DOM-first and uses direct/Jev decisions before Terra where applicable. The old planned `SolDecider` name is historical; review the adapter/consumer mapping at G2. No default round ceiling. |
 | Screenshots | Realtime: never; pixels only when a decider needs them; one capture reused per step |
 | Eye tracking | Core feature — copies the **visionOS input model**: eyes are the *targeting* mechanism only (the gazed element gets a hover-style highlight; a steady-state dot shows track confidence). Selection is always a *separate channel* — voice command, click, or key; gaze alone never actuates. Deciders receive the **resolved target identity** (AX element/window ref), never raw gaze coordinates. Dwell = accessibility opt-in, off by default; every gaze flow must also work without gaze (user directive 2026-10-19: "copy Apple") |
 | Bench | Separate macOS test user; ≥5 runs on hero tasks; Wilson CI; head-to-head vs Codex Computer Use + Browser Use; mandatory matched Wispr Flow accuracy/insertion comparison and per-category scorecard per COMPETITIVE.md |
 | Hardware floor | 8 GB M1 |
-| Commits | Per milestone on `ship/v1-<phase>` branches in worktrees; **user merges** |
+| Commits | When authorized, per milestone on `ship/v1-<phase>` branches in worktrees; **user controls merges**. A phase plan is not permission to stage, commit or publish. |
 | Check-in cadence | G1 phase-plan approval every phase; G6 hands-on for UX phases; merge + RC reviews |
-| Parallelism | ≤2 write tracks, isolated worktrees, disjoint owned paths; read-only agents unbounded |
-| Agent models | Implementer `opus`; judge `gpt` (fresh context, skeptical, read-only); research/explore `swe` |
-| Uncommitted tree | User owns existing uncommitted changes; phases build on the working tree |
+| Coordination | PLANS §§3–6: one owner per outcome; bounded readers within approved scope; pilot two disjoint, isolated writers against a verified common base. One integration/build owner and one physical operator. |
+| Agent roles | Reviewer independence, fresh context and read-only scope matter; no fixed model family for engineering roles. Product model/provider decisions above are unchanged. |
+| Uncommitted tree | The user owns inherited changes. A fresh checkout is not the dirty tree; compare the actual delta to its recorded baseline. |
 | Permissions | All grants issued ONCE during onboarding — TCC (Screen Recording, Accessibility, Microphone) + Chrome remote-debugging toggle & Allow. No recurring prompts in product flows (user directive, 2026-10-19) |
 | Browser attach | User's REAL logged-in Chrome is the primary surface (no profile fork); P7 driver holds one persistent browser-level ws connection → ≤1 Allow per Chrome launch; JevVoice-owned `--user-data-dir` profile is the documented zero-dialog alternative |
 
@@ -77,11 +78,14 @@ Computer Use and Browser Use.
 
 ## Target architecture (summary)
 
-Voice: `Fn down → local ASR (live partials) + realtime buffer (no
-response yet) + hold-time warm-up → Fn up → local final ≤200 ms →
-deterministic parse → hit: execute + clear buffer; miss: commit +
-response.create → one typed tool call` (realtime tool schemas in
-`.agent/CONTRACTS.md`).
+Voice: healthy duplex audio + confirmed Realtime session → server-detected
+turn (or manual Fn commit) → matching final for this input item → one host
+admission against the captured context. Insert literal text directly, use
+native actions for grounded commands, or authorize the appropriate
+dialogue/tool response. A partial, spoken reply or stale tool cannot act.
+No screen pixels go to Realtime. The [R10 contract](results/P4/c1-r10-realtime-contract.md)
+supersedes the old local-final startup design; [CONTRACTS](CONTRACTS.md)
+retains the frozen tool and outcome boundaries.
 
 Executors (lane budgets — routing picks the cheapest lane that can do
 the job; the generalist lanes are fallbacks, not front doors): T0
@@ -125,7 +129,8 @@ an independently reviewed upstream contract/source milestone with affected
 checks and an explicit hash-bound handoff, while upstream G5/G6 remains
 open. This never grants upstream PASS or moves failed tasks between slices.
 P12 packaging checks can start early; complete P12 acceptance depends on
-P0–P11, and P13 depends on P12. P11's existing off-by-default safety
+P0–P11, and P13 depends on P12. Track names below are subsystem labels,
+not checkout assignments. P11's existing off-by-default safety
 requirement can be corrected in C1 before the rest of P11.
 
 | # | Phase | Track | Depends on | Gate evidence (summary) |
@@ -136,7 +141,7 @@ requirement can be corrected in C1 before the rest of P11.
 | P2b | Spike: ChromeDevTools MCP vs Cua `browser_*` speed/robustness | agent | P1 | Driver pick recorded with numbers |
 | P2c | Spike: Codex app-server computer-use headless feasibility | agent | P1 | promote/discard + evidence |
 | P2d | Spike: SpeechAnalyzer vs Parakeet + live-partials fix | voice | P1 | latency/WER/RAM table; winner picked |
-| P3 | Voice one-brain (gated `response.create`, claim-ledger deletion, hold warm-up, realtime tools rewrite, delete gpt-4o/-mini + IntentClassifier/LocalChooser + CommandSpotter) | voice | P2d | Zero double-dispatch (50 paraphrases); T0 ≤300 ms; no images on socket |
+| P3 | Voice one-brain: one host-owned final, gated tool response and no speculative competing chooser. Apply the R10 provider mapping in SHIP-PLAN before interpreting legacy local-only checks. | voice | P2d | Zero double-dispatch (50 paraphrases); T0 ≤300 ms; no images on socket |
 | P4 | `TaskLoop` refactor + `JevDecider` (recall v2 A/B, optional progress-driven budget, settle, agents via same loop, delete perception lane) + **session-label wedge fix** (P1 finding: reused `--agent` slugs wedge drive_until until daemon respawn — `CuaDriveServer.swift:205,209`, `DriveLoop.swift:264-322`) | agent | P1 | DriveLoop tests green on TaskLoop; Jev slice ≥95%/≤4 s; repeated same-slug `--mcp-stdio` calls stay live |
 | P5 | SDK-backed `OpenAIResponsesClient` + Terra recovery adapter (legacy planned name `SolDecider`), actions→Cua, guarded batching, consent/safety, gaze hint, recording | agent | P4 | Complex slice ≥80%/≤60 s; red-team zero violations; Jev-only versus Jev-with-recovery policy comparison |
 | P6 | Script lane (hero intents + `inbox_brief`, argv-only, read-back confirm, contacts/dates, `NSAppleEventsUsageDescription`) | voice | P3 | Per-intent ≥99%/≤1.5 s; injection tests; brief ≤5 s |
@@ -153,10 +158,11 @@ low-value script intents → agent polish. The current plan retains all four
 hero jobs; any feature cut needs an explicit decision. Retiring the Jev
 image experiment must not remove the general screenshot fallback.
 
-Current candidate order: C1 fast ordinary Fn/pill use (P3/P4 plus early
-dwell/packaging checks); C2 complete general/browser/hero/replay routes
-(P5/P7/P6/P9); C3 integrated eyes/onboarding/portable release
-(P8/P11/P10/P12/P13 and outstanding P3/P4 qualification).
+The [delivery roadmap](SHIP-PLAN.md) is the current order: quiet first-minute
+conversation with optional Fn (C1), useful verified tasks alongside manual
+work (C2), then portable tester install, production gaze and matched
+qualification (C3). The DAG above is the acceptance order, not a sequence
+of mandatory signed builds.
 
 ## Reuse map
 
@@ -171,8 +177,8 @@ dwell/packaging checks); C2 complete general/browser/hero/replay routes
 | Settled-step browsing | ABP pattern via CDP/`verify_state` |
 | Skills | Cua recording + PreAct/SkillDroid/Webwright designs; we build locator re-binding + validation |
 | App scripting | AppleScript dictionaries, `shortcuts run`, Cua `invoke_menu` |
-| Speech | Parakeet vs SpeechAnalyzer bake-off; one transcript of record |
-| TTS | PocketTTS / AVSpeech |
+| Speech | Realtime input transcription for the matched committed item; P2d's local bake-off is historical diagnostic evidence. |
+| TTS | Realtime output by default; PocketTTS / AVSpeech only on the explicit diagnostic path. |
 | Tracker inference | `onnxruntime-node` Core ML EP in Electron utility process; wasm last resort |
 | Reference codebases | `browser-use`, `agent-browser-protocol`, `openai-cua-sample-app`, Agently decompile notes, Cua source — read-only; license check before copying |
 | Bench sources | MacArena/macOSWorld tasks, cua-speedrun method, Online-Mind2Web-style web tasks |
@@ -255,7 +261,7 @@ The user explicitly authorized the Terra API route. Existing OpenAI key,
 privacy and spend policy applies; documentation research makes no calls.
 ChatGPT/Codex remains the existing optional background route and is not
 a new authentication dependency for ordinary recovery. Terra does not
-support audio/Realtime and does not replace local ASR. No silent switch
+support audio/Realtime and is not the speech provider. No silent switch
 between subscription and billed API on errors or quota exhaustion.
 
 Retain the historical Sol-pixel comparison in P7 as a benchmark reference,
@@ -269,7 +275,7 @@ applicable, version/review its amendment before new qualification.
 proxy; notarization/public release; auto-update; native tracker rewrite;
 Beam SDK; WebMCP; perception extension; best-of-N answer shopping or
 speculative mutations (bounded independent reads/Jev questions are allowed); desktop
-code-as-action; new agent features; >2 parallel write tracks.
+code-as-action; new product agent features.
 
 ## Decision Log index
 
@@ -278,6 +284,8 @@ section) and appended here one line each.
 
 | # | Date | Phase | Decision |
 |---|---|---|---|
+| SHIP-3 | 2026-11-17 | PROGRAM · KAR-22 | Build C1 quiet first use, C2 tasks that yield to manual input, C3 portable tester qualification. Retire the numbered grid and its coaching; retain gaze as local targeting with separate selection. [Delivery map v2](SHIP-PLAN.md) carries P0–P13, R10 and outstanding physical gates forward. No change to frozen contracts, phase scores, spend, data, live authority or release control. |
+| COORD-1 | 2026-11-17 | PROGRAM | User approved the Capy coordination audit. PLANS supersedes the fixed named worktrees, permanent two-writer ceiling, unbounded readers, per-helper approval and fixed engineering model roles. Bounded bug proof is not phase acceptance. G1–G7, frozen contracts, scoped data/spend/live authority, historical evidence and user release control remain in force. No product run authorized. |
 | C1-R10 | 2026-11-16 | P3/P4/P12 | User explicitly selected OpenAI realtime voice after local startup/empty-final failures. G2 reviewer87dfafed PASS on revised `results/P4/c1-r10-realtime-contract.md`: server VAD/input-final correlation, provider-independent turn admission, common conversation safety, default Realtime speech output; local ASR/VAD/TTS only explicit diagnostics. Native/Cua/Jev safety and separate-service controls remain. Consumer/source/artifact/live/human verification still required; no install/commit. |
 | C1-R10-base | 2026-11-17 | P4/P12 | Recorded original daily app is absent; cause unknown. G2 reviewer859f3e7e PLAN PASS on `results/P4/c1-r10-packaging-base-amendment.md`: explicit final-r10-only retained-base flag, pinned verified R9-2 receipt/app/binary/signature/resources, original daily absence before/after, separate truthful historical-daily metadata. P12 enforces provenance and existing rollback controls. No daily restore/install/removal, no new Swift build, no source/live/phase acceptance implied. |
 | SHIP-2 | 2026-11-15 | PROGRAM | User directed continued Jev+Cua with Terra when needed and explicitly allowed Terra API. Updated planned default-Sol/replacement search to Jev-first routing with measured Terra recovery; added mandatory Wispr quality comparison and per-category leadership scorecard. Existing accepted P0–P4 records and source unchanged; new work remains under phase gates. |

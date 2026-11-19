@@ -218,6 +218,29 @@ class WilsonCase(unittest.TestCase):
 class RunnerCase(unittest.TestCase):
     """(f) run.py --stub --dry-run end-to-end on a fixture corpus."""
 
+    def test_untrusted_live_entry_records_every_attempt_before_setup(self):
+        import run as runner
+        from unittest.mock import patch
+        task = {"id": "fixture.guarded", "requires": "local-safe", "runs": 2}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"BENCH_STUB": "0"}), \
+                patch.object(runner, "load_corpus", return_value=[task]), \
+                patch.object(runner, "resolve_binary", side_effect=AssertionError), \
+                patch.object(runner, "require_api_key", side_effect=AssertionError), \
+                patch.object(runner, "run_setup", side_effect=AssertionError), \
+                patch.object(runner, "spawn_client", side_effect=AssertionError), \
+                patch.object(runner, "verify", side_effect=AssertionError):
+            out = Path(directory) / "rows.jsonl"
+            self.assertEqual(runner.main(["--binary", str(out) + ".absent", "--set", "local-safe",
+                                          "--out", str(out)]), 0)
+            rows = [json.loads(line) for line in out.read_text().splitlines()]
+        self.assertEqual([row["run"] for row in rows], [1, 2])
+        for row in rows:
+            self.assertEqual(row["status"], "blocked:operator_handoff")
+            self.assertEqual(row["evidence"], "BLOCKED: trusted operator handoff unavailable")
+            self.assertFalse(row["verified"])
+            self.assertEqual(row["wall_ms"], 0)
+
     def test_dry_run_rows(self):
         import run as run_mod
         with tempfile.TemporaryDirectory() as d:

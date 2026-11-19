@@ -99,6 +99,10 @@ final class AgentRuntime: ObservableObject {
 
     @discardableResult
     func send(_ text: String, to agent: CompanionAgent) async throws -> String {
+        try await sendBound(text, to: agent).turn
+    }
+
+    func sendBound(_ text: String, to agent: CompanionAgent) async throws -> WorkerTurnReceipt {
         await hooksTask?.value
         // An in-flight send resuming past stopAll's drain must not spawn a
         // session the teardown already walked past.
@@ -113,16 +117,15 @@ final class AgentRuntime: ObservableObject {
             pendingSends[agent.slug, default: 1] -= 1
             if pendingSends[agent.slug] == 0 { pendingSends.removeValue(forKey: agent.slug) }
         }
-        let turnID = try await bridge.send(to: agent, message: text)
+        let receipt = try await bridge.sendBound(to: agent, message: text)
         // Persist the bound thread so a respawn RESUMES the agent's chat
         // instead of starting a fresh one — the agent's memory is its thread.
         do {
-            let threadID = try await bridge.threadID(for: agent)
-            try await store.recordThread(slug: agent.slug, threadID: threadID)
+            try await store.recordThread(slug: agent.slug, threadID: receipt.thread)
         } catch {
             Self.log.error("thread persistence failed for \(agent.slug, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
-        return turnID
+        return receipt
     }
 
     /// Slugs with a turn in flight or a send still binding one — the

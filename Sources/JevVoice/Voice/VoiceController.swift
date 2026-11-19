@@ -96,6 +96,7 @@ final class VoiceController: ObservableObject {
     @Published private(set) var inputName = ""
     @Published private(set) var detail = ""
     @Published private(set) var resultMessage = ""
+    @Published private(set) var parkedDesktopStatus: (message: String, asks: [VoiceAdmissionContext.Ask])?
     @Published private(set) var measurements: [String: Double] = [:]
     @Published private(set) var isMicrophoneTest = false
     @Published private(set) var microphoneReady = false
@@ -105,6 +106,29 @@ final class VoiceController: ObservableObject {
     @Published private(set) var handsFreeSpeaking = false
     var handsFreeEnabled: Bool { config.handsFreeEnabled }
     var handsFreeListening: Bool { handsFreeState == .listening }
+    var handsFreeSessionAvailable: () -> Bool = { true }
+    var handsFreeControls: HandsFreeMenuState {
+        HandsFreeMenuState(state: handsFreeState, enabled: handsFreeEnabled, label: handsFreeLabel, detail: handsFreeDetail,
+            userPaused: config.handsFreePaused, controlsAvailable: handsFreeMenuControlsAvailable && handsFreeSessionAvailable(),
+            canResume: restricted == nil ? !missingPermissions.contains(.microphone) : missingPermissions.isEmpty,
+            stoppable: cuaTasks.contains(where: \.active),
+            pending: normalCoordinator?.pendingAskCount ?? 0)
+    }
+    func applyHandsFreeToggle(_ action: HandsFreeMenuState.Toggle, microphoneGranted: () -> Bool = { Permission.microphone.isGranted }) {
+        guard handsFreeControls.toggle == action else { return }
+        switch action {
+        case .pause: pauseHandsFree()
+        case .resume: if restricted != nil || microphoneGranted() { resumeHandsFree() }
+        }
+    }
+    var quietHandsFreePresentation: Bool {
+        handsFreeEnabled && !manualOverride && captureState == .idle &&
+            (status == .idle || (sessionID != nil && sessionID == latestAutomaticTurn))
+    }
+    var handsFreeMenuControlsAvailable: Bool {
+        !manualOverride && !physicalFnDown && !isMicrophoneTest && captureState == .idle &&
+            !held && deliveryOwner == nil && startupTask == nil && cleanupTask == nil
+    }
     var handsFreeLabel: String {
         switch handsFreeState {
         case .off: return "Hands-free off"
@@ -112,22 +136,40 @@ final class VoiceController: ObservableObject {
         case .listening:
             if handsFreeSpeaking { return "Speaking · listening" }
             return continuousScrolling ? "Scrolling · listening" : "Listening hands-free"
-        case .paused: return "Hands-free paused"
+        case .paused: return config.handsFreePaused ? "Hands-free paused" : "Hands-free on hold"
         case .unavailable: return "Hands-free unavailable"
         }
     }
     var handsFreeDetail: String {
-        if case .unavailable(let reason) = handsFreeState { return reason }
-        return "Say “stop” to stop an action or “pause listening” to pause."
+        if missingPermissions.contains(.microphone), config.handsFreeEnabled {
+            return "Allow Microphone access in System Settings → Privacy & Security → Microphone."
+        }
+        switch handsFreeState {
+        case .preparing: return "Connecting to hands-free voice."
+        case .paused: return config.handsFreePaused ? "Listening is paused until you resume it." : "Listening is temporarily on hold."
+        case .off: return "Hands-free is not listening."
+        case .listening: return "Say “stop” to stop an action or “pause listening” to pause."
+        case .unavailable(let reason): return reason
+        }
     }
-    @Published var missingPermissions: [Permission] = Permission.missing
+    @Published var missingPermissions: [Permission]
     private let permissionMonitor: PermissionStatusMonitor
-    private var lastPolledMicrophoneGranted = Permission.microphone.isGranted
+    private let readPermissions: @Sendable () -> [Permission]
+    private var lastPolledMicrophoneGranted: Bool
+    private let resolveDevice: @MainActor (String?) -> MicrophoneDevice?
+    private struct RestrictedInput {
+        let observedFnUpGeneration: @MainActor () -> UUID?
+        let readContext: @MainActor () -> VoiceAdmissionContext
+        let captureTarget: @MainActor (String, Int) -> SpokenLiteralTarget?
+    }
+    private let restricted: RestrictedInput?
+    private var listeningGeneration: UUID?
 
     private static let voiceLog = Logger(subsystem: "com.chriswozniczek.jevvoice.voice", category: "capture")
     /// Content-free diagnostics let physical trials be correlated without retaining
     /// raw microphone audio, spoken text, app contents, or credentials.
     private func trace(_ event: String) {
+        guard restricted == nil else { return }
         let id = sessionID?.uuidString ?? "none"
         let elapsed = max(0, ProcessInfo.processInfo.systemUptime - beganAt) * 1000
         let words = transcript.split(whereSeparator: \.isWhitespace).count
@@ -150,13 +192,17 @@ final class VoiceController: ObservableObject {
     var semanticAuditBudget: SemanticRequestBudget?
     var semanticAuditSubject: String?
     var auditDocumentBinding: (file: URL, windowID: Int)?
-    let cua: VoiceTaskCoordinator
-    var cuaTasks: [VoiceTaskCoordinator.Work] { cua.tasks }
-    var diagnosticTask: VoiceTaskCoordinator.Work? { cuaTasks.first { $0.id == cua.selectedID } }
-    func stopAll() { cancel(); cua.stopAll() }
-    func selectTask(_ id: UUID) { cua.select(id: id) }
-    func cancelTask(_ id: UUID) { cua.cancel(id) }
-    func approveTask(_ id: UUID, approved: Bool) { cua.resolveApproval(id: id, approved: approved) }
+    private let normalCoordinator: VoiceTaskCoordinator?
+    var cua: VoiceTaskCoordinator {
+        guard let normalCoordinator else { preconditionFailure("Only normal composition has a task coordinator.") }
+        return normalCoordinator
+    }
+    var cuaTasks: [VoiceTaskCoordinator.Work] { normalCoordinator?.tasks ?? [] }
+    var diagnosticTask: VoiceTaskCoordinator.Work? { cuaTasks.first { $0.id == normalCoordinator?.selectedID } }
+    func stopAll() { cancel(); normalCoordinator?.stopAll() }
+    func selectTask(_ id: UUID) { normalCoordinator?.select(id: id) }
+    func cancelTask(_ id: UUID) { normalCoordinator?.cancel(id) }
+    func approveTask(_ id: UUID, approved: Bool) { normalCoordinator?.resolveApproval(id: id, approved: approved) }
     /// All parked confirm asks, oldest task first — every row's Run button
     /// is id-scoped (approveTask → resolveApproval), so it resolves its own.
     /// Agent asks carry no continuation — the parked `.confirm` itself is
@@ -184,7 +230,7 @@ final class VoiceController: ObservableObject {
     /// recency.
     private var interactionWorks: [VoiceTaskCoordinator.Work] {
         guard let sessionID else { return [] }
-        return cua.tasks.filter { $0.captureID == sessionID }
+        return cuaTasks.filter { $0.captureID == sessionID }
     }
 
     /// A pending clarification owned by the current interaction — a normal
@@ -230,7 +276,8 @@ final class VoiceController: ObservableObject {
     }
 
     private func presentOwnedWork() -> Bool {
-        guard let projected = Self.workStatus(interactionWorks) else { return false }
+        let works = interactionWorks
+        guard let projected = Self.workStatus(works) else { return false }
         switch projected {
         case .done, .stopped:
             guard speechReplyEnded else { return true }
@@ -240,7 +287,10 @@ final class VoiceController: ObservableObject {
             }
         case .error(let reason):
             detail = reason
-            status = projected
+            if quietHandsFreePresentation, works.count == 1, works[0].desktopDecision == .pressAcceptedUnverified,
+               works[0].outcome == .uncertain(reason) {
+                status = .replied
+            } else { status = projected }
         case .awaitingAnswer(let prompt):
             detail = prompt
             status = projected
@@ -256,7 +306,7 @@ final class VoiceController: ObservableObject {
     /// background work.
     private func cancelInteractionWork() {
         for work in interactionWorks where work.active {
-            cua.cancel(work.id)
+            normalCoordinator?.cancel(work.id)
         }
     }
 
@@ -267,7 +317,7 @@ final class VoiceController: ObservableObject {
     /// asks included so a numbered ask resurfaces the card and reaches
     /// the [context] note like any other wait-on-user state.
     var pendingQuestions: [PendingQuestionItem] {
-        cua.tasks.compactMap { work in
+        cuaTasks.compactMap { work in
             guard work.awaitingAnswer else { return nil }
             switch work.ask {
             case .question(let prompt), .choice(let prompt, _):
@@ -295,14 +345,14 @@ final class VoiceController: ObservableObject {
     /// silent dismiss.
     var gazeTapHandler: (@Sendable () async -> Bool)? {
         get { (speech as? RealtimeVoiceLane)?.gazeTapHandler }
-        set { (speech as? RealtimeVoiceLane)?.gazeTapHandler = newValue }
+        set { if restricted == nil { (speech as? RealtimeVoiceLane)?.gazeTapHandler = newValue } }
     }
     /// Local speech tee — forwarded to the lane's capture feeds so the
     /// LocalTranscriber (composition lane) hears converted PCM chunks.
     /// nil = no tap.
     var localSpeechSink: (@Sendable (AVAudioPCMBuffer) -> Void)? {
         get { (speech as? RealtimeVoiceLane)?.localSpeechSink }
-        set { (speech as? RealtimeVoiceLane)?.localSpeechSink = newValue }
+        set { if restricted == nil { (speech as? RealtimeVoiceLane)?.localSpeechSink = newValue } }
     }
     /// Universal stop seam — wired by composition to the coordinator's
     /// `cancelAllRunning()` once it exists; Escape/stop calls it
@@ -323,6 +373,7 @@ final class VoiceController: ObservableObject {
     /// pays to repeat them. The return value stays for the caller's
     /// fallback path; everything this entry accepts is claimed.
     func voiceAgentEvent(_ text: String) -> Bool {
+        guard restricted == nil else { return false }
         pushOutcome(text, speak: true, to: speech as? RealtimeVoiceLane)
         return true
     }
@@ -362,8 +413,10 @@ final class VoiceController: ObservableObject {
     /// idle pipeline: it must not interleave with a live capture's events.
     func retryTask(_ id: UUID) {
         guard canRetryTask(id), !captureActive else { return }
+        desktopAnswers.invalidate()
+        fnDesktopOnset = nil
         let lane = speech as? RealtimeVoiceLane
-        cua.retryWork(id)
+        normalCoordinator?.retryWork(id)
         pushOutcome(#"{"kind":"task_outcome","status":"ok","say":"Retrying."}"#,
                     speak: true, to: lane)
     }
@@ -372,11 +425,10 @@ final class VoiceController: ObservableObject {
     /// connect without it (Clicky injects the same facts every turn). Facts
     /// only, one line; the instructions tell the model to use them silently.
     private func turnContextNote() async -> String {
+        guard restricted == nil else { return "" }
         var parts = ["local time: \(Self.timeFormatter.string(from: Date()))"]
         if let app = commandFrontmostApp ?? lastExternalApp { parts.append("active app: \(app)") }
-        let snapshot = voiceAdmissionContext()
-        parts += snapshot.currentAsks.map { "task_id=\($0.taskID.uuidString) ask_id=\($0.askID.uuidString)" }
-        parts += snapshot.agents.map { "agent_id=\($0.key) name=\($0.value)" }
+        parts += Self.noteIdentityLines(asks: Self.pendingVoiceAsks(in: cuaTasks), agents: cachedVoiceAgents)
         let waiting = pendingQuestions.prefix(2).map { "[\($0.owner)] \"\($0.prompt)\"" }
         if !waiting.isEmpty { parts.append("waiting on your answer: \(waiting.joined(separator: ", "))") }
         let confirms = pendingTaskApprovals.prefix(3).map { "[\($0.request)] \"\($0.askPrompt ?? "")\"" }
@@ -395,9 +447,15 @@ final class VoiceController: ObservableObject {
         let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
     }()
 
+    static func noteIdentityLines(asks: [VoiceAdmissionContext.Ask], agents: [String: String]) -> [String] {
+        asks.map { "task_id=\($0.taskID.uuidString) ask_id=\($0.askID.uuidString)" }
+            + agents.map { "agent_id=\($0.key) name=\($0.value)" }
+    }
+
     /// Typed and reviewed commands take the same model turn the voice does —
     /// one decision surface (the realtime model), one screen, one tool set.
     private func routeCommand(_ text: String) {
+        guard restricted == nil else { return }
         guard let lane = speech as? RealtimeVoiceLane else {
             fail("The realtime voice lane is not available.")
             return
@@ -440,10 +498,11 @@ final class VoiceController: ObservableObject {
     }
 
     private var speech: SpeechCapturing
-    private let dictation: DictationDelivering
+    private let dictation: DictationDelivering?
     /// Spoken replies seam — nil or Config.ttsEnabled=false stays silent.
     var speaker: SpeechSynthesizing? {
         didSet {
+            guard restricted == nil else { speaker = nil; return }
             oldValue?.stop()
             if let producer = speaker as? any VoicePlaybackRouting {
                 playbackProducers[producer.playbackChannel] = producer
@@ -468,6 +527,12 @@ final class VoiceController: ObservableObject {
     private var latestAutomaticText = ""
     private var automaticCaptures: Set<UUID> = []
     private var automaticTasks: Set<UUID> = []
+    private var desktopAnswers = DesktopSwitchAnswers()
+    private var fnDesktopOnset: (turn: UUID, snapshot: DesktopSwitchAnswers)?
+#if DEBUG
+    var recordedVoiceInputs: (context: () -> VoiceAdmissionContext, audioReady: () -> Bool,
+                              startManual: (UUID) async throws -> String)?
+#endif
     private var automaticTimes: [UUID: (began: TimeInterval, released: TimeInterval)] = [:]
     private let authorize: () async -> Bool
     private let timings: VoiceTimings
@@ -477,9 +542,12 @@ final class VoiceController: ObservableObject {
     private var lastExternalApp: String?
     private var commandFrontmostApp: String?
     private var sessionID: UUID?
+    private var manualPresentationTurn: UUID?
     private var held = false
     private var dictating = false
     private var latchRelease = false
+    private var latchedDesktopTurn: UUID?
+    private var desktopStopDown: UUID?
     /// A latch tap landed while startup was still resolving: `held` is already
     /// released but the capture continues, so the startup guards must treat
     /// the hold as logically alive instead of wedging at `.starting`.
@@ -498,6 +566,7 @@ final class VoiceController: ObservableObject {
     /// these turns "typed" in evidence so physical rows stay honest.
     private var typedSessions: Set<UUID> = []
     private var microphoneEnabled = true
+    private var shuttingDown = false
     private var configuredDevice: MicrophoneDevice?
     private var startupTask: Task<Void, Never>?
     private var cleanupTask: Task<Void, Never>?
@@ -521,19 +590,37 @@ final class VoiceController: ObservableObject {
     private var voiceRosterRefresh: Task<Void, Never>?
 
     func refreshVoiceContext() {
-        guard voiceRosterRefresh == nil else { return }
+        guard let normalCoordinator, voiceRosterRefresh == nil else { return }
         voiceRosterRefresh = Task { [weak self] in
             guard let self else { return }
             defer { self.voiceRosterRefresh = nil }
-            let roster = await self.cua.agentBridge?.roster() ?? []
+            let roster = await normalCoordinator.agentBridge?.roster() ?? []
             self.cachedVoiceAgents = Dictionary(roster.map { ($0.slug, $0.name) },
                                                 uniquingKeysWith: { first, _ in first })
         }
     }
 
-    private func voiceAdmissionContext() -> VoiceAdmissionContext {
+    private func voiceAdmissionContext(refreshEntities: Bool = false) -> VoiceAdmissionContext {
+        if let restricted {
+            guard restrictedListeningIsCurrent() else { return VoiceAdmissionContext() }
+            let observed = restricted.readContext()
+            guard observed.targetAppID == "com.apple.TextEdit", observed.windowID != nil,
+                  observed.editableTarget, observed.capturedAsks.isEmpty, observed.currentAsks.isEmpty else {
+                return VoiceAdmissionContext()
+            }
+            var context = VoiceAdmissionContext()
+            context.targetAppID = observed.targetAppID
+            context.targetID = observed.targetID
+            context.windowID = observed.windowID
+            context.editableTarget = observed.editableTarget
+            return context
+        }
+#if DEBUG
+        if let recordedVoiceInputs { return recordedVoiceInputs.context() }
+#endif
         var context = VoiceAdmissionContext()
-        if Date().timeIntervalSince(voiceEntityRefresh) > 30 {
+        context.desktopDisplayID = DesktopSpaceSwitch.singleDisplay
+        if refreshEntities || Date().timeIntervalSince(voiceEntityRefresh) > 30 {
             cachedVoiceEntities = VoiceAdmissionContext.observedAppEntities()
             cachedVoiceAppRoles = VoiceAdmissionContext.observedAppRoles()
             voiceEntityRefresh = Date()
@@ -548,10 +635,17 @@ final class VoiceController: ObservableObject {
             // The executor still validates the focused field before typing.
             context.editableTarget = true
         }
-        let active = cua.tasks.filter(\.active)
+        let active = cuaTasks.filter(\.active)
         context.tasks = Set(active.map(\.id))
+        context.delegatedStatus = cua.voiceDelegation
         context.selectedTask = active.count == 1 ? active.first?.id : nil
-        context.capturedAsks = active.filter(\.awaitingAnswer).map { work in
+        context.capturedAsks = Self.pendingVoiceAsks(in: active)
+        context.currentAsks = context.capturedAsks
+        return context
+    }
+
+    static func pendingVoiceAsks(in tasks: [VoiceTaskCoordinator.Work]) -> [VoiceAdmissionContext.Ask] {
+        tasks.filter { $0.active && $0.awaitingAnswer }.map { work in
             switch work.ask {
             case .confirm: return .init(taskID: work.id, askID: work.askID, kind: .confirm)
             case .choice(_, let options): return .init(taskID: work.id, askID: work.askID, kind: .choice, options: options)
@@ -559,12 +653,10 @@ final class VoiceController: ObservableObject {
             case nil: return .init(taskID: work.id, askID: work.askID)
             }
         }
-        context.currentAsks = context.capturedAsks
-        return context
     }
     var isListening: Bool { status == .listening }
     var canBegin: Bool {
-        guard microphoneEnabled else { return false }
+        guard restricted == nil, microphoneEnabled else { return false }
         if handsFreeListening, !held, startupTask == nil, cleanupTask == nil { return true }
         // A voice-latched dictation means stop-on-tap — let the press
         // through so begin() can convert it to finish().
@@ -580,6 +672,7 @@ final class VoiceController: ObservableObject {
     /// Same gates as `canBegin` minus microphone availability — a typed
     /// command never touches the mic.
     var canSubmitCommand: Bool {
+        guard restricted == nil else { return false }
         if handsFreeListening, !held, startupTask == nil, cleanupTask == nil { return true }
         if !held, cleanupTask == nil, startupTask == nil,
            [.executing, .thinking].contains(status) { return true }
@@ -590,6 +683,7 @@ final class VoiceController: ObservableObject {
         }
     }
     var operationActive: Bool {
+        if restricted != nil, let latestAutomaticTurn, automaticTimes[latestAutomaticTurn] != nil { return true }
         // Gates the Escape consume — the key is ours only while a real
         // interaction sits on the card: a live capture OR committed turn
         // (cancelling an in-flight turn is a valid Escape meaning), a
@@ -609,7 +703,7 @@ final class VoiceController: ObservableObject {
     /// Delegates to the coordinator's `hasActiveChoiceAsk` (parked-ask
     /// store: `work.ask` `.choice` + `awaitingAnswer`, i.e. an armed
     /// choice radial — the missing arm of this Escape gate).
-    private var hasActiveChoiceAsk: Bool { cua.hasActiveChoiceAsk }
+    private var hasActiveChoiceAsk: Bool { normalCoordinator?.hasActiveChoiceAsk == true }
     /// Dwell-suppression + Escape seam: true while a capture turn is live —
     /// Fn held through its commit, or a typed turn still in flight. Status
     /// alone can't see a committed turn: after .finishing the card shows
@@ -634,6 +728,13 @@ final class VoiceController: ObservableObject {
          diagnosticTraceOnly: Bool? = nil, turnEvidence: VoiceTurnEvidence? = nil,
          permissionStatusReader: @escaping @Sendable () -> [Permission] = { Permission.missing }) {
         let config = config ?? Config.shared
+        precondition(!config.isRestrictedVoice && (speech as? RealtimeVoiceLane)?.literalOnly != true,
+                     "A restricted voice profile requires the restricted initializer.")
+        self.restricted = nil
+        self.readPermissions = { Permission.missing }
+        self.missingPermissions = Permission.missing
+        self.lastPolledMicrophoneGranted = Permission.microphone.isGranted
+        self.resolveDevice = { try? MicrophoneCatalog.resolve(uid: $0) }
         self.config = config
         self.handsFreePaused = config.handsFreePaused
         self.permissionMonitor = PermissionStatusMonitor(read: permissionStatusReader)
@@ -646,7 +747,7 @@ final class VoiceController: ObservableObject {
         self.speech = speech ?? RealtimeVoiceLane(apiKey: { [weak config] in config?.openAIAPIKey ?? "" })
         // One final-only admission owner routes local actions or one
         // remote miss into the existing execution spine.
-        self.cua = cuaRuntime ?? VoiceTaskCoordinator(config: config,
+        self.normalCoordinator = cuaRuntime ?? VoiceTaskCoordinator(config: config,
             jevAPIKey: { [weak config] in config?.apiKey ?? "" })
         self.timings = timings
         self.frontmost = frontmost ?? { NSWorkspace.shared.frontmostApplication?.localizedName }
@@ -723,7 +824,7 @@ final class VoiceController: ObservableObject {
                 // the lane held dispatch until it landed (typed turns pass
                 // nil), so the runtime's heard-vs-called check compares
                 // against the user's final words, not a display partial.
-                let prior = Set(self.cua.tasks.map(\.id))
+                let prior = Set(self.cuaTasks.map(\.id))
                 let result = await self.cua.beginVoiceTask(
                     instruction, app: app,
                     frontmostHint: self.commandFrontmostApp ?? self.lastExternalApp,
@@ -734,7 +835,7 @@ final class VoiceController: ObservableObject {
                 // echo) is voiced verbatim by the lane's `.toolSay` event
                 // — the second model turn is suppressed for all of them,
                 // so nothing is spoken here or it would double the ack.
-                let added = self.cua.tasks.filter { !prior.contains($0.id) && $0.captureID == captureID }
+                let added = self.cuaTasks.filter { !prior.contains($0.id) && $0.captureID == captureID }
                 if added.count == 1, let id = added.first?.id,
                    let data = result.data(using: .utf8),
                    var fields = (try? JSONDecoder().decode(JSONValue.self, from: data))?.object {
@@ -781,13 +882,91 @@ final class VoiceController: ObservableObject {
                 return await self.cua.respondToTaskExact(answer, taskID: task, askID: ask, captureID: captureID)
             }
             lane.exactCancellationHandler = { [weak self] task in
-                guard let self, self.cua.tasks.contains(where: { $0.id == task && $0.active }) else {
+                guard let self, self.cuaTasks.contains(where: { $0.id == task && $0.active }) else {
                     return VoiceToolCatalog.result(status: "blocked", summary: "That task is no longer active.", error: "stale_task")
                 }
                 self.cua.cancel(task)
                 return VoiceToolCatalog.result(status: "accepted", summary: "Cancellation requested.", taskID: task.uuidString)
             }
             lane.admissionContextProvider = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
+            lane.gazeClickLease = { [weak self] in self?.cua.currentGazeClickLease }
+            lane.gazeClickPermitted = { [weak self] id in
+                guard let self, self.sessionID == id, self.microphoneEnabled, self.usesRealtimeVoice,
+                      !self.isMicrophoneTest, !self.dictating, !self.held, !self.physicalFnDown,
+                      !self.diagnosticTraceOnly, self.normalQualification == nil, !VoiceUserAudit.enabled,
+                      Permission.microphone.isGranted, Permission.accessibility.isGranted,
+                      !self.handsFreePaused || self.manualOverride, self.pendingQuestions.isEmpty,
+                      self.pendingTaskApproval == nil, !self.cuaTasks.contains(where: { $0.active && $0.awaitingAnswer })
+                else { return false }
+                switch self.presentation {
+                case .awaitingConfirm, .reviewTranscript, .error: return false
+                default: return true
+                }
+            }
+            lane.dispatchGazeClick = { [weak self] lease, permitted in
+                guard let self, permitted(),
+                      let (candidate, _) = await self.cua.gazeService.commitTarget(lookBackSec: 0, recordSelection: false),
+                      permitted(), candidate.gazeLease == lease else { return false }
+                let corpus = [candidate.label, candidate.role, candidate.url ?? "", candidate.windowTitle ?? "",
+                              candidate.appName ?? ""].joined(separator: " ")
+                guard VoiceTaskCoordinator.deniedReason(in: corpus) == nil else { return false }
+                return await self.cua.actuateCommitted(candidate, permitted: permitted)
+            }
+            lane.settleGazeClick = { [weak self] id, message in
+                guard let self, self.sessionID == id, !self.held else { return false }
+                if self.manualPresentationTurn == id { self.manualPresentationTurn = nil }
+                if let message { return self.showLocalAnswer(message, for: id) }
+                self.withdrawLocalAnswer(id, terminal: "gaze_click_withdrawn")
+                return false
+            }
+            lane.controlPermitted = { [weak self] id in
+                guard let self, self.sessionID == id else { return false }
+                switch self.presentation {
+                case .awaitingConfirm, .reviewTranscript, .error: return false
+                case .executing where self.interactionWorks.contains(where: \.active) || self.cuaTasks.contains(where: \.active):
+                    return false
+                default: break
+                }
+                return self.microphoneEnabled && self.usesRealtimeVoice && !self.isMicrophoneTest
+                    && (!self.handsFreePaused || self.manualOverride) && self.interactionQuestion == nil
+                    && self.pendingQuestions.isEmpty && self.pendingTaskApproval == nil
+                    && !self.cuaTasks.contains(where: { $0.active && $0.awaitingAnswer })
+                    && Permission.microphone.isGranted && Permission.accessibility.isGranted
+            }
+            lane.bindControl = { text, window, current in
+                await ScreenQuestionObservation.bind(final: text, window: window, isCurrent: current)
+            }
+            lane.onControlCard = { [weak self] id, message in
+                _ = self?.showLocalAnswer(message, for: id)
+            }
+            lane.onControlWithdrawn = { [weak self] id in
+                guard let self, self.sessionID == id, !self.presentProtectedConversationDetail() else { return }
+                self.speechReplyEnded = true
+                self.detail = ""; self.status = .idle
+            }
+            lane.currentDelegatedScope = { [weak self] id in
+                guard let self, self.canPresentLocalStatus(id) else { return nil }
+                return self.cua.voiceDelegation
+            }
+            lane.desktopSwitchAnswer = { [weak self] id, display in
+                guard let self, self.canPresentLocalStatus(id, desktop: true) else { return nil }
+                return self.desktopAnswers.answer(for: id, display: display,
+                                                  works: self.cuaTasks, now: ProcessInfo.processInfo.systemUptime)
+            }
+            lane.onParkedDesktopStatus = { [weak self] id, message, asks in
+                guard let self, self.canPresentLocalStatus(id, desktop: true),
+                      self.matchesParkedAsks(asks) else { return false }
+                self.settleParkedStatus(id)
+                self.parkedDesktopStatus = (message, asks)
+                return true
+            }
+            lane.workerStatus = { [weak self] receipt in await self?.cua.agentBridge?.status(of: receipt) ?? .unknown }
+            lane.onLocalStatusCard = { [weak self] id, message in
+                guard let self, self.sessionID == id else { return false }
+                if self.manualPresentationTurn == id { self.manualPresentationTurn = nil }
+                return self.showLocalAnswer(message, for: id)
+            }
+            lane.onLocalStatusWithdrawn = { [weak self] id in self?.withdrawDelegatedStatus(id) }
             lane.semanticEnabled = { [weak self] in
                 self?.config.semanticAppSuggestions == true && self?.diagnosticTraceOnly == false
             }
@@ -847,7 +1026,57 @@ final class VoiceController: ObservableObject {
             config.$ttsEnabled.sink { [weak lane] in lane?.audioRepliesEnabled = $0 }
                 .store(in: &subscriptions)
         }
-        Self.shared = self
+        finishInitialization()
+    }
+
+    init(restrictedConfig config: Config, lane: RealtimeVoiceLane,
+         observedFnUpGeneration: @escaping @MainActor () -> UUID?,
+         permissionStatusReader: @escaping @Sendable () -> [Permission] = {
+             [Permission.microphone, .accessibility].filter { !$0.isGranted }
+         },
+         resolveDevice: @escaping @MainActor (String?) -> MicrophoneDevice? = { try? MicrophoneCatalog.resolve(uid: $0) },
+         readContext: @escaping @MainActor () -> VoiceAdmissionContext = { VoiceController.textEditContext() },
+         captureLiteralTarget: @escaping @MainActor (String, Int) -> SpokenLiteralTarget? = { SpokenLiteralTarget.capture(app: $0, window: $1) }
+    ) throws {
+        guard config.isRestrictedVoice, lane.literalOnly, lane.speechSource == .realtime else {
+            throw VoiceError("The restricted voice profile does not match its configuration or transport.")
+        }
+        self.restricted = RestrictedInput(observedFnUpGeneration: observedFnUpGeneration,
+                                          readContext: readContext, captureTarget: captureLiteralTarget)
+        self.config = config
+        self.speech = lane
+        self.normalCoordinator = nil
+        self.dictation = nil
+        self.turnEvidence = nil
+        self.diagnosticTraceOnly = false
+        self.handsFreePaused = config.handsFreePaused
+        self.timings = VoiceTimings()
+        self.frontmost = { nil }
+        self.readPermissions = permissionStatusReader
+        self.permissionMonitor = PermissionStatusMonitor(read: permissionStatusReader)
+        let missing = permissionStatusReader()
+        self.missingPermissions = missing
+        self.lastPolledMicrophoneGranted = missing.isEmpty
+        self.authorize = { permissionStatusReader().isEmpty }
+        self.resolveDevice = resolveDevice
+        if config.handsFreeEnabled, config.handsFreePaused { handsFreeState = .paused }
+        finishInitialization()
+        lane.restrictedConnectionPermitted = { [weak self] in self?.restrictedListeningIsCurrent() == true }
+    }
+
+    private static func textEditContext() -> VoiceAdmissionContext {
+        var context = VoiceAdmissionContext()
+        guard let front = NSWorkspace.shared.frontmostApplication, front.bundleIdentifier == "com.apple.TextEdit",
+              let window = FocusedTextBinding.capturedWindowID(pid: Int(front.processIdentifier)) else { return context }
+        context.targetAppID = front.bundleIdentifier
+        context.windowID = window
+        context.targetID = "window:\(front.processIdentifier):\(window)"
+        context.editableTarget = true
+        return context
+    }
+
+    private func finishInitialization() {
+        if restricted == nil { Self.shared = self }
         wire(self.speech)
         if let producer = speaker as? any VoicePlaybackRouting {
             playbackProducers[producer.playbackChannel] = producer
@@ -895,9 +1124,15 @@ final class VoiceController: ObservableObject {
         }
         lane.onConversationState = { [weak self] state in
             guard let self else { return }
+            if self.restricted != nil, state == .listening, !self.restrictedListeningIsCurrent() { return }
             self.handsFreeState = state
             if case .unavailable = state {
-                self.cua.endListeningHint()
+                if self.restricted != nil {
+                    self.listeningGeneration = nil
+                    self.microphoneReady = false
+                    self.retireMicrophone()
+                }
+                if !self.usesRealtimeVoice { self.normalCoordinator?.endListeningHint() }
                 self.cancelConversationActions()
                 self.continuousScrolling = false
             }
@@ -909,6 +1144,36 @@ final class VoiceController: ObservableObject {
             if abs(self.audioLevel - level) >= 0.01 { self.audioLevel = level }
         }
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
+        lane.conversation.captureLiteralTarget = { [weak self] app, window in
+            guard let self else { return nil }
+            if let restricted = self.restricted {
+                guard app == "com.apple.TextEdit", self.restrictedListeningIsCurrent() else { return nil }
+                return restricted.captureTarget(app, window)
+            }
+            return SpokenLiteralTarget.capture(app: app, window: window)
+        }
+        lane.conversation.literalInputPermitted = { [weak self, weak lane] input in
+            guard let self, let lane else { return false }
+            return lane.ownsConversationInput(input) && self.audioReady(lane) && self.handsFreeListening
+                && self.wantsHandsFreeListening && !self.physicalFnDown && !self.held && !self.dictating
+                && !self.isMicrophoneTest && self.deliveryOwner == nil && !self.diagnosticTraceOnly
+                && self.pendingQuestions.isEmpty && self.pendingTaskApproval == nil
+                && (self.restricted == nil ? Permission.microphone.isGranted && Permission.accessibility.isGranted
+                                           : self.restrictedListeningIsCurrent())
+        }
+        lane.conversation.readPendingAsks = { [weak self] in Self.pendingVoiceAsks(in: self?.cuaTasks ?? []) }
+        lane.conversation.onControl = { [weak self] kind in
+            guard let self else { return }
+            self.cancelConversationActions()
+            self.interruptSpeechPlayback()
+            if kind == .pause { self.pauseHandsFree() }
+        }
+        lane.conversation.onBargeIn = { [weak self, weak lane] in
+            self?.interruptSpeechPlayback()
+            lane?.interruptConversationPlayback()
+        }
+        lane.conversation.onEvent = { [weak self] event in self?.presentConversation(event) }
+        guard let normalCoordinator else { return }
         lane.conversation.interpret = { [weak self] text, context, memory in
             guard let self, !self.diagnosticTraceOnly, !self.config.apiKey.isEmpty else {
                 throw VoiceError("Jev is unavailable. Check the connection and try again.")
@@ -923,31 +1188,25 @@ final class VoiceController: ObservableObject {
             guard let self else { throw CancellationError() }
             return try await self.executeConversation(command)
         }
-        lane.conversation.onControl = { [weak self] kind in
-            guard let self else { return }
-            self.cancelConversationActions()
-            self.interruptSpeechPlayback()
-            if kind == .pause { self.pauseHandsFree() }
-        }
-        lane.conversation.onBargeIn = { [weak self, weak lane] in
-            self?.interruptSpeechPlayback()
-            lane?.interruptConversationPlayback()
+        lane.conversation.pendingDesktopEffect = { [weak self] in
+            guard let self else { return nil }
+            return self.cuaTasks.last { $0.active && $0.desktopSideEffect != nil && self.automaticTasks.contains($0.id) }?.desktopSideEffect
         }
         lane.conversation.onCancelRepetition = { [weak self] in
             guard let self, let capture = self.repeatingCapture else { return }
             if let work = self.repeatingWork { self.cua.cancel(work) }
-            for work in self.cua.tasks where work.captureID == capture && work.continuousScroll && work.active {
+            for work in self.cuaTasks where work.captureID == capture && work.continuousScroll && work.active {
                 self.cua.cancel(work.id)
             }
             self.repeatingCapture = nil
             self.repeatingWork = nil
             self.continuousScrolling = false
         }
-        lane.conversation.onEvent = { [weak self] event in self?.presentConversation(event) }
-        cua.audioFeedbackAllowed = { [weak self] in self?.config.handsFreeEnabled != true }
+        normalCoordinator.audioFeedbackAllowed = { [weak self] in self?.config.handsFreeEnabled != true }
     }
 
     func resumeHandsFree() {
+        if restricted != nil, currentRestrictedGeneration() == nil { return }
         handsFreePaused = false
         config.handsFreePaused = false
         microphoneEnabled = true
@@ -959,40 +1218,103 @@ final class VoiceController: ObservableObject {
     func pauseHandsFree() {
         handsFreePaused = true
         config.handsFreePaused = true
-        microphoneTask?.cancel()
+        if restricted == nil { microphoneTask?.cancel() }
         stopHandsFree(state: .paused)
-        if !held, deliveryOwner == nil {
+        if restricted == nil, !held, deliveryOwner == nil {
             Task { [weak self] in await self?.speech.suspend() }
         }
     }
 
-    private func stopHandsFree(state: ConversationListeningState) {
+    private func stopHandsFree(state: ConversationListeningState, preservingParked: Bool = false) {
+        listeningGeneration = nil
+        if restricted != nil {
+            if let sessionID, sessionID == latestAutomaticTurn {
+                self.sessionID = nil
+                status = .idle
+                detail = ""
+                transcript = ""
+            }
+            latestAutomaticTurn = nil
+            automaticTimes.removeAll()
+        }
         handsFreeRequest = UUID()
         handsFreeTask?.cancel(); handsFreeTask = nil
-        cancelConversationActions()
+        cancelConversationActions(preservingParked: preservingParked)
         (speech as? RealtimeVoiceLane)?.stopConversation(state: state)
+        if restricted != nil {
+            microphoneReady = false
+            microphoneReadiness = "Microphone is paused."
+            retireMicrophone()
+        }
         handsFreeState = state
         continuousScrolling = false
         handsFreeSpeaking = false
-        cua.endListeningHint()
+        if !usesRealtimeVoice { normalCoordinator?.endListeningHint() }
+    }
+
+    var wantsHandsFreeListening: Bool { config.handsFreeEnabled && !handsFreePaused && !manualOverride && microphoneEnabled }
+
+    private func currentRestrictedGeneration() -> UUID? {
+        guard let restricted, !shuttingDown, handsFreeSessionAvailable(), !physicalFnDown,
+              let generation = restricted.observedFnUpGeneration(), readPermissions().isEmpty else { return nil }
+        return generation
+    }
+
+    private func restrictedListeningIsCurrent() -> Bool {
+        guard restricted != nil else { return true }
+        guard let generation = listeningGeneration else { return false }
+        let request = handsFreeRequest
+        guard generation == currentRestrictedGeneration(), wantsHandsFreeListening else {
+            guard handsFreeRequest == request else { return false }
+            listeningGeneration = nil
+            Task { [weak self] in
+                guard let self, self.handsFreeRequest == request else { return }
+                self.inputObservationLost()
+            }
+            return false
+        }
+        return true
+    }
+
+    func inputObservationLost() {
+        guard restricted != nil else { return }
+        if !config.handsFreeEnabled || config.handsFreePaused {
+            let state: ConversationListeningState = config.handsFreeEnabled ? .paused : .off
+            if handsFreeState != state || listeningGeneration != nil { stopHandsFree(state: state) }
+            return
+        }
+        if !microphoneEnabled, listeningGeneration == nil, case .unavailable = handsFreeState { return }
+        suspendMicrophone("Hands-free is on hold until microphone, Accessibility, and Fn input are available.",
+                          resumeHandsFreeOnRecovery: true)
     }
 
     private func startHandsFree(since: TimeInterval? = nil) {
-        guard config.handsFreeEnabled, !handsFreePaused, !manualOverride, microphoneEnabled,
+        guard !shuttingDown, wantsHandsFreeListening,
               !held, !physicalFnDown, !isMicrophoneTest,
               handsFreeTask == nil, let lane = speech as? RealtimeVoiceLane,
               lane.conversation.id == nil else { return }
         let request = UUID()
+        if restricted != nil {
+            guard let generation = currentRestrictedGeneration() else { inputObservationLost(); return }
+            listeningGeneration = generation
+        }
         handsFreeRequest = request
+        let retiringMicrophone = restricted == nil ? nil : microphoneTask
         handsFreeTask = Task { [weak self, weak lane] in
             guard let self, let lane else { return }
             defer { if self.handsFreeRequest == request { self.handsFreeTask = nil } }
             do {
+                if let retiringMicrophone {
+                    await Self.awaitUnlessCancelled(retiringMicrophone)
+                    try Task.checkCancellation()
+                }
                 let granted = await self.authorizeUnlessCancelled()
-                guard granted, self.handsFreeRequest == request, !Task.isCancelled else {
+                guard granted, self.handsFreeRequest == request, !Task.isCancelled,
+                      self.restrictedListeningIsCurrent() else {
                     throw VoiceError("Microphone access is needed for hands-free voice.")
                 }
                 try await lane.startConversation(inputUID: self.config.microphoneUID, since: since)
+                if self.handsFreeRequest == request { _ = self.restrictedListeningIsCurrent() }
             } catch {
                 guard self.handsFreeRequest == request, !Task.isCancelled else { return }
                 self.handsFreeState = .unavailable(error.localizedDescription)
@@ -1000,20 +1322,25 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    private func cancelConversationActions() {
-        for id in automaticTasks { cua.cancel(id) }
-        automaticTasks = []
+    private func cancelConversationActions(preservingParked: Bool = false) {
+        desktopAnswers = DesktopSwitchAnswers()
+        fnDesktopOnset = nil
+        parkedDesktopStatus = nil
+        let keep = preservingParked ? Set(cuaTasks.filter { $0.active && $0.awaitingAnswer }.map(\.id)) : []
+        let cancelling = automaticTasks.subtracting(keep)
+        automaticTasks.subtract(cancelling)
+        for id in cancelling { normalCoordinator?.cancel(id) }
         continuousScrolling = false
     }
 
-    private func overrideConversationForManualInput() {
+    private func overrideConversationForManualInput(preservingParked: Bool = false) {
         guard config.handsFreeEnabled else { return }
         if !manualOverride {
             if case .unavailable = handsFreeState { manualResumeWanted = false }
             else { manualResumeWanted = !handsFreePaused }
         }
         manualOverride = true
-        stopHandsFree(state: .paused)
+        stopHandsFree(state: .paused, preservingParked: preservingParked)
     }
 
     private func resumeAfterManualInput() {
@@ -1024,15 +1351,109 @@ final class VoiceController: ObservableObject {
     }
 
     func physicalFnChanged(_ down: Bool) {
+        if down && !physicalFnDown {
+            desktopStopDown = nil
+            parkedDesktopStatus = nil
+            let id = UUID()
+            var snapshot = desktopAnswers
+            snapshot.begin(id, conversation: nil)
+            fnDesktopOnset = (id, snapshot)
+        } else if !down {
+            desktopStopDown = nil
+            fnDesktopOnset = nil
+        }
         physicalFnDown = down
+        if restricted != nil, down {
+            overrideConversationForManualInput()
+        }
         if !down { resumeAfterManualInput() }
     }
 
+    var handsFreeCaptionTurn: UUID? {
+        guard handsFreeListening, !manualOverride, captureState == .idle,
+              let sessionID, sessionID == latestAutomaticTurn else { return nil }
+        return sessionID
+    }
+
+    private func presentProtectedConversationDetail() -> Bool {
+        if let prompt = pendingTaskApproval?.askPrompt ?? pendingQuestions.last?.prompt {
+            detail = prompt
+            presentation = .awaitingAnswer(prompt)
+            return true
+        }
+        switch presentation {
+        case .error(let reason): detail = reason
+        case .awaitingConfirm, .reviewTranscript: break
+        case .executing:
+            guard let work = interactionWorks.last(where: \.active) ?? cuaTasks.last(where: \.active) else { return false }
+            detail = work.message
+        default: return false
+        }
+        return true
+    }
+
+    func showLocalAnswer(_ message: String, for id: UUID) -> Bool {
+        guard restricted == nil, sessionID == id, !presentProtectedConversationDetail() else { return false }
+        receive(.assistant(message), session: id)
+        receive(.turnEnded, session: id)
+        return true
+    }
+
+    private func canPresentLocalStatus(_ id: UUID, desktop: Bool = false) -> Bool {
+        guard sessionID == id, microphoneEnabled, usesRealtimeVoice, !isMicrophoneTest, !held,
+              !handsFreePaused || manualOverride else { return false }
+        if desktop {
+            guard !dictating, manualPresentationTurn == id || (!manualOverride && latestAutomaticTurn == id) else { return false }
+            return !physicalFnDown || (desktopStopDown == id && manualPresentationTurn == id)
+        }
+        return !physicalFnDown && pendingQuestions.isEmpty && pendingTaskApproval == nil
+            && !cuaTasks.contains(where: { $0.active && $0.awaitingAnswer })
+    }
+
+    private func matchesParkedAsks(_ expected: [VoiceAdmissionContext.Ask]) -> Bool {
+        !expected.isEmpty && VoiceAdmissionContext.Ask.sameParkedSnapshot(expected, Self.pendingVoiceAsks(in: cuaTasks))
+    }
+
+    private func settleParkedStatus(_ id: UUID) {
+        if manualPresentationTurn == id { manualPresentationTurn = nil }
+        speechReplyEnded = true
+        captureState = .idle
+        if case .awaitingAnswer(let visible) = presentation,
+           cuaTasks.contains(where: { $0.active && $0.awaitingAnswer && $0.askPrompt == visible }) { return }
+        _ = presentProtectedConversationDetail()
+    }
+
+    func withdrawDelegatedStatus(_ id: UUID) {
+        if sessionID == id, !held, !Self.pendingVoiceAsks(in: cuaTasks).isEmpty {
+            settleParkedStatus(id)
+            return
+        }
+        withdrawLocalAnswer(id, terminal: "status_withdrawn")
+    }
+
+    private func withdrawLocalAnswer(_ id: UUID, terminal: String) {
+        guard sessionID == id, !held else { return }
+        if manualPresentationTurn == id { manualPresentationTurn = nil }
+        speechReplyEnded = true
+        let protected = presentProtectedConversationDetail()
+        if status == .thinking || status == .executing {
+            if !protected { detail = "" }
+            if !protected || interactionWorks.isEmpty { status = .idle }
+        }
+        settleEvidence(terminal: terminal)
+    }
+
     private func adoptAutomaticTurn(_ id: UUID) {
-        guard latestAutomaticTurn == id, !held, !latched, startupTask == nil, deliveryOwner == nil,
+        guard latestAutomaticTurn == id, !manualOverride, presentation != .awaitingConfirm,
+              presentation != .reviewTranscript, !held, !latched, startupTask == nil, deliveryOwner == nil,
               captureState == .idle else { return }
+        if let sessionID, sessionID == manualPresentationTurn,
+           status == .thinking || status == .executing { return }
         if sessionID != id {
-            presentation = .idle
+            if !presentProtectedConversationDetail() {
+                presentation = .idle
+                detail = ""
+            }
             speechReplyEnded = false
             replyDraft = ""
         }
@@ -1044,33 +1465,46 @@ final class VoiceController: ObservableObject {
         partialLive = false
     }
 
-    private func presentConversation(_ event: ConversationPresentation) {
+    func presentConversation(_ event: ConversationPresentation) {
+        if restricted != nil, !handsFreeListening || !restrictedListeningIsCurrent() { return }
         switch event {
         case .began(let id, let at):
+            if restricted != nil, latestAutomaticTurn != nil, case .error = presentation {
+                presentation = .idle
+                detail = ""
+            }
+            parkedDesktopStatus = nil
+            fnDesktopOnset = nil
+            desktopAnswers.begin(id, conversation: (speech as? RealtimeVoiceLane)?.conversation.id)
             latestAutomaticTurn = id; latestAutomaticText = ""
             automaticTimes[id] = (at, 0)
             adoptAutomaticTurn(id)
-            cua.beginListeningHint()
+            if !usesRealtimeVoice { normalCoordinator?.beginListeningHint() }
             turnEvidence?.open(turn: id, input: "conversation", beganAt: at)
             if let owner = (speech as? RealtimeVoiceLane)?.conversation.id {
                 turnEvidence?.event(turn: id, name: "conversation.session.\(owner)")
             }
         case .source(let id, let input):
+            desktopAnswers.source(input, for: id)
             turnEvidence?.event(turn: id, name: "conversation.source.openai_realtime")
             turnEvidence?.event(turn: id, name: "conversation.connection.\(input.connectionID)")
             turnEvidence?.event(turn: id, name: "conversation.input.\(input.itemID)")
         case .sealed(let id, let at):
-            cua.endListeningHint()
+            if !usesRealtimeVoice { normalCoordinator?.endListeningHint() }
             automaticTimes[id]?.released = at
             turnEvidence?.release(turn: id, at: at)
+        case .processing(let id):
+            guard restricted != nil, latestAutomaticTurn == id, sessionID == id else { return }
+            presentation = .thinking
         case .final(let id, let text):
             turnEvidence?.final(turn: id, text: text)
             if latestAutomaticTurn == id {
                 latestAutomaticText = text
                 adoptAutomaticTurn(id)
-                if sessionID == id { presentation = .thinking }
+                if sessionID == id, !presentProtectedConversationDetail() { presentation = .thinking }
             }
         case .routed(let id, let local, let started, let ended):
+            guard restricted == nil else { return }
             for (stage, at) in [
                 (VoiceCommandTrace.Stage.conversationRoutingBegin, started),
                 (local ? .admissionLocal : .admissionRemote, ended),
@@ -1079,16 +1513,26 @@ final class VoiceController: ObservableObject {
                 commandTrace.record(stage, turn: id, at: at)
                 turnEvidence?.event(turn: id, name: "command.\(stage.rawValue)", at: at)
             }
-        case .feedback(let id, let message):
+        case .feedback(let id, let message), .literalRefusal(let id, let message):
+            if restricted != nil { automaticTimes.removeValue(forKey: id) }
             guard latestAutomaticTurn == id else { return }
             adoptAutomaticTurn(id)
             guard sessionID == id else { return }
-            detail = message
             if handsFreeListening { speak(message) }
+            if interactionWorks.isEmpty, presentProtectedConversationDetail() { return }
+            detail = message
+            if restricted != nil, case .literalRefusal = event {
+                presentation = .error(message)
+                return
+            }
             if !presentOwnedWork() { presentation = .idle }
         case .ignored(let id), .waiting(let id):
             automaticTimes.removeValue(forKey: id)
-            if latestAutomaticTurn == id, sessionID == id, !held {
+            guard latestAutomaticTurn == id else { return }
+            latestAutomaticText = ""
+            if sessionID == id, !held {
+                transcript = ""; partialLive = false
+                guard !presentProtectedConversationDetail() else { return }
                 detail = "Listening…"
                 if !interactionWorks.contains(where: \.active) { presentation = .idle }
             }
@@ -1100,9 +1544,17 @@ final class VoiceController: ObservableObject {
         }
     }
 
+    private func audioReady(_ lane: RealtimeVoiceLane) -> Bool {
+#if DEBUG
+        if restricted == nil, let recordedVoiceInputs { return recordedVoiceInputs.audioReady() }
+#endif
+        return lane.conversationAudioReady
+    }
+
     private func executeConversation(_ command: ConversationCommand) async throws -> ConversationEffect {
+        guard let cua = normalCoordinator else { throw VoiceError("Only literal typing in TextEdit is available.") }
         guard let lane = speech as? RealtimeVoiceLane, lane.conversation.isCurrent(command),
-              lane.conversationAudioReady,
+              audioReady(lane),
               !held, !manualOverride, deliveryOwner == nil, !Task.isCancelled else {
             throw CancellationError()
         }
@@ -1118,14 +1570,19 @@ final class VoiceController: ObservableObject {
         if command.decision.kind == .answer {
             guard let task = command.admission.slots["task_id"].flatMap(UUID.init(uuidString:)),
                   let ask = command.admission.slots["ask_id"].flatMap(UUID.init(uuidString:)),
-                  let existing = cua.tasks.first(where: { $0.id == task && $0.askID == ask && $0.awaitingAnswer }) else {
+                  let existing = cuaTasks.first(where: { $0.id == task && $0.askID == ask && $0.awaitingAnswer }) else {
                 throw VoiceError("That question is no longer waiting for an answer.")
             }
             let answer = await cua.respondToTaskExact(command.text, taskID: task, askID: ask, captureID: capture)
             answerMessage = RealtimeVoiceLane.deterministicSay(answer)
             work = existing
         } else {
-            guard let scope = command.decision.scope, scope.matches(voiceAdmissionContext()) else {
+            guard let scope = command.decision.scope else { throw CancellationError() }
+            let namedApp: Bool
+            if case .application = scope { namedApp = true } else { namedApp = false }
+            let observed = voiceAdmissionContext(refreshEntities: namedApp)
+            guard command.decision.matchesCurrentScope(observed,
+                captured: command.context, final: command.admission.text) else {
                 throw VoiceError("The target changed. No new action was started.")
             }
             let goal: String
@@ -1135,12 +1592,27 @@ final class VoiceController: ObservableObject {
                 }
                 goal = scroll
             } else { goal = command.text }
-            let prior = Set(cua.tasks.map(\.id))
+            let prior = Set(cuaTasks.map(\.id))
+            if let space = command.decision.space {
+                guard command.decision.local, command.admission.intent == "switch_space",
+                      command.admission.route == .local, command.text == command.admission.text,
+                      DesktopSpaceTarget(command: command.admission.text) == space else {
+                    throw VoiceError("Please restate the desktop request.")
+                }
+                guard case .numbered = space else {
+                    throw VoiceError("Name the desktop, for example: go to Desktop 2.")
+                }
+                guard let display = command.context.desktopDisplayID, display == observed.desktopDisplayID else {
+                    throw VoiceError("I need one unchanged display to select a numbered desktop safely.")
+                }
+            }
             let result = await cua.beginVoiceTask(goal, app: scope.appID,
                 frontmostHint: frontmost() ?? lastExternalApp,
                 literalText: command.admission.slots["text"], transcriptHint: command.text,
+                taskOnly: true,
                 captureID: capture, pinnedWindowID: scope.windowID,
                 windowScroll: command.decision.windowScroll,
+                desktopDisplay: command.decision.space == nil ? nil : command.context.desktopDisplayID,
                 allowParsedScroll: command.decision.kind != .task,
                 scrollContinuation: command.continuation,
                 continuousScroll: command.decision.kind == .continueScroll,
@@ -1149,15 +1621,22 @@ final class VoiceController: ObservableObject {
                 },
                 admissionIsCurrent: { [weak self, weak lane] in
                     guard let self, let lane, !self.held, !self.manualOverride else { return false }
-                    return lane.conversationAudioReady && lane.conversation.isCurrent(command)
-                        && scope.matches(self.voiceAdmissionContext())
+                    let current = self.voiceAdmissionContext(refreshEntities: namedApp)
+                    return self.audioReady(lane) && lane.conversation.isCurrent(command)
+                        && command.decision.matchesCurrentScope(current, captured: command.context, final: command.admission.text)
                 })
-            let added = cua.tasks.filter { !prior.contains($0.id) && $0.captureID == capture }
+            let added = cuaTasks.filter { !prior.contains($0.id) && $0.captureID == capture }
             guard added.count == 1, let created = added.first else {
                 return .init(verified: false, waitingForAnswer: false,
                              message: RealtimeVoiceLane.deterministicSay(result) ?? "No action was started.")
             }
             work = created
+            if case .numbered(let number) = command.decision.space, let source = command.admission.realtimeInput,
+               let display = command.context.desktopDisplayID {
+                desktopAnswers.bind(work, to: capture, conversation: command.session, source: source,
+                                    number: number, display: display, works: cuaTasks,
+                                    now: ProcessInfo.processInfo.systemUptime)
+            }
         }
         automaticTasks.insert(work.id)
         if command.decision.kind == .continueScroll { repeatingWork = work.id }
@@ -1205,6 +1684,13 @@ final class VoiceController: ObservableObject {
             case .interrupted: evidenceStage = "microphone.interrupted"
             }
             self.normalQualification?.preparation(evidenceStage, at: ProcessInfo.processInfo.systemUptime)
+            if self.restricted != nil {
+                switch readiness {
+                case .preparing, .ready:
+                    guard self.restrictedListeningIsCurrent() else { return }
+                case .unavailable, .interrupted: break
+                }
+            }
             switch readiness {
             case .preparing: self.microphoneReady = false; self.microphoneReadiness = "Preparing microphone…"
             case .ready(let name): self.microphoneReady = true; self.microphoneReadiness = "Ready — " + name
@@ -1214,12 +1700,12 @@ final class VoiceController: ObservableObject {
                 if self.microphoneEnabled { self.prepareMicrophone() }
             }
         }
-        capture.onEvent = { [weak self] id, event in self?.receive(event, session: id) }
+        if restricted == nil { capture.onEvent = { [weak self] id, event in self?.receive(event, session: id) } }
     }
 
     func refreshPermissions() {
         permissionMonitor.invalidate()
-        applyPermissions(Permission.missing)
+        applyPermissions(readPermissions())
     }
 
     func refreshPermissionsInBackground(
@@ -1228,7 +1714,7 @@ final class VoiceController: ObservableObject {
     ) {
         permissionMonitor.refresh { [weak self] missing in
             guard let self else { return }
-            let granted = !missing.contains(.microphone)
+            let granted = self.restricted == nil ? !missing.contains(.microphone) : missing.isEmpty
             let changed = granted != self.lastPolledMicrophoneGranted
             self.lastPolledMicrophoneGranted = granted
             self.applyPermissions(missing)
@@ -1238,23 +1724,39 @@ final class VoiceController: ObservableObject {
 
     private func applyPermissions(_ missing: [Permission]) {
         let microphoneWasGranted = !missingPermissions.contains(.microphone)
-        missingPermissions = missing
+        let hadAccess = missingPermissions.isEmpty
+        if restricted == nil || missingPermissions != missing { missingPermissions = missing }
+        if restricted != nil, !missing.isEmpty {
+            if hadAccess || microphoneReady || listeningGeneration != nil { inputObservationLost() }
+            return
+        }
         if missing.contains(.microphone), microphoneReady || (microphoneEnabled && microphoneWasGranted) {
-            suspendMicrophone("Microphone permission was removed.")
+            suspendMicrophone("Microphone permission was removed.", resumeHandsFreeOnRecovery: true)
         }
     }
 
     func prepareMicrophone(deviceChanged: Bool = false) {
+        guard !shuttingDown else { return }
         guard !config.handsFreePaused || manualOverride || held || isMicrophoneTest else {
             handsFreeState = .paused
             return
         }
-        let device = try? MicrophoneCatalog.resolve(uid: config.microphoneUID)
+        if restricted != nil {
+            guard config.handsFreeEnabled, !manualOverride, !physicalFnDown else { return }
+            guard let generation = currentRestrictedGeneration() else { inputObservationLost(); return }
+            if let listeningGeneration, listeningGeneration != generation { inputObservationLost(); return }
+        }
+        let device = resolveDevice(config.microphoneUID)
         let changed = deviceChanged && device != configuredDevice
         if deviceChanged && !changed { return }
         if changed, captureActive { interruptCapture("The selected microphone changed. Hold Fn again.") }
         configuredDevice = device
         microphoneEnabled = true
+        if restricted != nil {
+            if changed { stopHandsFree(state: .preparing) }
+            startHandsFree()
+            return
+        }
         let prior = microphoneTask
         let uid = config.microphoneUID
         microphoneTask = Task { [weak self] in
@@ -1274,7 +1776,7 @@ final class VoiceController: ObservableObject {
                     return
                 }
                 try Task.checkCancellation()
-                if self.config.handsFreeEnabled, !self.handsFreePaused, !self.manualOverride {
+                if self.wantsHandsFreeListening {
                     self.startHandsFree()
                 }
                 let milliseconds = (ProcessInfo.processInfo.systemUptime - started) * 1000
@@ -1303,6 +1805,19 @@ final class VoiceController: ObservableObject {
             }
         }
         speech.cancel()
+        if restricted == nil { retireMicrophone() }
+    }
+
+    private func retireMicrophone() {
+        if restricted != nil {
+            guard microphoneTask == nil else { return }
+            microphoneTask = Task { [weak self] in
+                guard let self else { return }
+                await self.speech.suspend()
+                self.microphoneTask = nil
+            }
+            return
+        }
         let prior = microphoneTask
         prior?.cancel()
         microphoneTask = Task { [weak self] in
@@ -1322,7 +1837,7 @@ final class VoiceController: ObservableObject {
     /// Fn+Ctrl dictation: the same capture pipeline, but the transcript is
     /// delivered as literal text — no planner call ever sees it.
     func beginDictation() {
-        guard config.dictationHotkey else { return }
+        guard restricted == nil, config.dictationHotkey else { return }
         begin(dictating: true)
     }
 
@@ -1332,7 +1847,7 @@ final class VoiceController: ObservableObject {
     /// tap (routed through begin() below), a finish() call from the
     /// "stop dictating" verb, Escape, or the recording limit ends it.
     func startDictation() {
-        guard config.dictationHotkey else { return }
+        guard restricted == nil, config.dictationHotkey else { return }
         // Idempotent — a repeated "start dictation" verb while a voice
         // dictation is already latched does nothing, never toggles it off.
         guard !voiceLatched else { return }
@@ -1353,7 +1868,7 @@ final class VoiceController: ObservableObject {
     /// their own truthful answers instead of a claimed toggle.
     func dictationRequest(_ start: Bool) -> Bool {
         if start {
-            guard config.dictationHotkey else { return false }
+            guard restricted == nil, config.dictationHotkey else { return false }
             // Idempotent like `startDictation` — a second "start
             // dictating" while one runs reports the live state, not a
             // toggle-off.
@@ -1372,7 +1887,7 @@ final class VoiceController: ObservableObject {
 
     /// Ctrl joined an armed Fn hold — the rest of this capture is dictation.
     func dictate() {
-        guard config.dictationHotkey, !dictating else { return }
+        guard restricted == nil, config.dictationHotkey, !dictating else { return }
         guard status == .starting || status == .listening else { return }
         dictating = true
         closeLocalSpeechWindow()
@@ -1388,8 +1903,9 @@ final class VoiceController: ObservableObject {
     /// A tap-short Fn release with latch mode on: keep the capture listening;
     /// the monitor's `.finish` that follows is consumed here.
     func latchHold() {
-        guard config.latchMode, status == .starting || status == .listening else { return }
+        guard restricted == nil, config.latchMode, status == .starting || status == .listening else { return }
         latchRelease = true
+        latchedDesktopTurn = !dictating && !physicalFnDown ? manualPresentationTurn : nil
         // During startup the latch is deferred: `held` ends now but the
         // in-flight startup keeps going and resolves to `.listening`.
         latched = status == .starting
@@ -1403,7 +1919,9 @@ final class VoiceController: ObservableObject {
         // convert the tap into the release that ends dictation.
         if voiceLatched { voiceLatched = false; finish(); return }
         guard canBegin else { return }
-        overrideConversationForManualInput()
+        let onset = !dictating && physicalFnDown ? fnDesktopOnset : nil
+        fnDesktopOnset = nil
+        overrideConversationForManualInput(preservingParked: !dictating && physicalFnDown)
         let priorStart = startupTask
         priorStart?.cancel()
         speech.cancel()
@@ -1412,11 +1930,12 @@ final class VoiceController: ObservableObject {
         // Dictation commits audio for transcript only — no spoken reply.
         (speech as? RealtimeVoiceLane)?.respondOnCommit = !dictating
         held = true
-        let id = newSession()
+        let id = newSession(desktopOnset: onset)
+        if usesRealtimeVoice, !dictating { (speech as? RealtimeVoiceLane)?.captureManualGazeClickOnset(id) }
         turnEvidence?.open(turn: id, input: dictating ? "dictation" : "voice", beganAt: beganAt)
         if let inputHandlingMs { measurements["Fn handler"] = inputHandlingMs }
         commandFrontmostApp = lastExternalApp
-        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
+        if !usesRealtimeVoice, NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
             commandFrontmostApp = frontmost() ?? lastExternalApp
         }
         status = .starting
@@ -1424,10 +1943,7 @@ final class VoiceController: ObservableObject {
         // The gate's pre-roll cut — audio spoken during `.starting` is
         // replayed from this moment, never from before it.
         (speech as? RealtimeVoiceLane)?.holdStartedAt = beganAt
-        // Pre-observe: the coordinator warms transport + gaze and arms the
-        // target halo while the user is still talking — "click this" lands
-        // as a lookup instead of a cold scan.
-        cua.beginListeningHint()
+        if !usesRealtimeVoice { normalCoordinator?.beginListeningHint() }
         // The local transcriber's turn opens with the capture — dictation
         // holds skip it (their literal text never reaches a command lane).
         if !dictating { openLocalSpeechWindow(id) }
@@ -1444,7 +1960,13 @@ final class VoiceController: ObservableObject {
             self.measurements["Permission check"] = (ProcessInfo.processInfo.systemUptime - permissionStart) * 1000
             guard granted else { self.fail("Microphone access is needed. Open Voice settings."); return }
             do {
-                let name = try await self.speech.start(session: id, inputUID: selectedUID, transcribe: true)
+                let name: String
+#if DEBUG
+                if let recorded = self.recordedVoiceInputs { name = try await recorded.startManual(id) }
+                else { name = try await self.speech.start(session: id, inputUID: selectedUID, transcribe: true) }
+#else
+                name = try await self.speech.start(session: id, inputUID: selectedUID, transcribe: true)
+#endif
                 guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
                 self.inputName = name
                 self.trace("capture_started")
@@ -1458,12 +1980,15 @@ final class VoiceController: ObservableObject {
     }
 
     func finish() {
+        guard restricted == nil else { return }
         trace("fn_up")
-        cua.endListeningHint()
+        if !usesRealtimeVoice { normalCoordinator?.endListeningHint() }
         held = false
         // A latch release keeps the capture listening; the next Fn tap
         // arrives as a plain `.finish` and ends it below.
         guard !latchRelease else { latchRelease = false; return }
+        desktopStopDown = physicalFnDown && status == .listening && !dictating ? latchedDesktopTurn : nil
+        latchedDesktopTurn = nil
         closeLocalSpeechWindow()
         defer { resumeAfterManualInput() }
         if let id = sessionID {
@@ -1503,7 +2028,7 @@ final class VoiceController: ObservableObject {
     }
 
     func acceptTranscript() {
-        guard status == .reviewTranscript, let id = sessionID else { return }
+        guard restricted == nil, status == .reviewTranscript, let id = sessionID else { return }
         submit(transcript, session: id)
     }
 
@@ -1532,7 +2057,7 @@ final class VoiceController: ObservableObject {
     }
 
     func confirm() {
-        guard status == .awaitingConfirm else { return }
+        guard restricted == nil, status == .awaitingConfirm else { return }
         status = .executing
         routeCommand(transcript)
     }
@@ -1542,8 +2067,13 @@ final class VoiceController: ObservableObject {
     func cancelCaptureAttempt() { cancel(endingWith: .idle, cancelTask: false) }
 
     private func cancel(endingWith terminalStatus: Status, cancelTask: Bool = true) {
-        let resetConversation = cancelTask && !manualOverride
-            && (speech as? RealtimeVoiceLane)?.conversation.id != nil
+        desktopStopDown = nil
+        latchedDesktopTurn = nil
+        parkedDesktopStatus = nil
+        desktopAnswers = DesktopSwitchAnswers()
+        fnDesktopOnset = nil
+        let resetConversation = !manualOverride && (cancelTask || restricted != nil)
+            && ((speech as? RealtimeVoiceLane)?.conversation.id != nil || (restricted != nil && handsFreeTask != nil))
         if resetConversation { stopHandsFree(state: .preparing) }
         if cancelTask { interruptSpeechPlayback() }
         defer {
@@ -1559,11 +2089,11 @@ final class VoiceController: ObservableObject {
             // PAIRING: if the .cancel dispatch grows an explicit
             // declineTopmostChoiceAsk call, drop this routing — it must
             // not settle two asks on one keypress.
-            if !captureActive { _ = cua.declineTopmostChoiceAsk() }
+            if !captureActive { _ = normalCoordinator?.declineTopmostChoiceAsk() }
             // Universal stop seam — composition wires this to the
             // coordinator's cancelAllRunning(); nil keeps the cancel
             // scoped to this interaction's work.
-            if let cancelAllTasks { Task { await cancelAllTasks() } }
+            if restricted == nil, let cancelAllTasks { Task { await cancelAllTasks() } }
         }
         guard status != .stopping else { return }
         held = false; dictating = false; latched = false; voiceLatched = false
@@ -1582,7 +2112,7 @@ final class VoiceController: ObservableObject {
         routeTask?.cancel(); routeTask = nil
         // The Fn-down pre-observe's gaze pump lives on the coordinator —
         // a cancelled hold must end it, not wait out its 30s watchdog.
-        cua.endListeningHint()
+        if !usesRealtimeVoice { normalCoordinator?.endListeningHint() }
         closeLocalSpeechWindow()
         speech.cancel()
         audioLevel = 0
@@ -1608,19 +2138,30 @@ final class VoiceController: ObservableObject {
     }
 
     func shutdown() async {
+        shuttingDown = true
         permissionMonitor.stop()
         microphoneEnabled = false
+        if restricted != nil {
+            stopHandsFree(state: .off)
+            cancel()
+            await microphoneTask?.value
+            return
+        }
         let microphone = microphoneTask
         microphone?.cancel()
         cancel()
         await speech.suspend()
         await microphone?.value
-        cua.shutdown()
+        normalCoordinator?.shutdown()
         await cleanupTask?.value
         normalQualification?.stop()
     }
 
     func interruptCapture(_ reason: String) {
+        if restricted != nil {
+            inputObservationLost()
+            return
+        }
         guard captureActive else { return }
         if let id = sessionID {
             turnEvidence?.event(turn: id, name: "interrupted")
@@ -1667,7 +2208,10 @@ final class VoiceController: ObservableObject {
                             at: observed, metrics: ["confirmation_ms": elapsed])
     }
 
-    private func newSession() -> UUID {
+    private func newSession(desktopOnset: (turn: UUID, snapshot: DesktopSwitchAnswers)? = nil) -> UUID {
+        parkedDesktopStatus = nil
+        desktopStopDown = nil
+        latchedDesktopTurn = nil
         deadlineTask?.cancel(); durationTask?.cancel(); hideTask?.cancel()
         deliveryTask?.cancel(); deliveryTask = nil
         deliveryOwner = nil
@@ -1675,7 +2219,14 @@ final class VoiceController: ObservableObject {
         latchRelease = false; latched = false; voiceLatched = false
         // A new capture barges in on any spoken reply.
         interruptSpeechPlayback()
-        let id = UUID(); sessionID = id
+        let id = desktopOnset?.turn ?? UUID(); sessionID = id; manualPresentationTurn = id
+        if let desktopOnset {
+            desktopAnswers = desktopOnset.snapshot
+        } else {
+            desktopAnswers = DesktopSwitchAnswers()
+            desktopAnswers.begin(id, conversation: nil)
+        }
+        fnDesktopOnset = nil
         automatic = config.autoExecute
         transcript = ""; detail = ""; resultMessage = ""; audioLevel = 0; replyDraft = ""; partialLive = false
         replyReceived = false; speechReplyEnded = false
@@ -1830,7 +2381,7 @@ final class VoiceController: ObservableObject {
     }
 
     private func submit(_ text: String, session id: UUID) {
-        guard sessionID == id else { return }
+        guard restricted == nil, sessionID == id else { return }
         transcript = text
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             // An empty dictation is a lost outcome — say so instead of
@@ -1857,6 +2408,7 @@ final class VoiceController: ObservableObject {
     /// parked on the input lease; an abandoned delivery resuming later
     /// would insert text the user no longer expects.
     private func deliver(_ text: String, session id: UUID) {
+        guard let dictation else { return }
         status = .executing
         detail = "Dictating into the focused field…"
         deliveryTask?.cancel()
@@ -1865,7 +2417,7 @@ final class VoiceController: ObservableObject {
             guard let self else { return }
             defer { if self.deliveryOwner == id { self.deliveryOwner = nil } }
             do {
-                try await self.dictation.deliver(text)
+                try await dictation.deliver(text)
                 guard self.sessionID == id else { return }
                 self.complete("Dictated into the focused field.", session: id)
             } catch {
@@ -1880,7 +2432,7 @@ final class VoiceController: ObservableObject {
     /// Spoken replies go through the SpeechSynthesizing seam only; dictation
     /// completions stay silent since the text lands where the user is looking.
     private func speak(_ text: String) {
-        guard config.ttsEnabled, !text.isEmpty else { return }
+        guard restricted == nil, config.ttsEnabled, !text.isEmpty else { return }
         if usesRealtimeVoice {
             guard microphoneEnabled, !handsFreePaused || manualOverride else { return }
             (speech as? RealtimeVoiceLane)?.speakFeedback(text)
@@ -1914,7 +2466,7 @@ final class VoiceController: ObservableObject {
     /// outstanding, or the recorder's 30s grace.
     func maybeFlushEvidence(works suppliedWorks: [VoiceTaskCoordinator.Work]? = nil) {
         guard let evidence = turnEvidence else { return }
-        let allWorks = suppliedWorks ?? cua.tasks
+        let allWorks = suppliedWorks ?? cuaTasks
         for id in evidence.pendingTurns {
             let works = allWorks.filter { $0.captureID == id }
             if works.contains(where: \.awaitingAnswer) {
@@ -1939,11 +2491,14 @@ final class VoiceController: ObservableObject {
                        status: finalStatus?.title ?? (turn == sessionID ? status.title : "not_current"),
                        uptime: ProcessInfo.processInfo.systemUptime,
                        trace: commandTrace.events.filter { $0.turn == turn },
-                       works: cua.tasks.filter { $0.captureID == turn }, traceDropped: commandTrace.dropped)
+                       works: cuaTasks.filter { $0.captureID == turn }, traceDropped: commandTrace.dropped)
     }
 
     private func cuaChanged() {
-        normalQualification?.worksChanged(cua.tasks)
+        if let parkedDesktopStatus, !matchesParkedAsks(parkedDesktopStatus.asks) { self.parkedDesktopStatus = nil }
+        desktopAnswers.observe(cuaTasks, now: ProcessInfo.processInfo.systemUptime)
+        fnDesktopOnset?.snapshot.observe(cuaTasks, now: ProcessInfo.processInfo.systemUptime)
+        normalQualification?.worksChanged(cuaTasks)
         objectWillChange.send()
         // Evidence first — the early returns below must not starve a row
         // whose work just settled or parked on an ask.
@@ -1958,7 +2513,7 @@ final class VoiceController: ObservableObject {
             } else if let question = interactionQuestion {
                 detail = question.prompt
             } else {
-                detail = cua.tasks.last(where: \.active)?.message ?? ""
+                detail = cuaTasks.last(where: \.active)?.message ?? ""
             }
             return
         }
@@ -2027,7 +2582,7 @@ final class VoiceController: ObservableObject {
         // A pending dictation delivery dies with its session — a failed
         // capture must not paste anyway.
         deliveryTask?.cancel(); deliveryTask = nil
-        cua.endListeningHint()
+        if !usesRealtimeVoice { normalCoordinator?.endListeningHint() }
         closeLocalSpeechWindow()
         status = .error(message)
         settleEvidence(terminal: "failed")

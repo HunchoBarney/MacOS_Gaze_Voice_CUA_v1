@@ -28,6 +28,45 @@ run_eyes() {
 }
 
 case "$scope" in
+  c1-desktop-followup)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'DesktopSwitch(Admission|Answer|Question)Tests|DelegatedVoiceStatusTests|VoiceLaneAuditTests.testDelegatedStatus|LocalSpeechTests.testConversationRemoteFinalDesktop|VoiceTaskCoordinatorLaneTests.testDesktopSwitch|VoiceTaskCoordinatorOverlayTests.testDesktopSwitchQuestion'
+    ;;
+  c1-pocket-tts)
+    pocket_filter='LocalSpeechTests.test(SpeakRoutesThroughEngine|SpeakInterruptsInFlight|StopSilencesEngine|EngineFailureDegrades|DisabledVoiceIsSilentStub|PocketFrameConversion)|VoiceLaneAuditTests.test(RealtimeFeedbackAndPauseNeverFallBackToLegacySpeech|PersistedHandsFreePauseDoesNotWarmTheMicrophoneOnLaunch|CancelFiresUniversalStopSeam|DeterministicPushedOutcomeSpeaksLocally)|RealtimeVoiceLaneTests.test(CancelledTurnDoesNotSpeakALateToolQuestion|RemoteChoiceIsSpokenByWorkOnlyWhileUnownedRepliesStillSpeak)|MicrophoneInputTests.testDuplexReadiness(RequiresFreshInputAndAdvancingOutput|CannotReuseAnInvalidatedRoute)'
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter "$pocket_filter"
+    ;;
+  c3-startup-credentials)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'TypeSafeStartupTests|VoiceCommandTraceTests.testDiagnosticCredentialInteractionPolicy|VoiceCommandTraceTests.testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied'
+    ;;
+  c1-gaze-authority)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'TrackerArgumentsTests.testHostedMarkerSurvivesForwardedGestureAndConflictingFlags|GazeAuthorityTests|GazeNativeIntegrationTests|CommittedGazeHitTests|SpokenGazeClickTests|GazeServiceTests|GazeStreamTests|GazeLaneTests|GazeRefusalStateTests|FastLaneExecutorTests.testUnboundGaze|FastLaneExecutorTests.testC1ScrollCannotFollowGazeOutsideCapturedWindow|FastLaneExecutorTests.testGazeClickOnDeniedWindowRefuses|RetiredTargetAdmissionTests|DriveLoopTests.testExactWindow|VoiceTaskCoordinatorLaneTests.testAgentCancellationNeverTakesItsTargetFromGaze'
+    (cd EyeTracking && node --check electron/main.cjs && node --check electron/externalStore.cjs && ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run web/src/inference/presentedFrame.test.ts web/src/inference/runtimeSource.test.ts electron/storeContract.test.mjs electron/hostedLipMotion.test.mjs)
+    ;;
+  c1-gaze-feedback)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'TargetOverlayTests|VoiceTaskCoordinatorOverlayTests|IntentScorerTests|DwellPolicyTests|GazeDwellTests' --skip 'VoiceTaskCoordinatorOverlayTests.testAgentCursorToggleSuppressesCursorSurface'
+    (cd EyeTracking && node --check electron/main.cjs && ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run web/src/flows.test.ts web/src/uiState.test.ts web/src/inference/temporal.test.ts)
+    ;;
+  c2-worker-status)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'CodexRuntimeBridgeTests|VoiceAgentBridgeTests|CuaDriveServerTests|CuaDriveSessionTests|GazeDelegationTests|DelegatedVoiceStatusTests|VoiceLaneAuditTests.testDelegatedStatus'
+    ;;
+  c1-final-admission)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'HandsFreeFinalAdmissionTests|LocalSpeechTests.testConversationRemoteFinalDesktop|VoiceTaskCoordinatorLaneTests.testDesktopSwitch|VoiceTaskCoordinatorLaneTests.testHandsFreeTask|FastLaneExecutorTests.testNativeActivation|VoiceAccuracyTests|VoiceSemanticTests.testConversationNegationCannot|VoiceSemanticTests.testR8LocalAppFocus'
+    ;;
+  c1-ask-projection)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'VoiceAskProjectionTests'
+    ;;
+  c1-control-questions)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'ScreenQuestionObservationTests|ControlReplyEnvelopeTests|VoiceLaneAuditTests.testControlQuestion|VoiceOneBrainTests.testControlQuestion|VoiceTurnTests.testControlQuestion'
+    ;;
   c1-realtime-protocol|c1-realtime-recovery)
     realtime_filter='VoiceOneBrainTests|VoiceTurnTests|LocalSpeechTests.testRealtime|LocalSpeechTests.testConversationRemoteFinal|VoiceLaneAuditTests|RealtimeVoiceLaneTests|UXOnboardingTests|VoiceSemanticTests|FnInputStateTests|FnInputMonitorReleaseTests'
     if [[ "$scope" == "c1-realtime-recovery" ]]; then
@@ -95,14 +134,29 @@ case "$scope" in
     PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .agent/results/P4 -p 'test_jev_build_guard.py'
     ;;
   p4-vision-driver-045-fetch|p4-vision-driver-045-node-deps|p4-vision-driver-045-generator-bootstrap|p4-vision-driver-045-core|p4-vision-driver-045-contract|p4-vision-driver-045-macos|p4-vision-driver-045-sdk|p4-vision-driver-045-build|p4-vision-driver-045-generate|p4-vision-driver-045-parity|p4-vision-driver-045-stage-sdk|p4-vision-driver-045-python-tests-bootstrap|p4-vision-driver-045-consumers)
-    driver_root="/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/cua-upstream-0.45.4"
-    [[ "$(git -C "$driver_root" rev-parse HEAD)" == "d96e1bc359b2cc638c7a406aad01a7276b1b416f" ]] || exit 2
+    vision_root="$(pwd -P)/.context/p4-vision"
+    driver_root="$vision_root/cua-upstream-0.45.4"
     driver_manifest="$driver_root/libs/cua-driver/rust/Cargo.toml"
+    if [[ ! -f "$driver_manifest" ||
+          "$(cd "$driver_root" && pwd -P)" != "$driver_root" ||
+          "$(git -C "$driver_root" rev-parse --show-toplevel 2>/dev/null)" != "$driver_root" ]]; then
+      echo "BLOCKED: $scope requires the isolated Cua 0.45.4 source checkout at .context/p4-vision/cua-upstream-0.45.4" >&2
+      exit 2
+    fi
+    if [[ "$(git -C "$driver_root" rev-parse --verify HEAD 2>/dev/null)" != "d96e1bc359b2cc638c7a406aad01a7276b1b416f" ]]; then
+      echo "BLOCKED: $scope requires Cua source revision d96e1bc359b2cc638c7a406aad01a7276b1b416f" >&2
+      exit 2
+    fi
+    driver_version="$(awk -F '"' '/^\[/ { package = ($0 == "[workspace.package]") } package && /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }' "$driver_manifest")"
+    if [[ "$driver_version" != "0.45.4" ]]; then
+      echo "BLOCKED: $scope requires Cargo workspace version 0.45.4" >&2
+      exit 2
+    fi
     export RUSTUP_TOOLCHAIN=1.97.1
     export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0
     export CARGO_BUILD_JOBS=2
-    export CARGO_TARGET_DIR="/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/build/vision-capture-045"
-    export CARGO_HOME="/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver/development/JevVoice/build/cargo-045"
+    export CARGO_TARGET_DIR="$vision_root/build/vision-capture-045"
+    export CARGO_HOME="$vision_root/build/cargo-045"
     export TMPDIR="$CARGO_TARGET_DIR/tmp"
     mkdir -p "$TMPDIR"
     export DO_NOT_TRACK=1 CUA_TELEMETRY=0 CUA_DRIVER_RS_TELEMETRY_ENABLED=0
@@ -189,23 +243,8 @@ case "$scope" in
     esac
     ;;
   p4-vision-driver-capture|p4-vision-driver-contract|p4-vision-driver-macos|p4-vision-driver-build)
-    driver_workspace="/Users/karanvirkang/Documents/code/jarvis-v1-vision-driver"
-    driver_manifest="$driver_workspace/development/JevVoice/cua-source/libs/cua-driver/rust/Cargo.toml"
-    export CARGO_TARGET_DIR="$driver_workspace/development/JevVoice/build/vision-capture"
-    case "$scope" in
-      p4-vision-driver-capture)
-        cargo test --offline --locked --manifest-path "$driver_manifest" -p cua-driver-core --lib capture_
-        ;;
-      p4-vision-driver-contract)
-        cargo test --offline --locked --manifest-path "$driver_manifest" -p cua-driver-contract --lib
-        ;;
-      p4-vision-driver-macos)
-        cargo test --offline --locked --manifest-path "$driver_manifest" -p platform-macos --lib capture
-        ;;
-      p4-vision-driver-build)
-        cargo build --offline --locked --release --manifest-path "$driver_manifest" -p cua-driver -p cua-driver-sdk
-        ;;
-    esac
+    echo "BLOCKED: $scope requires the unavailable patched vision-capture prototype; vendored source and shipped Cua 0.38 are not substitutes" >&2
+    exit 2
     ;;
   p4-vision-probe-tests)
     python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" -- xcrun swiftc -typecheck -module-cache-path "$PWD/.build/arm64-apple-macosx/release/ModuleCache" .agent/results/P4/jev-native-field-probe.swift
@@ -610,7 +649,7 @@ PY
   p3-current-replay)
     output=".agent/results/P3/native-current-replay.json"
     [[ ! -e "$output" ]] || { echo "Refusing to overwrite prior replay" >&2; exit 2; }
-    python3 scripts/verify-p3.py replay --recordings-root .agent/results/P3/audio --out "$output"
+    python3 scripts/verify-p3.py replay --out "$output"
     ;;
   p3-normal-closeout)
     run_swift
@@ -711,8 +750,12 @@ PY
   p3-audit-settlement)
     swift test --disable-automatic-resolution --filter VoiceCommandTraceTests.testAuditSettlement
     ;;
+  c1-retired-targets)
+    python3 "$PWD/.agent/results/P4/jev-build-guard.py" --directory "$PWD" --minimum-free-gib 3 -- \
+      swift test --jobs 1 --disable-automatic-resolution --filter 'RetiredTargetAdmissionTests|FastLaneParseTests.testRetiredTargetPhrases|FastLaneExecutorTests.testRetiredNumberTargets|VoiceTaskCoordinatorOverlayTests.testRetired|TargetOverlayTests.testRadialChipsLandOnTheRadius'
+    ;;
   p3-ax-coordinates)
-    swift test --disable-automatic-resolution --filter 'GazeCandidateFeedTests|VoiceTaskCoordinatorLaneTests.testHaloUsesNativeScreenPoints|FastLaneExecutorTests.testOverlayVerbDispatchesConvertedTargets|FastLaneExecutorTests.testDescribeNativeScreenFrame|DriveLoopTests.testGazeAnnotatesElementUnderEyes'
+    swift test --disable-automatic-resolution --filter 'GazeCandidateFeedTests|VoiceTaskCoordinatorLaneTests.testHaloUsesNativeScreenPoints|FastLaneExecutorTests.testRetiredNumberTargetsBlockWithoutObservation|FastLaneExecutorTests.testDescribeNativeScreenFrame|DriveLoopTests.testGazeAnnotatesElementUnderEyes'
     ;;
   p3-gaze-stream-fixture)
     swift test --disable-automatic-resolution --filter GazeStreamTests

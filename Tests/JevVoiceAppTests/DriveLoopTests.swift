@@ -1311,7 +1311,7 @@ final class DriveLoopTests: XCTestCase {
                                        frame: CGRect(x: 5, y: 5, width: 12, height: 12))]
             },
             windowControlPress: { kind, _ in pressed.append(kind); return true })
-        let result = await loop.run(DriveTask(goal: "close this window",
+        let result = await loop.run(DriveTask(goal: "close the fixture window",
                                               pid: 42, windowID: 7), session: "t")
         XCTAssertNotEqual(result.status, .done, "verified effect alone is not task completion")
         XCTAssertEqual(pressed, [.close])
@@ -1329,7 +1329,7 @@ final class DriveLoopTests: XCTestCase {
                                        frame: CGRect(x: 5, y: 5, width: 12, height: 12))]
             },
             windowControlPress: { _, _ in false })
-        let result = await loop.run(DriveTask(goal: "close this window",
+        let result = await loop.run(DriveTask(goal: "close the fixture window",
                                               pid: 42, windowID: 7), session: "t")
         guard case .blocked = result.status else {
             return XCTFail("expected blocked, got \(result.status)")
@@ -1658,7 +1658,7 @@ final class DriveLoopTests: XCTestCase {
                                        frame: CGRect(x: 5, y: 5, width: 12, height: 12))]
             },
             windowControlPress: { _, _ in true })
-        let result = await loop.run(DriveTask(goal: "close this window",
+        let result = await loop.run(DriveTask(goal: "close the fixture window",
                                               pid: 42, windowID: 7), session: "t")
         guard case .blocked(let why) = result.status else {
             return XCTFail("expected blocked, got \(result.status)")

@@ -660,7 +660,8 @@ final class FastLaneExecutorTests: XCTestCase {
                                  pid: 42, windowID: 7)
             if variant != "missing" { task.values["text"] = variant == "mismatch" ? "different" : payload }
             _ = await loop.run(task, session: "bound-type-\(variant)")
-            XCTAssertTrue(driver.calls.contains { $0.tool == "list_apps" }, variant)
+            if variant == "deictic" { XCTAssertTrue(driver.calls.isEmpty) }
+            else { XCTAssertTrue(driver.calls.contains { $0.tool == "list_apps" }, variant) }
             XCTAssertFalse(driver.calls.contains { $0.tool == "type_text" }, variant)
         }
     }
@@ -735,6 +736,7 @@ final class FastLaneExecutorTests: XCTestCase {
                                frontWindowProbe: (() -> Int?)? = nil,
                                nativeProof: @escaping @Sendable (Int) async -> Int? = { _ in nil },
                                nativeEvents: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
+                               nativeCurrent: (@MainActor @Sendable () -> Bool)? = nil,
                                native: @escaping (String) async throws -> Int) -> DriveLoop {
         driver.responses["launch_app"] = [.object(["pid": .number(424242)])]
         driver.responses["list_windows"] = Array(repeating: windows([
@@ -755,6 +757,7 @@ final class FastLaneExecutorTests: XCTestCase {
         activateApp: { _ in }, appIsHidden: { _ in false }, unhideApp: { _ in true },
         activateRestoredApp: restored ?? { _, _ in XCTFail("a completed native launch must not be reopened again") },
         foregroundAppLauncher: native,
+        nativeAdmission: nativeCurrent,
         observeLaunchedPID: observed ?? { await DriveLoop.observedPID(bundle: $0) },
         frontmostBundleID: { "fixture.audit" }, frontmostPID: { frontPID },
         frontmostWindowID: frontWindowProbe ?? { frontWindow })
@@ -793,6 +796,33 @@ final class FastLaneExecutorTests: XCTestCase {
             }
             XCTAssertEqual(stages.value, ["nativeActivationBegin", "nativeActivationFailed"])
             XCTAssertTrue(driver.calls.isEmpty, "An uncertain native request must never be retried through the SDK.")
+        }
+    }
+
+    func testNativeActivationRechecksFreshAskOrDuplicateBeforeEffect() async throws {
+        for duplicate in [false, true] {
+            let driver = FakeDriver(), changed = LockedBox(false)
+            let loop = coldFocusLoop(driver, nativeEvents: { stage in
+                if stage == .nativeActivationBegin { changed.set(true) }
+            }, nativeCurrent: {
+                let app = VoiceAdmissionContext.Entity(name: "Fixture", id: "fixture.audit", canOpenLocally: true)
+                var captured = VoiceAdmissionContext()
+                captured.entities = [app]
+                var current = captured
+                if changed.value {
+                    if duplicate { current.entities.append(.init(name: "Fixture", id: "fixture.other", canOpenLocally: true)) }
+                    else { current.currentAsks = [.init(taskID: UUID(), askID: UUID())] }
+                }
+                return ConversationDecision(kind: .task, scope: .application(app), local: true)
+                    .matchesCurrentScope(current, captured: captured, final: "Focus Fixture.")
+            }) { _ in XCTFail("Stale native effect"); return 424242 }
+            var history: [String] = [], confirmed = false
+            do {
+                _ = try await loop.runFastLane(.init(action: nil, openVerb: "focus", name: "Fixture", bundle: "fixture.audit"),
+                    task: DriveTask(goal: "Focus Fixture.", foreground: true), session: "fixture", history: &history, confirmed: &confirmed)
+                XCTFail("Expected authorization withdrawal")
+            } catch is CancellationError {}
+            XCTAssertTrue(changed.value); XCTAssertTrue(driver.calls.isEmpty)
         }
     }
 
@@ -1160,6 +1190,74 @@ final class FastLaneExecutorTests: XCTestCase {
                        .array([.string("https://example.com")]))
     }
 
+    @MainActor
+    func testColdUncertainBackgroundLaunchWaitsForObservationWithoutRetry() async throws {
+        for disposition in ["missing", "delayed", "cancel"] {
+            let driver = FakeDriver(), settled = LockedBox(false)
+            let observing = expectation(description: "observing the requested bundle")
+            let (values, gate) = AsyncStream<Int>.makeStream()
+            let loop = coldFocusLoop(driver, observed: { bundle in
+                XCTAssertEqual(bundle, "fixture.audit")
+                observing.fulfill()
+                for await value in values { return value > 0 ? value : nil }
+                return nil
+            }) { _ in XCTFail("No native launch fallback"); return 0 }
+            driver.thrown["launch_app"] = CuaUncertainOutcome(tool: "launch_app", result: .null)
+            let operation = Task {
+                defer { settled.set(true) }
+                var history: [String] = [], confirmed = false
+                return try await loop.runFastLane(.init(action: nil, openVerb: "open",
+                    name: "AuditFixture", bundle: "fixture.audit"), task: DriveTask(goal: "open AuditFixture", scope: .open),
+                    session: "uncertain-launch", history: &history, confirmed: &confirmed)
+            }
+            await fulfillment(of: [observing], timeout: 4)
+            XCTAssertFalse(settled.value, "No terminal outcome before observation returns")
+            if disposition == "cancel" { operation.cancel() }
+            gate.yield(disposition == "delayed" ? 424242 : 0); gate.finish()
+            do {
+                let value = try await operation.value
+                let result = try XCTUnwrap(value)
+                XCTAssertNotEqual(disposition, "cancel", "Cancellation is not a failed launch")
+                if disposition == "delayed" {
+                    XCTAssertEqual(result.status, .done)
+                    XCTAssertEqual(result.pid, 424242)
+                } else {
+                    let (outcome, spoken) = VoiceTaskCoordinator.describe(result, request: "open AuditFixture")
+                    let message = "I requested AuditFixture, but couldn't confirm it opened."
+                    XCTAssertEqual(outcome, .uncertain(message))
+                    XCTAssertEqual(spoken, message)
+                    let row = VoiceTaskCoordinator.Work(label: "Open", request: "open AuditFixture", spec: DriveTask(goal: "open AuditFixture"))
+                    row.active = false; row.outcome = outcome
+                    XCTAssertEqual(row.statusText, "Uncertain")
+                    XCTAssertFalse(result.dispatchedEffect)
+                    XCTAssertFalse(VoiceTaskCoordinator.shouldRetrySessionDeath(result))
+                }
+            } catch is CancellationError {
+                XCTAssertEqual(disposition, "cancel")
+            }
+            XCTAssertEqual(driver.calls.filter { $0.tool == "launch_app" }.count, 1)
+        }
+    }
+
+    @MainActor
+    func testColdBackgroundLaunchPermissionRefusalDoesNotObserveOrRetry() async throws {
+        let driver = FakeDriver()
+        let loop = coldFocusLoop(driver, observed: { _ in XCTFail("No uncertain dispatch"); return nil }) { _ in
+            XCTFail("No native fallback"); return 0
+        }
+        driver.thrown["launch_app"] = DriverConnectionError.toolRefused(
+            tool: "launch_app", code: "permission_denied", detail: "Permission denied.")
+        var history: [String] = [], confirmed = false
+        let resolved = DriveLoop.FastResolution(action: nil, openVerb: "open", name: "AuditFixture", bundle: "fixture.audit")
+        let value = try await loop.runFastLane(resolved, task: DriveTask(goal: "open AuditFixture", scope: .open),
+            session: "refused-launch", history: &history, confirmed: &confirmed)
+        let result = try XCTUnwrap(value)
+        let (outcome, spoken) = VoiceTaskCoordinator.describe(result, request: "open AuditFixture")
+        XCTAssertEqual(outcome, .blocked("Permission denied."))
+        XCTAssertEqual(spoken, "Permission denied.")
+        XCTAssertEqual(driver.calls.map(\.tool), ["launch_app"])
+    }
+
     func testColdPinnedWindowCannotLaunchReplacementApp() async throws {
         let driver = FakeDriver()
         let loop = coldFocusLoop(driver) { _ in XCTFail("pinned target is gone"); return 424242 }
@@ -1390,109 +1488,55 @@ final class FastLaneExecutorTests: XCTestCase {
 
     // MARK: - display scope
 
-    /// "on this monitor" resolves the app owning the topmost window on the
-    /// display under the gaze point — the ⌘M lands on the app whose row
-    /// intersects the fake display containing (200,200), never the other
-    /// display's app. `displayFrames` is the seam: NSScreen can't be
-    /// stubbed, so the display lookup reads injected (frame, scale) pairs.
-    func testDisplayScopeResolvesAppOnGazeDisplay() async {
-        let old = DriveLoop.displayFrames
-        defer { DriveLoop.displayFrames = old }
-        DriveLoop.displayFrames = {
-            [(frame: CGRect(x: 0, y: 0, width: 1440, height: 900), scale: 2),
-             (frame: CGRect(x: 1440, y: 0, width: 1440, height: 900), scale: 2)]
+    func testUnboundGazeActionsBlockBeforeObservationOrPlanning() async throws {
+        let loop = DriveLoop(call: { tool, _ in XCTFail(tool); return .null },
+                             choose: { _, _ in XCTFail("Unexpected chooser"); return nil },
+                             ask: nil, granted: { true },
+                             resolver: AppResolver(listApps: { XCTFail("Unexpected inventory"); return [] }),
+                             gaze: { XCTFail("Unexpected gaze"); throw CancellationError() })
+        for goal in ["minimize the window on this monitor", "type hello there here", "minimize this",
+                     "close it", "hide this app", "close on this monitor"] {
+            let task = DriveTask(goal: goal, application: "fixture.editor", pid: 42, windowID: 7)
+            XCTAssertThrowsError(try CuaDriveServer.decodeTask(.object(["goal": .string(goal)])), goal)
+            let preview = try await loop.preview(task, session: "fixture")
+            XCTAssertEqual(preview, "Please name the control you want to use.", goal)
+            let result = await loop.run(task, session: "fixture")
+            guard case .blocked = result.status else { return XCTFail(goal) }
+            XCTAssertFalse(result.dispatchedEffect, goal)
+            var history: [String] = []
+            var confirmed = true
+            let direct = try await loop.runFastLane(
+                .init(action: FastAction.parse("close the window")?.action, openVerb: nil,
+                      name: "Fixture", bundle: "fixture.editor", pid: 42),
+                task: task, session: "fixture", history: &history, confirmed: &confirmed)
+            guard case .blocked? = direct?.status else { return XCTFail(goal) }
+            XCTAssertFalse(direct?.dispatchedEffect ?? true, goal)
+            let request = try XCTUnwrap(WindowScrollRequest(goal: goal, application: "fixture.editor",
+                                                            windowID: 7, direction: "down", small: true))
+            let scroll = await loop.runWindowScroll(request, task: task, session: "fixture")
+            guard case .blocked = scroll.status else { return XCTFail(goal) }
+            let focus = await loop.runAppFocus(bundleID: "fixture.editor",
+                task: DriveTask(goal: goal, application: "fixture.editor", scope: .open, foreground: true),
+                session: "fixture")
+            guard case .blocked = focus.status else { return XCTFail(goal) }
         }
-        let driver = FakeDriver()
-        driver.responses["list_apps"] = [
-            apps([appRow("Notes", "com.apple.Notes", pid: 42),
-                  appRow("Safari", "com.apple.Safari", pid: 9)]),
-            apps([appRow("Notes", "com.apple.Notes", pid: 42),
-                  appRow("Safari", "com.apple.Safari", pid: 9)]),
-        ]
-        driver.responses["list_windows"] = [
-            // The global read the display hit-test makes: Safari owns the
-            // second display, Notes the one under the gaze point.
-            windows([windowRow(id: 8, pid: 9, app: "Safari", title: "Safari",
-                               x: 1500, y: 100, w: 800, h: 600, z: 0),
-                     windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
-                               x: 100, y: 100, w: 800, h: 600, z: 1)]),
-            // The bound app's inventory, then the post-dispatch readback.
-            windows([windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
-                               x: 100, y: 100, w: 800, h: 600, z: 1)]),
-            windows([windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
-                               x: 100, y: 100, w: 800, h: 600, z: 1,
-                               onScreen: false)]),
-        ]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
-                             choose: { _, _ in nil }, ask: nil, granted: { true },
-                             gaze: gaze(200, 200))
-        let result = await loop.run(
-            DriveTask(goal: "minimize the window on this monitor"), session: "t")
-        XCTAssertEqual(result.status, .done)
-        let hotkeys = driver.calls.filter { $0.tool == "hotkey" }
-        XCTAssertEqual(hotkeys.count, 1)
-        XCTAssertEqual(hotkeys[0].args["keys"]?.array?.compactMap(\.string),
-                       ["cmd", "m"])
-        XCTAssertEqual(hotkeys[0].args["pid"], .number(42),
-                       "the app under the gaze display owns the chord — not Safari on the other display")
-        XCTAssertEqual(result.pid, 42)
     }
 
-    // MARK: - overlay
-
-    /// Native AX targets already carry the overlay's global screen points.
-    func testOverlayVerbDispatchesConvertedTargets() async {
-        let driver = FakeDriver()
-        driver.responses["list_apps"] = [apps([appRow("Notes", "com.apple.Notes", pid: 42)])]
-        driver.responses["list_windows"] = [windows([
-            windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
-                      x: 100, y: 100, w: 800, h: 600)])]
-        driver.responses["get_window_state"] = [.object([
-            "window_bounds": .object(["x": .number(100), "y": .number(100),
-                                      "width": .number(800), "height": .number(600)]),
-            "screenshot_scale": .number(2),
-            "elements": .array([
-                .object(["element_index": .number(1), "role": .string("button"),
-                         "label": .string("Save"),
-                         "frame": .object(["x": .number(400), "y": .number(300),
-                                           "w": .number(60), "h": .number(30)]),
-                         "actions": .array([.string("AXPress")])]),
-            ])])]
-        var gotVerb: FastAction.OverlayVerb?
-        var gotTargets: [(frame: CGRect, label: String)] = []
-        var gotPoint: CGPoint?
-        let loop = DriveLoop(
-            call: { t, a in try driver.call(t, a) },
-            choose: { _, _ in nil }, ask: nil, granted: { true },
-            gaze: gaze(200, 200),
-            overlayDispatch: { verb, targets, point in
-                gotVerb = verb; gotTargets = targets; gotPoint = point
-                return DriveResult(status: .done, history: ["numbered"],
-                                   dispatchedEffect: true)
-            })
-        let result = await loop.run(DriveTask(goal: "show numbers"), session: "t")
-        XCTAssertEqual(result.status, .done)
-        XCTAssertEqual(gotVerb, .showNumbers)
-        XCTAssertEqual(gotTargets.count, 1)
-        // Screenshot metadata must not move or halve native AX rectangles.
-        XCTAssertEqual(gotTargets[0].frame, CGRect(x: 400, y: 300, width: 60, height: 30))
-        XCTAssertEqual(gotTargets[0].label, "Save")
-        XCTAssertEqual(gotPoint, CGPoint(x: 200, y: 200))
-    }
-
-    /// A nil overlay seam refuses — "nothing was numbered" is honest when
-    /// no app-side overlay exists to draw the chips.
-    func testOverlayWithoutSeamBlocksHonestly() async {
-        let driver = FakeDriver()
-        driver.responses["list_apps"] = [apps([])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
-                             choose: { _, _ in nil }, ask: nil, granted: { true },
-                             gaze: gaze(200, 200))
-        let result = await loop.run(DriveTask(goal: "show numbers"), session: "t")
-        guard case .blocked(let reason) = result.status else {
-            return XCTFail("expected blocked, got \(result.status)")
+    func testRetiredNumberTargetsBlockWithoutObservation() async throws {
+        let loop = DriveLoop(call: { tool, _ in XCTFail(tool); return .null },
+                             choose: { _, _ in XCTFail("Unexpected chooser"); return nil },
+                             ask: nil, granted: { true },
+                             resolver: AppResolver(listApps: { XCTFail("Unexpected inventory"); return [] }),
+                             gaze: { XCTFail("Unexpected gaze"); throw CancellationError() })
+        for phrase in ["show numbers everywhere", "click two", "hide numbers", "press 12 in Safari"] {
+            XCTAssertThrowsError(try CuaDriveServer.decodeTask(.object(["goal": .string(phrase)])))
+            let task = DriveTask(goal: phrase)
+            let result = await loop.run(task, session: "fixture")
+            guard case .blocked = result.status else { return XCTFail(phrase) }
+            XCTAssertFalse(result.dispatchedEffect)
+            let preview = try await loop.preview(task, session: "fixture")
+            XCTAssertEqual(preview, "Please name the control you want to use.")
         }
-        XCTAssertTrue(reason.contains("nothing was numbered"), reason)
     }
 
     /// An unlabeled field still has something to say — its value. The
@@ -1621,38 +1665,33 @@ final class FastLaneExecutorTests: XCTestCase {
         XCTAssertFalse(driver.calls.contains { $0.tool == "type_text" })
     }
 
-    /// "close this" on a window whose own title is protected refuses —
-    /// the deictic gate scans the gazed window's words, grant or not.
     func testDeicticCloseOnDeniedWindowRefuses() async {
         let driver = FakeDriver()
-        driver.responses["list_apps"] = [apps([appRow("Store", "com.example.store", pid: 42)])]
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Store", title: "Confirm purchase",
                       x: 0, y: 0, w: 800, h: 600)])]
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
-                             choose: { _, _ in nil }, ask: nil, granted: { true },
-                             gaze: gaze(200, 200),
-                             frontmostBundleID: { "com.example.store" })
+                             choose: { _, _ in XCTFail("Unexpected chooser"); return nil }, ask: nil, granted: { true },
+                             gaze: gaze(200, 200), frontmostBundleID: { "com.example.store" })
         let result = await loop.run(DriveTask(goal: "close this"), session: "t")
-        guard case .blockedByConsent = result.status else {
-            return XCTFail("expected blockedByConsent, got \(result.status)")
-        }
-        XCTAssertFalse(driver.calls.contains {
-            ["hotkey", "click", "invoke_menu", "set_window_frame"].contains($0.tool) })
+        guard case .blocked = result.status else { return XCTFail("Expected refusal") }
+        XCTAssertTrue(driver.calls.isEmpty)
+        XCTAssertFalse(result.dispatchedEffect)
     }
 
-    /// The deny scan reads the window under the point even on the raw
-    /// gaze fallback — a click at "Confirm purchase" refuses before any
-    /// pixel dispatch.
+    /// A protected window title blocks a committed gaze click.
     func testGazeClickOnDeniedWindowRefuses() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([])]
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Store", title: "Confirm purchase",
                       x: 0, y: 0, w: 800, h: 600)])]
+        let frame = CGRect(x: 190, y: 190, width: 20, height: 20)
+        let candidate = IntentCandidate(id: "store-action", kind: .axElement, frame: frame, motorRect: frame,
+            role: "AXButton", label: "OK", pid: 42, windowID: 7, windowTitle: "Confirm purchase")
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
-                             gaze: gaze(200, 200))
+                             gaze: gaze(200, 200), gazeCommit: { (candidate, 0.9) })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
         guard case .blockedByConsent = result.status else {
             return XCTFail("expected blockedByConsent, got \(result.status)")

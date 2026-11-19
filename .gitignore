@@ -18,6 +18,8 @@ build/
 .conductor/settings.local.toml
 .empryo
 
-# Private P3 microphone recordings are local evidence only.
-/.agent/results/P3/audio/
+# Private P3 microphone recordings and replay reports are local evidence only.
+/.agent/results/P3/audio
+/.agent/results/P3/native-current-replay.json
+/.agent/results/P3/replay.json
 /.agent/results/P3/normal-voice-qualification/speed-comparison.html

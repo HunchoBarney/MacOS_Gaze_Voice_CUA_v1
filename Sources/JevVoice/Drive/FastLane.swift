@@ -44,8 +44,8 @@ struct WindowScrollRequest: Sendable {
 ///
 /// Ported lean from the retired fast lane: app open/raise/control, window
 /// and tab chords, media keys, counted scrolls, literal typing, engine
-/// searches, explicit URL navigation, menu paths, window snaps, aim-overlay
-/// picks, repeat/locate, and desktop-scope system chords.
+/// searches, explicit URL navigation, menu paths, window snaps,
+/// repeat/locate, and desktop-scope system chords.
 struct FastAction: Sendable {
     enum Body: Sendable {
         /// A chorded shortcut scoped to one window.
@@ -88,10 +88,6 @@ struct FastAction: Sendable {
         /// Snap/tile geometry — `set_window_frame` against the bound
         /// window's containing screen, verified by a bounds readback.
         case windowFrame(WindowSnap)
-        /// Aim overlay commands — numbered targets over live candidates.
-        /// Resolved app-side through the overlay seam (TargetOverlay),
-        /// never through the driver.
-        case overlay(OverlayVerb)
         /// Re-dispatch the most recent confirmed fast action — "do that
         /// again". The coordinator owns the replay log; the executor asks
         /// it through the injected seam and refuses honestly when empty.
@@ -110,20 +106,6 @@ struct FastAction: Sendable {
     /// Snap/tile verbs — fractions of the window's containing screen.
     enum WindowSnap: String, Equatable, Sendable {
         case left, right, fill
-    }
-
-    /// Aim overlay verbs — the numbered-targeting capability, scoped to
-    /// what the user is looking at rather than a wall of labels.
-    enum OverlayVerb: Equatable, Sendable {
-        /// Chips over the candidates of the window under the gaze point
-        /// (pointer/frontmost when no tracker).
-        case showNumbers
-        /// Chips over every on-screen candidate — the explicit "everywhere".
-        case showNumbersAll
-        case hideNumbers
-        /// Pick chip N — resolves through the pending overlay state, so a
-        /// spoken number only acts while chips are up.
-        case clickIndex(Int)
     }
 
     /// Gaze-referent verbs — "click", "open this", "what is this". The
@@ -232,16 +214,12 @@ struct FastAction: Sendable {
     /// tab") — the literal request IS the consent, so the risk gate passes
     /// it. Rows that merely *match* destructive keywords stay false.
     var directlyRequested = false
-    /// "type X **here**" — the destination is the point under the user's
-    /// gaze when the tracker is live, the existing insertion point when it
-    /// isn't. Set by the deictic suffix peel in `parseType`.
+    /// A gaze-derived field or window, not an independently bound target.
     var deictic = false
 
     /// Display-scope qualifier sentinel — "on this monitor"/"over there"
     /// peels into a qualifier carrying this marker instead of an app name;
-    /// the executor resolves it to the app/window on the display under the
-    /// gaze point. Deliberately not a word a user can type into a real
-    /// qualifier position.
+    /// it must not resolve to an app or an active window.
     static let gazeDisplayQualifier = "__gaze_display__"
 
     /// Bundles whose windows accept the chorded shortcuts below for tab,
@@ -312,6 +290,7 @@ struct FastAction: Sendable {
         // Verb-first app control parses the post-peel command so "minimize the
         // window in notes" keeps its ⌘M+qualifier meaning; a phrase that peels
         // a qualifier AND leaves a verb-first tail is ambiguous — the loop owns it.
+        if command == "hide numbers" || command == "hide the numbers" { return nil }
         if qualifier == nil, let control = parseAppControl(command) { return control }
         if qualifier == nil, display.scoped { qualifier = Self.gazeDisplayQualifier }
         guard let action = table[command] else {
@@ -319,9 +298,6 @@ struct FastAction: Sendable {
             if let scroll = parseScrollReps(command) { return (scroll, qualifier) }
             if let tab = parseTabIndex(command) { return (tab, qualifier) }
             if let menu = parseMenu(command) { return (menu, qualifier) }
-            if let overlay = overlayTable[command] ?? parseOverlayClick(command) {
-                return (overlay, qualifier)
-            }
             if let snap = snapTable[command] { return (snap, qualifier) }
             if let system = systemTable[command] { return (system, qualifier) }
             if let again = repeatTable[command] { return (again, qualifier) }
@@ -684,9 +660,6 @@ struct FastAction: Sendable {
                   !["window", "windows", "app", "it", "this", "that", "current",
                     "tab", "tabs", "all", "everything", "others", "other apps"].contains(rest)
             else { continue }
-            // "hide numbers" is the aim-overlay phrase, not the Numbers
-            // app; hiding Numbers by name takes "hide the numbers app".
-            if verb == "hide", rest == "numbers" { continue }
             let description: String
             let result: String
             switch kind {
@@ -789,7 +762,7 @@ struct FastAction: Sendable {
                           effect: .delivered)
     }
 
-    /// Spoken number words shared by the tab-index and overlay-pick
+    /// Spoken number words shared by the tab-index and task-choice
     /// parses — cardinals, the ordinals "the third tab" carries, and the
     /// tens a spoken chip number can reach.
     private static let numberWords: [String: Int] = [
@@ -878,20 +851,43 @@ struct FastAction: Sendable {
         return action([valid])
     }
 
-    /// `click|press|number|choose|pick <n>` — chip N of the live overlay,
-    /// 1–99 as digits or a number word. Only meaningful while chips are
-    /// up; the overlay seam owns the pending state, so a stale pick fails
-    /// at dispatch, not here.
-    private static func parseOverlayClick(_ command: String) -> FastAction? {
-        guard let expression = try? NSRegularExpression(
-                pattern: #"^(?:click|press|number|choose|pick) ([a-z0-9]+)$"#),
-              let match = expression.firstMatch(in: command, range: NSRange(command.startIndex..., in: command)),
-              let numRange = Range(match.range(at: 1), in: command) else { return nil }
-        let token = String(command[numRange])
-        guard let n = Int(token) ?? numberWords[token], (1...99).contains(n) else { return nil }
-        return FastAction(body: .overlay(.clickIndex(n)), generic: true,
-                          description: "Clicking number \(n)",
-                          result: "Clicked number \(n)", effect: .delivered)
+    enum RetiredTargetRequest: Equatable {
+        case palette, pick(Int), unboundGaze
+    }
+
+    static func retiredTargetRequest(_ text: String) -> RetiredTargetRequest? {
+        let raw = HandsFreeActionSyntax.withoutCourtesy(text)
+        let scoped = peelDisplayScope(raw)
+        let head = scoped.rest.split(separator: " ").first ?? ""
+        if scoped.scoped || ["type", "hide", "close", "minimize", "minimise"].contains(head) {
+            if let parsed = parse(raw) {
+                if parsed.action.deictic { return .unboundGaze }
+                if parsed.appQualifier == gazeDisplayQualifier {
+                    if case .gaze(.describe) = parsed.action.body { return nil }
+                    return .unboundGaze
+                }
+            } else if head == "type", stripDeicticSuffix(raw) != nil {
+                return .unboundGaze
+            } else if scoped.scoped, ["type", "close", "hide", "minimize", "minimise"].contains(head) {
+                return .unboundGaze
+            }
+        }
+        if scoped.rest.hasSuffix(" menu"), parseMenu(scoped.rest) != nil { return nil }
+        let qualifier = splitAppQualifier(scoped.rest)
+        let command = qualifier?.command ?? scoped.rest
+        switch command {
+        case "show numbers", "show me the numbers", "show the numbers", "numbers",
+             "show numbers everywhere", "numbers everywhere", "all numbers",
+             "show all numbers", "hide numbers", "clear numbers", "hide the numbers":
+            return .palette
+        default: break
+        }
+        let words = command.split(separator: " ")
+        guard words.count == 2, ["click", "press", "choose", "pick", "number"].contains(words[0]),
+              let n = Int(words[1]) ?? numberWords[String(words[1])] else { return nil }
+        guard !scoped.scoped, qualifier == nil, (1...99).contains(n),
+              !text.contains(where: { "\"“”‘’'`?".contains($0) }) else { return .palette }
+        return .pick(n)
     }
 
     /// `where did <X> go` / `wheres <X>` / `bring back <X>` / `find my <X>`
@@ -954,6 +950,7 @@ struct FastAction: Sendable {
         if let quoted = verbatim {
             rest = quoted
         } else {
+            if peelDisplayScope(rest).scoped { return nil }
             // A deictic destination names the live insertion point, not an
             // app — strip it from the payload so "type X here" types X, not
             // "X here". It runs before the qualifier peel: "into this" is a
@@ -1350,28 +1347,6 @@ struct FastAction: Sendable {
              "move the window right", "snap the window right"], .right, "right")
         add(["maximize the window", "maximise the window", "fill the screen",
              "make the window fill", "zoom window"], .fill, "to fill the screen")
-        return t
-    }()
-
-    /// Aim-overlay phrases — the numbered-chip lane. The click-by-number
-    /// tail is unbounded phrasing ("click 3", "pick twelve"), so the
-    /// numeric forms live in `parseOverlayClick` instead.
-    private static let overlayTable: [String: FastAction] = {
-        var t: [String: FastAction] = [:]
-        func add(_ phrases: [String], _ verb: OverlayVerb,
-                 _ description: String, _ result: String) {
-            let action = FastAction(body: .overlay(verb), generic: true,
-                                    description: description, result: result,
-                                    effect: .delivered)
-            for phrase in phrases { t[phrase] = action }
-        }
-        add(["show numbers", "show me the numbers", "show the numbers", "numbers"],
-            .showNumbers, "Showing the numbered targets", "Showed the numbers")
-        add(["show numbers everywhere", "numbers everywhere", "all numbers",
-             "show all numbers", "show numbers on everything"],
-            .showNumbersAll, "Showing numbers everywhere", "Showed numbers everywhere")
-        add(["hide numbers", "clear numbers", "hide the numbers"],
-            .hideNumbers, "Hiding the numbers", "Hid the numbers")
         return t
     }()
 

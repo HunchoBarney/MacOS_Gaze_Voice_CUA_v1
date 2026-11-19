@@ -104,16 +104,22 @@ def model_files(path, stage):
     return result
 
 
-def create(receipt_path):
+def create(receipt_path, app=None):
     stage = staging()
     receipt_path = receipt_path.resolve()
     receipt = json.loads(receipt_path.read_text())
-    app = Path(receipt["app"])
+    if app is not None:
+        check(receipt.get("label") == candidate_staging().GAZE, "app override requires gaze candidate")
+    app = app or Path(receipt["app"])
+    if receipt.get("label") == candidate_staging().GAZE:
+        check(app.absolute() == app.resolve(strict=True), "candidate app path is aliased")
     model_root = Path.home() / "Library/Application Support/JevVoice/Models"
     pins = json.loads((ROOT / "ThirdParty/Cua/source-manifest.json").read_text())
     package = json.loads((ROOT / "Package.resolved").read_text())
     provider = plistlib.loads((app / "Contents/Info.plist").read_bytes()).get("JevVoiceInputProvider", "local")
     check(provider in ("local", "openai-realtime"), "unknown voice provider")
+    if receipt.get("label") == candidate_staging().GAZE:
+        check(provider == "openai-realtime", "gaze candidate requires realtime voice")
     required = [item for item in REQUIRED if provider == "local" or not item.startswith("ConversationVAD/")]
     models = {}
     for name in (MODEL_MEMBERS if provider == "local" else ()):
@@ -127,7 +133,7 @@ def create(receipt_path):
         "schema_version": 1,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "stage_receipt": str(receipt_path), "stage_receipt_sha256": stage.digest(receipt_path),
-        "app": str(app), "binary_sha256": receipt["binary_sha256"],
+        "app": receipt["app"], "binary_sha256": receipt["binary_sha256"],
         "rollback_app": receipt["rollback_app"], "rollback_sha256": receipt["rollback_sha256"],
         "rollback_role": receipt.get("rollback_role", "original_daily"),
         "source_snapshot": receipt["source_snapshot"],
@@ -156,6 +162,8 @@ def create(receipt_path):
     if data["rollback_role"] == "last_verified_candidate":
         for key in candidate_staging().retained_base_metadata():
             data[key] = receipt.get(key)
+    if receipt.get("label") == candidate_staging().GAZE:
+        data["tracker_overlay"] = receipt["tracker_overlay"]
     return data
 
 
@@ -165,6 +173,10 @@ def verify(data, app=None):
     receipt_path = Path(data["stage_receipt"])
     check(stage.digest(receipt_path) == data["stage_receipt_sha256"], "stage receipt identity changed")
     receipt = json.loads(receipt_path.read_text())
+    candidate = candidate_staging()
+    gaze = receipt.get("label") == candidate.GAZE
+    check(gaze == ("tracker_overlay" in receipt) == ("tracker_overlay" in data),
+          "tracker overlay label or proof missing")
     role = receipt.get("rollback_role", "original_daily")
     check(role in ("original_daily", "last_verified_candidate")
           and data.get("rollback_role", "original_daily") == role, "rollback provenance role changed")
@@ -184,6 +196,36 @@ def verify(data, app=None):
           and stage.digest(snapshot_path) == data["source_snapshot_sha256"]
           == receipt["source_snapshot_sha256"], "source snapshot identity changed")
     snapshot = json.loads(snapshot_path.read_text())
+    check((snapshot.get("label") == candidate.GAZE) == gaze, "gaze freeze cannot be relabelled")
+    check((Path(receipt["app"]).parent.name == "jev-c1-" + candidate.GAZE) == gaze,
+          "gaze stage destination cannot be relabelled")
+    if gaze:
+        destination = candidate.RETAINED_BASE_APP.parents[1] / ("jev-c1-" + candidate.GAZE) / "Jev Voice.app"
+        check(Path(receipt["app"]) == destination, "gaze stage destination differs from exclusive reservation")
+        overlay = candidate.tracker_overlay()
+        overlay.verify_freeze(stage, snapshot_path, snapshot)
+        base_receipt = overlay.retained_receipt(candidate.RETAINED_BASE_RECEIPT, candidate.RETAINED_BASE_RECEIPT_SHA,
+                                               candidate.RETAINED_BASE_SHA)
+        for path, field in ((Path(candidate.__file__), "staging_helper_sha256"),
+                            (Path(overlay.__file__), "tracker_overlay_helper_sha256"),
+                            (Path(__file__), "resource_helper_sha256")):
+            check(stage.digest(path) == receipt[field] == snapshot["source_sha256"].get(str(path.relative_to(ROOT))),
+                  "gaze recipe identity changed")
+        check(receipt["signing_helper_sha256"] == receipt["staging_helper_sha256"],
+              "incorrect outer signing recipe")
+        check(base_receipt["signing_metadata"] == receipt["signing_metadata"] and
+              base_receipt["designated_requirement"] == receipt["designated_requirement"],
+              "retained signing identity or entitlements changed")
+    if receipt.get("label") in candidate_staging().RETEST_LABELS:
+        check(role == "last_verified_candidate", "first-minute candidate requires the pinned retained base")
+        candidate_staging().verify_retest_release(snapshot, receipt["unsigned_main_sha256"], receipt["label"])
+        expected = {key: value for key, value in snapshot["source_sha256"].items()
+                    if key.startswith("Sources/") or key in ("Package.swift", "Package.resolved", "Info.plist")}
+        check(expected == receipt["source_sha256"], "first-minute source manifest differs from staging")
+        for name, digest in snapshot["source_sha256"].items():
+            source = snapshot_path.parent / name
+            check(source.resolve().is_relative_to(snapshot_path.parent.resolve())
+                  and stage.digest(source) == digest, "first-minute frozen input changed")
     dependency_name = "Sources/JevVoice/ComputerControl/CuaDependency.swift"
     check(data["integration"]["dependency_source"] == dependency_name, "SDK source identity changed")
     dependency = snapshot_path.parent / dependency_name
@@ -197,11 +239,14 @@ def verify(data, app=None):
     check(snapshot["source_sha256"]["Package.resolved"] == data["package_resolved_sha256"],
           "source dependency binding changed")
     app = app or Path(data["app"])
+    if gaze:
+        check(app.absolute() == app.resolve(strict=True), "candidate app path is aliased")
     check(Path(data["app"]) == Path(receipt["app"]), "candidate path differs from staging")
     base = app / "Contents/Resources"
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     provider = info.get("JevVoiceInputProvider", "local")
-    check(provider in ("local", "openai-realtime") and data.get("voice_provider", "local") == provider,
+    check(provider in (("openai-realtime",) if gaze else ("local", "openai-realtime"))
+          and data.get("voice_provider", "local") == provider,
           "voice provider declaration changed")
     required = [item for item in REQUIRED if provider == "local" or not item.startswith("ConversationVAD/")]
     check(set(required).issubset(data["required_resources"]), "required resource policy omitted")
@@ -229,7 +274,21 @@ def verify(data, app=None):
     check(info["JevCuaDriverSHA256"] == receipt["driver"]["signed_sha256"], "generated driver stamp mismatch")
     check(canonical_hash(receipt["resource_manifest"]) == data["resource_manifest_sha256"],
           "resource manifest identity changed")
-    check(stage.resources(app) == receipt["resource_manifest"], "immutable bundle resources changed")
+    resources = stage.resources(app)
+    check(resources == receipt["resource_manifest"], "immutable bundle resources changed")
+    if not gaze:
+        shim = resources.get("EyeTracker/node_modules/.bin/electron", {}).get("sha256")
+        check(shim != "a8fe569ad0c1efe9b7e18f575c2d9f0ab07a22068ba504bff98079600e0dd2a5",
+              "gaze bundle cannot be relabelled as legacy")
+    if gaze:
+        proof = overlay.verify_resources(app, resources, base_receipt["resource_manifest"])
+        check(proof == data["tracker_overlay"] == receipt["tracker_overlay"], "tracker provenance changed")
+        pins_path = overlay.plain(snapshot_path.parent, "ThirdParty/Cua/source-manifest.json")
+        pins_sha = stage.digest(pins_path)
+        check(pins_sha == receipt["canonical_pin_sha256"] == snapshot["source_sha256"].get("ThirdParty/Cua/source-manifest.json"),
+              "canonical vendor manifest identity changed")
+        overlay.verify_tools(base_receipt, pins_sha, json.loads(pins_path.read_text())["vendored_binaries"],
+                             receipt["driver"], receipt["codex"], receipt["source_sha256"], dependency, resources)
     check(stage.requirement(app) == receipt["designated_requirement"], "designated requirement changed")
     check(stage.signing_metadata(app) == receipt["signing_metadata"], "signing metadata changed")
     signature = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
@@ -245,9 +304,10 @@ def verify(data, app=None):
     rollback = Path(data["rollback_app"])
     check(str(rollback) == receipt["rollback_app"] and data["rollback_sha256"] == receipt["rollback_sha256"],
           "rollback declaration changed")
-    check(stage.digest(rollback / "Contents/MacOS/JevVoice") == data["rollback_sha256"],
-          "rollback executable changed")
-    if role == "last_verified_candidate":
+    if not gaze:
+        check(stage.digest(rollback / "Contents/MacOS/JevVoice") == data["rollback_sha256"],
+              "rollback executable changed")
+    if role == "last_verified_candidate" and not gaze:
         candidate_staging().verify_retained_base(stage, receipt["label"], data)
     return {"candidate_verified": True, "release_ready": not blockers,
             "release_blockers": blockers, "speech_models": list(data["speech_models"]),
@@ -259,6 +319,7 @@ def main():
     parser.add_argument("action", choices=("create", "verify", "prepare-vad"))
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--app", type=Path, help="verify a copied gaze candidate in place")
     parser.add_argument("--source", type=Path)
     parser.add_argument("--destination", type=Path)
     args = parser.parse_args()
@@ -269,13 +330,16 @@ def main():
     check(args.manifest is not None, "a component manifest is required")
     if args.action == "create":
         check(args.receipt is not None, "a stage receipt is required")
-        data = create(args.receipt)
-        result = verify(data)
+        data = create(args.receipt, args.app)
+        result = verify(data, args.app)
         with args.manifest.open("x") as stream:
             json.dump(data, stream, indent=2, sort_keys=True)
             stream.write("\n")
     else:
-        result = verify(json.loads(args.manifest.read_text()))
+        data = json.loads(args.manifest.read_text())
+        if args.app is not None:
+            check("tracker_overlay" in data, "app override requires gaze candidate")
+        result = verify(data, args.app)
     print(json.dumps(result, indent=2))
 
 

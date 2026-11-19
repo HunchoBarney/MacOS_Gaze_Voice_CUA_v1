@@ -31,6 +31,10 @@ final class VoiceTaskCoordinator {
         var worker: Task<Void, Never>?
         var semanticFocus: VoiceSemanticRouter.Proposal?
         var windowScroll: WindowScrollRequest?
+        var desktopSwitch: (number: Int, display: UInt32)?
+        var desktopSideEffect: String?
+        var desktopDecision: DesktopSpaceSwitch.Code?
+        var desktopOverviewOrigin: DesktopSpaceSwitch.Origin?
         var allowParsedScroll = true
         var semanticExecutionStarted = false
         var semanticDriverLoop: DriveLoop?
@@ -119,7 +123,12 @@ final class VoiceTaskCoordinator {
         case question
         case finished(Work.Outcome)
     }
-    private var conversationWaiters: [UUID: [(Bool, CheckedContinuation<ConversationBoundary?, Never>)]] = [:]
+    private struct BoundaryWaiter {
+        let id: UUID
+        let throughQuestions: Bool
+        let continuation: CheckedContinuation<ConversationBoundary?, Never>
+    }
+    private var conversationWaiters: [UUID: [BoundaryWaiter]] = [:]
     /// Content-free latency spans; fixture runners may observe them without
     /// recording tool arguments, screen contents or credentials.
     var onLatencySpan: ((String, TimeInterval, TimeInterval) -> Void)?
@@ -129,7 +138,14 @@ final class VoiceTaskCoordinator {
     var taskEventSink: (UUID?, String, Bool) -> Void = { _, _, _ in }
     let feed = DecisionFeed()
     /// Agent delegation seam — set by main after the agent runtime exists.
-    var agentBridge: (any AgentBridging)?
+    var agentBridge: (any AgentBridging)? {
+        didSet {
+            voiceDelegation = .init(revision: UUID(), receipt: nil)
+            hasDelegationAttempt = false
+        }
+    }
+    private(set) var voiceDelegation = DelegatedVoiceStatusScope(revision: UUID(), receipt: nil)
+    private var hasDelegationAttempt = false
 
     /// The drive sessions' labels — the driver draws one agent cursor per
     /// session, so which label a call rides decides whether a cursor
@@ -174,7 +190,7 @@ final class VoiceTaskCoordinator {
     private let jevAPIKey: () -> String
     private let resolver: AppResolver
     private let commandDriver: DriveLoop.Call?
-    private let foregroundAppLauncher: ((String) async throws -> Int)?
+    private let foregroundAppLauncher: ((String, @escaping @MainActor @Sendable () -> Bool) async throws -> Int)?
     var hasForegroundAppLauncher: Bool { foregroundAppLauncher != nil }
     private var connection: CuaConnection?
     private var connectTask: Task<CuaConnection, Error>?
@@ -217,24 +233,10 @@ final class VoiceTaskCoordinator {
     // Shared with DictationDelivery — dictation pastes and drive-loop focus
     // borrows serialize on ONE lease so a ⌘V can't land inside a focus steal.
     let inputGuard = DictationDelivery.sharedLease
+    var switchDesktop: @MainActor (Int, UInt32, () -> Bool, (String) -> Void) async -> DesktopSpaceSwitch.Outcome = DesktopSpaceSwitch.run
 
-    /// The onPick of whichever overlay is showing — a spoken "click two"
-    /// and a dwell pick resolve through the same stored path, so the two
-    /// inputs can never disagree about which chip they mean.
     private(set) var pendingOverlayPick: (@MainActor (Int) -> Void)?
-    /// Who armed `pendingOverlayPick` — one pick path at a time. The
-    /// gaze radial's retract must never retire another owner's chips,
-    /// and a pick set may only resolve the ask it was armed for.
-    enum OverlayPickOwner: Equatable {
-        case none, gaze, choice, numbers
-    }
-    private(set) var overlayPickOwner: OverlayPickOwner = .none
-    /// The contested pair the gaze radial is currently armed for —
-    /// distinguishes OUR radial from a task's choice radial sharing
-    /// `pendingOverlayPick`, and dedupes re-arms on the same pair. Set
-    /// only while `overlayPickOwner == .gaze`; any other owner taking
-    /// the pick clears it.
-    private(set) var gazeRadialPair: Set<String>?
+    private var choiceAskID: UUID?
     /// Latest fresh gaze point in top-left screen points — radials park
     /// near it and the agent-chip hit-test reads it.
     private var lastGazePoint: CGPoint?
@@ -270,6 +272,13 @@ final class VoiceTaskCoordinator {
     /// The candidate enumerator the service drives — built over `call`
     /// by `configureGazeService`; nil means the feed reports empty.
     private var gazeFeed: GazeCandidateFeed?
+    private var gazeEnumeration = UUID()
+    private var nativeGaze: (id: UUID, hit: CommittedGazeHit, target: IntentCandidate)?
+    private var heldDwellRect: CGRect?
+    var currentGazeClickLease: UUID? {
+        guard let bound = nativeGaze, bound.id == gazeService.batch.nativeWitness else { return nil }
+        return gazeService.currentActionLease
+    }
     /// Fn-down pre-observe and its gaze pump — cancelled by
     /// `endListeningHint` or a watchdog so a non-computer utterance
     /// leaves nothing running.
@@ -281,7 +290,7 @@ final class VoiceTaskCoordinator {
     /// Which Fn-down hint owns the gaze feed — a pending
     /// `endListeningHint` teardown must not stop the stream a NEWER
     /// hold just opened.
-    private var listenHintGeneration = 0
+    private(set) var listenHintGeneration = 0
 
     /// Live Fn/dictation capture probe — true while the user is mid-
     /// sentence, so a dwell fire can't double-actuate on "click this".
@@ -295,19 +304,27 @@ final class VoiceTaskCoordinator {
     init(config: Config, jevAPIKey: @escaping () -> String,
          gazeService: GazeService? = nil, overlay: TargetOverlay? = nil,
          resolver: AppResolver? = nil, commandDriver: DriveLoop.Call? = nil,
+         observeAgents: Bool = true,
          foregroundAppLauncher: ((String) async throws -> Int)? = nil) {
         self.config = config
         self.jevAPIKey = jevAPIKey
         self.resolver = resolver ?? AppResolver()
         self.commandDriver = commandDriver
-        if let foregroundAppLauncher { self.foregroundAppLauncher = foregroundAppLauncher }
+        if let foregroundAppLauncher {
+            self.foregroundAppLauncher = { bundle, current in
+                guard await current() else { throw CancellationError() }
+                return try await foregroundAppLauncher(bundle)
+            }
+        }
         else if commandDriver == nil {
-            self.foregroundAppLauncher = { try await DriveLoop.openForegroundApplication($0) }
+            self.foregroundAppLauncher = { try await DriveLoop.openForegroundApplication($0, isCurrent: $1) }
         } else { self.foregroundAppLauncher = nil }
         self.gazeService = gazeService ?? .shared
         self.overlay = overlay ?? .shared
-        startAskWatcher()
-        startCursorPoller()
+        if observeAgents {
+            startAskWatcher()
+            startCursorPoller()
+        }
         configureGazeService()
     }
 
@@ -748,10 +765,12 @@ final class VoiceTaskCoordinator {
                         frontmostHint: String? = nil,
                         literalText: String? = nil,
                         transcriptHint: String? = nil,
+                        taskOnly: Bool = false,
                         steps: [String] = [],
                         captureID: UUID? = nil,
                         pinnedWindowID: Int? = nil,
                         windowScroll: WindowScrollRequest? = nil,
+                        desktopDisplay: UInt32? = nil,
                         allowParsedScroll: Bool = true,
                         scrollContinuation: NativeWindowObservation.ScrollViewport? = nil,
                         continuousScroll: Bool = false,
@@ -765,7 +784,30 @@ final class VoiceTaskCoordinator {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
                                    say: "I didn't catch a task.").encoded()
         }
+        if FastAction.retiredTargetRequest(trimmed) != nil || transcriptHint.flatMap(FastAction.retiredTargetRequest) != nil {
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "Please name the control you want to use.").encoded()
+        }
+        if VoiceAdmissionPolicy.isDesktopSwitchQuestion(trimmed)
+            || transcriptHint.map(VoiceAdmissionPolicy.isDesktopSwitchQuestion) == true {
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "That question doesn't request an action.").encoded()
+        }
         let normalized = trimmed.lowercased()
+        let space = DesktopSpaceTarget(command: trimmed)
+        let classified = windowScroll == nil ? IntentRouter.classify(trimmed) : nil
+        if taskOnly, classified?.verb == .cancel, FastAction.parseOpen(trimmed) == nil {
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "Say stop or pause listening to interrupt.").encoded()
+        }
+        if space != nil || desktopDisplay != nil {
+            guard case .numbered = space, desktopDisplay != nil, transcriptHint == instruction,
+                  captureID != nil, let pinnedWindowID, pinnedWindowID > 0, app != nil,
+                  steps.isEmpty, literalText == nil, windowScroll == nil, !continuousScroll else {
+                return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                       say: "Please make a fresh hands-free request naming the desktop.").encoded()
+            }
+        }
         if let windowScroll {
             let bound = Self.voiceTaskSpec(trimmed, app: app, frontmostHint: frontmostHint,
                 values: literalText.map { ["text": $0] } ?? [:], windowID: pinnedWindowID)
@@ -792,6 +834,7 @@ final class VoiceTaskCoordinator {
             return await beginVoiceTask(last.request,
                                         app: app,
                                         frontmostHint: frontmostHint,
+                                        taskOnly: taskOnly,
                                         captureID: captureID, pinnedWindowID: pinnedWindowID,
                                         allowParsedScroll: allowParsedScroll,
                                         scrollContinuation: scrollContinuation,
@@ -841,7 +884,7 @@ final class VoiceTaskCoordinator {
         let plan = steps.filter { !$0.isEmpty }
         onCommandStage?(captureID, nil, .gazeBegin, nil)
         var gazeContext: String?
-        if windowScroll == nil { gazeContext = await gazeContextProvider() }
+        if windowScroll == nil, space == nil { gazeContext = await gazeContextProvider() }
         onCommandStage?(captureID, nil, .gazeEnd, nil)
         guard !Task.isCancelled, admissionIsCurrent() else {
             onCommandStage?(captureID, nil, .cancelled, nil)
@@ -851,16 +894,15 @@ final class VoiceTaskCoordinator {
         // modifiers picks the lane; the routed intent rides the context
         // so the executor knows an "answer" intent fetches, not clicks,
         // and the provenance echo (≤5 words) becomes the spoken ack.
-        let classified = windowScroll == nil ? IntentRouter.classify(trimmed) : nil
         onCommandStage?(captureID, nil, .referentBegin, nil)
         var referent: GazeReferent?
-        if windowScroll == nil { referent = await gazeService.scorer.currentReferent }
+        if windowScroll == nil, space == nil { referent = await gazeService.scorer.currentReferent }
         onCommandStage?(captureID, nil, .referentEnd, nil)
         guard !Task.isCancelled else {
             onCommandStage?(captureID, nil, .cancelled, nil)
             return VoiceToolResult(status: VoiceToolResult.Status.cancelled, say: "Cancelled.").encoded()
         }
-        let routed = classified.flatMap {
+        let routed = (taskOnly && classified?.verb == .cancel) ? nil : classified.flatMap {
             IntentRouter.route(verb: $0.verb, referent: referent, modifiers: $0.modifiers)
         }
         // The router's cancel verdict is authoritative, not advisory, and
@@ -869,7 +911,7 @@ final class VoiceTaskCoordinator {
         // stop request must never spin up a drive loop for itself, and it
         // must never leave sibling work running past the word "stop". A
         // named target ("stop scout") keeps the targeted path.
-        if classified?.verb == .cancel {
+        if !taskOnly, classified?.verb == .cancel {
             feed.add(.route, "\"\(trimmed)\" → cancel")
             if let hint = Self.cancelHint(from: trimmed) {
                 return await cancelVoiceTask(hint)
@@ -900,6 +942,9 @@ final class VoiceTaskCoordinator {
                                    say: "The scrolling request or target changed.").encoded()
         }
         work.windowScroll = windowScroll
+        if case .numbered(let number) = space, let desktopDisplay {
+            work.desktopSwitch = (number, desktopDisplay)
+        }
         work.allowParsedScroll = allowParsedScroll
         work.provenance = captureID.map { SpeechProvenance(captureID: $0) }
         work.captureID = captureID
@@ -934,7 +979,11 @@ final class VoiceTaskCoordinator {
     /// ask, "last"/"newest" the newest), then by substring, then — with
     /// no hint at all — the turn that spawned the work, then the newest.
     func respondToTask(_ answer: String, task: String? = nil,
-                       captureID: UUID? = nil) async -> String? {
+                       captureID: UUID? = nil, exactAskID: UUID? = nil) async -> String? {
+        guard !VoiceAdmissionPolicy.isDesktopSwitchQuestion(answer) else {
+            return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                   say: "That question doesn't select an answer.").encoded()
+        }
         let parked = tasks.filter(\.awaitingAnswer)
         var target: Work?
         if let hint = task?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -970,14 +1019,40 @@ final class VoiceTaskCoordinator {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
                                    say: "Nothing is waiting for an answer.").encoded()
         }
+        let retired = FastAction.retiredTargetRequest(answer)
+        let clickReply = VoiceAdmissionPolicy.isBareGazeClick(answer)
+        if retired != nil || clickReply {
+            guard parked.count == 1, target.active, exactAskID == target.askID else {
+                return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                       say: "Please answer the current question by name.").encoded()
+            }
+            switch target.ask {
+            case .choice: break
+            case .question where clickReply: break
+            default:
+                return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                       say: "Please answer the current question by name.").encoded()
+            }
+        }
+        var choice: OrdinalAnswer = .unparseable
+        if case .choice(_, let options) = target.ask {
+            let label = VoiceAdmissionPolicy.normalized(answer)
+            let exact = options.indices.filter { VoiceAdmissionPolicy.normalized(options[$0]) == label }
+            if exact.count == 1, let index = exact.first { choice = .picked(index) }
+            else if !exact.isEmpty || clickReply || retired == .palette || retired == .unboundGaze { choice = .outOfRange }
+            else { choice = Self.ordinalIndex(in: answer, limit: options.count) }
+            if case .outOfRange = choice {
+                return VoiceToolResult(status: VoiceToolResult.Status.refused,
+                                       say: "Which of the offered options do you mean?").encoded()
+            }
+        }
         // A parked agent ask resolves through the shared answer file — the
         // child's poll picks it up and its drive loop resumes.
         if let askID = target.agentAskID {
             let reply: String
             if case .confirm = target.ask {
                 reply = DriveLoop.affirmative(answer) ? "yes" : "no"
-            } else if case .choice(_, let options) = target.ask,
-                      case .picked(let index) = Self.ordinalIndex(in: answer, limit: options.count) {
+            } else if case .picked(let index) = choice {
                 // Agent choice asks take the option index — same wire
                 // shape the child's DriveLoop already maps.
                 reply = "\(index)"
@@ -1001,13 +1076,13 @@ final class VoiceTaskCoordinator {
         // A parked choice wants an option index on the wire — spoken
         // ordinals ("two", "the second one", "number 3") map here; an
         // unparseable answer passes through literally and the loop maps it.
-        if case .choice(_, let options) = target.ask,
+        if case .choice = target.ask,
            let continuation = target.askContinuation {
-            switch Self.ordinalIndex(in: answer, limit: options.count) {
+            switch choice {
             case .picked(let index):
+                clearOverlayPick(ownedBy: target.askID)
                 target.ask = nil
                 target.askContinuation = nil
-                clearOverlayPick()
                 continuation.resume(returning: "\(index)")
                 return VoiceToolResult(status: VoiceToolResult.Status.ok,
                                        say: "Got it.").encoded()
@@ -1015,9 +1090,9 @@ final class VoiceTaskCoordinator {
                 return VoiceToolResult(status: VoiceToolResult.Status.refused,
                                        say: "Say the number next to it.").encoded()
             case .unparseable:
+                clearOverlayPick(ownedBy: target.askID)
                 target.ask = nil
                 target.askContinuation = nil
-                clearOverlayPick()
                 continuation.resume(returning: answer)
                 return VoiceToolResult(status: VoiceToolResult.Status.ok,
                                        say: "Got it.").encoded()
@@ -1046,7 +1121,7 @@ final class VoiceTaskCoordinator {
                                                 error: "explicit_consent_required")
             }
         }
-        return await respondToTask(answer, task: taskID.uuidString, captureID: captureID)
+        return await respondToTask(answer, task: taskID.uuidString, captureID: captureID, exactAskID: askID)
             ?? VoiceToolCatalog.result(status: "blocked", summary: "That task is no longer waiting.", error: "ask_changed")
     }
 
@@ -1061,12 +1136,6 @@ final class VoiceTaskCoordinator {
             // No voice work matched — "stop scout" names a delegated agent
             // turn, not a local task. Interrupting beats a wrong refusal.
             if let agentBridge {
-                // A glance is a referent too: "stop" while looking at an
-                // agent's cursor or shelf chip interrupts that agent
-                // without a name — the scorer's commit answers first.
-                if let slug = await gazedAgentSlug() {
-                    return await agentBridge.interruptAgent(hint: slug)
-                }
                 return await agentBridge.interruptAgent(hint: hint)
             }
             return VoiceToolResult(status: VoiceToolResult.Status.nothingRunning,
@@ -1085,6 +1154,10 @@ final class VoiceTaskCoordinator {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
                                    say: "No agents are available.").encoded()
         }
+        let soleAttempt = !hasDelegationAttempt
+        hasDelegationAttempt = true
+        let start = UUID()
+        voiceDelegation = .init(revision: start, receipt: nil)
         do {
             // The delegated task carries the same gaze context the local
             // loop would get — an agent asked to "keep an eye on that"
@@ -1093,9 +1166,13 @@ final class VoiceTaskCoordinator {
             if let gazeContext = await gazeContextProvider() {
                 message += "\n\nGaze context (what the user is looking at):\n" + gazeContext
             }
-            return try await agentBridge.delegate(DelegationRequest(
+            let result = try await agentBridge.delegateWithReceipt(DelegationRequest(
                 agentSlug: agent, newAgentName: name, newAgentRole: role,
                 newAgentDescription: description, message: message))
+            if voiceDelegation.revision == start {
+                voiceDelegation = .init(revision: UUID(), receipt: soleAttempt ? result.receipt : nil)
+            }
+            return result.payload
         } catch {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
                 say: VoiceToolResult.spoken(error.localizedDescription,
@@ -1128,7 +1205,7 @@ final class VoiceTaskCoordinator {
         }
         work.ask = nil
         if work.active {
-            finish(work, .cancelled, say: "Cancelled.")
+            finish(work, .cancelled, say: work.desktopSideEffect.map { "Cancelled. " + $0 } ?? "Cancelled.")
         } else {
             onChange()
         }
@@ -1140,51 +1217,35 @@ final class VoiceTaskCoordinator {
     /// Escape must be consumable or the key leaks to the frontmost app
     /// mid-pick. `pendingTaskApproval`/`pendingQuestions` only count
     /// `.confirm`/`.question`; this is the missing arm of that gate.
-    /// ANY armed overlay pick counts the same — bare number chips are
-    /// an overlay pick too, and their documented dismiss is Escape.
     var hasActiveChoiceAsk: Bool {
         tasks.contains(where: \.awaitingChoice) || pendingOverlayPick != nil
     }
 
-    /// Parked asks awaiting the user — the menu-bar badge Lane 1 polls
-    /// in `menuWillOpen`. Every parked ask counts (choice/question/
-    /// confirm/agent rows) plus an armed gaze radial — the scorer is
-    /// asking which of the pair the eyes meant. Bare number chips are
-    /// a tool palette, not an ask, so they don't badge.
-    var pendingAskCount: Int {
-        tasks.filter(\.awaitingAnswer).count + (overlayPickOwner == .gaze ? 1 : 0)
-    }
+    var pendingAskCount: Int { tasks.filter(\.awaitingAnswer).count }
 
     /// Settle the newest parked `.choice` the way its deadline firing
     /// would — the continuation resumes nil and the radial retracts
     /// through the normal park teardown, so the task decides what a
     /// non-answer means (an ambiguity ask settles blocked, a loop ask
     /// declines). An agent's parked choice has no continuation — its row
-    /// cancels, which reads to the child like its own timeout. A gaze
-    /// radial or a bare numbered set has no continuation at all —
-    /// Escape just retracts it.
+    /// cancels, which reads to the child like its own timeout.
     /// Returns whether a parked choice was waiting.
     @discardableResult
     func declineTopmostChoiceAsk() -> Bool {
-        guard let work = tasks.last(where: \.awaitingChoice) else {
-            // No parked choice — a bare overlay pick (number chips, or
-            // the gaze radial) is still ours to retract, and Escape
-            // stays consumable while one is up.
-            switch overlayPickOwner {
-            case .none: return false
-            case .gaze: disarmGazeRadial()
-            default: clearOverlayPick()
-            }
+        let displayed = tasks.first { $0.awaitingChoice && $0.askID == choiceAskID }
+        guard let work = displayed ?? tasks.last(where: \.awaitingChoice) else {
+            guard pendingOverlayPick != nil else { return false }
+            clearOverlayPick()
             return true
         }
         if work.agentAskID != nil {
             cancel(work.id)
             return true
         }
+        clearOverlayPick(ownedBy: work.askID)
         work.ask = nil
         if let continuation = work.askContinuation {
             work.askContinuation = nil
-            clearOverlayPick()
             continuation.resume(returning: nil)
         }
         onChange()
@@ -1359,6 +1420,7 @@ final class VoiceTaskCoordinator {
     }
 
     func shutdown() {
+        voiceDelegation = .init(revision: UUID(), receipt: nil)
         inventoryWarmStopped = true
         inventoryPreparationTask?.cancel()
         inventoryWarmTask?.cancel()
@@ -1421,7 +1483,7 @@ final class VoiceTaskCoordinator {
         // or a dwell pick all resolve it) and the answer pins the spec to
         // that app's bundle. Unanswered, the task settles naming the
         // candidates rather than guessing at the wrong app.
-        if let requested = work.spec.application, work.spec.pid == nil {
+        if work.desktopSwitch == nil, let requested = work.spec.application, work.spec.pid == nil {
             onCommandStage?(work.captureID, work.id, .resolveBegin, nil)
             if let pid = DriveLoop.capturedForegroundApplication(
                 application: requested, windowID: work.spec.windowID)?.pid {
@@ -1457,6 +1519,10 @@ final class VoiceTaskCoordinator {
         }
 
         let traceTurn = work.captureID, traceWork = work.id
+        let nativeCurrent: @MainActor @Sendable () -> Bool = { [weak work] in
+            guard let work else { return false }
+            return work.active && work.scrollAuthorization?() != false
+        }
         let imageClient = JevChooser.experimentalWindowImages
             ? JevClient(apiKey: jevAPIKey(), model: "jev-1.14.0") : nil
         let loop = work.semanticDriverLoop ?? DriveLoop(
@@ -1504,7 +1570,8 @@ final class VoiceTaskCoordinator {
             nativeTextEvent: { [weak self] receipt in
                 await self?.recordNativeTextInsertion(receipt, turn: traceTurn, work: traceWork)
             },
-            foregroundAppLauncher: foregroundAppLauncher,
+            foregroundAppLauncher: foregroundAppLauncher.map { launch in { try await launch($0, nativeCurrent) } },
+            nativeAdmission: nativeCurrent,
             gaze: { [weak self] in
                 // A live hold already owns the ~20Hz stream — reading it
                 // beats a fresh HTTP GET per command, and a dead stream
@@ -1513,13 +1580,7 @@ final class VoiceTaskCoordinator {
                 return try await GazeClient().snapshot()
             },
             gazeCommit: { [weak self] in
-                // The scorer's committed referent — semantic clicks and
-                // "what is this" resolve through it; nil keeps the raw
-                // point fallback alive on a cold feed.
                 await self?.gazeService.commitTarget()
-            },
-            overlayDispatch: { [weak self] verb, targets, point in
-                await self?.handleOverlayVerb(verb, targets: targets, gaze: point)
             },
             scrollContinuation: work.scrollContinuation,
             freshScrollContinuation: work.continuousScroll && work.verifiedScroll == nil,
@@ -1545,6 +1606,25 @@ final class VoiceTaskCoordinator {
         // `run` never throws — cancellation and transport faults surface as
         // DriveResult statuses, so every outcome funnels through describe.
         @MainActor func runWork() async -> DriveResult {
+            if let target = work.desktopSwitch {
+                var confirmed = false
+                let result: DesktopSpaceSwitch.Outcome
+                do {
+                    try await loop.gateExplicit("select desktop", corpus: "Mission Control Desktop \(target.number)",
+                                                denied: work.spec.deny, confirmed: &confirmed)
+                    result = try await loop.focusLeased {
+                        await self.switchDesktop(target.number, target.display,
+                            { work.active && work.scrollAuthorization?() == true },
+                            { work.desktopSideEffect = $0 })
+                    }
+                } catch {
+                    let code: DesktopSpaceSwitch.Code = error is CancellationError ? .authorizationCancelled : .policyDenied
+                    result = .init(code, "The desktop request was not authorized or was cancelled.")
+                }
+                if work.active { work.desktopDecision = result.code; work.desktopOverviewOrigin = result.origin }
+                return await loop.settle(.blocked(result.message), work.spec, [],
+                    blockedReason: result.code == .pressAcceptedUnverified ? "desktop press unverified" : "desktop unverified")
+            }
             if let scroll = work.windowScroll {
                 return await loop.runWindowScroll(scroll, task: work.spec, session: Self.session)
             }
@@ -1644,13 +1724,13 @@ final class VoiceTaskCoordinator {
             return nil
         }
         work.ask = ask
+        let askID = work.askID
         let prompt: String
         switch ask {
         case .confirm(let p): prompt = p + " Say yes or no."
         case .question(let p): prompt = p
         case .choice(let p, let options):
-            // Spoken choices carry their numbering so a voice "two" and a
-            // dwell pick on chip 2 resolve to the same index.
+            // Spoken choices and explicit accessibility picks use the same index.
             let list = options.enumerated()
                 .map { "\($0.offset + 1)) \($0.element)" }
                 .joined(separator: ", ")
@@ -1663,7 +1743,10 @@ final class VoiceTaskCoordinator {
                       true)
         feed.add(.consent, prompt)
         onChange()
-        defer { work.ask = nil; onChange() }
+        defer {
+            if work.askID == askID { work.ask = nil }
+            onChange()
+        }
         switch ask {
         case .confirm:
             let yes: Bool = await withCheckedContinuation { c in
@@ -1680,7 +1763,7 @@ final class VoiceTaskCoordinator {
             }
         case .choice(_, let options):
             // The micro-radial rings the options around the gaze point;
-            // dwell picks, "click two", and spoken ordinals all resume the
+            // explicit accessibility picks and spoken ordinals resume the
             // same continuation with the same 0-based index string. The
             // Glass earcon marks "your pick is needed" — same chime the
             // agent-ask path plays — so a radial appearing without a
@@ -1692,7 +1775,7 @@ final class VoiceTaskCoordinator {
                 cue("Glass")
                 expire(ask, on: work)
             }
-            clearOverlayPick()
+            clearOverlayPick(ownedBy: askID)
             return answer
         }
     }
@@ -1701,14 +1784,15 @@ final class VoiceTaskCoordinator {
     /// work row must still hold the same ask, or a later park's expiry
     /// would fire on the wrong continuation.
     private func expire(_ ask: DriveLoop.Ask, on work: Work) {
+        let askID = work.askID
         let deadline = askExpirySeconds.isFinite
             ? min(Self.askDeadline, max(0.01, askExpirySeconds)) : Self.askDeadline
         Task { @MainActor [weak self, weak work] in
             try? await Task.sleep(for: .seconds(deadline))
-            guard let self, let work, work.ask == ask else { return }
+            guard let self, let work, work.askID == askID, work.ask == ask else { return }
             // An expired choice retracts its radial — leaving the chips up
             // would invite a pick that resolves nothing.
-            if case .choice = ask { self.clearOverlayPick() }
+            if case .choice = ask { self.clearOverlayPick(ownedBy: askID) }
             if let approval = work.approvalContinuation {
                 work.approvalContinuation = nil
                 work.ask = nil
@@ -1734,7 +1818,7 @@ final class VoiceTaskCoordinator {
         // like the stall-check ask, whose task ended underneath it.
         if let continuation = work.askContinuation {
             work.askContinuation = nil
-            clearOverlayPick()
+            clearOverlayPick(ownedBy: work.askID)
             continuation.resume(returning: nil)
         }
         if let approval = work.approvalContinuation {
@@ -1769,25 +1853,32 @@ final class VoiceTaskCoordinator {
 
     func waitForConversationBoundary(_ id: UUID, throughQuestions: Bool = false) async -> ConversationBoundary? {
         guard let work = tasks.first(where: { $0.id == id }) else { return nil }
+        if let outcome = work.outcome { return .finished(outcome) }
+        if work.awaitingAnswer, !throughQuestions { return .question }
         if Task.isCancelled {
             cancel(id)
             return .finished(.cancelled)
         }
-        if let outcome = work.outcome { return .finished(outcome) }
-        if work.awaitingAnswer, !throughQuestions { return .question }
+        let registration = UUID()
         return await withTaskCancellationHandler {
-            await withCheckedContinuation { conversationWaiters[id, default: []].append((throughQuestions, $0)) }
+            await withCheckedContinuation {
+                conversationWaiters[id, default: []].append(
+                    BoundaryWaiter(id: registration, throughQuestions: throughQuestions, continuation: $0))
+            }
         } onCancel: {
-            Task { @MainActor [weak self] in self?.cancel(id) }
+            Task { @MainActor [weak self] in
+                guard let self, self.conversationWaiters[id]?.contains(where: { $0.id == registration }) == true else { return }
+                self.cancel(id)
+            }
         }
     }
 
     private func wakeConversationWaiters(_ id: UUID, _ boundary: ConversationBoundary) {
         let waiters = conversationWaiters.removeValue(forKey: id) ?? []
-        for (throughQuestions, waiter) in waiters {
-            if throughQuestions, boundary == .question {
-                conversationWaiters[id, default: []].append((throughQuestions, waiter))
-            } else { waiter.resume(returning: boundary) }
+        for waiter in waiters {
+            if waiter.throughQuestions, boundary == .question {
+                conversationWaiters[id, default: []].append(waiter)
+            } else { waiter.continuation.resume(returning: boundary) }
         }
     }
 
@@ -1831,15 +1922,14 @@ final class VoiceTaskCoordinator {
         case .alreadySatisfied:
             return (.alreadyDone, "That's already done.")
         case .blocked(let why), .blockedByConsent(let why):
-            if result.blockedReason == DriveLoop.scrollUnverifiedReason { return (.uncertain(why), why) }
+            if result.blockedReason == DriveLoop.scrollUnverifiedReason || result.blockedReason == DriveLoop.launchUnverifiedReason || result.blockedReason == "desktop press unverified" {
+                return (.uncertain(why), why)
+            }
             return (.blocked(why), why)
         case .handedBack(let reason):
-            // Low confidence means "I won't guess" — the honest remedy is
-            // the numbered overlay, not another drive round. Other
-            // reasons keep the generic line.
             if reason == .lowConfidence {
                 return (.blocked(reason.rawValue),
-                        "I'm not sure enough to act — say 'show numbers' to pick it yourself.")
+                        "I couldn't identify the target. Which control do you mean?")
             }
             return (.blocked(reason.rawValue),
                     "I couldn't pick a confident next step.")
@@ -1858,114 +1948,29 @@ final class VoiceTaskCoordinator {
 
     // MARK: - Overlay seam
 
-    /// The drive loop's overlay verbs land on TargetOverlay — numbered
-    /// chips and radials are app-side UI, never driver calls. Returns nil
-    /// only through `self` being gone; every verb gets an honest status.
-    func handleOverlayVerb(_ verb: FastAction.OverlayVerb,
-                                   targets: [(frame: CGRect, label: String)],
-                                   gaze point: CGPoint?) async -> DriveResult {
-        if let point { gazeIngest(point) }
-        switch verb {
-        case .showNumbers, .showNumbersAll:
-            // The executor already scoped the target set; both verbs show
-            // exactly what they were handed. A pick clicks the chip's
-            // frame center — same path whether dwell or a spoken index.
-            guard !targets.isEmpty else {
-                return DriveResult(status: .blocked("Nothing on screen to number."),
-                                   blockedReason: "no overlay targets")
-            }
-            // "Persistent number chips": off, a pick retires the set as
-            // today; on, the chips stay armed for the next pick until an
-            // explicit dismiss ("hide numbers", a re-arm, Escape).
-            let persist = config.persistentNumbers
-            let pick: @MainActor (Int) -> Void = { [weak self] idx in
-                guard let self, targets.indices.contains(idx) else { return }
-                if !persist {
-                    self.pendingOverlayPick = nil
-                    self.overlayPickOwner = .none
-                    self.overlay.hideChips()
-                }
-                self.feed.add(.dispatch, "picked numbered target \(idx + 1)")
-                Task { @MainActor in
-                    await self.clickOverlayTarget(targets[idx].frame,
-                                                  label: targets[idx].label)
-                }
-            }
-            // Number chips take the pick slot wholesale — a gaze radial
-            // parked on it yields (its contest is re-scored each tick
-            // anyway and can re-arm once the set retires).
-            overlayPickOwner = .numbers
-            gazeRadialPair = nil
-            pendingOverlayPick = pick
-            overlay.showNumbers(targets: targets, persistent: persist, onPick: pick)
-            return DriveResult(status: .done,
-                               history: ["showed \(targets.count) numbered targets"],
-                               dispatchedEffect: true)
-        case .hideNumbers:
-            pendingOverlayPick = nil
-            overlayPickOwner = .none
-            gazeRadialPair = nil
-            overlay.hideChips()
-            return DriveResult(status: .done, history: ["hid numbered targets"],
-                               dispatchedEffect: true)
-        case .clickIndex(let n):
-            // Spoken numbers are 1-based and only mean something while
-            // chips are up — pendingCount is the honest range check.
-            guard overlay.pendingCount > 0, let pick = pendingOverlayPick else {
-                return DriveResult(status: .blocked("No numbered targets are showing."),
-                                   blockedReason: "no pending overlay")
-            }
-            guard (1...overlay.pendingCount).contains(n) else {
-                return DriveResult(status: .blocked("Say the number next to it."),
-                                   blockedReason: "index out of range")
-            }
-            pick(n - 1)
-            return DriveResult(status: .done, history: ["picked target \(n)"],
-                               dispatchedEffect: true)
-        }
-    }
-
-    /// A picked chip clicks its frame's center through the driver's
-    /// desktop pixel path — the same dispatch a gaze click takes. The
-    /// label carries the chip's caption into the deny scan — an explicit
-    /// pick is not a protected-phrase bypass. A landed dispatch rings
-    /// the point so the pick reads as confirmed, not silent.
-    func clickOverlayTarget(_ frame: CGRect, label: String = "") async {
-        let center = CGPoint(x: frame.midX, y: frame.midY)
-        guard await claimActuation(of: label.isEmpty ? nil : label) else { return }
-        defer { Task { await inputGuard.release() } }
-        let px = DriveLoop.desktopPixels(center)
-        // A chip pick is the user's own actuation — the cursorless
-        // direct session, never a cursor chasing their pick.
-        let result = try? await call("click", ["scope": .string("desktop"),
-                                               "x": .number(px.x), "y": .number(px.y),
-                                               "session": .string(Self.directSession)])
-        if result != nil { overlay.flash(at: center) }
-    }
-
     /// Retract the pick surface and drop its pick path — called when a
     /// parked choice resolves, expires, or is cancelled. Chip-scoped on
     /// purpose: the conforming ring and the hint halo retire on their
     /// own lifecycle, so resolving a pick can't order them out from
-    /// under the scorer. Clearing the slot drops the gaze-radial claim
-    /// too — one owner per set.
-    func clearOverlayPick() {
+    /// under the scorer. Clearing the slot invalidates old choice callbacks.
+    func clearOverlayPick(ownedBy askID: UUID? = nil) {
+        if let askID, choiceAskID != askID { return }
         pendingOverlayPick = nil
-        gazeRadialPair = nil
-        overlayPickOwner = .none
+        choiceAskID = nil
         overlay.hideChips()
     }
 
     /// A parked `.choice` rings its options around where the user is
-    /// looking — dwell picks resolve the same continuation a spoken
+    /// looking — explicit picks resolve the same continuation a spoken
     /// ordinal does, with the same 0-based index string. The pick is
     /// bound to the ask it armed for: a pick firing after the ask moved
     /// on (superseded, expired, already answered) declines rather than
     /// resolving a question it was never shown.
     private func armChoiceRadial(_ ask: DriveLoop.Ask, options: [String], on work: Work) {
+        let askID = work.askID
         let onPick: @MainActor (Int) -> Void = { [weak self, weak work] idx in
-            guard let self, let work, options.indices.contains(idx) else { return }
-            guard work.ask == ask, let continuation = work.askContinuation else {
+            guard let self, let work, self.choiceAskID == askID, options.indices.contains(idx) else { return }
+            guard work.askID == askID, work.ask == ask, let continuation = work.askContinuation else {
                 self.clearOverlayPick()
                 return
             }
@@ -1974,11 +1979,7 @@ final class VoiceTaskCoordinator {
             self.clearOverlayPick()
             continuation.resume(returning: "\(idx)")
         }
-        // A task's choice radial takes the pick slot — the gaze claim
-        // can't survive it (a stale pair would let the next scorer tick
-        // disarm THIS radial).
-        overlayPickOwner = .choice
-        gazeRadialPair = nil
+        choiceAskID = askID
         pendingOverlayPick = onPick
         overlay.showRadial(labels: options,
                            near: liveGazePoint ?? screenCenter,
@@ -2026,7 +2027,7 @@ final class VoiceTaskCoordinator {
 
     /// The overlay's dwell-pick feed — gaze points in top-left screen
     /// points. The listen-time pump calls this; TargetOverlay decides
-    /// whether a pending radial or numbered pick resolves.
+    /// whether a pending radial pick resolves.
     func gazeIngest(_ p: CGPoint) {
         lastGazePoint = p
         lastGazeAt = Date()
@@ -2075,7 +2076,9 @@ final class VoiceTaskCoordinator {
         gazeFeed = feed
         let service = gazeService
         service.enumerate = { [weak self] point in
-            await self?.gazeFeed?.enumerate(around: point) ?? .empty
+            guard let self, let feed = self.gazeFeed else { return .empty }
+            return await self.witnessedGazeRoster(at: point, capture: { await CommittedGazeHit.capture(at: $0) },
+                                                 enumerate: { await feed.enumerate(around: $0) })
         }
         service.windowIDUnder = { [weak self] point in
             self?.gazeFeed?.windowUnder(point)?.id
@@ -2085,19 +2088,20 @@ final class VoiceTaskCoordinator {
                   Date().timeIntervalSince(last.at) < 5 else { return nil }
             return last.text
         }
-        service.gazePointSink = { [weak self] point in self?.gazeIngest(point) }
+        service.gazePointSink = { [weak self] point in
+            guard let self else { return }
+            if let rect = self.heldDwellRect, !rect.contains(point) { self.heldDwellRect = nil }
+            self.gazeIngest(point)
+        }
         service.eventSink = { [weak self] event in
             guard let self else { return }
-            self.overlay.intentEvent(event)
-            // `.ambiguous` is a state — the radial retracts on the FIRST
-            // event that isn't ambiguous, i.e. the tie resolved or the
-            // feed released. Without this it would float forever on a
-            // stale contest and suppress dwell for the whole session.
-            // The disarm is chip-scoped — the ring the same event just
-            // presented must survive it.
-            if self.gazeRadialPair != nil, !event.isAmbiguous {
-                self.disarmGazeRadial()
+            let dwellFeedback: Bool
+            switch event {
+            case .acquire(let c), .hold(let c, _):
+                dwellFeedback = self.gazeService.dwellPolicy.allows(c) && !self.gazeService.dwellSuppressed()
+            default: dwellFeedback = false
             }
+            self.overlay.intentEvent(event, dwellFeedback: dwellFeedback)
         }
         service.staleSink = { [weak self] stale in
             guard let self else { return }
@@ -2112,14 +2116,17 @@ final class VoiceTaskCoordinator {
         // double actuation.
         service.dwellSuppressed = { [weak self] in
             guard let self else { return true }
-            return self.pendingOverlayPick != nil
+            return self.heldDwellRect != nil || self.pendingOverlayPick != nil
                 || self.captureActiveProbe()
                 || self.tasks.contains {
                     $0.awaitingAnswer || $0.awaitingApproval || $0.awaitingChoice
                 }
         }
         service.actuate = { [weak self] candidate in
-            await self?.actuateCommitted(candidate) ?? false
+            guard let self, self.heldDwellRect == nil else { return false }
+            return await self.actuateCommitted(candidate, willPress: { self.heldDwellRect = candidate.motorRect }) {
+                self.gazeService.dwellPolicy.allows(candidate) && !self.gazeService.dwellSuppressed()
+            }
         }
         service.noteOut = { [weak self] s in self?.feed.add(.dispatch, s) }
         gazeContextProvider = { [weak service] in await service?.referentContext() }
@@ -2132,60 +2139,35 @@ final class VoiceTaskCoordinator {
         // can't inherit a dead pick path. The one place `hideAll` is
         // correct outside user-driven dismiss.
         service.overlayTeardown = { [weak self] in
+            self?.gazeEnumeration = UUID()
+            self?.nativeGaze = nil
+            self?.heldDwellRect = nil
             self?.clearOverlayPick()
             self?.overlay.hideAll()
             self?.overlay.gazeLost(false)
         }
-        // Scorer ambiguity → the coordinator's radial; a parked overlay
-        // pick (a choice radial already up) keeps precedence — the new
-        // event just waits for the next contested frame.
-        overlay.onAmbiguous = { [weak self] candidates in
-            self?.armGazeRadial(candidates)
-        }
     }
 
-    /// A contested frame rings the top candidates around the gaze — the
-    /// same radial the loop's choice asks use; a pick actuates that
-    /// candidate through the same commit path a dwell fire takes.
-    /// `.ambiguous` is a state event: the same pair re-arms idempotently,
-    /// a NEW pair re-arms with the fresh contest, and a pick owned by
-    /// anything else (a task radial, number chips) keeps precedence —
-    /// the contest is re-scored next tick anyway.
-    private func armGazeRadial(_ candidates: [IntentCandidate]) {
-        let pair = Set(candidates.prefix(TargetOverlay.maxRadialChips).map(\.id))
-        if gazeRadialPair == pair { return } // already armed for this contest
-        guard overlayPickOwner == .none || overlayPickOwner == .gaze else { return }
-        let picks = Array(candidates.prefix(TargetOverlay.maxRadialChips))
-        let onPick: @MainActor (Int) -> Void = { [weak self] idx in
-            // The pair still owning the slot is the only one this pick
-            // may resolve — a stale radial never actuates.
-            guard let self, picks.indices.contains(idx),
-                  self.gazeRadialPair == pair else { return }
-            self.disarmGazeRadial()
-            Task { @MainActor in _ = await self.actuateCommitted(picks[idx]) }
-        }
-        overlayPickOwner = .gaze
-        gazeRadialPair = pair
-        pendingOverlayPick = onPick
-        overlay.showRadial(
-            labels: picks.map { $0.label.isEmpty ? $0.role : $0.label },
-            near: liveGazePoint ?? screenCenter,
-            radius: Self.measuredRadius(for: picks.map(\.label)),
-            onPick: onPick)
-    }
-
-    /// The contest resolved or the feed released — retract the radial
-    /// and free `pendingOverlayPick` so dwell suppression lifts. Only
-    /// fires while a GAZE radial owns the slot, and chip-scoped: the
-    /// conforming ring the scorer presented on the same event is NOT
-    /// gaze-radial state and must survive the disarm. Task choice
-    /// radials retire on their own lifecycle.
-    func disarmGazeRadial() {
-        guard overlayPickOwner == .gaze, gazeRadialPair != nil else { return }
-        gazeRadialPair = nil
-        pendingOverlayPick = nil
-        overlayPickOwner = .none
-        overlay.hideChips()
+    func witnessedGazeRoster(at point: CGPoint,
+                             capture: @MainActor (CGPoint) async -> CommittedGazeHit?,
+                             enumerate: @MainActor (CGPoint) async -> GazeCandidateFeed.Batch) async -> GazeCandidateFeed.Batch {
+        let request = UUID()
+        gazeEnumeration = request
+        let hit = await capture(point)
+        guard !Task.isCancelled, request == gazeEnumeration else { return .empty }
+        var batch = await enumerate(point)
+        guard !Task.isCancelled, request == gazeEnumeration else { return .empty }
+        let previous = nativeGaze
+        nativeGaze = nil
+        guard let hit, let window = batch.windowID else { return batch }
+        let matches = batch.candidates.filter { $0.windowID == window && hit.describes($0, at: point) }
+        guard matches.count == 1, let target = matches.first,
+              await hit.corroborates(target, at: point), !Task.isCancelled,
+              request == gazeEnumeration else { return batch }
+        let id = previous.map { $0.target == target && $0.hit.representsSameElement(as: hit) ? $0.id : UUID() } ?? UUID()
+        nativeGaze = (id, hit, target)
+        batch.nativeWitness = id
+        return batch
     }
 
     /// Candidate → actuation mapping (`CommittedActuation` is file-scope,
@@ -2268,17 +2250,11 @@ final class VoiceTaskCoordinator {
         }
     }
 
-    /// Execute one committed referent — dwell fire, radial pick, or the
-    /// spoken commit path all land here. The pixel form is the same
-    /// desktop-scope dispatch the spoken gaze verb has always taken:
-    /// the consent is the user's own eye+voice/dwell, gated upstream by
-    /// the dwell policy's deny list and mode. Default session is the
-    /// cursorless gaze lane — the eyes are the pointing device.
     @discardableResult
-    func actuateCommitted(_ c: IntentCandidate,
-                          session: String = VoiceTaskCoordinator.gazeSession) async -> Bool {
-        guard let actuation = Self.actuation(for: c, gaze: liveGazePoint)
-        else { return false }
+    func actuateCommitted(_ c: IntentCandidate, verb: FastAction.GazeVerb = .click,
+                          willPress: @MainActor () -> Void = {},
+                          permitted: @escaping @MainActor @Sendable () -> Bool = { true }) async -> Bool {
+        guard verb == .click, !c.motorRect.isEmpty else { return false }
         // The pick lane skips the dwell engine's upstream corpus scan, so
         // this gate carries the same context a dwell commit sees: label,
         // role, URL, window title, app — an "OK" inside a "Confirm
@@ -2286,53 +2262,37 @@ final class VoiceTaskCoordinator {
         let corpus = [c.label, c.role, c.url ?? "", c.windowTitle ?? "",
                       c.appName ?? ""].joined(separator: " ")
         guard await claimActuation(of: corpus) else { return false }
-        let landed = await dispatchCommitted(actuation, on: c, session: session)
+        var target = c
+        target.gazeLease = nil
+        guard permitted(), let point = await gazeService.authorizedPoint(for: c), let bound = nativeGaze,
+              gazeService.batch.nativeWitness == bound.id, bound.target == target else {
+            await inputGuard.release()
+            return false
+        }
+        let provenSource = gazeService.stream.liveObservations()
+        let landed = Self.dispatchCommitted(verb: verb, current: {
+            permitted() && gazeService.authorizes(c, at: point) { latest in
+                bound.hit.matches(target, at: point) && (latest == point || bound.hit.matches(target, at: latest))
+            }
+        }, press: {
+            bound.hit.press {
+                guard permitted(), gazeService.authorizes(c, at: point),
+                      gazeService.stream.isCurrent(provenSource) else { return false }
+                willPress()
+                return true
+            }
+        })
+        if landed { overlay.flash(at: point) }
         await inputGuard.release()
         return landed
     }
 
     /// The dispatch half of `actuateCommitted` — runs under the input
     /// lease `claimActuation` claimed.
-    private func dispatchCommitted(_ actuation: CommittedActuation,
-                                   on c: IntentCandidate,
-                                   session: String) async -> Bool {
-        let at = CGPoint(x: c.motorRect.midX, y: c.motorRect.midY)
-        switch actuation {
-        case .trafficLight(let kind, let pid, let frame):
-            guard WindowControls.press(kind, pid: pid, matching: frame) else { return false }
-            overlay.flash(at: at)
-            return true
-        case .elementClick(let pid, let wid, let token):
-            let result = try? await call("click", [
-                "pid": .number(Double(pid)), "window_id": .number(Double(wid)),
-                "element_token": .string(token),
-                "delivery_mode": .string("background"),
-                "session": .string(session)])
-            if result != nil { overlay.flash(at: at); return true }
-            return false
-        case .pixelClick(let point):
-            let px = DriveLoop.desktopPixels(point)
-            let result = try? await call("click", [
-                "scope": .string("desktop"),
-                "x": .number(px.x), "y": .number(px.y),
-                "session": .string(session)])
-            if result != nil { overlay.flash(at: point); return true }
-            return false
-        }
-    }
-
-    /// The agent under the user's eyes — the scorer's committed
-    /// agentCursor candidate first (semantic), then the raw chip-point
-    /// hit-test the code already had. Feeds "stop" without a name.
-    /// READ-ONLY — `recordSelection: false` keeps "which agent am I
-    /// looking at" polls from biasing the scorer's selection priors.
-    private func gazedAgentSlug() async -> String? {
-        if let (candidate, _) = await gazeService.commitTarget(recordSelection: false),
-           candidate.kind == .agentCursor,
-           candidate.id.hasPrefix("agent:") {
-            return String(candidate.id.dropFirst("agent:".count))
-        }
-        return await gazedChipSlug()
+    static func dispatchCommitted(verb: FastAction.GazeVerb,
+                                  current: () -> Bool, press: () -> Bool) -> Bool {
+        guard verb == .click, current(), !Task.isCancelled else { return false }
+        return press()
     }
 
     // MARK: - Fn-down pre-observe
@@ -2529,24 +2489,6 @@ final class VoiceTaskCoordinator {
         return (pid, wid)
     }
 
-    /// The agent whose cursor chip is under the user's eyes — gaze
-    /// (top-left points) flipped to the AppKit space the poller records,
-    /// loose enough (~64pt) that a glance at the chip counts as pointing.
-    private func gazedChipSlug() async -> String? {
-        guard !lastChipPoints.isEmpty,
-              let point = await freshGazePoint() else { return nil }
-        let appKit = ScreenGeometry.topLeftToAppKit(point)
-        let hit = lastChipPoints.min(by: {
-            Self.distance($0.value, to: appKit) < Self.distance($1.value, to: appKit)
-        })
-        guard let hit, Self.distance(hit.value, to: appKit) <= 64 else { return nil }
-        return hit.key
-    }
-
-    private static func distance(_ a: CGPoint, to b: CGPoint) -> CGFloat {
-        hypot(a.x - b.x, a.y - b.y)
-    }
-
     /// JSONValue doubles for bounds/scale fields — `integer` is exact-Int
     /// only; geometry arrives fractional.
     private static func num(_ v: JSONValue?) -> Double? {
@@ -2595,14 +2537,13 @@ final class VoiceTaskCoordinator {
     /// The spoken answer to "what can I say" — the lane families, terse.
     private static let helpSummary =
         "You can open, hide, or quit apps, click what you're looking at, "
-        + "say show numbers then click two, pause or recalibrate tracking, "
+        + "pause or recalibrate tracking, "
         + "hand work to an agent, or hold Fn and Control to dictate."
 
     /// The overlay cheat sheet — one line per lane family.
     private static let cheatSheet: [String] = [
         "open / hide / minimize / quit <app>",
         "click this · open this · what is this",
-        "show numbers · click two · hide numbers",
         "pause tracking · recalibrate · disable tracking",
         "type <text> here · scroll down",
         "ask <agent> to <task> · stop <agent>",
@@ -2677,6 +2618,9 @@ final class VoiceTaskCoordinator {
     /// index. Spoken numbering is 1-based; the wire back to the loop is
     /// the 0-based index string the radial's onPick also produces.
     static func ordinalIndex(in answer: String, limit: Int) -> OrdinalAnswer {
+        if case .pick(let number) = FastAction.retiredTargetRequest(answer) {
+            return number <= limit ? .picked(number - 1) : .outOfRange
+        }
         let cardinals = ["one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
                          "six": 6, "seven": 7, "eight": 8, "nine": 9]
         let ordinals = ["first": 1, "second": 2, "third": 3, "fourth": 4,

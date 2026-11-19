@@ -299,6 +299,10 @@ actor TrackerHost {
             // A stop() or a newer start that landed between the claim and
             // this probe must not be undone by an adoption.
             guard generation == startGeneration, state == .starting else { return }
+            if Self.releaseProfile != nil {
+                state = .failed("Another tracker is already using the release tracker port.")
+                return
+            }
             // Post-escalation adoption must verify the responder isn't the
             // same wedged tracker the kill chain failed to remove —
             // /health identity is process-stable, so an equal identity
@@ -351,6 +355,16 @@ actor TrackerHost {
         // binary into plain node — `require("electron")` returns a path,
         // main.cjs crashes on `app` being undefined).
         var env = ProcessInfo.processInfo.environment
+        if Self.releaseProfile != nil {
+            guard let extra = Self.portableExtraArguments(env["JARVIS_EYE_TRACKER_ARGS"], forceWasm: forceWasm) else {
+                state = .failed("The portable eye tracker does not accept experiment arguments.")
+                return
+            }
+            env["JARVIS_EYE_TRACKER_ARGS"] = extra.isEmpty ? nil : extra.joined(separator: " ")
+            for key in ["NODE_OPTIONS", "NODE_PATH", "ELECTRON_OVERRIDE_DIST_PATH", "VITE_DEV_SERVER_URL"] {
+                env.removeValue(forKey: key)
+            }
+        }
         // NODE_ENV must NOT leak through: under =production vite dev
         // skips the react-refresh preamble and the renderer crashes on
         // $RefreshSig$. start-prod.cjs sets =production itself.
@@ -372,6 +386,10 @@ actor TrackerHost {
         // the proven vite+electron path.
         let useProdRenderer = ["dist/index.html", "scripts/start-prod.cjs"].allSatisfy {
             FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
+        }
+        guard Self.releaseProfile == nil || useProdRenderer else {
+            state = .failed("The bundled release renderer is missing.")
+            return
         }
         Self.log.notice("tracker node=\(node.path, privacy: .public) renderer=\(useProdRenderer ? "prod" : "dev", privacy: .public)")
         let proc = Process()
@@ -912,14 +930,16 @@ actor TrackerHost {
     /// that only exist after shell init still resolve. nil fails
     /// honestly at the caller — better than /usr/bin/env dying opaquely
     /// inside the tracker boot.
-    nonisolated static func nodeBinary(environment: [String: String], trackerDir: URL? = nil) -> URL? {
+    nonisolated static func nodeBinary(environment: [String: String], trackerDir: URL? = nil,
+                                       bundledOnly: Bool = releaseProfile != nil) -> URL? {
         let fm = FileManager.default
         if let trackerDir {
             let staged = trackerDir.appendingPathComponent("bin/node")
-            if fm.isExecutableFile(atPath: staged.path) {
+            if fm.isExecutableFile(atPath: staged.path), !bundledOnly || staged.resolvingSymlinksInPath().path == staged.path {
                 return staged
             }
         }
+        guard !bundledOnly else { return nil }
         for path in ["/opt/homebrew/bin/node", "/usr/local/bin/node"]
         where fm.isExecutableFile(atPath: path) {
             return URL(fileURLWithPath: path)
@@ -1090,7 +1110,49 @@ actor TrackerHost {
         return payload
     }
 
+    nonisolated static func portableExtraArguments(_ text: String?, forceWasm: Bool) -> [String]? {
+        guard let text else { return [] }
+        let words = text.split(whereSeparator: \.isWhitespace)
+        guard !words.isEmpty else { return [] }
+        for value in ["auto", "webgpu", "wasm"] {
+            if words == ["--web-accelerator", Substring(value)] || words == [Substring("--web-accelerator=" + value)] {
+                return forceWasm ? [] : ["--web-accelerator", value]
+            }
+        }
+        return nil
+    }
+
+    nonisolated static var releaseProfile: String? {
+        let marker = Bundle.main.object(forInfoDictionaryKey: "JevTrackerReleaseProfile")
+#if JEV_PORTABLE_TRACKER
+        return marker as? String ?? ""
+#else
+        return marker.map { $0 as? String ?? "" }
+#endif
+    }
+
+    nonisolated static func portableDirectory(resources: URL?, profile: String) -> URL? {
+        guard profile == "retinaface-v1", let resources else { return nil }
+        let root = resources.resolvingSymlinksInPath().appendingPathComponent("EyeTracker")
+        let fm = FileManager.default
+        for name in ["package.json", "scripts/start-prod.cjs", "electron/main.cjs", "dist/index.html", "dist/.vite/manifest.json",
+                     "node_modules/.bin/electron", "bin/node"] {
+            let file = root.appendingPathComponent(name)
+            guard file.resolvingSymlinksInPath().path == file.path, fm.isReadableFile(atPath: file.path),
+                  (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { return nil }
+        }
+        let metadata = root.appendingPathComponent("package.json")
+        guard let data = try? Data(contentsOf: metadata),
+              let package = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              package["jevTrackerProfile"] as? String == profile else { return nil }
+        let electron = root.appendingPathComponent("node_modules/electron/dist/Electron.app/Contents/MacOS/Electron")
+            .resolvingSymlinksInPath()
+        guard electron.path.hasPrefix(root.path + "/"), fm.isExecutableFile(atPath: electron.path) else { return nil }
+        return root
+    }
+
     static func trackerDirectory() -> URL? {
+        if let releaseProfile { return portableDirectory(resources: Bundle.main.resourceURL, profile: releaseProfile) }
         let fm = FileManager.default
         // Bundled layout first: `make bundle-tracker` stages the tracker
         // at Contents/Resources/EyeTracker. The scripts/ launcher must

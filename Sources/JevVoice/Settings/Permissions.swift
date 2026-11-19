@@ -74,6 +74,10 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
 
     static var missing: [Permission] { allCases.filter { !$0.isGranted } }
 
+    static func restrictedVoiceMissing(isGranted: (Permission) -> Bool = { $0.isGranted }) -> [Permission] {
+        [Permission.microphone, .accessibility].filter { !isGranted($0) }
+    }
+
     /// Triggers the system prompt where one is still available, otherwise opens System Settings.
     @MainActor
     func request() async {

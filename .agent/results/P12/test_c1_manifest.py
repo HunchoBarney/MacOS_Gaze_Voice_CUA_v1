@@ -23,6 +23,84 @@ class RetainedBaseTests(unittest.TestCase):
         spec.loader.exec_module(self.candidate)
         self.stage = manifest.staging()
 
+    def testQuietCandidateDoesNotSubstituteTheDiagnosticFreeze(self):
+        quiet = "final-first-minute-quiet-1"
+        self.assertEqual(self.candidate.choose_base(self.stage, quiet, True)[0], self.candidate.RETAINED_BASE_APP)
+        with self.assertRaises(RuntimeError):
+            self.candidate.choose_base(self.stage, quiet + "-2", True)
+        with self.assertRaises(RuntimeError):
+            self.candidate.verify_retest_release({"label": "final-spaces-diagnostic-1", "built_unsigned_main_sha256": "a" * 64}, "a" * 64, quiet)
+        with self.assertRaises(RuntimeError):
+            self.candidate.choose_base(self.stage, quiet, False)
+
+    def testDiagnosticLabelRequiresItsOwnFreezeAndDestination(self):
+        label = "final-spaces-diagnostic-1"
+        self.assertEqual(self.candidate.choose_base(self.stage, label, True)[0], self.candidate.RETAINED_BASE_APP)
+        with self.assertRaises(RuntimeError):
+            self.candidate.choose_base(self.stage, label, False)
+        with self.assertRaises(RuntimeError):
+            self.candidate.choose_base(self.stage, "final-spaces-diagnostic-2", True)
+        snap = {"label": label, "built_unsigned_main_sha256": "b" * 64}
+        self.candidate.verify_retest_release(snap, "b" * 64, label)
+        for called, frozen, digest in [(label, "final-first-minute-1", "b"),
+                                       ("final-first-minute-1", label, "b"), (label, label, "a")]:
+            with self.assertRaises(RuntimeError):
+                self.candidate.verify_retest_release({**snap, "label": frozen}, digest * 64, called)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            receipt, component = root / "receipt", root / "component"
+            for path in (receipt, component):
+                path.write_text("keep")
+                with self.assertRaises(FileExistsError):
+                    self.candidate.reserve_retest(root, receipt, component, label)
+                self.assertEqual(path.read_text(), "keep")
+                path.unlink()
+            parent = self.candidate.reserve_retest(root, receipt, component, label)
+            self.assertEqual(parent.name, "jev-c1-" + label)
+            with self.assertRaises(FileExistsError):
+                self.candidate.reserve_retest(root, receipt, component, label)
+
+    def testFirstMinuteLabelOnlyAdmitsThePinnedRetainedBase(self):
+        label = "final-first-minute-1"
+        app, sha, metadata = self.candidate.choose_base(self.stage, label, True)
+        self.assertEqual((app, sha), (self.candidate.RETAINED_BASE_APP, self.candidate.RETAINED_BASE_SHA))
+        self.assertEqual(metadata, self.candidate.retained_base_metadata())
+        with self.assertRaises(RuntimeError):
+            self.candidate.choose_base(self.stage, label, False)
+        with self.assertRaises(RuntimeError):
+            self.candidate.choose_base(self.stage, "final-first-minute-2", True)
+        with mock.patch.object(self.candidate, "RETAINED_BASE_SHA", "0" * 64):
+            with self.assertRaisesRegex(RuntimeError, "binary identity"):
+                self.candidate.choose_base(self.stage, label, True)
+
+    def testFirstMinuteDestinationAndEvidenceAreExclusive(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            receipt = root / "receipt.json"
+            component = root / "component.json"
+            for path in [receipt, component]:
+                path.symlink_to(root / "dangling")
+                with self.assertRaises(FileExistsError):
+                    self.candidate.reserve_retest(root, receipt, component)
+                self.assertTrue(path.is_symlink())
+                path.unlink()
+                path.write_text("keep")
+                with self.assertRaises(FileExistsError):
+                    self.candidate.reserve_retest(root, receipt, component)
+                self.assertEqual(path.read_text(), "keep")
+                path.unlink()
+            parent = self.candidate.reserve_retest(root, receipt, component)
+            self.assertEqual(parent.stat().st_mode & 0o777, 0o700)
+            with self.assertRaises(FileExistsError):
+                self.candidate.reserve_retest(root, receipt, component)
+
+    def testFirstMinuteReleaseMustMatchItsNamedFreeze(self):
+        snapshot = {"label": "final-first-minute-1", "built_unsigned_main_sha256": "a" * 64}
+        self.candidate.verify_retest_release(snapshot, "a" * 64)
+        for change in [{"label": "final-r10"}, {"built_unsigned_main_sha256": "b" * 64}]:
+            with self.assertRaises(RuntimeError):
+                self.candidate.verify_retest_release({**snapshot, **change}, "a" * 64)
+
     def testActualRetainedBaseMatchesEveryRecordedIdentity(self):
         app, sha, fields = self.candidate.choose_base(self.stage, "final-r10", True)
         self.assertEqual(app, self.candidate.RETAINED_BASE_APP)

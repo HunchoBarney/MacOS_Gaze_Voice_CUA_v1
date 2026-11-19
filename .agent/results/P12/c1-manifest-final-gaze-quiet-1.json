@@ -1,0 +1,126 @@
+{
+  "app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-gaze-quiet-1/Jev Voice.app",
+  "base_receipt": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-final-r9-2-stage.json",
+  "base_receipt_sha256": "972d1ce3cfc04f0d3ef8c101c1cabfe377ee223b2aae0c93e98f35e76e6714f0",
+  "binary_sha256": "545a26ac1f4e567022db5e6e0e0856d2074ba6ec2ab76a18b309f306ea9792cf",
+  "codex": {
+    "canonical_sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
+    "signed_sha256": "232ecb1008fcbaa395e45032e4d2186a627a840ed6cb0dd6f821512cbf570b9f",
+    "version": "0.160.0"
+  },
+  "conversation_vad": null,
+  "created_at": "2026-11-18T04:57:58.525941+00:00",
+  "driver": {
+    "canonical_sha256": "b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8",
+    "signed_matches_rollback": true,
+    "signed_sha256": "6e10ddf7b4112e8000abc09ef92b6bf26e5b90d9b40727cb9acb9d5069cadcd3",
+    "version": "0.38.0"
+  },
+  "fluid_audio": {
+    "identity": "fluidaudio",
+    "kind": "remoteSourceControl",
+    "location": "https://github.com/FluidInference/FluidAudio.git",
+    "state": {
+      "revision": "0b1f46289fe27d95b5e66ad8be46e64f5ee02ae7",
+      "version": "0.17.5"
+    }
+  },
+  "historical_daily": {
+    "app": "/Users/karanvirkang/jarvis-local/Jev Voice.app",
+    "binary_sha256": "f6abbe98113d7f9362ab98bc48a32e1fa94df6ddb3b376ab27dc56939fa4adf1",
+    "status": "missing"
+  },
+  "installed": false,
+  "integration": {
+    "dependency_source": "Sources/JevVoice/ComputerControl/CuaDependency.swift",
+    "driver_generation": "0.38.0",
+    "experimental_window_images": false,
+    "transport": "app-stdio-jsonrpc"
+  },
+  "licenses": {
+    "cua": "ThirdParty/CuaDriver/LICENSE.md",
+    "fluid_audio": "ThirdParty/FluidAudio/LICENSE",
+    "fluid_voice_ui": "ThirdParty/FluidVoice/NOTICE.md",
+    "speech_attribution": "ThirdParty/FluidAudio/NOTICE.md",
+    "transitive_release_review": "pending C3 portable-package qualification"
+  },
+  "package_resolved_sha256": "8b6e651712aa9cc58deb51ff8e32e71b1ec431503dcecf9535dd4ed2f8ec782c",
+  "private_tester_keys": "existing Keychain policy; no secret values in this manifest",
+  "required_resources": [
+    "cua-driver",
+    "CodexRuntime/codex",
+    "EyeTracker/bin/node",
+    "EyeTracker/package.json",
+    "EyeTracker/dist/models/gaze_1x3x160x160.onnx",
+    "EyeTracker/dist/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
+    "EyeTracker/dist/models/vsdlm_l.onnx",
+    "ThirdParty/CuaDriver/LICENSE.md",
+    "ThirdParty/CuaDriver/THIRD_PARTY_NOTICES.md",
+    "ThirdParty/FluidVoice/LICENSE",
+    "ThirdParty/FluidVoice/NOTICE.md",
+    "ThirdParty/FluidAudio/LICENSE",
+    "ThirdParty/FluidAudio/NOTICE.md"
+  ],
+  "resource_manifest_sha256": "61f0ae9338c44a40382a493f7c20bb5ea4fa8cab589533d5d0d0b7c25a030117",
+  "rollback_app": "/Users/karanvirkang/jarvis-local/c1-candidates/jev-c1-final-r9-2-ksh975zx/Jev Voice.app",
+  "rollback_role": "last_verified_candidate",
+  "rollback_sha256": "79e8859b32d849e2777c741cefec099123cae9e18a6d081de8bab440cabb276b",
+  "schema_version": 1,
+  "source_snapshot": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.context/c1-local/final-gaze-quiet-1-source/manifest.json",
+  "source_snapshot_sha256": "05eeae505c222f16c7870dd6f97ed019a1f1538d3c0953f9ddcb560c4e47ad76",
+  "speech_models": {},
+  "stage_receipt": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P12/c1-final-gaze-quiet-1-stage.json",
+  "stage_receipt_sha256": "e3e4c688a5134056cc55b8cb2a9f70091d10bc7f991f315f8f0b04ee5f763232",
+  "tracker_overlay": {
+    "electron": "node_modules/.pnpm/electron@42.4.1/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    "inputs": {
+      "EyeTracking/electron/externalStore.cjs": "3d3d4498c8a5474b48b919bff1049fddcbd6c0cd6ffe0cdc064189a6e7ee0fc8",
+      "EyeTracking/electron/main.cjs": "6478958b74be5750e7382fb551cdf2bd0dd1cdc84d82a43e42ef1a1d79db1c93",
+      "EyeTracking/index.html": "6efedc3e4936210323ae0debd5ce083dbe65878f46c7bbd117ff477b1d8961e5",
+      "EyeTracking/package.json": "fbec43d88fb46b373a28c93856aca4b2bc9ab57a1c13a4169693d458f4604209",
+      "EyeTracking/pnpm-lock.yaml": "e84d83a224dc7551fed2e86a90145412616fc3d8cba1505ea71a1d8806ea7898",
+      "EyeTracking/scripts/start-prod.cjs": "1549de8bcc0d68b6e58cccb1a8d53cfff360c32c05b1be982de7681b8b410a30",
+      "EyeTracking/tsconfig.json": "7fbe8ddd91313e1b1d7891360815c9f0fb203120a5e4f346d87ca49f66c3760f",
+      "EyeTracking/vite.config.ts": "8b922469a9d642580934ab0faee60159b6da0b31363b0cdcbd080cee7c3bb27b",
+      "EyeTracking/web/src/App.tsx": "0df7b731cae8ec639a0290b8bfab8cb3b7948aa75e515dac11e4cc05a3e3f441",
+      "EyeTracking/web/src/flows.test.ts": "e4dc8875f46dff4a5559ca165ee3526baaba4302bba8d9dbeeabc860685c9ef3",
+      "EyeTracking/web/src/global.d.ts": "c6c3919c39cbc3817adb25e27e76d373a7ad4872902dc4ccdbb63c2582105f9a",
+      "EyeTracking/web/src/inference/core.test.ts": "22a8ff1077364e5784a6aca6c98bed8f999d9c5b227e74fdce3e413765b2f6fa",
+      "EyeTracking/web/src/inference/core.ts": "235728ffd9a1ebe2ddc10c651478ecd482e0b15f3e666dff04ff2d3f937dba4e",
+      "EyeTracking/web/src/inference/inferenceWorker.ts": "2de79b1891460ecff7d704af562009252a6b377124f8cf2a2af2416c45a49a40",
+      "EyeTracking/web/src/inference/presentedFrame.test.ts": "79c7437acdf36e3b3be53652adc99e30e9f4594deac89fff77f143d11adb14d4",
+      "EyeTracking/web/src/inference/presentedFrame.ts": "ad3624d7568819c0f7beb0b2fae1c962fa80a1bc9ece9566854142038dab52c8",
+      "EyeTracking/web/src/inference/runtimeSource.test.ts": "d38754620827fad4b798df088c862ca2b8111f352cb9fcbf59581779a0465c18",
+      "EyeTracking/web/src/inference/runtimeSource.ts": "bd5f9fbf198a5b8091a3adf6795b0964f317c8a63c13503af4b75fcae716ee42",
+      "EyeTracking/web/src/inference/runtimes.ts": "3c0900055cd2063a063051e49b6079c072ea51ea4b4bc753efede415a79784d5",
+      "EyeTracking/web/src/inference/temporal.test.ts": "de965ddc8fae1eaa1af28ed2ee9923cffe9dbb56644d834c4d7ac41ed0ce5489",
+      "EyeTracking/web/src/inference/webRuntime.ts": "35ba35411cd3a00ff183385a754f1a521d67ccc8776d9cfb9d657c4a01b690c1",
+      "EyeTracking/web/src/logger.ts": "f1bdfd574e613dcf89c98ab225e0f872a43f5943d9c8b5ec77d833b2fbc9b31a",
+      "EyeTracking/web/src/styles.css": "80dcb21ac4909dc23724ad11b9818f32b451e6838afad7a654b71534dda534a5",
+      "EyeTracking/web/src/uiState.test.ts": "4f269db050db1d37e000caf1c790459913fb46866151071bdd319b438034ba5e",
+      "EyeTracking/web/src/uiState.ts": "dadb4f139afa56e4e91051590e1f59038ddb1ecd8ec153e230ccca045cad2c2b",
+      "EyeTracking/web/src/vite-env.d.ts": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+      "Sources/JevVoice/Gaze/TrackerHost.swift": "878f646c9d23999c6a628b7980323ea9607dd6b8d2b12c8bac8e99e6f130fddb"
+    },
+    "launcher": "scripts/start-prod.cjs",
+    "main": "electron/main.cjs",
+    "node": "bin/node",
+    "outputs": {
+      "assets/index-Cybb5dnu.js": "a3813a4eaaef20cc9cf12dbe3d3aabb215ed4f33d76072ba105ad06943d1017b",
+      "assets/index-l2cG5lwS.css": "34af7e29af4569f674498e4ad1a20a6a11cad7cae520dcb6dbc20aaf79bfd8d0",
+      "assets/inferenceWorker-DpmUy7PN.js": "3863f7945b3291a32a0f03a375b3faf5bb3864011594c819e3abfa61b5bf36ca",
+      "assets/ort-wasm-simd-threaded.asyncify-D5D0fo7z.wasm": "39f9f0894d478800487ed9f7dbe92618498db320cf55c8e3d89adff8dce658da",
+      "assets/ort.webgpu.bundle.min-DErkXLLQ.js": "501d03be8de0c04eacb19efa936e34d085ac5ed2cca4dcc78a42185cf98d1daf",
+      "index.html": "396f024016d3b9bac18e3c150e0f0ea698ef6c24b7284de9e8571bf523da3ddd"
+    },
+    "pins_sha256": "3ad65625bcae736e6bc1564b1dea68b5a969fce8b31c0c1ef105e2cf63fe8bec",
+    "producer": "electron/externalStore.cjs",
+    "release_build_sha256": "f1ba903a734fca21a4f39ae0016dc407533d1bbca59ece9081dd08f032b1efef",
+    "renderer": "dist/index.html",
+    "reviewed_source_delta_sha256": "97a8e64e63bf10b222b04adc4030c5160ff16fd705e5d7f015c1017ff028d7de",
+    "shim": "node_modules/.bin/electron",
+    "shim_sha256": "a8fe569ad0c1efe9b7e18f575c2d9f0ab07a22068ba504bff98079600e0dd2a5",
+    "tracker": "Contents/Resources/EyeTracker"
+  },
+  "voice_provider": "openai-realtime"
+}

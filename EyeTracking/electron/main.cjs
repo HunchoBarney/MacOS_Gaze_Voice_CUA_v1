@@ -9,6 +9,7 @@ const { startHostWatchdog } = require("./hostWatchdog.cjs");
 const { copyIfStale } = require("./assetCopy.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
+const releaseRetinaface = require("./releaseProfile.cjs").retinafaceRelease(require("../package.json").jevTrackerProfile, cliArgs());
 const defaultCalibrationFile = path.join(repoRoot, ".gaze_calibration.json");
 // 18x18 alpha-only dot — macOS recolors template images for the menu bar.
 const TRAY_ICON_DATA_URL =
@@ -18,13 +19,15 @@ let mainWindow = null;
 let selectedDisplay = null;
 let rendererConfig = null;
 let rendererReady = false;
+let rendererFrame = null;
 // Set by the renderer's modal-interactive IPC — while a calibration/accuracy
 // modal owns the screen the overlay must keep mouse+keyboard focus, and both
 // the region updater and the cursor-idle sampler must stand down.
 let modalInteractive = false;
-// Renderer-driven pause (set-paused IPC / report-state): gates the
-// cursor-idle sampler and the lip-click path exactly like modalInteractive.
+// Pause fences immediately; only a current renderer acknowledgement resumes.
 let paused = false;
+let requestedPaused = false;
+let pauseRevision = 0;
 let debugOverlay = false;
 let shapeOverlay = false;
 // Set by the child-process-gone handler when the GPU child dies — pure
@@ -293,6 +296,7 @@ function resolveRepoPath(value) {
 }
 
 function useDevServer() {
+  if (releaseRetinaface) return false;
   return Boolean(process.env.VITE_DEV_SERVER_URL) || (!app.isPackaged && process.env.NODE_ENV !== "production");
 }
 
@@ -366,7 +370,7 @@ function webInferenceConfig(args, displayBounds) {
   const lipMotionModel = resolveRepoPath(readOption(args, "--lip-motion-model", "public/models/vsdlm_l.onnx"));
   // Phase-4 ensemble signal: MobileOne-S0 gaze net (~5MB). Runs async at ~5Hz
   // alongside the mesh pipeline; the feature map fuses it with geometry.
-  const appearanceModel = hasFlag(args, "--no-appearance-model")
+  const appearanceModel = releaseRetinaface || hasFlag(args, "--no-appearance-model")
     ? null
     : resolveRepoPath(readOption(args, "--appearance-model", "public/models/mobileone_s0_gaze.onnx"));
   const enableLipMotion = hasFlag(args, "--enable-lip-motion") && detector === "yolo";
@@ -396,10 +400,12 @@ function webInferenceConfig(args, displayBounds) {
     lipMotionModel,
     // Only *ModelUrl fields cross the bridge — the renderer loads models by
     // URL; on-disk paths stay in main (detectorModel covers the active one).
-    detectorModelUrl: copyModelForRenderer(detectorModel),
-    gazeModelUrl: copyModelForRenderer(gazeModel),
-    lipMotionModelUrl: copyModelForRenderer(lipMotionModel),
-    onnxWasmBaseUrl: copyOnnxRuntimeAssetsForRenderer(),
+    detectorModelUrl: releaseRetinaface ? require("url").pathToFileURL(detectorModel).href : copyModelForRenderer(detectorModel),
+    gazeModelUrl: releaseRetinaface ? require("url").pathToFileURL(gazeModel).href : copyModelForRenderer(gazeModel),
+    lipMotionModelUrl: releaseRetinaface ? "" : copyModelForRenderer(lipMotionModel),
+    onnxWasmBaseUrl: releaseRetinaface
+      ? require("url").pathToFileURL(path.join(repoRoot, "dist/runtime-assets/onnxruntime-web") + path.sep).href
+      : copyOnnxRuntimeAssetsForRenderer(),
     appearanceModelUrl: appearanceModel ? copyModelForRenderer(appearanceModel) : undefined,
     smoothingAlpha: readNumberOption(args, "--smoothing-alpha", 0.65),
     smoothingAlphaY: readNumberOption(args, "--smoothing-alpha-y", 0.45),
@@ -496,9 +502,17 @@ function sendToRendererChannel(channel, payload) {
 
 // Menu-style control dispatch — POST /control, ⌘⇧P, and the tray menu all
 // land here; the renderer turns the action into a UI state change and
-// reports it back through set-paused / report-state / set-settings.
+// acknowledges pause revisions through set-paused.
 function dispatchMenuAction(action, value) {
   const payload = { type: "menu_action", action };
+  if (action === "set_paused" || action === "pause_toggle") {
+    if (action === "pause_toggle" && modalInteractive) return;
+    requestedPaused = action === "pause_toggle" ? !requestedPaused : value === true;
+    payload.pause_revision = ++pauseRevision;
+    value = requestedPaused;
+    if (requestedPaused) applyPausedFlag(true);
+    if (!rendererReady) return;
+  }
   if (value !== undefined) {
     payload.value = value;
   }
@@ -528,7 +542,7 @@ function handleControlAction(action, value) {
   }
   // set_paused carries the target state (the host's screen-lock parking),
   // not a toggle — the renderer applies it through the same path a manual
-  // pause uses and reports it back through set-paused / report-state.
+  // pause uses and acknowledges the revision through set-paused.
   if (action === "set_paused") {
     dispatchMenuAction("set_paused", Boolean(value));
     return;
@@ -570,6 +584,7 @@ function applyPausedFlag(value) {
     return;
   }
   paused = next;
+  gazeStateStore.updateSharedState({ paused });
   // Same stand-down as modal mode — a paused tracker must not land
   // mouth-clicks on whatever happens to sit under the gaze point.
   lipClickController?.setCalibrationActive(paused || modalInteractive);
@@ -808,19 +823,19 @@ function applyHostedChromePolicy() {
   }
 }
 
-function createNutMouseAdapter() {
-  return {
-    move: (point) => mouse.setPosition(new Point(point.x, point.y)),
-    press: () => mouse.pressButton(Button.LEFT),
-    release: () => mouse.releaseButton(Button.LEFT)
-  };
-}
-
 function configureLipClickController(args, displayBounds) {
+  if (isHostedMode()) {
+    lipClickController = null;
+    return;
+  }
   const detector = readOption(args, "--detector", "retinaface");
   const requested = hasFlag(args, "--enable-lip-motion");
   lipClickController = createLipClickController({
-    mouse: createNutMouseAdapter(),
+    mouse: {
+      move: (point) => mouse.setPosition(new Point(point.x, point.y)),
+      press: () => mouse.pressButton(Button.LEFT),
+      release: () => mouse.releaseButton(Button.LEFT)
+    },
     getDisplayBounds: () => displayBounds,
     logger: console,
     emitEffect: (payload) => sendToRenderer(payload, { updateStore: false })
@@ -959,6 +974,7 @@ function createWindow() {
     enableInferenceTime: hasFlag(args, "--enable-inference-time"),
     debug: hasFlag(args, "--debug"),
     showCameraMarker: hasFlag(args, "--show-camera-marker"),
+    shapeOverlay: shapeOverlay && !debugOverlay,
     webInference: webInferenceConfig(args, bounds)
   };
   // webInference is always populated, so every former options fallback
@@ -1051,22 +1067,35 @@ function createWindow() {
       .join("\n")
   );
 
-  mainWindow.webContents.on("did-start-loading", () => {
+  const sourceWindow = mainWindow;
+  const retireRendererSource = () => {
+    if (mainWindow !== sourceWindow) return;
+    rendererReady = false;
+    rendererFrame = null;
+    gazeStateStore.updateFromBackendMessage({ type: "gaze", away: true, held_reason: "source_stopped", confidence: 0 });
+  };
+  mainWindow.on("closed", retireRendererSource);
+  mainWindow.webContents.on("did-navigate", () => {
+    if (mainWindow === sourceWindow) rendererFrame = sourceWindow.webContents.mainFrame;
+  });
+  mainWindow.webContents.on("did-start-navigation", (details) => {
+    if (!details.isMainFrame || details.isSameDocument) return;
     // Navigation/reload starts a fresh renderer that hasn't sent
     // renderer-ready — stop treating the old one as sendable and drop the
     // click shield back until it re-asks for modal interactivity. `paused`
     // stays main's truth: the fresh renderer boots unpaused, so the
     // renderer-ready handler re-emits it — forcing it false here would
     // silently drop a deliberate pause (and the host's screen-lock park).
-    rendererReady = false;
+    retireRendererSource();
     modalInteractive = false;
     lipClickController?.setCalibrationActive(paused || modalInteractive);
     gazeStateStore.updateSharedState({ paused });
     rebuildTrayMenu();
     applyPassiveOverlayMode();
   });
-  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-    rendererReady = false;
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    retireRendererSource();
     console.error(`Renderer failed to load ${validatedURL}: ${errorCode} ${errorDescription}`);
     sendToRenderer({
       type: "status",
@@ -1081,7 +1110,7 @@ function createWindow() {
   mainWindow.once("ready-to-show", applyPassiveOverlayMode);
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     console.error(`Renderer process gone: ${details.reason}`);
-    rendererReady = false;
+    retireRendererSource();
     // A crash while modal-interactive leaves an invisible always-on-top
     // window eating every mouse event on the screen — re-shield first, then
     // reload to auto-recover. Same pause-truth rule as did-start-loading:
@@ -1124,10 +1153,8 @@ function createWindow() {
     }
   });
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else if (!app.isPackaged && process.env.NODE_ENV !== "production") {
-    mainWindow.loadURL("http://127.0.0.1:5173");
+  if (useDevServer()) {
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5173");
   } else {
     mainWindow.loadFile(path.join(repoRoot, "dist", "index.html"));
   }
@@ -1225,13 +1252,20 @@ ipcMain.handle("write-report", async (_event, filePath, payload) => {
   }
 });
 
-ipcMain.on("publish-backend-message", (_event, payload) => {
+function isCurrentRenderer(event) {
+  return mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents &&
+    rendererFrame !== null && event.senderFrame === rendererFrame && rendererFrame === mainWindow.webContents.mainFrame;
+}
+
+ipcMain.on("publish-backend-message", (event, payload) => {
+  if (!rendererReady || !isCurrentRenderer(event)) return;
   gazeStateStore.updateFromBackendMessage(payload);
   handleLipMotionMessage(payload);
   refreshTrayStateLabel();
 });
 
-ipcMain.on("renderer-ready", () => {
+ipcMain.on("renderer-ready", (event) => {
+  if (!isCurrentRenderer(event)) return;
   rendererReady = true;
   // Drain a snapshot, never the live queue: a send that throws on a
   // crashed-but-undestroyed webContents re-queues its message once and
@@ -1257,24 +1291,7 @@ ipcMain.on("renderer-ready", () => {
       break;
     }
   }
-  // A fresh renderer boots unpaused — push main's pause truth down so a
-  // deliberate pause (or the host's screen-lock park) survives a
-  // reload/crash. Pause actions already queued above are the LATEST
-  // intent and outrank the flag — pushing the stale flag over them would
-  // un-park a pause that was requested while the renderer was down.
-  let effectivePaused = paused;
-  for (const item of queue) {
-    const payload = item.payload;
-    if (item.channel !== "backend-message" || !payload || payload.type !== "menu_action") {
-      continue;
-    }
-    if (payload.action === "set_paused") {
-      effectivePaused = payload.value === true;
-    } else if (payload.action === "pause_toggle") {
-      effectivePaused = !effectivePaused;
-    }
-  }
-  dispatchMenuAction("set_paused", effectivePaused);
+  dispatchMenuAction("set_paused", requestedPaused);
 });
 
 // Modal phases (calibration, accuracy test) own the whole screen — disable
@@ -1350,19 +1367,18 @@ ipcMain.on("overlay-regions", (_event, regions) => {
 // Renderer pause toggle (tray/menu/hotkey actions all funnel through the
 // renderer, which confirms the new state here) — gates cursor-idle sampling
 // and the lip-click path, and lands in the /snapshot `paused` slice.
-ipcMain.on("set-paused", (_event, value) => {
-  applyPausedFlag(value);
-  gazeStateStore.updateSharedState({ paused });
+ipcMain.on("set-paused", (event, ack) => {
+  if (!rendererReady || !isCurrentRenderer(event) || !ack || typeof ack !== "object" ||
+      ack.revision !== pauseRevision || typeof ack.paused !== "boolean") return;
+  requestedPaused = ack.paused;
+  applyPausedFlag(ack.paused);
   rebuildTrayMenu();
 });
 
-// Periodic shared-state report — merges whichever slices the renderer
-// included (paused, calibration_status, settings) into the snapshot.
-ipcMain.on("report-state", (_event, report) => {
-  if (report && typeof report === "object" && report.paused !== undefined) {
-    applyPausedFlag(report.paused);
-  }
-  const changed = gazeStateStore.updateSharedState(report);
+// Periodic state reports carry diagnostics/settings, never pause authority.
+ipcMain.on("report-state", (event, report) => {
+  if (!rendererReady || !isCurrentRenderer(event) || !report || typeof report !== "object") return;
+  const changed = gazeStateStore.updateSharedState({ settings: report.settings, calibration_status: report.calibration_status });
   if (changed.length > 0) {
     rebuildTrayMenu();
   }

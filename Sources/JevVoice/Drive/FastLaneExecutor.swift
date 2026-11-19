@@ -30,7 +30,8 @@ extension DriveLoop {
     }
 
     @MainActor
-    static func openForegroundApplication(_ bundleID: String) async throws -> Int {
+    static func openForegroundApplication(_ bundleID: String,
+        isCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> Int {
         try Task.checkCancellation()
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
               Bundle(url: url)?.bundleIdentifier == bundleID else {
@@ -42,6 +43,7 @@ extension DriveLoop {
             configuration.activates = true
             configuration.hides = false
             configuration.createsNewApplicationInstance = false
+            guard isCurrent() else { throw CancellationError() }
             let app = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
             guard !app.isTerminated, app.bundleIdentifier == bundleID else {
                 throw DriverConnectionError.refused("The requested application identity could not be verified.")
@@ -61,10 +63,6 @@ extension DriveLoop {
         /// The resolved app row's live pid — nil when the app isn't running.
         var pid: Int? = nil
         var launchURLs: [String] = []
-        /// The qualifier was the display-scope sentinel ("on this monitor") —
-        /// the app can't be known until live window rows answer which display
-        /// the gaze point sits on. `runFastLane` resolves it at dispatch.
-        var displayScoped = false
         var isScroll: Bool {
             if case .scroll? = action?.body { return true }
             return false
@@ -86,6 +84,7 @@ extension DriveLoop {
     /// used only when the instruction itself names no app.
     static func resolveFastLane(goal: String, apps: [JSONValue], appHint: String? = nil,
                                 frontmostBundle: String?) -> FastResolution? {
+        if FastAction.retiredTargetRequest(goal) != nil { return nil }
         if let parsed = FastAction.parse(goal) {
             switch Self.resolveParsed(parsed, goal: goal, apps: apps,
                                       appHint: appHint, frontmostBundle: frontmostBundle) {
@@ -138,6 +137,7 @@ extension DriveLoop {
     private static func resolveParsed(_ parsed: (action: FastAction, appQualifier: String?),
                                       goal: String, apps: [JSONValue], appHint: String?,
                                       frontmostBundle: String?) -> ParsedOutcome {
+        guard !parsed.action.deictic else { return .vetoed }
         // Global lanes need no app and must not queue behind an app
         // lease — a media key is a system event, not a window action.
         if case .mediaKey = parsed.action.body {
@@ -160,14 +160,13 @@ extension DriveLoop {
             else { return .vetoed }
             return .resolved(FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: ""))
         }
-        // The desktop and overlay lanes need no app either — a system
+        // The desktop lanes need no app either — a system
         // chord posts scope:"desktop", "do that again" replays the
         // coordinator's log, "where did X go" hunts every window,
-        // overlay verbs number what's under the gaze point, and
         // dictation verbs steer the capture lane. Peeled qualifiers are
         // emphasis, the same as the gaze referents above.
         switch parsed.action.body {
-        case .systemHotkey, .overlay, .repeatLast, .locate, .dictation:
+        case .systemHotkey, .repeatLast, .locate, .dictation:
             guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
             else { return .vetoed }
             return .resolved(FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: ""))
@@ -183,18 +182,7 @@ extension DriveLoop {
         let qualifiers: [String?] = parsed.appQualifier != nil
             ? [parsed.appQualifier] : [nil, appHint]
         for qualifier in qualifiers {
-            // "on this monitor" names a display, not an app — the target
-            // is the app owning the topmost window on the screen under
-            // the gaze point. Live window rows answer that at dispatch
-            // time; the resolution only marks the lane display-scoped.
-            if qualifier == FastAction.gazeDisplayQualifier {
-                guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
-                else { return .vetoed }
-                var resolution = FastResolution(action: parsed.action, openVerb: nil,
-                                                name: "", bundle: "")
-                resolution.displayScoped = true
-                return .resolved(resolution)
-            }
+            if qualifier == FastAction.gazeDisplayQualifier { return .vetoed }
             // "search google for X" names an engine, not an installed
             // app — the engine URL is the deterministic target. The
             // check runs before app resolution so an installed app
@@ -293,10 +281,12 @@ extension DriveLoop {
                      scrollLines: Int? = nil,
                      scrollAnchor: NativeWindowObservation.ScrollViewport? = nil) async throws -> DriveResult? {
         let nativeEvent = nativeEvents ?? self.nativeEvent
-        var bundle = resolved.bundle
-        var name = resolved.name
-        var displayPID: Int?
+        let bundle = resolved.bundle
+        let name = resolved.name
         try Task.checkCancellation()
+        guard resolved.action?.deictic != true, FastAction.retiredTargetRequest(task.goal) == nil else {
+            return settle(.blocked("Please name the control you want to use."), task, history)
+        }
         // App-free lanes dispatch before any inventory read: media keys post
         // to the HID tap and a navigation URL binds a browser or goes
         // through LaunchServices.
@@ -343,6 +333,9 @@ extension DriveLoop {
                                        denied: task.deny, confirmed: &confirmed)
                 return try await dispatchWebSearch(url, task: task, history: &history)
             case .gaze(let verb):
+                guard verb == .describe || !isDirectVoiceLoop else {
+                    return settle(.blocked("Please name the control you want to use."), task, history)
+                }
                 feed(action.description)
                 // Gaze referents dispatch on the gaze session — the same
                 // label the candidate feed's reads mint element tokens
@@ -379,12 +372,6 @@ extension DriveLoop {
                                   task, history, blockedReason: "tracker control failed")
                 }
                 return done("\(action.result).", task, history, effect: true)
-            case .overlay(let verb):
-                feed(action.description)
-                try await gateExplicit("overlay pick", corpus: action.description,
-                                       denied: task.deny, confirmed: &confirmed)
-                return try await runOverlayVerb(verb, task: task, session: session,
-                                                history: &history)
             case .repeatLast:
                 feed(action.description)
                 // The coordinator owns the replay log and replays confirmed
@@ -400,31 +387,6 @@ extension DriveLoop {
                                            history: &history)
             default:
                 break
-            }
-        }
-        // A deictic window verb ("minimize this", "close it", "hide this")
-        // names the window under the user's eyes — resolve it before app
-        // binding so the action lands on the gazed window, never the
-        // frontmost app's focused one. A dead tracker refuses like a
-        // deictic type: retargeting the frontmost window is a mutation
-        // the user didn't point at.
-        if let action = resolved.action, action.deictic,
-           let control = Self.deicticWindowControl(for: action) {
-            return try await runDeicticWindowControl(control, action: action, task: task,
-                                                     session: session, history: &history,
-                                                     confirmed: &confirmed)
-        }
-        // A display-scoped qualifier ("minimize on this monitor") names no
-        // app — the target is the app owning the topmost window on the
-        // display under the gaze point. It resolves here, not in the static
-        // resolver, because it needs live window rows.
-        if resolved.displayScoped {
-            switch try await displayScopedApp(session: session) {
-            case .app(let scopedName, let scopedBundle, let scopedPID):
-                name = scopedName; bundle = scopedBundle; displayPID = scopedPID
-            case .refused(let why):
-                return settle(.blocked(why), task, history,
-                              blockedReason: "display scope unresolved")
             }
         }
         guard !bundle.isEmpty else { return nil }
@@ -449,7 +411,7 @@ extension DriveLoop {
         // ride the launch hand-off so the app receives them on arrival.
         var launchedPID: Int?
         var foregroundLaunched = false
-        var pid = task.pid ?? displayPID ?? resolved.pid ?? Self.runningPID(bundle: bundle, in: [])
+        var pid = task.pid ?? resolved.pid ?? Self.runningPID(bundle: bundle, in: [])
         if pid == nil, task.windowID != nil || task.windowName != nil {
             return settle(.blocked("The pinned application's window is no longer available. No replacement was launched."),
                           task, history, blockedReason: "pinned app missing")
@@ -492,10 +454,11 @@ extension DriveLoop {
                 // can honestly report "effect unknown". Never replay the
                 // mutation — verify by observation instead: AppKit knows
                 // whether the process is running without any driver grant.
-                pid = await Self.observedPID(bundle: bundle)
-                guard pid != nil else {
-                    return settle(.blocked("The launch was dispatched but its result is unknown, and \(name) is not running. Nothing was retried."),
-                                  task, history, blockedReason: "launch unverifiable")
+                pid = await observeLaunchedPID(bundle)
+                try Task.checkCancellation()
+                guard let observed = pid, observed > 0 else {
+                    return settle(.blocked("I requested \(name), but couldn't confirm it opened."),
+                                  task, history, blockedReason: Self.launchUnverifiedReason)
                 }
                 launchedPID = pid
             } catch let error as DriverConnectionError {
@@ -531,8 +494,8 @@ extension DriveLoop {
         // the effect predicate reads, dispatch, verify.
         var retainedTextTarget: FocusedTextBinding.Capture?
         var nativeTextWindow: FocusedTextBinding.WindowSnapshot?
-        if requiresCapturedTextTarget, case .type(let payload) = action.body,
-           !action.deictic, !resolved.displayScoped, task.windowName == nil,
+        if isDirectVoiceLoop, case .type(let payload) = action.body,
+           task.windowName == nil,
            !BrowserSupport.isBrowser(bundleID: bundle),
            task.application == bundle, task.values["text"] == payload,
            CuaPolicy.deniedInTypedPayload(payload) == nil, let pinned = task.windowID {
@@ -605,51 +568,6 @@ extension DriveLoop {
                 window: WindowRef(pid: pid, windowID: windowID), name: name, bundle: bundle,
                 session: session, history: &history, lineAmount: scrollLines, scrollAnchor: scrollAnchor)
         case .type(let payload):
-            // "type X here" binds the target to the gaze point — a dead
-            // or unsure tracker must not retarget the bound/frontmost
-            // window: typing into it is a mutation the user didn't
-            // point at. Non-deictic type keeps the bound-window path.
-            if action.deictic {
-                let sample: GazeSample
-                do {
-                    sample = try await gazeSample()
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    return settle(.blocked("The eye tracker isn't answering — tell me which window instead."),
-                                  task, history, pid: pid, windowID: windowID,
-                                  blockedReason: "deictic gaze unavailable")
-                }
-                guard let target = try await windowAtPoint(CGPoint(x: sample.x, y: sample.y),
-                                                         session: session) else {
-                    return settle(.blocked("There's no window where you're looking — tell me which window you mean."),
-                                  task, history, pid: pid, windowID: windowID,
-                                  blockedReason: "no window at gaze point")
-                }
-                // The window under the gaze is the typed-text's context —
-                // scan its identity for the corpus, then the payload
-                // itself: the command-shaped deny list reads the actual
-                // text before any dispatch (the field-label scan can't
-                // see it, same as `decide`'s args["text"] rule).
-                if let hit = CuaPolicy.deniedInTypedPayload(payload) {
-                    feed("denied: typed payload \(hit)")
-                    throw Abort.denied("Refused: the text itself runs '\(hit)' — shell-shaped input is the user's own hands, not ours")
-                }
-                try await gateExplicit("type_text",
-                                       corpus: "\(target.app) \(target.title)",
-                                       denied: task.deny, confirmed: &confirmed)
-                let px = Self.desktopPixels(CGPoint(x: sample.x, y: sample.y))
-                _ = try await call("click", ["scope": .string("desktop"),
-                                             "x": .number(px.x), "y": .number(px.y),
-                                             "session": .string(session)])
-                _ = try await call("type_text",
-                                   ["pid": .number(Double(target.pid)),
-                                    "text": .string(payload),
-                                    "session": .string(session)])
-                return done("Typed at the point you were looking at.", task, history,
-                            pid: target.pid, windowID: target.windowID,
-                            bundleID: bundle, effect: true)
-            }
             return try await dispatchFastType(payload, pid: pid, window: windowID,
                                               name: name, bundle: bundle, task: task,
                                               session: session, history: &history,
@@ -660,7 +578,7 @@ extension DriveLoop {
                                                task: task, session: session, history: &history,
                                                confirmed: &confirmed)
         case .mediaKey, .systemHotkey, .navigateURL, .webSearch, .appControl,
-             .gaze, .tracker, .overlay, .repeatLast, .locate, .dictation:
+             .gaze, .tracker, .repeatLast, .locate, .dictation:
             return nil // handled above
         }
     }
@@ -684,7 +602,7 @@ extension DriveLoop {
             // app on every macOS version. `unhide()` can return false even
             // though the OS restores it asynchronously; trust observed state,
             // then still demand a real window and a verified raise.
-            _ = try await tracedNativeActivation(events: nativeEvent, restoringHidden: true) { self.unhideApp(pid) }
+            _ = try await tracedNativeActivation(events: nativeEvent, restoringHidden: true) { try await self.unhideApp(pid) }
             nativeForegroundRequested = true
             let restored = try await pollDriver({ self.appIsHidden(pid) }, until: { !$0 })
             guard restored == false else {
@@ -693,7 +611,7 @@ extension DriveLoop {
             }
         }
         if needsForeground, !foregroundLaunched, task.windowID == nil, task.windowName == nil {
-            try await tracedNativeActivation(events: nativeEvent) { self.activateRestoredApp(pid, bundle) }
+            try await tracedNativeActivation(events: nativeEvent) { try await self.activateRestoredApp(pid, bundle) }
             nativeForegroundRequested = true
         }
         if allowsNativeProof, needsForeground, nativeForegroundRequested,
@@ -842,7 +760,7 @@ extension DriveLoop {
         // A windowless foreground open still activates the app so the
         // request has a visible effect; apps that never front (menu-bar
         // agents) fall through to the observed-running report.
-        try? await focusLeased { self.activateApp(pid) }
+        try await focusLeased { try await self.activateApp(pid) }
         return done(didLaunch ? "Opened \(name)." : "\(name) was already running; brought it forward.",
                     task, history, pid: pid, bundleID: bundle, effect: true)
     }
@@ -963,6 +881,7 @@ extension DriveLoop {
 
     // MARK: - Gaze referents
 
+    static let launchUnverifiedReason = "launch unverifiable"
     static let scrollUnverifiedReason = "scroll_outcome_unverified"
 
     private func runVerifiedScroll(direction: String, pages: Int, task: DriveTask,
@@ -1199,10 +1118,6 @@ extension DriveLoop {
         var windowID: Int
         var app: String
         var title: String
-        /// The window's list_windows bounds in top-left points — what the
-        /// AX traffic-light press frame-matches against. Zero when the
-        /// target came from a fallback that never had a row.
-        var frame: CGRect = .zero
     }
 
     /// The global window inventory — every app's rows, used by the
@@ -1249,95 +1164,15 @@ extension DriveLoop {
                                               excludingPID: Self.ownPID),
               let pid = row["pid"]?.integer,
               let wid = row["window_id"]?.integer else { return nil }
-        var frame = CGRect.zero
-        if let bounds = row["bounds"], let x = Self.num(bounds["x"]),
-           let y = Self.num(bounds["y"]), let w = Self.num(bounds["width"]),
-           let h = Self.num(bounds["height"]) {
-            frame = CGRect(x: x, y: y, width: w, height: h)
-        }
         return GazeWindowTarget(pid: pid, windowID: wid,
                                 app: row["app_name"]?.string ?? "the app",
-                                title: row["title"]?.string ?? "", frame: frame)
-    }
-
-    /// The window-verb a deictic phrase aims at the gazed window — the
-    /// action's effect is what names it (the same ⌘M row also serves a
-    /// bare "minimize", so the row alone can't distinguish).
-    enum DeicticWindowControl { case minimize, close, hideApp }
-
-    static func deicticWindowControl(for action: FastAction) -> DeicticWindowControl? {
-        switch action.effect {
-        case .windowOffScreen: return .minimize
-        case .windowDelta(-1): return .close
-        case .appOffScreen: return .hideApp
-        default: return nil
-        }
-    }
-
-    /// "minimize this" / "close it" / "hide this": the window under the
-    /// gaze point is the target. minimize/close AXPress the traffic-light
-    /// on THAT window — background-safe, no focus borrow, the same button
-    /// the user would have clicked; hide routes the whole-app path on the
-    /// window's owner. Every leg verifies from live window state.
-    private func runDeicticWindowControl(_ control: DeicticWindowControl, action: FastAction,
-                                         task: DriveTask, session: String,
-                                         history: inout [String],
-                                         confirmed: inout Bool) async throws -> DriveResult {
-        let sample: GazeSample
-        do {
-            sample = try await gazeSample()
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            return settle(.blocked("The eye tracker isn't answering — tell me which window instead."),
-                          task, history, blockedReason: "deictic gaze unavailable")
-        }
-        guard let target = try await windowAtPoint(CGPoint(x: sample.x, y: sample.y),
-                                                 session: session) else {
-            return settle(.blocked("There's no window where you're looking — tell me which window you mean."),
-                          task, history, blockedReason: "no window at gaze point")
-        }
-        let noun = target.title.isEmpty ? "\(target.app)'s window" : "“\(target.title)”"
-        // The gazed window's own words are the deny corpus — "close it"
-        // on a "Confirm purchase" dialog refuses on its title.
-        try await gateExplicit(control == .hideApp ? "hide app" : "window_control",
-                               corpus: "\(action.description) \(target.app) \(target.title)",
-                               denied: task.deny, confirmed: &confirmed)
-        switch control {
-        case .hideApp:
-            // The verified whole-app path — already handles already-
-            // hidden, no-windows, and the on-screen readback.
-            feed("Hiding \(target.app)")
-            return try await runAppControl(.hide, pid: target.pid, name: target.app,
-                                           bundle: "", task: task, session: session,
-                                           history: &history, alreadyConfirmed: confirmed)
-        case .minimize, .close:
-            let kind: WindowControls.Kind = control == .minimize ? .minimize : .close
-            feed(control == .minimize ? "Minimizing \(noun)" : "Closing \(noun)")
-            guard WindowControls.press(kind, pid: pid_t(target.pid), matching: target.frame) else {
-                return settle(.blocked("I see \(noun), but its \(kind == .minimize ? "minimize" : "close") button isn't reachable."),
-                              task, history, pid: target.pid, windowID: target.windowID,
-                              blockedReason: "window control absent")
-            }
-            let gone = try await pollDriver({ () async throws -> Bool in
-                guard let row = try await self.windowRow(pid: target.pid, windowID: target.windowID,
-                                                        session: session) else { return true }
-                return row["is_on_screen"] == .bool(false)
-            }, until: { $0 })
-            guard gone == true else {
-                throw DriverConnectionError.refused("\(noun) was asked to \(control == .minimize ? "minimize" : "close"), but it's still on screen.")
-            }
-            return done(control == .minimize ? "Minimized \(noun)." : "Closed \(noun).",
-                        task, history, pid: target.pid, windowID: target.windowID,
-                        bundleID: "", effect: true)
-        }
+                                title: row["title"]?.string ?? "")
     }
 
     /// The attached displays as `(topLeftFrame, backingScale)` — behind a
     /// seam because NSScreen can't be stubbed in a test host; production
     /// maps `NSScreen.screens` through `ScreenGeometry`, tests serve fake
-    /// geometry. The frame and scale are the only things the display-scope
-    /// and snap lanes ever read.
+    /// geometry. The snap lane reads only the frame and scale.
     static var displayFrames: () -> [(frame: CGRect, scale: Double)] = {
         let screens = NSScreen.screens
         let primaryHeight = screens.first?.frame.height ?? 0
@@ -1345,75 +1180,6 @@ extension DriveLoop {
             (ScreenGeometry.topLeftFrame(of: $0, primaryHeight: primaryHeight),
              Double($0.backingScaleFactor))
         }
-    }
-
-    /// The display-scope resolution: an app identity the display under the
-    /// gaze point produced, or the refusal text to settle with.
-    private enum DisplayScope {
-        case app(name: String, bundle: String, pid: Int?)
-        case refused(String)
-    }
-
-    /// "on this monitor" — the app owning the topmost on-screen window on
-    /// the display under the gaze point. Fallbacks in order: no tracker
-    /// seam → the pointer's display (AppKit bottom-left flipped to
-    /// top-left); no display or window claim → the frontmost app. A
-    /// tracker *fault* refuses — clicking where the user *was* is worse
-    /// than naming the failure.
-    private func displayScopedApp(session: String) async throws -> DisplayScope {
-        let point: CGPoint
-        if gaze != nil {
-            do {
-                let sample = try await gazeSample()
-                point = CGPoint(x: sample.x, y: sample.y)
-            } catch let error as GazeError {
-                return .refused(await Self.gazeRefusal(error))
-            }
-        } else {
-            point = ScreenGeometry.appKitToTopLeft(NSEvent.mouseLocation)
-        }
-        if let display = Self.displayFrames().first(where: { $0.frame.contains(point) })?.frame {
-            let top = try await allWindowRows(session: session)
-                .filter { row in
-                    guard row["is_on_screen"] != .bool(false),
-                          row["pid"]?.integer != Self.ownPID,
-                          let bounds = row["bounds"],
-                          let x = Self.num(bounds["x"]), let y = Self.num(bounds["y"]),
-                          let w = Self.num(bounds["width"]), let h = Self.num(bounds["height"])
-                    else { return false }
-                    return CGRect(x: x, y: y, width: w, height: h).intersects(display)
-                }
-                // z_index is higher = closer to front; null can't be
-                // inferred and trails any ordered row.
-                .max { ($0["z_index"]?.integer ?? Int.min) < ($1["z_index"]?.integer ?? Int.min) }
-            if let top, let pid = top["pid"]?.integer,
-               let bundle = try await bundleID(forPID: pid, session: session) {
-                return .app(name: top["app_name"]?.string ?? bundle,
-                            bundle: bundle, pid: pid)
-            }
-        }
-        // No window claim on the gaze display — "this screen" most often
-        // means the one in use.
-        if let bundle = frontmostBundleID() {
-            let name = NSWorkspace.shared.runningApplications
-                .first(where: { $0.bundleIdentifier == bundle })?.localizedName ?? bundle
-            return .app(name: name, bundle: bundle,
-                        pid: Self.runningPID(bundle: bundle, in: []))
-        }
-        return .refused("I couldn't tell which display you meant — nothing is under your gaze on any screen.")
-    }
-
-    /// pid → bundle: `list_windows` reports pids, not bundles, so the app
-    /// inventory answers first and AppKit's roster is the local fallback.
-    private func bundleID(forPID pid: Int, session: String) async throws -> String? {
-        if let apps = try? await observe("list_apps", ["session": .string(session)]),
-           let bundle = (apps["structuredContent"]?["apps"]?.array
-                ?? apps["apps"]?.array ?? [])
-                .first(where: { $0["pid"]?.integer == pid })?["bundle_id"]?.string,
-           !bundle.isEmpty {
-            return bundle
-        }
-        return NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier
     }
 
     /// Convert a gaze point (global top-left points) into the driver's
@@ -1438,15 +1204,8 @@ extension DriveLoop {
         return CGPoint(x: point.x * scale, y: point.y * scale)
     }
 
-    /// Dispatch a gaze-referent verb at the freshest tracker point.
-    /// Click lands through the driver's desktop pixel path; right and
-    /// double clicks post through the host HID tap (the driver's pixel
-    /// forms of those want a pid + window-local coordinates).
-    ///
-    /// Consent is the gaze itself — the user looked AT the thing — but
-    /// the committed referent's own words (label + href + window title)
-    /// still ride the deny scan, and a raw-point fallback scans the
-    /// window under the point when no candidate exists.
+    /// A spoken click needs a current scored target. A point alone can
+    /// describe the window under the gaze, but cannot authorize a click.
     private func runGazeVerb(_ verb: FastAction.GazeVerb, task: DriveTask,
                              session: String, history: inout [String],
                              confirmed: inout Bool) async throws -> DriveResult {
@@ -1464,107 +1223,19 @@ extension DriveLoop {
                 .joined(separator: " ")
         }
         switch verb {
-        case .click:
-            // The scorer's committed referent decides where the click
-            // lands — an element-token dispatch is driver-verified; the
-            // pixel form clicks the candidate's motor point, not raw
-            // gaze. A cold scorer falls back to the point unchanged.
-            var target = point
-            var say = "Clicked where you're looking."
-            var outcome: DriveResult?
-            if let gazeCommit, let (candidate, _) = await gazeCommit() {
-                // Deny-scan BEFORE picking the actuation form — a "Buy
-                // now" referent refuses whichever way the click lands.
-                try await gateExplicit("click", corpus: corpus(candidate),
-                                       denied: task.deny, confirmed: &confirmed)
-                let name = candidate.label.isEmpty
-                    ? Self.speakableRole(candidate.role) : candidate.label
-                switch VoiceTaskCoordinator.actuation(for: candidate, gaze: point) {
-                case .elementClick(let pid, let wid, let token):
-                    do {
-                        _ = try await call("click", [
-                            "pid": .number(Double(pid)),
-                            "window_id": .number(Double(wid)),
-                            "element_token": .string(token),
-                            "delivery_mode": .string("background"),
-                            "session": .string(session)])
-                        outcome = done("Clicked \(name).", task, history,
-                                       pid: Int(pid), windowID: wid, effect: true)
-                    } catch let error as DriverConnectionError {
-                        if case .toolRefused(_, _, let detail) = error {
-                            return settle(.blocked(detail), task, history)
-                        }
-                        throw error
-                    }
-                case .trafficLight(let kind, let pid, let frame):
-                    if WindowControls.press(kind, pid: pid, matching: frame) {
-                        outcome = done("Clicked \(name).", task, history,
-                                       pid: Int(pid), windowID: candidate.windowID,
-                                       effect: true)
-                    } else {
-                        // Press refused — the pixel path below lands on
-                        // the button's rect, same target.
-                        target = CGPoint(x: candidate.motorRect.midX,
-                                         y: candidate.motorRect.midY)
-                        say = "Clicked \(name)."
-                    }
-                case .pixelClick(let p):
-                    target = p
-                    say = "Clicked \(name)."
-                case .none:
-                    break
-                }
-            } else {
-                // Cold scorer: the window under the point is the only
-                // deny-scan context a raw pixel click has.
-                let fallback = (try? await windowAtPoint(target, session: session))
-                    .map { "\($0.title) \($0.app)" } ?? ""
-                try await gateExplicit("click", corpus: fallback,
-                                       denied: task.deny, confirmed: &confirmed)
+        case .click, .rightClick, .doubleClick:
+            guard let (candidate, _) = await gazeCommit?() else {
+                return settle(.blocked("I couldn't confirm a current gaze target. Nothing was clicked."),
+                              task, history, blockedReason: "gaze target unavailable")
             }
-            if let outcome { return outcome }
-            let px = Self.desktopPixels(target)
-            do {
-                _ = try await call("click", ["scope": .string("desktop"),
-                                             "x": .number(px.x), "y": .number(px.y),
-                                             "session": .string(session)])
-            } catch let error as DriverConnectionError {
-                if case .toolRefused(_, _, let detail) = error {
-                    return settle(.blocked(detail), task, history)
-                }
-                throw error
+            try await gateExplicit("click", corpus: corpus(candidate),
+                                   denied: task.deny, confirmed: &confirmed)
+            guard !Task.isCancelled, await gazeClick?(candidate, verb) == true else {
+                return settle(.blocked("The gaze click could not be confirmed. Nothing was retried."),
+                              task, history, blockedReason: "gaze click unconfirmed")
             }
-            return done(say, task, history, effect: true)
-        case .rightClick, .doubleClick:
-            // Same single-referent contract as .click: the committed
-            // candidate's motor point decides where the post lands —
-            // raw gaze is the cold-scorer fallback, not the primary path.
-            var postPoint = point
-            var corpusText = ""
-            if let gazeCommit, let (candidate, _) = await gazeCommit() {
-                if !candidate.motorRect.isEmpty {
-                    postPoint = candidate.motorRect.contains(point) ? point
-                        : CGPoint(x: candidate.motorRect.midX, y: candidate.motorRect.midY)
-                }
-                corpusText = corpus(candidate)
-            } else {
-                corpusText = (try? await windowAtPoint(point, session: session))
-                    .map { "\($0.title) \($0.app)" } ?? ""
-            }
-            try await gateExplicit(verb == .rightClick ? "gaze right click" : "gaze double click",
-                                   corpus: corpusText, denied: task.deny,
-                                   confirmed: &confirmed)
-            guard GazePointer.poster(verb == .rightClick ? .right : .double, postPoint) else {
-                let reason = GazePointer.refusal == .postAccessDenied
-                    ? "macOS denied the synthetic click — check Accessibility and Input Monitoring permissions."
-                    : "The click event couldn't be built."
-                return settle(.blocked(reason), task, history,
-                              blockedReason: "pointer post refused")
-            }
-            return done(verb == .rightClick
-                        ? "Right-clicked where you're looking."
-                        : "Double-clicked where you're looking.",
-                        task, history, effect: true)
+            return done("Sent the gaze click.", task, history, pid: candidate.pid.map(Int.init),
+                        windowID: candidate.windowID, effect: true)
         case .describe:
             // The committed referent answers directly — its label, role,
             // app and DOM href are already resolved; no second window
@@ -1655,133 +1326,6 @@ extension DriveLoop {
 
     // MARK: - Overlay and locate lanes
 
-    /// Aim-overlay verbs — the numbered chips resolve app-side through the
-    /// injected `overlayDispatch` seam (TargetOverlay on the coordinator),
-    /// never through the driver. The referent window is the one under the
-    /// gaze point, then the pointer's, then the frontmost window — an
-    /// overlay verb tolerates a dead tracker because the chips land where
-    /// the user can see them either way. A nil seam means nothing can draw
-    /// numbers; the refusal says so instead of pretending chips went up.
-    private func runOverlayVerb(_ verb: FastAction.OverlayVerb, task: DriveTask,
-                                session: String, history: inout [String]) async throws -> DriveResult {
-        guard let overlayDispatch else {
-            return settle(.blocked("The overlay isn't available — nothing was numbered."),
-                          task, history, blockedReason: "overlay seam absent")
-        }
-        let point = (try? await gazeSample()).map { CGPoint(x: $0.x, y: $0.y) }
-            ?? ScreenGeometry.appKitToTopLeft(NSEvent.mouseLocation)
-        switch verb {
-        case .showNumbers, .showNumbersAll:
-            // Show verbs need real targets — an unreadable window or an
-            // empty tree is an honest "nothing to number", not a silent
-            // overlay.
-            let targets = try await collectOverlayTargets(
-                allWindows: verb == .showNumbersAll, point: point, session: session)
-            guard !targets.isEmpty else {
-                return settle(.blocked("There's nothing on that surface to number."),
-                              task, history, blockedReason: "no overlay targets")
-            }
-            guard let result = await overlayDispatch(verb, targets, point) else {
-                return settle(.blocked("The overlay isn't available — nothing was numbered."),
-                              task, history, blockedReason: "overlay declined")
-            }
-            return result
-        case .hideNumbers, .clickIndex:
-            // Pick/hide verbs ride the overlay's own pending state — the
-            // targets here are best-effort context, so a failed snapshot
-            // doesn't veto the pick.
-            let targets = (try? await collectOverlayTargets(
-                allWindows: false, point: point, session: session)) ?? []
-            guard let result = await overlayDispatch(verb, targets, point) else {
-                return settle(.blocked("The overlay isn't available — nothing was numbered."),
-                              task, history, blockedReason: "overlay declined")
-            }
-            return result
-        }
-    }
-
-    /// The target windows for an overlay verb: "everywhere" is every
-    /// on-screen window topmost-first (bounded — a snapshot per window
-    /// still costs a roundtrip), a scoped show is the window under the
-    /// point with the frontmost window's app as the last honest referent.
-    private func collectOverlayTargets(allWindows: Bool, point: CGPoint,
-                                     session: String) async throws -> [(frame: CGRect, label: String)] {
-        var windows: [(pid: Int, wid: Int)] = []
-        if allWindows {
-            // Topmost-first: z_index is higher = closer to the front, so
-            // the sort descends and the cap keeps the windows a user can
-            // actually see — not the eight buried ones. Own-pid rows are
-            // dropped so chips never number Jev Voice itself.
-            windows = try await allWindowRows(session: session)
-                .filter { $0["is_on_screen"] != .bool(false)
-                          && $0["pid"]?.integer != Self.ownPID }
-                .sorted { ($0["z_index"]?.integer ?? Int.min) > ($1["z_index"]?.integer ?? Int.min) }
-                .prefix(8)
-                .compactMap { row in
-                    guard let pid = row["pid"]?.integer,
-                          let wid = row["window_id"]?.integer else { return nil }
-                    return (pid, wid)
-                }
-        } else {
-            var target = try await windowAtPoint(point, session: session)
-            if target == nil, let bundle = frontmostBundleID(),
-               let pid = Self.runningPID(bundle: bundle, in: []),
-               let wid = Self.bestWindowID(
-                    in: try await listedWindowRows(pid: pid, session: session)) {
-                target = GazeWindowTarget(pid: pid, windowID: wid,
-                                          app: bundle, title: "")
-            }
-            if let target { windows = [(target.pid, target.windowID)] }
-        }
-        // Each window's snapshot is an independent read — overlap them.
-        // The group keeps z-order by carrying each row's index through,
-        // so chip numbering still reads front-to-back.
-        return try await withThrowingTaskGroup(
-            of: (Int, [(frame: CGRect, label: String)]).self
-        ) { group in
-            for (index, window) in windows.enumerated() {
-                group.addTask { [self] in
-                    (index, try await self.overlayTargets(pid: window.pid,
-                                                          windowID: window.wid,
-                                                          session: session))
-                }
-            }
-            var grouped: [(Int, [(frame: CGRect, label: String)])] = []
-            for try await item in group { grouped.append(item) }
-            return grouped.sorted { $0.0 < $1.0 }.flatMap(\.1)
-        }
-    }
-
-    /// The window's actionable elements as top-left screen rects — element
-    /// frames already share the overlay and gaze sample's global point space.
-    private func overlayTargets(pid: Int, windowID: Int,
-                                session: String) async throws -> [(frame: CGRect, label: String)] {
-        let snap = try await observe("get_window_state",
-            ["pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
-             "include_screenshot": .bool(false), "max_elements": .number(220),
-             "session": .string(session)])
-        let content = snap["structuredContent"] ?? snap
-        return Self.elements(from: content).compactMap { e in
-            guard Self.overlayActionable(e), let frame = Self.nativeAXScreenRect(e) else { return nil }
-            return (frame, e.label.isEmpty ? (e.value ?? e.role) : e.label)
-        }
-    }
-
-    /// The actionable-role vocabulary the overlay numbers — the same
-    /// filter pattern the chooser's candidate builder applies, duplicated
-    /// here so this lane doesn't grow a dependency on the chooser's
-    /// private tables.
-    private static func overlayActionable(_ e: Element) -> Bool {
-        guard e.frame.w > 0, e.frame.h > 0 else { return false }
-        let r = e.role.lowercased().replacingOccurrences(of: "ax", with: "")
-        return !e.actions.isEmpty
-            || ["textfield", "textarea", "text", "searchfield",
-                "combo box", "combobox", "securetextfield"].contains(where: r.contains)
-            || ["button", "link", "menuitem", "menu item", "tab",
-                "checkbox", "radio", "row", "cell", "pop up",
-                "popupbutton", "switch", "list"].contains(where: r.contains)
-    }
-
     /// "where did X go" — hunt the global window inventory for an app name
     /// or title fragment, then either report it on screen or bring it back
     /// with a real activation. Several distinct matching apps is a choice
@@ -1818,7 +1362,7 @@ extension DriveLoop {
         }
         // The window is minimized or off-Space — a real activate fires the
         // app's un-minimize path; the driver won't do this on its own.
-        try await focusLeased { self.activateApp(pid) }
+        try await focusLeased { try await self.activateApp(pid) }
         let back = try await pollDriver({ () async throws -> Bool in
             try await self.allWindowRows(session: session)
                 .contains { $0["pid"]?.integer == pid && $0["is_on_screen"] != .bool(false) }
@@ -1850,14 +1394,16 @@ extension DriveLoop {
         // reopen before this poll; other callers only observe existing UI.
         // A delayed window may outlive the first poll, so activate once
         // more mid-patience without replaying a driver mutation.
-        _ = try? await focusLeased { self.activateApp(pid) }
+        do { try await focusLeased { try await self.activateApp(pid) } } catch { return [] }
         for i in 0..<20 {
             if Task.isCancelled { return [] }
             let rows = (try? await listedWindowRows(pid: pid, session: session)) ?? []
             if rows.contains(where: {
                 $0["is_on_screen"] != .bool(false) || !($0["title"]?.string ?? "").isEmpty
             }) { return rows }
-            if i == 8 { _ = try? await focusLeased { self.activateApp(pid) } }
+            if i == 8 {
+                do { try await focusLeased { try await self.activateApp(pid) } } catch { return [] }
+            }
             try? await Task.sleep(for: .milliseconds(150))
         }
         return []
@@ -2257,7 +1803,7 @@ extension DriveLoop {
         }
         let focusedAllowed = task.windowID == wid && task.application == bundle
             && task.values["text"] == payload
-        if requiresCapturedTextTarget || (BrowserSupport.isBrowser(bundleID: bundle) && focusedAllowed) {
+        if isDirectVoiceLoop || (BrowserSupport.isBrowser(bundleID: bundle) && focusedAllowed) {
             guard focusedAllowed else {
                 return settle(.blocked("The captured typing target changed. No text was sent."),
                               task, history, pid: pid, windowID: wid,
@@ -2365,7 +1911,7 @@ extension DriveLoop {
                 throw Abort.refused("The focused field changed before typing. No text was sent.")
             }
             try Task.checkCancellation()
-            if requiresCapturedTextTarget, !BrowserSupport.isBrowser(bundleID: bundle),
+            if isDirectVoiceLoop, !BrowserSupport.isBrowser(bundleID: bundle),
                let selection = capturedSelection, let expected, let insert = target.insertSelectedText {
                 if let receipt = try await insert(payload, before, selection) {
                     await nativeTextEvent(receipt)
@@ -2398,7 +1944,7 @@ extension DriveLoop {
             let currentAfter = await target.isCurrent()
             let after = await target.value()
             let exact = after != nil && expected != nil && after == expected
-            let canonicalNative = requiresCapturedTextTarget && !BrowserSupport.isBrowser(bundleID: bundle)
+            let canonicalNative = isDirectVoiceLoop && !BrowserSupport.isBrowser(bundleID: bundle)
                 && result["verified"] == nil && result["route"] == .string("accessibility")
                 && result["delivery"]?["mode"] == .string("background")
                 && result["evidence"]?.array?.contains(where: { $0["kind"] == .string("value_readback") }) == true
@@ -2897,7 +2443,6 @@ extension DriveLoop {
             }
         case .gaze: return "click"
         case .tracker: return "tracker control"
-        case .overlay: return "click"
         case .repeatLast: return "repeat last action"
         case .locate: return "list_windows"
         case .dictation: return "dictation"

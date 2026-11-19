@@ -13,10 +13,33 @@ final class Config: ObservableObject {
                       openAIKeyStore: KeychainAPIKeyStore(account: "openAIAPIKey", allowUserInteraction: allow))
     }()
 
-    private let defaults: UserDefaults
-    private let keyStore: APIKeyStore
-    private let openAIKeyStore: APIKeyStore
+    enum VoicePreference: String {
+        case microphoneUID, handsFreeEnabled, handsFreePaused
+    }
+
+    private enum Storage {
+        case standard(UserDefaults, keyStore: APIKeyStore, openAIKeyStore: APIKeyStore)
+        case restricted(write: (VoicePreference, Any) -> Void, readRealtimeKey: () -> String?)
+
+        func set(_ value: Any, forKey name: String) {
+            switch self {
+            case let .standard(defaults, _, _):
+                defaults.set(value, forKey: name)
+            case let .restricted(write, _):
+                if let preference = VoicePreference(rawValue: name) { write(preference, value) }
+            }
+        }
+    }
+
+    private let storage: Storage
+
+    var isRestrictedVoice: Bool {
+        if case .restricted = storage { return true }
+        return false
+    }
+
     @Published private(set) var apiKeyError: String?
+    @Published private(set) var needsAPIKeyRetry = false
 
     @Published private(set) var apiKey: String
     /// OpenAI credential for the realtime duplex lane — env `OPENAI_API_KEY`
@@ -25,37 +48,30 @@ final class Config: ObservableObject {
     @Published private(set) var openAIAPIKey: String
 
     @Published var microphoneUID: String {
-        didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
+        didSet { storage.set(microphoneUID, forKey: "microphoneUID") }
     }
 
     @Published var autoExecute: Bool {
-        didSet { defaults.set(autoExecute, forKey: "autoExecute") }
+        didSet { storage.set(autoExecute, forKey: "autoExecute") }
     }
 
     /// Standing computer-use consent — when on, voice confirmations and the
     /// agent gate approve input without asking. Persisted as the same
     /// standing-grant key the runtime and gate read.
     @Published var alwaysAllowComputerUse: Bool {
-        didSet { defaults.set(alwaysAllowComputerUse, forKey: "cuaStandingGrant.computerUseInput") }
+        didSet { storage.set(alwaysAllowComputerUse, forKey: "cuaStandingGrant.computerUseInput") }
     }
 
     /// Whether the driver draws its animated agent cursor while acting.
     /// Off = silent direct dispatch; on = the overlay glides to each click.
     @Published var agentCursorEnabled: Bool {
-        didSet { defaults.set(agentCursorEnabled, forKey: "agentCursorEnabled") }
+        didSet { storage.set(agentCursorEnabled, forKey: "agentCursorEnabled") }
     }
 
     /// Cue-tone gate — the chimes that mark hold start, task done and
     /// refusals. On by default; off keeps the interface silent.
     @Published var sounds: Bool {
-        didSet { defaults.set(sounds, forKey: "soundsEnabled") }
-    }
-
-    /// Aim number-chip persistence — on keeps the overlay's numbered
-    /// targets painted until dismissed; off lets them fade with the
-    /// action that used them.
-    @Published var persistentNumbers: Bool {
-        didSet { defaults.set(persistentNumbers, forKey: "persistentNumbers") }
+        didSet { storage.set(sounds, forKey: "soundsEnabled") }
     }
 
     /// ChatGPT/codex login state for the planner UI and runtime — mirrors
@@ -67,42 +83,42 @@ final class Config: ObservableObject {
 
     /// Spoken replies through the SpeechSynthesizing seam.
     @Published var ttsEnabled: Bool {
-        didSet { defaults.set(ttsEnabled, forKey: "ttsEnabled") }
+        didSet { storage.set(ttsEnabled, forKey: "ttsEnabled") }
     }
     @Published var handsFreeEnabled: Bool {
-        didSet { defaults.set(handsFreeEnabled, forKey: "handsFreeEnabled") }
+        didSet { storage.set(handsFreeEnabled, forKey: "handsFreeEnabled") }
     }
     @Published var handsFreePaused: Bool {
-        didSet { defaults.set(handsFreePaused, forKey: "handsFreePaused") }
+        didSet { storage.set(handsFreePaused, forKey: "handsFreePaused") }
     }
     /// Core semantic assist defaults on; an explicit opt-out is retained.
     @Published var semanticAppSuggestions: Bool {
-        didSet { defaults.set(semanticAppSuggestions, forKey: "semanticAppSuggestions") }
+        didSet { storage.set(semanticAppSuggestions, forKey: "semanticAppSuggestions") }
     }
 
     /// Tap Fn to start capture, tap again to stop — hold-to-talk stays the
     /// default when off.
     @Published var latchMode: Bool {
-        didSet { defaults.set(latchMode, forKey: "latchMode") }
+        didSet { storage.set(latchMode, forKey: "latchMode") }
     }
 
     /// Fn+Ctrl hold dictates literal text into the focused field instead of
     /// running an intent.
     @Published var dictationHotkey: Bool {
-        didSet { defaults.set(dictationHotkey, forKey: "dictationHotkey") }
+        didSet { storage.set(dictationHotkey, forKey: "dictationHotkey") }
     }
 
     /// Launch the eye tracker with the app so gaze-referent verbs resolve:
     /// "click", "scroll down", "open this", "what is this". Off leaves the
     /// tracker alone — the verbs then refuse honestly instead of guessing.
     @Published var gazeTracking: Bool {
-        didSet { defaults.set(gazeTracking, forKey: "gazeTracking") }
+        didSet { storage.set(gazeTracking, forKey: "gazeTracking") }
     }
 
     /// Tap-to-click with the eyes: a Fn tap while looking at a target
     /// clicks it directly instead of opening a voice turn. On by default.
     @Published var tapToGazeClick: Bool {
-        didSet { defaults.set(tapToGazeClick, forKey: "tapToGazeClick") }
+        didSet { storage.set(tapToGazeClick, forKey: "tapToGazeClick") }
     }
 
     /// Launch at login — the persisted value is the user's choice; the real
@@ -112,7 +128,7 @@ final class Config: ObservableObject {
     /// the system says otherwise.
     @Published var launchAtLogin: Bool {
         didSet {
-            defaults.set(launchAtLogin, forKey: "launchAtLogin")
+            storage.set(launchAtLogin, forKey: "launchAtLogin")
             applyLaunchAtLogin()
         }
     }
@@ -135,9 +151,7 @@ final class Config: ObservableObject {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         codexAuth: CodexAuth = .shared
     ) {
-        self.defaults = defaults
-        self.keyStore = keyStore
-        self.openAIKeyStore = openAIKeyStore
+        self.storage = .standard(defaults, keyStore: keyStore, openAIKeyStore: openAIKeyStore)
         self.codexAuth = codexAuth
         self.environment = environment
         self.chatGPTAuthStatus = codexAuth.chatGPTAuthStatus
@@ -148,7 +162,6 @@ final class Config: ObservableObject {
         self.alwaysAllowComputerUse = defaults.object(forKey: "cuaStandingGrant.computerUseInput") as? Bool ?? false
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? true
         self.sounds = defaults.object(forKey: "soundsEnabled") as? Bool ?? true
-        self.persistentNumbers = defaults.object(forKey: "persistentNumbers") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
         self.handsFreeEnabled = defaults.object(forKey: "handsFreeEnabled") as? Bool ?? true
         self.handsFreePaused = defaults.object(forKey: "handsFreePaused") as? Bool ?? false
@@ -170,21 +183,7 @@ final class Config: ObservableObject {
         }
         self.launchAtLoginError = nil
 
-        do {
-            if let stored = try keyStore.read() {
-                apiKey = stored
-                defaults.removeObject(forKey: "typesafeAPIKey")
-            } else if let legacy = defaults.string(forKey: "typesafeAPIKey"), !legacy.isEmpty {
-                apiKey = legacy
-                // Keep the old value until the durable Keychain write succeeds.
-                try keyStore.save(legacy)
-                defaults.removeObject(forKey: "typesafeAPIKey")
-            } else {
-                defaults.removeObject(forKey: "typesafeAPIKey")
-            }
-        } catch {
-            apiKeyError = "Could not load or migrate the API key in Keychain: \(error.localizedDescription)"
-        }
+        loadAPIKey(from: keyStore.noninteractive, defaults: defaults)
 
         if openAIAPIKey.isEmpty {
             openAIAPIKey = (try? openAIKeyStore.read()) ?? ""
@@ -200,11 +199,57 @@ final class Config: ObservableObject {
         }
     }
 
+    static func restrictedVoice() -> Config {
+        restrictedVoice(
+            readPreference: { UserDefaults.standard.object(forKey: $0.rawValue) },
+            writePreference: { UserDefaults.standard.set($1, forKey: $0.rawValue) },
+            readRealtimeKey: {
+                try? KeychainAPIKeyStore(account: "openAIAPIKey", allowUserInteraction: false).read()
+            }
+        )
+    }
+
+    static func restrictedVoice(readPreference: (VoicePreference) -> Any?,
+                                writePreference: @escaping (VoicePreference, Any) -> Void,
+                                readRealtimeKey: @escaping () -> String?) -> Config {
+        Config(storage: .restricted(write: writePreference, readRealtimeKey: readRealtimeKey),
+               readPreference: readPreference)
+    }
+
+    private init(storage: Storage, readPreference: (VoicePreference) -> Any?) {
+        self.storage = storage
+        environment = [:]
+        codexAuth = CodexAuth(binary: nil, codexHome: URL(fileURLWithPath: "/dev/null", isDirectory: false))
+        chatGPTAuthStatus = .unreachable
+        apiKey = ""
+        openAIAPIKey = ""
+        microphoneUID = readPreference(.microphoneUID) as? String ?? ""
+        handsFreeEnabled = readPreference(.handsFreeEnabled) as? Bool ?? true
+        handsFreePaused = readPreference(.handsFreePaused) as? Bool ?? false
+        autoExecute = false
+        alwaysAllowComputerUse = false
+        agentCursorEnabled = false
+        sounds = false
+        ttsEnabled = true
+        semanticAppSuggestions = false
+        latchMode = false
+        dictationHotkey = false
+        gazeTracking = false
+        tapToGazeClick = false
+        launchAtLogin = false
+    }
+
+    func restrictedRealtimeKey() -> String {
+        guard case let .restricted(_, read) = storage else { return "" }
+        return read() ?? ""
+    }
+
     /// Register or unregister the app as a login item. Errors land in
     /// `launchAtLoginError` and the live status in `loginServiceStatus` —
     /// the desired-state flag stays whatever the user picked so the toggle
     /// and the system can be compared honestly.
     private func applyLaunchAtLogin() {
+        guard case .standard = storage else { return }
         do {
             if launchAtLogin {
                 try SMAppService.mainApp.register()
@@ -222,6 +267,7 @@ final class Config: ObservableObject {
 
     @discardableResult
     func saveOpenAIAPIKey(_ value: String) -> Bool {
+        guard case let .standard(_, _, openAIKeyStore) = storage else { return false }
         do {
             if value.isEmpty {
                 try openAIKeyStore.delete()
@@ -235,8 +281,13 @@ final class Config: ObservableObject {
         }
     }
 
+    func canSaveAPIKey(_ value: String) -> Bool {
+        !isRestrictedVoice && (!needsAPIKeyRetry || (!value.isEmpty && value != apiKey))
+    }
+
     @discardableResult
     func saveAPIKey(_ value: String) -> Bool {
+        guard case let .standard(defaults, keyStore, _) = storage, canSaveAPIKey(value) else { return false }
         do {
             if value.isEmpty {
                 try keyStore.delete()
@@ -244,12 +295,39 @@ final class Config: ObservableObject {
                 try keyStore.save(value)
             }
             apiKey = value
+            needsAPIKeyRetry = false
             defaults.removeObject(forKey: "typesafeAPIKey")
             apiKeyError = nil
             return true
         } catch {
             apiKeyError = "Could not save the API key in Keychain: \(error.localizedDescription)"
             return false
+        }
+    }
+
+    func retryAPIKeyAccess(keeping draft: String) -> String {
+        guard case let .standard(defaults, keyStore, _) = storage, needsAPIKeyRetry else { return draft }
+        let draftWasUnchanged = draft == apiKey
+        loadAPIKey(from: keyStore, defaults: defaults)
+        return draftWasUnchanged ? apiKey : draft
+    }
+
+    private func loadAPIKey(from store: APIKeyStore, defaults: UserDefaults) {
+        do {
+            if let stored = try store.read() {
+                apiKey = stored
+            } else if let legacy = defaults.string(forKey: "typesafeAPIKey"), !legacy.isEmpty {
+                apiKey = legacy
+                try store.migrateLegacyKey(legacy)
+            } else {
+                apiKey = environment["TYPESAFE_API_KEY"] ?? ""
+            }
+            defaults.removeObject(forKey: "typesafeAPIKey")
+            needsAPIKeyRetry = false
+            apiKeyError = nil
+        } catch {
+            needsAPIKeyRetry = true
+            apiKeyError = "Jev couldn’t read or store the TypeSafe key in Keychain. Retry access or save a replacement key."
         }
     }
 }

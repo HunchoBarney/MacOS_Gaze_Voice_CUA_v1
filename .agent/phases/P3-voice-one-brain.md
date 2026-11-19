@@ -134,15 +134,16 @@ resolve any general wording below. The frozen labeled case manifest is
 - Existing FastAction, IntentRouter, AppResolver, task consent/verification,
   agent asks, dictation, barge-in and microphone tests must keep working.
 
-### Workspace And Inherited State
+### Original workspace and inherited state (historical)
 
-Work in `/Users/karanvirkang/Documents/code/jarvis-v1-agent`, not the
-original shared checkout. The worktree starts at 4b263b3 with the original
+P3 used `/Users/karanvirkang/Documents/code/jarvis-v1-agent`, not the
+original shared checkout. The worktree started at 4b263b3 with the original
 uncommitted refactor overlaid locally (276 status entries). This baseline
 is NOT new P3 work and must not be discarded or wholesale committed.
 `.agent/results/P3/inherited-baseline.json` records dirty file hashes;
 `inherited-baseline.diff` records tracked hunks before P3 source edits.
-Original checkout is a read-only source of P2d recordings.
+The original checkout supplied P2d recordings for that run. Use PLANS §5
+for current placement; the old baseline does not grant access to recordings.
 
 Worktree development assets were prepared with setup-workspace-development.
 Downloaded Swift dependencies/artifacts were cloned locally, not fetched.
@@ -152,6 +153,13 @@ No original build cache or source was removed. Record baseline build
 failures separately from P3 regressions.
 
 ## Owned paths
+
+KAR-15 additionally owns the two new app modules `ScreenQuestionObservation`
+and `ControlReplyEnvelope` and their named app tests. Its integrator owns the
+bounded deltas in LocalSpeechSession, ConversationContext, VoiceTurn,
+RealtimeVoiceClient, RealtimeVoiceLane, RealtimeAudioEngine, MicrophoneInput,
+VoiceController, VoiceOneBrainTests, VoiceTurnTests and the named verification
+scope. This is a post-quiet-candidate source cohort, not a packaging lane.
 
 ```text
 .agent/phases/P3-voice-one-brain.md
@@ -757,6 +765,22 @@ No acceptance flags were flipped and no commit/push was made.
   a claim unwritten code has passed.
 
 ## Decision Log
+
+2026-11-17, KAR-28: exact standalone spoken `click` binds the same
+locally retained, eligible gaze lease at onset and final. No model tool
+can supply or replace it. Other ungrounded pointing phrases still ask
+for a name; typed text, dictation and parked answers have no gaze-click
+authority.
+
+2026-11-17, KAR-25: a committed, standalone delegated-status question may
+show fixed local text about one bound worker turn, without a Realtime status
+payload, synthesized voice, or reuse of the KAR-15 screen inquiry. A spoken
+question with a local card is not a verified hands-free spoken answer.
+
+2026-11-17, KAR-15: apply the approved v1 named-control exception in CONTRACTS.
+Close/Minimize are system control kinds, never inferred from gaze or recent
+actions. Verbatim dictation and the independent ordinary command executor keep
+their owners; unknown referents stay local. No historical verdict is promoted.
 
 ### C1 candidate handoff, 2026-11-16
 

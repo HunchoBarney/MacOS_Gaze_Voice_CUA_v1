@@ -1,0 +1,1453 @@
+{
+  "baseline_freeze": "5277bd7812a96a2fbdd73f34ba8faa4098257a906f5ced73dfc0ba223573325f",
+  "scope": "offline fake wire, reused ready session only, real monotonic software time in ms; injected 100 ms charges are virtual, not measured Mac AX latency",
+  "source_sha256": {
+    "Tests/JevVoiceAppTests/VoiceAskProjectionTests.swift": "8e58b9c49ed8c25e5f0253a68ef01a1c21a5979971912fa51cc33619416f4037",
+    "Tests/JevVoiceAppTests/VoiceOneBrainTests.swift": "b71e370d04826c9220ce76c830fd78c0a1987ed0e2be68e9948a3fb0662c395d",
+    "Sources/JevVoice/Voice/ConversationContext.swift": "d80bd1ed57f6648b8cd5f0620885f93876f900bdadb8eea83b08449f2faa4c4d",
+    "Sources/JevVoice/Voice/VoiceController.swift": "16912179b1de8d1d8404166286c6bb530d9a1fcde70ecd5b454c4abef71363df"
+  },
+  "raw_log_sha256": "e3162a00089d350edc05c4b8c4625bd2565b9c6ea785781ccdcac6b1e1975074",
+  "rows": [
+    {
+      "case": "ambiguous",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "waiting",
+        "read_order": [
+          "full:onset",
+          "full:final-scope"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.462,
+            "p95_ms": 0.462
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2365,
+            "p95_ms": 0.2365
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.3304,
+            "p95_ms": 0.3304
+          }
+        }
+      },
+      "B": {
+        "terminal": "waiting",
+        "read_order": [
+          "full:onset",
+          "full:final-scope"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.4381,
+            "p95_ms": 0.4381
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2323,
+            "p95_ms": 0.2323
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.3132,
+            "p95_ms": 0.3132
+          }
+        }
+      }
+    },
+    {
+      "case": "ambiguous",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "waiting",
+        "read_order": [
+          "full:onset",
+          "full:final-scope"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.4339,
+            "p95_ms": 0.4339
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2409,
+            "p95_ms": 0.2409
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.3115,
+            "p95_ms": 0.3115
+          }
+        }
+      },
+      "B": {
+        "terminal": "waiting",
+        "read_order": [
+          "full:onset",
+          "full:final-scope"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.4583,
+            "p95_ms": 0.4583
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2103,
+            "p95_ms": 0.2103
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.3134,
+            "p95_ms": 0.3134
+          }
+        }
+      }
+    },
+    {
+      "case": "answer",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 1.2025,
+            "p95_ms": 1.674
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 1.2377,
+            "p95_ms": 1.7182
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.1866,
+            "p95_ms": 1.645
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.9324,
+            "p95_ms": 1.2145
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 1.2419,
+            "p95_ms": 1.725
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 1.2383,
+            "p95_ms": 1.7188
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2068,
+            "p95_ms": 0.3165
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.5901,
+            "p95_ms": 0.7554
+          }
+        }
+      },
+      "B": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "narrow:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 1.1963,
+            "p95_ms": 1.6731
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 1.2299,
+            "p95_ms": 1.7234
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.1838,
+            "p95_ms": 1.6448
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.9291,
+            "p95_ms": 1.2043
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 1.2341,
+            "p95_ms": 1.7307
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 1.2304,
+            "p95_ms": 1.7243
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2035,
+            "p95_ms": 0.3506
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.5904,
+            "p95_ms": 0.7431
+          }
+        }
+      }
+    },
+    {
+      "case": "answer",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 200,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 1.2052,
+            "p95_ms": 1.68
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 1.2384,
+            "p95_ms": 1.7233
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.1895,
+            "p95_ms": 1.6514
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.9339,
+            "p95_ms": 1.337
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 1.2427,
+            "p95_ms": 1.7303
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 1.2391,
+            "p95_ms": 1.724
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2168,
+            "p95_ms": 0.3838
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.5918,
+            "p95_ms": 1.0743
+          }
+        }
+      },
+      "B": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "narrow:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 1.1962,
+            "p95_ms": 1.6834
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 1.2303,
+            "p95_ms": 1.7328
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.1847,
+            "p95_ms": 1.6514
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.9305,
+            "p95_ms": 1.3545
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 1.2347,
+            "p95_ms": 1.741
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 1.231,
+            "p95_ms": 1.7341
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2132,
+            "p95_ms": 0.374
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.5922,
+            "p95_ms": 0.8075
+          }
+        }
+      }
+    },
+    {
+      "case": "move",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7519,
+            "p95_ms": 0.9195
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 0.7834,
+            "p95_ms": 0.9759
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7429,
+            "p95_ms": 0.8806
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.5086,
+            "p95_ms": 0.5691
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.788,
+            "p95_ms": 0.983
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 0.7842,
+            "p95_ms": 0.9772
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.153,
+            "p95_ms": 0.2221
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.409,
+            "p95_ms": 0.5427
+          }
+        }
+      },
+      "B": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7535,
+            "p95_ms": 0.9327
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 0.786,
+            "p95_ms": 0.9918
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7442,
+            "p95_ms": 0.9015
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.508,
+            "p95_ms": 0.5825
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.7906,
+            "p95_ms": 1.0005
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 0.7868,
+            "p95_ms": 0.993
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.1498,
+            "p95_ms": 0.2099
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.4111,
+            "p95_ms": 0.537
+          }
+        }
+      }
+    },
+    {
+      "case": "move",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 200,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7553,
+            "p95_ms": 1.2389
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 0.7866,
+            "p95_ms": 1.2795
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7464,
+            "p95_ms": 1.2195
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.5075,
+            "p95_ms": 0.6134
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.7908,
+            "p95_ms": 1.2841
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 0.7873,
+            "p95_ms": 1.2803
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.1615,
+            "p95_ms": 0.211
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.4107,
+            "p95_ms": 0.526
+          }
+        }
+      },
+      "B": {
+        "terminal": "verified",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 100,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7522,
+            "p95_ms": 0.8078
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 0.7841,
+            "p95_ms": 0.853
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7432,
+            "p95_ms": 0.7965
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.5062,
+            "p95_ms": 0.5409
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.7883,
+            "p95_ms": 0.8579
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 0.7849,
+            "p95_ms": 0.8536
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.1616,
+            "p95_ms": 0.2439
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.4097,
+            "p95_ms": 0.516
+          }
+        }
+      }
+    },
+    {
+      "case": "negative",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "Please restate the action you want me to take.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.3435,
+            "p95_ms": 0.3435
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.268,
+            "p95_ms": 0.268
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.2295,
+            "p95_ms": 0.2295
+          }
+        }
+      },
+      "B": {
+        "terminal": "Please restate the action you want me to take.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.3383,
+            "p95_ms": 0.3383
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2285,
+            "p95_ms": 0.2285
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.2318,
+            "p95_ms": 0.2318
+          }
+        }
+      }
+    },
+    {
+      "case": "negative",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "Please restate the action you want me to take.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process"
+        ],
+        "virtual_final_to_terminal_ms": 100,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.2998,
+            "p95_ms": 0.2998
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2513,
+            "p95_ms": 0.2513
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.222,
+            "p95_ms": 0.222
+          }
+        }
+      },
+      "B": {
+        "terminal": "Please restate the action you want me to take.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.3004,
+            "p95_ms": 0.3004
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2534,
+            "p95_ms": 0.2534
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.2373,
+            "p95_ms": 0.2373
+          }
+        }
+      }
+    },
+    {
+      "case": "remote",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "remote-ended",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:note",
+          "full:tool-validation",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 4.0009,
+            "p95_ms": 4.7501
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 4.0418,
+            "p95_ms": 4.7883
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.8158,
+            "p95_ms": 2.3844
+          },
+          "admitted_to_route-end-2": {
+            "n": 100,
+            "p50_ms": 3.9831,
+            "p95_ms": 4.728
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 1.5334,
+            "p95_ms": 2.086
+          },
+          "admitted_to_route-start-2": {
+            "n": 100,
+            "p50_ms": 3.5427,
+            "p95_ms": 4.3103
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 4.1729,
+            "p95_ms": 4.9245
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 4.0425,
+            "p95_ms": 4.7891
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2292,
+            "p95_ms": 0.3423
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 1.0254,
+            "p95_ms": 1.4588
+          }
+        }
+      },
+      "B": {
+        "terminal": "remote-ended",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "narrow:note",
+          "full:tool-validation",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 3.9542,
+            "p95_ms": 4.7183
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 3.9881,
+            "p95_ms": 4.7584
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.8018,
+            "p95_ms": 2.3479
+          },
+          "admitted_to_route-end-2": {
+            "n": 100,
+            "p50_ms": 3.9375,
+            "p95_ms": 4.6975
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 1.5199,
+            "p95_ms": 2.0499
+          },
+          "admitted_to_route-start-2": {
+            "n": 100,
+            "p50_ms": 3.507,
+            "p95_ms": 4.2828
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 4.1223,
+            "p95_ms": 4.8952
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 3.9886,
+            "p95_ms": 4.7592
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2263,
+            "p95_ms": 0.3547
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 1.0188,
+            "p95_ms": 1.2142
+          }
+        }
+      }
+    },
+    {
+      "case": "remote",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "remote-ended",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:note",
+          "full:tool-validation",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 500,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 3.9765,
+            "p95_ms": 4.7251
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 4.0183,
+            "p95_ms": 4.7705
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.8001,
+            "p95_ms": 2.3074
+          },
+          "admitted_to_route-end-2": {
+            "n": 100,
+            "p50_ms": 3.9617,
+            "p95_ms": 4.705
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 1.5216,
+            "p95_ms": 1.8401
+          },
+          "admitted_to_route-start-2": {
+            "n": 100,
+            "p50_ms": 3.5418,
+            "p95_ms": 4.2837
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 4.1345,
+            "p95_ms": 4.9074
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 4.0189,
+            "p95_ms": 4.7712
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2367,
+            "p95_ms": 0.3432
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 1.0115,
+            "p95_ms": 1.4324
+          }
+        }
+      },
+      "B": {
+        "terminal": "remote-ended",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "narrow:note",
+          "full:tool-validation",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 200,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 3.9609,
+            "p95_ms": 4.7158
+          },
+          "admitted_to_observed": {
+            "n": 100,
+            "p50_ms": 3.9921,
+            "p95_ms": 4.7545
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 1.8,
+            "p95_ms": 2.2967
+          },
+          "admitted_to_route-end-2": {
+            "n": 100,
+            "p50_ms": 3.945,
+            "p95_ms": 4.6952
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 1.5211,
+            "p95_ms": 2.0077
+          },
+          "admitted_to_route-start-2": {
+            "n": 100,
+            "p50_ms": 3.5309,
+            "p95_ms": 4.2548
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 4.1187,
+            "p95_ms": 4.874
+          },
+          "admitted_to_verified": {
+            "n": 100,
+            "p50_ms": 3.9926,
+            "p95_ms": 4.7551
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.2368,
+            "p95_ms": 0.365
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 1.0123,
+            "p95_ms": 1.2202
+          }
+        }
+      }
+    },
+    {
+      "case": "replacedAsk",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "That question changed. Please answer the current question.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 1.294,
+            "p95_ms": 1.294
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 1.0307,
+            "p95_ms": 1.0307
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 1.4159,
+            "p95_ms": 1.4159
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2194,
+            "p95_ms": 0.2194
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.6087,
+            "p95_ms": 0.6087
+          }
+        }
+      },
+      "B": {
+        "terminal": "That question changed. Please answer the current question.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "narrow:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 1.2565,
+            "p95_ms": 1.2565
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 1.0155,
+            "p95_ms": 1.0155
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 1.2754,
+            "p95_ms": 1.2754
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2265,
+            "p95_ms": 0.2265
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.5934,
+            "p95_ms": 0.5934
+          }
+        }
+      }
+    },
+    {
+      "case": "replacedAsk",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "That question changed. Please answer the current question.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 200,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 1.3171,
+            "p95_ms": 1.3171
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 1.0604,
+            "p95_ms": 1.0604
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 1.3466,
+            "p95_ms": 1.3466
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2433,
+            "p95_ms": 0.2433
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 1.1286,
+            "p95_ms": 1.1286
+          }
+        }
+      },
+      "B": {
+        "terminal": "That question changed. Please answer the current question.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "narrow:answer-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 1.2015,
+            "p95_ms": 1.2015
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 0.9341,
+            "p95_ms": 0.9341
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 1.2194,
+            "p95_ms": 1.2194
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2996,
+            "p95_ms": 0.2996
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.5939,
+            "p95_ms": 0.5939
+          }
+        }
+      }
+    },
+    {
+      "case": "swappedWindow",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "The target changed while you were speaking. Please restate the request.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 0.9107,
+            "p95_ms": 0.9107
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 0.6506,
+            "p95_ms": 0.6506
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.9316,
+            "p95_ms": 0.9316
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2288,
+            "p95_ms": 0.2288
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.4341,
+            "p95_ms": 0.4341
+          }
+        }
+      },
+      "B": {
+        "terminal": "The target changed while you were speaking. Please restate the request.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 0.8723,
+            "p95_ms": 0.8723
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 0.6411,
+            "p95_ms": 0.6411
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.8899,
+            "p95_ms": 0.8899
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2265,
+            "p95_ms": 0.2265
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.4025,
+            "p95_ms": 0.4025
+          }
+        }
+      }
+    },
+    {
+      "case": "swappedWindow",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 1,
+      "mismatched": 0,
+      "A": {
+        "terminal": "The target changed while you were speaking. Please restate the request.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 200,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 0.8951,
+            "p95_ms": 0.8951
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 0.5467,
+            "p95_ms": 0.5467
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.992,
+            "p95_ms": 0.992
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.2552,
+            "p95_ms": 0.2552
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.3978,
+            "p95_ms": 0.3978
+          }
+        }
+      },
+      "B": {
+        "terminal": "The target changed while you were speaking. Please restate the request.",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 100,
+        "actual": {
+          "admitted_to_route-end-1": {
+            "n": 1,
+            "p50_ms": 0.7549,
+            "p95_ms": 0.7549
+          },
+          "admitted_to_route-start-1": {
+            "n": 1,
+            "p50_ms": 0.5158,
+            "p95_ms": 0.5158
+          },
+          "admitted_to_terminal": {
+            "n": 1,
+            "p50_ms": 0.7825,
+            "p95_ms": 0.7825
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 1,
+            "p50_ms": 0.4857,
+            "p95_ms": 0.4857
+          },
+          "receipt_to_admitted": {
+            "n": 1,
+            "p50_ms": 0.5435,
+            "p95_ms": 0.5435
+          }
+        }
+      }
+    },
+    {
+      "case": "unchanged",
+      "virtual_full_read_ms": 0,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "no-effect",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7556,
+            "p95_ms": 0.8045
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7466,
+            "p95_ms": 0.7913
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.5078,
+            "p95_ms": 0.5365
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.79,
+            "p95_ms": 0.8641
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.185,
+            "p95_ms": 0.2758
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.4095,
+            "p95_ms": 0.5494
+          }
+        }
+      },
+      "B": {
+        "terminal": "no-effect",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 0,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7507,
+            "p95_ms": 0.8706
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7417,
+            "p95_ms": 0.8571
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.5061,
+            "p95_ms": 0.5623
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.7859,
+            "p95_ms": 0.9176
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.1741,
+            "p95_ms": 0.2894
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.4108,
+            "p95_ms": 0.5142
+          }
+        }
+      }
+    },
+    {
+      "case": "unchanged",
+      "virtual_full_read_ms": 100,
+      "attempted_pairs": 100,
+      "mismatched": 0,
+      "A": {
+        "terminal": "no-effect",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "full:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 200,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7493,
+            "p95_ms": 1.1612
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7406,
+            "p95_ms": 1.143
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.5067,
+            "p95_ms": 0.7742
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.7841,
+            "p95_ms": 1.2392
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.1937,
+            "p95_ms": 0.2848
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.4065,
+            "p95_ms": 0.4464
+          }
+        }
+      },
+      "B": {
+        "terminal": "no-effect",
+        "read_order": [
+          "full:onset",
+          "full:final-scope",
+          "narrow:process",
+          "full:target-check"
+        ],
+        "virtual_final_to_terminal_ms": 100,
+        "actual": {
+          "admitted_to_dispatch": {
+            "n": 100,
+            "p50_ms": 0.7544,
+            "p95_ms": 1.0835
+          },
+          "admitted_to_route-end-1": {
+            "n": 100,
+            "p50_ms": 0.7449,
+            "p95_ms": 1.0375
+          },
+          "admitted_to_route-start-1": {
+            "n": 100,
+            "p50_ms": 0.5065,
+            "p95_ms": 0.7312
+          },
+          "admitted_to_terminal": {
+            "n": 100,
+            "p50_ms": 0.7893,
+            "p95_ms": 1.1614
+          },
+          "fixture_end_to_stop_receipt": {
+            "n": 100,
+            "p50_ms": 0.1951,
+            "p95_ms": 0.2783
+          },
+          "receipt_to_admitted": {
+            "n": 100,
+            "p50_ms": 0.4128,
+            "p95_ms": 0.5599
+          }
+        }
+      }
+    }
+  ]
+}

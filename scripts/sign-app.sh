@@ -11,9 +11,11 @@ IDENTITY_NAME="Jev Voice Local Dev"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -f "$REPO_ROOT/Sources/JevVoice/Voice/ConversationCapture.swift" ]; then
-    python3 "$REPO_ROOT/scripts/bundle-conversation-vad.py" \
-        --source "$REPO_ROOT/build/vendor/ConversationVAD" \
-        --app "$APP"
+    vad_args=(--app "$APP" --source "$REPO_ROOT/build/vendor/ConversationVAD")
+    if [ "${JEV_SPEECH_PACKAGE+x}" ]; then
+        vad_args+=(--profile "$JEV_SPEECH_PACKAGE")
+    fi
+    python3 "$REPO_ROOT/scripts/bundle-conversation-vad.py" "${vad_args[@]}"
 fi
 
 xattr -dr com.apple.FinderInfo "$APP" 2>/dev/null || true
@@ -66,6 +68,10 @@ EOF
 
 IDENTITY=$(find_identity)
 if [ -z "$IDENTITY" ]; then
+    if [ "${2:-}" = "--existing-only" ]; then
+        echo "sign-app: the required existing signer is unavailable; no identity was created" >&2
+        exit 1
+    fi
     echo "sign-app: '$IDENTITY_NAME' not in the login keychain — minting it"
     mint_identity && IDENTITY=$(find_identity) || true
 fi

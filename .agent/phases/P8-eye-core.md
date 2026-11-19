@@ -1,7 +1,7 @@
 # P8 — eye-core ExecPlan
 
 > Status: draft; documentation authorized, source G1/G2 pending
-> Track: eyes, with serialized agent-owned host integration
+> Track: eyes, with a sequenced host integration
 > Depends on: P2a · Branch: `ship/v1-p8`
 > Acceptance: `.agent/acceptance/P8.json` · Contracts: tracker IPC, §2, §8
 
@@ -57,9 +57,9 @@ scripts/verification-lane.sh
 .agent/PROGRESS.md
 ```
 
-Eyes writer edits only EyeTracking paths. Agent writer applies Swift,
-shared verification and metadata changes sequentially after reviewing the
-IPC handoff. At most two disjoint writers; no concurrent shared-file edit.
+Assign tracker and host changes by named paths under PLANS §5. The
+integration owner sequences Swift, shared verification and metadata
+changes after reviewing the IPC handoff; never edit shared files in parallel.
 
 ## Non-goals
 
@@ -146,6 +146,12 @@ may keep the app responsive without meeting the release FPS requirement.
 Such a fallback must be labeled, not presented as Core ML qualification.
 
 ## Decision Log
+
+2026-11-17, KAR-28: keep renderer presence and scorer display separate
+from action authority. Track the originating video observation, not its
+latest delivery time. An entered source gap or replaced target cannot
+extend a hold, and a recent repeated frame cannot refresh it. See the
+KAR-28 entry in CONTRACTS. No physical or phase verdict follows.
 
 | Date | Decision | Reason |
 |---|---|---|

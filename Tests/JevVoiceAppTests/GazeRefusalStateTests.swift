@@ -312,7 +312,7 @@ final class GazeRefusalStateTests: XCTestCase {
         guard case .blocked(let reason) = result.status else {
             return XCTFail("expected blocked, got \(result.status)")
         }
-        XCTAssertTrue(reason.contains("tell me which window"), reason)
+        XCTAssertEqual(reason, "Please name the control you want to use.")
         XCTAssertTrue(driver.calls.allSatisfy { $0.tool != "type_text" && $0.tool != "click" },
                       "no keystroke may land without the gaze point")
     }
@@ -339,7 +339,7 @@ final class GazeRefusalStateTests: XCTestCase {
         guard case .blocked(let reason) = result.status else {
             return XCTFail("expected blocked, got \(result.status)")
         }
-        XCTAssertTrue(reason.contains("no window where you're looking"), reason)
+        XCTAssertEqual(reason, "Please name the control you want to use.")
         XCTAssertTrue(driver.calls.allSatisfy { $0.tool != "type_text" && $0.tool != "click" })
     }
 

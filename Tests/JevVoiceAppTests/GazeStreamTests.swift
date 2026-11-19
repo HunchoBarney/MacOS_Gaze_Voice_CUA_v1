@@ -104,7 +104,7 @@ final class GazeStreamTests: XCTestCase {
     /// trailing garbage frame can't corrupt it.
     func testSnapshotThenUpdateKeepsNewestGoodSample() async {
         let stream = GazeStream(frames: feed([
-            snapshotFrame(gaze(100, 200)),
+            snapshotFrame(gaze(100, 200, age: 0.2)),
             updateFrame(gaze(300, 400)),
             "this is not json",
         ]))

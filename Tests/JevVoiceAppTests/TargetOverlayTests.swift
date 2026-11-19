@@ -125,12 +125,9 @@ final class TargetOverlayTests: XCTestCase {
 
     /// pendingCount mirrors drawn chips: shown→N, hideAll→0.
     func testPendingCountLifecycle() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         XCTAssertEqual(overlay.pendingCount, 0)
-        overlay.showNumbers(targets: [
-            (frame: CGRect(x: 10, y: 10, width: 40, height: 20), label: "Save"),
-            (frame: CGRect(x: 100, y: 10, width: 40, height: 20), label: "Open"),
-        ]) { _ in }
+        overlay.showRadial(labels: ["Save", "Open"], near: .zero, radius: 80) { _ in }
         XCTAssertEqual(overlay.pendingCount, 2)
         overlay.hideAll()
         XCTAssertEqual(overlay.pendingCount, 0)
@@ -138,69 +135,58 @@ final class TargetOverlayTests: XCTestCase {
 
     /// A second show replaces the pending set — re-arm, never stack.
     func testRearmReplacesPendingSet() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.showRadial(labels: ["a", "b", "c"], near: CGPoint(x: 400, y: 300),
                            radius: 80) { _ in }
         XCTAssertEqual(overlay.pendingCount, 3)
-        overlay.showNumbers(targets: [
-            (frame: CGRect(x: 0, y: 0, width: 20, height: 20), label: "x"),
-        ]) { _ in }
+        overlay.showRadial(labels: ["x"], near: .zero, radius: 80) { _ in }
         XCTAssertEqual(overlay.pendingCount, 1)
         overlay.hideAll()
     }
 
-    /// More than the cap draws the cap, not the list — pendingCount is
-    /// what a voice index can actually resolve against.
-    func testNumbersCapAtSixty() {
-        let overlay = TargetOverlay()
-        let targets = (0..<80).map {
-            (frame: CGRect(x: CGFloat($0) * 10, y: 0, width: 8, height: 8), label: "t\($0)")
-        }
-        overlay.showNumbers(targets: targets) { _ in }
-        XCTAssertEqual(overlay.pendingCount, TargetOverlay.maxNumberChips)
+    func testChoiceRadialLimitsDrawnOptions() {
+        let overlay = TargetOverlay(presentsPanels: false)
+        overlay.showRadial(labels: (0..<80).map { String($0) }, near: .zero, radius: 80) { _ in }
+        XCTAssertEqual(overlay.pendingCount, TargetOverlay.maxRadialChips)
         overlay.hideAll()
     }
 
     func testHideAllFromEmptyStateIsSafe() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.hideAll()
         overlay.hideAll()
         XCTAssertEqual(overlay.pendingCount, 0)
     }
 
     func testAgentChipsThenHideIsSafe() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.agentChips([CGRect(x: 0, y: 0, width: 10, height: 10)])
         overlay.agentChips([])
         overlay.hideAll()
     }
 
-    /// A pick retires only its own chip set — the conforming ring the
-    /// scorer owns survives it (disarm/hideAll confusion used to order
-    /// the ring out under the same tick's acquire).
-    func testPickClearsChipsButKeepsRing() {
-        let overlay = TargetOverlay()
+    func testChoicePreviewDoesNotFirePickOrRetractRing() {
+        let overlay = TargetOverlay(presentsPanels: false)
         var t: TimeInterval = 0
         overlay.now = { t }
         overlay.intentEvent(.acquire(intentCandidate(x: 0, y: 0, w: 40, h: 40)))
         XCTAssertTrue(overlay.ringArmed)
-        let frame = CGRect(x: 100, y: 100, width: 50, height: 30)
         var picked: [Int] = []
-        overlay.showNumbers(targets: [(frame: frame, label: "A")]) { picked.append($0) }
-        let chipPoint = CGPoint(x: frame.minX + TargetOverlay.numberNudge.x,
-                                y: frame.minY + TargetOverlay.numberNudge.y)
+        overlay.showRadial(labels: ["A"], near: CGPoint(x: 100, y: 100), radius: 80) { picked.append($0) }
+        let chipPoint = CGPoint(x: 100, y: 20)
         overlay.ingestGaze(chipPoint)
         t = 0.6
         overlay.ingestGaze(chipPoint)
-        XCTAssertEqual(picked, [0])
-        XCTAssertEqual(overlay.pendingCount, 0)
+        XCTAssertTrue(picked.isEmpty)
+        XCTAssertEqual(overlay.previewedChip, 0)
+        XCTAssertEqual(overlay.pendingCount, 1)
         XCTAssertTrue(overlay.ringArmed)   // ring survives the pick
         overlay.hideAll()
     }
 
     /// `hideChips` is the scoped teardown — chips + pick state only.
     func testHideChipsLeavesRingHaloAlone() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.intentEvent(.acquire(intentCandidate(x: 0, y: 0, w: 40, h: 40)))
         overlay.showRadial(labels: ["a", "b"], near: CGPoint(x: 400, y: 300),
                            radius: 80) { _ in }
@@ -213,26 +199,28 @@ final class TargetOverlayTests: XCTestCase {
         XCTAssertFalse(overlay.ringArmed)
     }
 
-    /// The whole ingest→dwell→pick→dismiss loop on a fake clock: the
-    /// chip centers on the target corner + nudge, so the nudged corner
-    /// is guaranteed inside its hit rect.
-    func testIngestGazeFiresPickThenClears() {
-        let overlay = TargetOverlay()
+    func testLookingAtChoicePreviewsWithoutAnsweringAndLeavingClearsPreview() {
+        let overlay = TargetOverlay(presentsPanels: false)
         var t: TimeInterval = 0
         overlay.now = { t }
         var picked: [Int] = []
-        let frame = CGRect(x: 100, y: 100, width: 50, height: 30)
-        overlay.showNumbers(targets: [(frame: frame, label: "A")]) { picked.append($0) }
-        let chipPoint = CGPoint(x: frame.minX + TargetOverlay.numberNudge.x,
-                                y: frame.minY + TargetOverlay.numberNudge.y)
+        overlay.showRadial(labels: ["A"], near: CGPoint(x: 100, y: 100), radius: 80) { picked.append($0) }
+        let chipPoint = CGPoint(x: 100, y: 20)
         overlay.ingestGaze(chipPoint)          // t=0: enters, clock starts
         t = 0.3
         overlay.ingestGaze(chipPoint)          // still short of 500ms
         XCTAssertTrue(picked.isEmpty)
         t = 0.6
-        overlay.ingestGaze(chipPoint)          // ≥500ms → pick + dismiss
-        XCTAssertEqual(picked, [0])
-        XCTAssertEqual(overlay.pendingCount, 0)
+        overlay.ingestGaze(chipPoint)
+        XCTAssertTrue(picked.isEmpty)
+        XCTAssertEqual(overlay.previewedChip, 0)
+        XCTAssertEqual(overlay.pendingCount, 1)
+        t = 5
+        overlay.ingestGaze(chipPoint)
+        XCTAssertTrue(picked.isEmpty)
+        overlay.ingestGaze(.zero)
+        XCTAssertNil(overlay.previewedChip)
+        XCTAssertEqual(overlay.pendingCount, 1)
         overlay.hideAll()
     }
 
@@ -320,12 +308,12 @@ final class TargetOverlayTests: XCTestCase {
 
     /// hold progress is what the fill stroke sweeps — 0→1 verbatim.
     func testHoldProgressDrivesFillFraction() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         let c = intentCandidate(x: 100, y: 100, w: 120, h: 28)
         overlay.intentEvent(.acquire(c))
-        overlay.intentEvent(.hold(c, progress: 0.4))
+        overlay.intentEvent(.hold(c, progress: 0.4), dwellFeedback: true)
         XCTAssertEqual(overlay.ringProgress, 0.4, accuracy: 0.001)
-        overlay.intentEvent(.hold(c, progress: 1))
+        overlay.intentEvent(.hold(c, progress: 1), dwellFeedback: true)
         XCTAssertEqual(overlay.ringProgress, 1, accuracy: 0.001)
         overlay.hideAll()
     }
@@ -384,7 +372,7 @@ final class TargetOverlayTests: XCTestCase {
     /// is exactly where the release morph had reached — no jump, no
     /// snap back to the dot.
     func testAcquireReleaseAcquireLeavesMorphConsistent() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         var t: TimeInterval = 0
         overlay.now = { t }
         let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
@@ -419,7 +407,7 @@ final class TargetOverlayTests: XCTestCase {
     /// A hold carrying a moved frame retargets the morph at the faster
     /// retarget duration instead of snapping.
     func testHoldRetargetsWhenTheElementMoved() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         var t: TimeInterval = 0
         overlay.now = { t }
         let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
@@ -442,7 +430,7 @@ final class TargetOverlayTests: XCTestCase {
     /// `.none` on a fresh overlay is a no-op; after an acquire it drops
     /// the ring's claim.
     func testNoneAndReleaseAreSafe() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         let c = intentCandidate(x: 0, y: 0, w: 40, h: 40)
         overlay.intentEvent(.none)
         overlay.intentEvent(.release(c))
@@ -454,21 +442,35 @@ final class TargetOverlayTests: XCTestCase {
         overlay.hideAll()
     }
 
-    /// Ambiguity only signals upward — the coordinator owns the radial;
-    /// the ring itself claims nothing.
-    func testAmbiguousBubblesUpThroughHook() {
-        let overlay = TargetOverlay()
-        var got: [IntentCandidate] = []
-        overlay.onAmbiguous = { got = $0 }
+    func testAmbiguityReleasesHighlightWithoutArmingChoices() {
+        let overlay = TargetOverlay(presentsPanels: false)
         let a = intentCandidate(x: 0, y: 0, w: 40, h: 40, id: "a")
         let b = intentCandidate(x: 50, y: 0, w: 40, h: 40, id: "b")
+        overlay.intentEvent(.acquire(a))
         overlay.intentEvent(.ambiguous([a, b]))
-        XCTAssertEqual(got, [a, b])
+        XCTAssertEqual(overlay.pendingCount, 0)
         XCTAssertFalse(overlay.ringArmed)
+        overlay.hideAll()
+    }
+
+    func testPassiveHoverIsTransientAndDoesNotImplyDwellOrOutlineWholeWindows() {
+        let overlay = TargetOverlay(presentsPanels: false)
+        let control = intentCandidate(x: 20, y: 20, w: 40, h: 24)
+        overlay.intentEvent(.acquire(control))
+        overlay.intentEvent(.hold(control, progress: 0.4))
+        XCTAssertTrue(overlay.ringArmed)
+        XCTAssertEqual(overlay.ringProgress, 0)
+        for progress in [0.55, 0.9, 1.0] {
+            overlay.intentEvent(.hold(control, progress: progress))
+            XCTAssertFalse(overlay.ringArmed)
+        }
+        overlay.intentEvent(.acquire(intentCandidate(.window, x: 0, y: 0, w: 800, h: 600)))
+        XCTAssertFalse(overlay.ringArmed)
+        overlay.hideAll()
     }
 
     func testHideAllDismissesRing() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.intentEvent(.acquire(intentCandidate(x: 0, y: 0, w: 40, h: 40)))
         XCTAssertTrue(overlay.ringArmed)
         overlay.hideAll()
@@ -479,7 +481,7 @@ final class TargetOverlayTests: XCTestCase {
     /// Agent stand-down applies to the ring too — acquiring on a frame
     /// an agent is acting on must not fight the agent's cursor.
     func testRingAcquireUnderAgentActivityIsSafe() {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         let frame = CGRect(x: 0, y: 0, width: 40, height: 40)
         overlay.agentChips([frame])
         overlay.intentEvent(.acquire(intentCandidate(x: 0, y: 0, w: 40, h: 40)))

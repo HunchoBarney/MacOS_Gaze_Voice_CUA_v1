@@ -2,6 +2,26 @@ import Foundation
 import OSLog
 import JevVoiceCore
 
+struct DelegatedVoiceStatusScope: Sendable, Equatable {
+    let revision: UUID
+    let receipt: WorkerTurnReceipt?
+
+    static func asks(_ final: String) -> Bool {
+        guard final.utf8.count <= 160 else { return false }
+        var words = final.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if words.last == "?" || words.last == "." { words.removeLast() }
+        return ["has my delegated task finished", "is my delegated task done",
+                "what is the status of my delegated task", "what’s the status of my delegated task",
+                "what's the status of my delegated task"].contains(words)
+    }
+}
+
+extension VoiceAdmission {
+    var isLocalStatusQuestion: Bool {
+        intent == "desktop_switch_status" || (intent != "respond" && DelegatedVoiceStatusScope.asks(text))
+    }
+}
+
 /// Observed identities, not a vocabulary supplied with expected ASR answers.
 struct VoiceAdmissionContext: Sendable {
     struct Entity: Sendable, Equatable {
@@ -19,15 +39,28 @@ struct VoiceAdmissionContext: Sendable {
             self.taskID = taskID; self.askID = askID; self.kind = kind; self.options = options
         }
         static func == (lhs: Self, rhs: Self) -> Bool { lhs.taskID == rhs.taskID && lhs.askID == rhs.askID }
+
+        static func sameParkedSnapshot(_ opened: [Self], _ current: [Self]) -> Bool {
+            guard opened.count == current.count, Set(opened.map(\.taskID)).count == opened.count,
+                  Set(opened.map(\.askID)).count == opened.count else { return false }
+            return opened.allSatisfy { ask in
+                current.contains { other in
+                    other == ask && other.kind == ask.kind &&
+                        other.options.elementsEqual(ask.options) { $0.utf8.elementsEqual($1.utf8) }
+                }
+            }
+        }
     }
     var entities: [Entity] = []
     var appRoles: [String: String] = [:]
     var targetID: String?
     var targetAppID: String?
     var windowID: Int?
+    var desktopDisplayID: UInt32?
     var editableTarget = false
     var tasks: Set<UUID> = []
     var selectedTask: UUID?
+    var delegatedStatus: DelegatedVoiceStatusScope?
     var capturedAsks: [Ask] = []
     var currentAsks: [Ask] = []
     var hasExplicitGrantScope = false
@@ -36,30 +69,25 @@ struct VoiceAdmissionContext: Sendable {
 
 /// Final-only deterministic admission. Unknown values never become phonetic substitutions.
 enum VoiceAdmissionPolicy {
+    static func isDesktopSwitchQuestion(_ final: String) -> Bool {
+        guard final.utf8.count <= 160 else { return false }
+        var words = final.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let last = words.last, ".?!".contains(last) { words.removeLast() }
+        return words.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ") == "did it switch"
+    }
+
+    static func isBareGazeClick(_ final: String) -> Bool {
+        guard final.utf8.count <= 32 else { return false }
+        let words = final.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return words == "click" || words == "click." || words == "click!"
+    }
+
     /// Same captured-state interpretation is used by admission and execution.
     /// This changes request syntax, never the retained transcript or literals.
     static func commandText(_ original: String, context: VoiceAdmissionContext) -> String {
         guard original.utf8.count <= 4000 else { return original }
-        let raw = normalized(original)
-        if eligibleAsks(context).contains(where: { ask in
-            ask.kind == .choice && ask.options.contains { normalized($0) == raw }
-        }) { return original }
-        var command = original.trimmingCharacters(in: .whitespacesAndNewlines)
-        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",:"))
-        let courtesies = ["would you mind", "could you", "would you", "can you", "will you",
-                          "hey jarvis", "hey jev", "jarvis", "jev", "please", "just"]
-        while true {
-            var stripped = false
-            for prefix in courtesies where command.lowercased().hasPrefix(prefix) {
-                let tail = String(command.dropFirst(prefix.count))
-                guard let first = tail.first, first.isWhitespace || first == "," || first == ":" else { continue }
-                let rest = tail.trimmingCharacters(in: separators)
-                guard !rest.isEmpty else { continue }
-                command = rest; stripped = true
-                break
-            }
-            if !stripped { break }
-        }
+        if matchesCapturedChoice(original, context: context) { return original }
+        let command = HandsFreeActionSyntax.withoutCourtesy(original)
         if FastAction.parse(command) != nil { return command }
         if let parsed = FastAction.parseOpen(command),
            !namedCandidates(parsed.query.components(separatedBy: " and ")[0], context: context).isEmpty {
@@ -154,19 +182,47 @@ enum VoiceAdmissionPolicy {
     static func propose(_ original: String, context: VoiceAdmissionContext,
                         speech: Bool = false) -> VoiceProposal {
         guard original.utf8.count <= 4000 else { return blocked(.refuse, "invalid_length") }
+        if speech, isDesktopSwitchQuestion(original) { return .local("desktop_switch_status") }
+        let request = FastAction.retiredTargetRequest(original)
+        let clickReply = isBareGazeClick(original) && (!context.capturedAsks.isEmpty || !context.currentAsks.isEmpty)
+        if request != nil || clickReply {
+            let asks = context.capturedAsks
+            let current = context.currentAsks
+            guard asks.count == 1, let ask = asks.first,
+                  current.count == 1, let fresh = current.first, fresh == ask,
+                  fresh.kind == ask.kind, fresh.options == ask.options else { return blocked(.clarify, "unbound_pointing") }
+            let answer = normalized(original)
+            if clickReply, ask.kind == .question { return answerProposal(answer, context: context) }
+            guard ask.kind == .choice else { return blocked(.clarify, "unbound_pointing") }
+            let labels = ask.options.filter { normalized($0) == answer }
+            if labels.count == 1 { return answerProposal(answer, context: context) }
+            guard labels.isEmpty, case .pick(let n) = request, ask.options.indices.contains(n - 1) else {
+                return blocked(.clarify, "unbound_pointing")
+            }
+            return answerProposal(answer, context: context)
+        }
+        if ScreenQuestionObservation.isScreenInquiry(original, context: context) {
+            return remote("screen_question", context: context)
+        }
         let originalValue = normalized(original)
-        if eligibleAsks(context).contains(where: { ask in
-            ask.kind == .choice && ask.options.contains { normalized($0) == originalValue }
-        }) {
+        if matchesCapturedChoice(original, context: context) {
             return answerProposal(originalValue, context: context)
         }
         let text = commandText(original, context: context)
         let t = normalized(text)
+        if speech, (t.range(of: #"^(?:click|tap|press|select|open|choose|hit)\s+(?:this|that|it|here|there)(?:\s+(?:one|button|link|control|item))?$"#, options: .regularExpression) != nil
+            || t.range(of: #"^(?:click|tap|press|select|open|choose|hit)\b.*\b(?:looking|pointing) at\b"#, options: .regularExpression) != nil) {
+            return blocked(.clarify, "unbound_pointing")
+        }
         guard !t.isEmpty else { return blocked(.refuse, "empty_transcript") }
         guard text.utf8.count <= 4000 else { return blocked(.refuse, "invalid_length") }
 
+        let parsed = FastAction.parse(text)
+        if speech, let parsed, case .gaze(let verb) = parsed.action.body, verb != .describe {
+            return blocked(.clarify, "unbound_pointing")
+        }
         // Literal command words are data, not cancellation or negation.
-        if let parsed = FastAction.parse(text), case .type(let payload) = parsed.action.body {
+        if let parsed, case .type(let payload) = parsed.action.body {
             let literal = normalized(payload)
             let withdrawal = ["do not type", "don t type", "stop typing", "do not write", "don t write",
                               "do not enter", "don t enter"].contains { literal.contains($0) }
@@ -205,6 +261,13 @@ enum VoiceAdmissionPolicy {
         if t.contains(" actually ") && ["don't", "don t", "do not", " no"].contains(where: { t.contains($0) }) {
             return blocked(.clarify, "contradictory_request", risk: .contradictory)
         }
+        if DesktopSpaceTarget(command: original) != nil {
+            guard context.capturedAsks.isEmpty, context.currentAsks.isEmpty else {
+                return blocked(.clarify, "ask_changed")
+            }
+            return VoiceProposal(route: .local, intent: "switch_space", targetIDs: targets(context))
+        }
+
         let imperative = ["open", "launch", "show", "send", "reply", "remind", "set", "delete", "click"]
             .contains { t.hasPrefix($0 + " ") }
         if imperative && t.contains(" or ") {
@@ -228,6 +291,9 @@ enum VoiceAdmissionPolicy {
             if ask.kind == .question, !commandHead, FastAction.parse(text) == nil {
                 return answerProposal(t, context: context)
             }
+        }
+        if DelegatedVoiceStatusScope.asks(original) {
+            return .local("delegated_status")
         }
         if ["stop", "cancel", "cancel the task", "cancel that", "never mind", "nevermind"].contains(t) {
             let task = context.selectedTask.flatMap { context.tasks.contains($0) ? $0 : nil }
@@ -253,7 +319,7 @@ enum VoiceAdmissionPolicy {
             return blocked(.clarify, "ungrounded_target")
         }
 
-        if let parsed = FastAction.parse(text) {
+        if let parsed {
             if let qualifier = parsed.appQualifier,
                !context.entities.contains(where: { normalized($0.name) == normalized(qualifier) }) {
                 if t.hasPrefix("search for ") {
@@ -276,7 +342,7 @@ enum VoiceAdmissionPolicy {
                                      slots: ["direction": direction, "pages": String(pages)],
                                      targetIDs: targets(context))
             case .gaze:
-                return blocked(.clarify, "ungrounded_target")
+                return blocked(.clarify, speech ? "unbound_pointing" : "ungrounded_target")
             default:
                 return VoiceProposal(route: .local, intent: "primitive", targetIDs: targets(context))
             }
@@ -286,6 +352,7 @@ enum VoiceAdmissionPolicy {
             let pieces = open.query.components(separatedBy: " and ")
             let query = pieces[0]
             let candidates = namedCandidates(query, context: context)
+            if candidates.count > 1 { return blocked(.clarify, "ambiguous_target") }
             let rows = candidates.map { entity in JSONValue.object([
                 "name": .string(entity.name), "bundle_id": .string(entity.id)
             ]) }
@@ -305,9 +372,6 @@ enum VoiceAdmissionPolicy {
         }
         if t.split(separator: " ").count == 1 { return blocked(.clarify, "unclear_request") }
         if case .query = IntentRouter.classify(text).verb {
-            if ["screen", "this page", "this window", "this button"].contains(where: { t.contains($0) }) {
-                return remote("screen_question", context: context)
-            }
             return remote("question", context: context)
         }
         return remote("remote", context: context)
@@ -327,6 +391,13 @@ enum VoiceAdmissionPolicy {
                              replyTo: .init(taskID: ask.taskID, askID: ask.askID))
     }
 
+    static func matchesCapturedChoice(_ final: String, context: VoiceAdmissionContext) -> Bool {
+        let value = normalized(final)
+        return eligibleAsks(context).contains { ask in
+            ask.kind == .choice && ask.options.contains { normalized($0) == value }
+        }
+    }
+
     static func eligibleAsks(_ context: VoiceAdmissionContext) -> [VoiceAdmissionContext.Ask] {
         context.capturedAsks.filter { context.selectedTask == nil || $0.taskID == context.selectedTask }
     }
@@ -339,15 +410,34 @@ enum VoiceAdmissionPolicy {
     }
 
     private static func explicitNewRequest(_ text: String) -> Bool {
-        if let parsed = FastAction.parse(text), case .overlay = parsed.action.body { return false }
         let first = normalized(text).split(separator: " ").first.map(String.init) ?? ""
         if ["open", "launch", "show", "new", "close", "scroll", "type", "undo", "redo", "copy", "paste", "cut",
             "select", "move", "bring", "switch", "organize", "find", "read", "summarize", "check", "send", "reply",
             "stop", "cancel", "search"].contains(first) { return true }
         if case .query = IntentRouter.classify(text).verb { return true }
-        guard let parsed = FastAction.parse(text) else { return false }
-        if case .overlay = parsed.action.body { return false }
-        return true
+        return FastAction.parse(text) != nil
+    }
+
+    static func isSpokenTypeRequest(_ command: String) -> Bool {
+        if command.split(whereSeparator: \.isWhitespace).first?.lowercased() == "type" { return true }
+        if case .type? = FastAction.parse(command)?.action.body { return true }
+        return false
+    }
+
+    static func standaloneLiteral(_ command: String, admission: VoiceAdmission) -> String? {
+        guard admission.route == .local, admission.intent == "type", let literal = admission.slots["text"],
+              let parsed = FastAction.parse(command), parsed.appQualifier == nil, !parsed.action.deictic,
+              case .type = parsed.action.body else { return nil }
+        if quotedLiteral(command) {
+            guard let close = command.last, !literal.contains(close) else { return nil }
+        } else {
+            guard !command.contains(where: { "\"“”‘`?;\n".contains($0) }),
+                  !literal.hasPrefix("'"), !literal.hasSuffix("'"),
+                  literal.allSatisfy({ $0.isLetter || $0.isNumber || $0 == " " || "'’-".contains($0) }),
+                  normalized(literal).range(of: #"\b(?:then|actually|instead|but|unless|except|and|or|if|when|after|before|otherwise|while|until)\b"#,
+                                             options: .regularExpression) == nil else { return nil }
+        }
+        return literal
     }
 
     private static func quotedLiteral(_ text: String) -> Bool {
@@ -382,6 +472,8 @@ final class LocalSpeechSession {
     private(set) var gate = VoiceTurnGate()
     var context = VoiceAdmissionContext()
     private var capturedContext = VoiceAdmissionContext()
+    private(set) var gazeClickOnset: UUID?
+    private(set) var gazeClickFinal: UUID?
     private let provider: (any LocalTranscriptProvider)?
     private var drainedFrames = 0
     private var remoteFrames: [Data] = []
@@ -399,18 +491,61 @@ final class LocalSpeechSession {
         self.provider = provider; self.execute = execute
     }
 
+#if DEBUG
+    typealias FixtureFinal = @MainActor (VoiceAdmission, VoiceAdmissionContext, VoiceAdmissionContext, @escaping @MainActor () -> Bool) async -> Bool
+    private var reservedFixture = false
+    private var fixtureFinal: FixtureFinal?
+    private var fixtureTask: Task<Bool, Never>?
+
+    convenience init(reservedFixtureFinal: FixtureFinal?) {
+        self.init { _ in }
+        reservedFixture = true
+        fixtureFinal = reservedFixtureFinal
+    }
+
+    func consumeReservedFixture(_ turn: VoiceTurnToken, input: VoiceRealtimeInput?, current: @escaping @MainActor () -> Bool) async -> Bool {
+        guard reservedFixture, turn.mode == .command else { return false }
+        guard let fixtureFinal else { fail(turn, reason: "fixture_unavailable"); return true }
+        guard current(), !Task.isCancelled, let input, gate.realtimeInput == input else {
+            cancel(turn)
+            return true
+        }
+        guard let admission = consumeAdmission(turn), admission.realtimeInput == input else {
+            fail(turn, reason: "fixture_refused")
+            return true
+        }
+        let task = Task { @MainActor [weak self, boundContext, context] in
+            guard let self, current(), !Task.isCancelled, self.gate.isCurrent(turn), self.gate.state == .completed else { return false }
+            return await fixtureFinal(admission, boundContext, context) { [weak self] in
+                current() && !Task.isCancelled && self?.gate.isCurrent(turn) == true && self?.gate.state == .completed
+            }
+        }
+        fixtureTask = task
+        let handled = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if gate.isCurrent(turn) { fixtureTask = nil }
+        if !handled, current(), gate.state == .completed { fail(turn, reason: "fixture_refused") }
+        return true
+    }
+#endif
+
     @discardableResult
     func begin(id: UUID = UUID(), mode: VoiceCaptureMode, ready: Bool, now: TimeInterval,
                realtimeConnection: UUID? = nil) -> VoiceTurnToken {
+#if DEBUG
+        fixtureTask?.cancel(); fixtureTask = nil
+#endif
         capturedContext = context
+        gazeClickOnset = nil; gazeClickFinal = nil
         finalizedAt = nil
         drainedFrames = 0; remoteFrames = []; remoteBytes = 0; exportedRemote = false
         return gate.begin(id: id, mode: mode, ready: ready, now: now, realtimeConnection: realtimeConnection)
     }
 
     func beginRemoteCapture(id: UUID, mode: VoiceCaptureMode, connection: UUID,
-                            now: TimeInterval) -> VoiceTurnToken {
-        begin(id: id, mode: mode, ready: true, now: now, realtimeConnection: connection)
+                            now: TimeInterval, gazeClickLease: UUID? = nil) -> VoiceTurnToken {
+        let turn = begin(id: id, mode: mode, ready: true, now: now, realtimeConnection: connection)
+        if mode == .command { gazeClickOnset = gazeClickLease }
+        return turn
     }
 
     func commitRemoteCapture(_ turn: VoiceTurnToken, input: VoiceRealtimeInput, now: TimeInterval) -> Bool {
@@ -418,13 +553,14 @@ final class LocalSpeechSession {
     }
 
     func finishRemoteCapture(_ text: String, turn: VoiceTurnToken,
-                             input: VoiceRealtimeInput, now: TimeInterval) async -> VoiceAdmission? {
+                             input: VoiceRealtimeInput, now: TimeInterval, gazeClickLease: UUID? = nil) async -> VoiceAdmission? {
         guard gate.isCurrent(turn), gate.state == .finishing, gate.realtimeInput == input else { return nil }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             gate.cancel(turn)
             onDiagnostic?(.init(turn: turn.id, stage: "finalization.realtime.empty", metrics: [:]))
             return nil
         }
+        if turn.mode == .command, VoiceAdmissionPolicy.isBareGazeClick(text) { gazeClickFinal = gazeClickLease }
         let admission = await finalize(text, turn: turn, drainedFrames: 0, now: now,
             speech: true, window: 8, executeAutomatically: false, realtimeInput: input)
         if admission != nil {
@@ -448,7 +584,12 @@ final class LocalSpeechSession {
         gate.release(turn, acceptedFrames: acceptedFrames, now: now)
     }
 
-    func cancel(_ turn: VoiceTurnToken) { gate.cancel(turn) }
+    func cancel(_ turn: VoiceTurnToken) {
+#if DEBUG
+        if gate.isCurrent(turn) { fixtureTask?.cancel() }
+#endif
+        gate.cancel(turn)
+    }
     func fail(_ turn: VoiceTurnToken, reason: String) { gate.fail(turn, reason: reason) }
 
     var readyForCapture: Bool { provider?.readyForTurn ?? false }
@@ -624,7 +765,13 @@ final class LocalSpeechSession {
         var boundContext = capturedContext
         boundContext.currentAsks = context.currentAsks
         var proposal = VoiceAdmissionPolicy.propose(text, context: boundContext, speech: speech)
-        if !executeAutomatically, ConversationContext.localControl(text) != nil {
+        if realtimeInput != nil, turn.mode == .command, VoiceAdmissionPolicy.isBareGazeClick(text),
+           proposal.intent != "respond", boundContext.capturedAsks.isEmpty, boundContext.currentAsks.isEmpty,
+           let gazeClickOnset, gazeClickFinal == gazeClickOnset {
+            proposal = .local("spoken_gaze_click")
+        }
+        if !executeAutomatically, ConversationContext.localControl(text) != nil,
+           proposal.intent != "respond", !VoiceAdmissionPolicy.matchesCapturedChoice(text, context: boundContext) {
             proposal = VoiceProposal(route: .local, intent: "conversation_control")
         }
         if proposal.route == .local, let target = capturedContext.targetID,

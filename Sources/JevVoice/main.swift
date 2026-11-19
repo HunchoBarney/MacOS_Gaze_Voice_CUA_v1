@@ -3,19 +3,26 @@ import AVFoundation
 import Combine
 import OSLog
 
+#if !JEV_C1_VOICE_BADGE_ONLY
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Single-instance guard: a second launch exits cleanly instead of
     /// spawning duplicate driver daemons and overlays.
     private var instanceLock: FileHandle?
     private var statusItem: NSStatusItem!
+    private var voiceHeader: NSMenuItem!
+    private var voiceToggle: NSMenuItem!
+    private var voiceStop: NSMenuItem!
+    private var displayedVoiceMenu: HandsFreeMenuState?
     private var windows: VoiceWindows!
     private let speechOutput = SpeechOutput()
     private lazy var controller: VoiceController = {
         let config = VoiceUserAudit.enabled
             ? VoiceUserAudit.diagnosticConfiguration()
             : Config.shared
-        return VoiceController(config: config, speaker: speechOutput)
+        let controller = VoiceController(config: config, speaker: speechOutput)
+        controller.handsFreeSessionAvailable = { [weak self] in self?.canPrepareMicrophone == true }
+        return controller
     }()
     private var agentRuntime: AgentRuntime?
     private let microphones = MicrophoneCatalog()
@@ -46,7 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var driverRestarting = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard acquireInstanceLock() else {
+        instanceLock = VoiceInstanceLock.acquire()
+        guard instanceLock != nil else {
             Self.log.error("Jev Voice is already running; terminating duplicate launch.")
             // Never route this through NSApp.terminate — it lands in
             // applicationShouldTerminate, whose shutdown path touches the
@@ -63,6 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jev Voice")
         windows = VoiceWindows(controller: controller, microphones: microphones, input: input)
         let menu = NSMenu()
+        voiceHeader = menu.addItem(withTitle: "Hands-free off", action: nil, keyEquivalent: "")
+        voiceToggle = menu.addItem(withTitle: "Pause Hands-Free", action: #selector(pauseVoice), keyEquivalent: "")
+        voiceToggle.target = self
+        voiceStop = menu.addItem(withTitle: "Stop All Tasks", action: #selector(stopVoiceTasks), keyEquivalent: "")
+        voiceStop.target = self
+        menu.addItem(.separator())
         let settings = menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         let activity = menu.addItem(withTitle: "Activity", action: #selector(showActivity), keyEquivalent: "")
@@ -97,6 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         applyEyesState()
         refreshAskBadge()
+        controller.objectWillChange.receive(on: RunLoop.main).sink { [weak self] in
+            self?.refreshAskBadge()
+        }.store(in: &subscriptions)
 
         if let session = CGSessionCopyCurrentDictionary() as? [String: Any] {
             sessionActive = session[kCGSessionOnConsoleKey as String] as? Bool ?? false
@@ -506,10 +523,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///     and in-flight agent turn, not just the capture.
     ///   - Local capture/final admission belongs to RealtimeVoiceLane;
     ///     composition never wires a second transcript/action authority.
-    ///   - `controller.speaker` → `LocalVoice.shared` once its models
-    ///     are ready (PocketTTS downloads on first prepare); the
-    ///     `ttsEnabled` toggle-off restores `speechOutput`, and any
-    ///     prepare failure leaves the AVSpeech lane in place.
     private func wireLocalIntelligence() {
         controller.gazeTapHandler = { [weak self] in
             guard !Task.isCancelled else { return false }
@@ -518,7 +531,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let (candidate, _) = await GazeService.shared.commitTarget()
             else { return false }
             guard !Task.isCancelled else { return false }
-            return await self.controller.cua.actuateCommitted(candidate)
+            return await self.controller.cua.actuateCommitted(candidate, permitted: {
+                self.controller.config.tapToGazeClick
+            })
         }
         // Universal stop — Escape lands on every lane: running tasks,
         // parked asks (a cancel resolves their continuation like the
@@ -530,26 +545,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // No independently wired speculative transcript router may dispatch.
         controller.localSpeechWindow = nil
         controller.localSpeechSink = nil
-        guard !controller.usesRealtimeVoice else { return }
-        // Local voice — adopt only after its models are really present
-        // (first prepare downloads them); AVSpeech stays the fallback.
-        controller.config.$ttsEnabled
-            .sink { [weak self] on in
-                guard let self else { return }
-                if !on {
-                    self.controller.speaker = self.speechOutput
-                    return
-                }
-                Task { [weak self] in
-                    guard let self, await LocalVoice.shared.prepare() else { return }
-                    // Re-read the toggle — a user who flipped it off mid-
-                    // download shouldn't wake the lane anyway.
-                    if self.controller.config.ttsEnabled {
-                        self.controller.speaker = LocalVoice.shared
-                    }
-                }
-            }
-            .store(in: &subscriptions)
     }
 
     // MARK: - Eyes section
@@ -626,9 +621,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// depends on the menu happening to open. The count is polled on
     /// open and on every snapshot refresh; it comes from the task
     /// coordinator's seam.
+    private var voiceMenu: HandsFreeMenuState {
+        controller.handsFreeControls
+    }
+
     private func refreshAskBadge() {
-        let pending = controller.cua.pendingAskCount
-        statusItem.button?.title = pending > 0 ? " ·\(pending)" : ""
+        let voice = voiceMenu
+        guard displayedVoiceMenu != voice else { return }
+        displayedVoiceMenu = voice
+        let button = statusItem.button
+        button?.image = NSImage(systemSymbolName: voice.symbol, accessibilityDescription: voice.label)
+        button?.setAccessibilityLabel("Jev Voice")
+        button?.setAccessibilityValue(voice.accessibilityValue)
+        button?.toolTip = "Jev Voice — " + voice.label
+        button?.title = voice.pending > 0 ? " ·\(voice.pending)" : ""
+        voiceHeader.title = voice.label
+        voiceHeader.toolTip = voice.detail
+        voiceToggle.isHidden = voice.toggle == nil
+        if let toggle = voice.toggle {
+            voiceToggle.title = toggle.rawValue
+            voiceToggle.action = toggle == .pause ? #selector(pauseVoice) : #selector(resumeVoice)
+        }
+        voiceStop.isHidden = !voice.stoppable
+    }
+
+    @objc private func pauseVoice() { controller.applyHandsFreeToggle(.pause) }
+
+    @objc private func resumeVoice() {
+        controller.applyHandsFreeToggle(.resume)
+    }
+
+    @objc private func stopVoiceTasks() {
+        if voiceMenu.stoppable { controller.stopAll() }
     }
 
     /// One snapshot read, then repaint — cancelled reads can't paint over
@@ -698,45 +722,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Locks the shared instance marker in the app support directory.
-    /// Returns true when this process acquired the lock; false if another
-    /// instance is running. Every path that can't even evaluate the lock
-    /// fails CLOSED — proceeding unlocked risks two instances
-    /// double-binding the Fn tap, so those exits are honest process
-    /// deaths, not returns.
-    private func acquireInstanceLock() -> Bool {
-        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            Self.log.error("no Application Support directory — can't establish the instance lock; refusing to run unlocked")
-            exit(1)
-        }
-        // App support is "JevVoice" everywhere else (tracker.log, the
-        // EyeTracking symlink) — the lock joins it. The old spaced
-        // "Jev Voice" directory is orphaned harmlessly; nothing but this
-        // flock file ever lived in it, so there's no migration.
-        let dir = support.appendingPathComponent("JevVoice", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("instance.lock")
-        // createFile answers false only when the file genuinely can't
-        // be made — an existing file returns true and falls through to
-        // the flock, which is where "already running" is decided.
-        guard FileManager.default.createFile(atPath: url.path, contents: nil, attributes: nil) else {
-            Self.log.error("can't create instance lock at \(url.path, privacy: .public) — exiting rather than running unlocked")
-            exit(1)
-        }
-        let fd = open(url.path, O_RDWR)
-        guard fd >= 0 else {
-            Self.log.error("can't open instance lock at \(url.path, privacy: .public) — exiting rather than running unlocked")
-            exit(1)
-        }
-        let locked = flock(fd, LOCK_EX | LOCK_NB) == 0
-        if locked {
-            self.instanceLock = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        } else {
-            close(fd)
-        }
-        return locked
-    }
-
     private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice", category: "AppDelegate")
 
     private func installEditMenu() {
@@ -763,14 +748,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+#endif
+
 // `JevVoice --mcp-stdio --agent <slug>` is an agent's MCP server process —
 // short-circuit before the app boots so codex children never become a
 // second Jev Voice instance.
-MainActor.assumeIsolated { VoiceNormalQualification.preflight() }
-if ProcessInfo.processInfo.arguments.contains("--p3-voice-replay")
-    || ProcessInfo.processInfo.arguments.contains("--p3-record-holdouts") {
-    VoiceReplay.main()
+#if JEV_C1_VOICE_BADGE_ONLY
+guard RestrictedVoiceEntry.accepts(marker: Bundle.main.object(forInfoDictionaryKey: "JevLocalProfile"),
+                                  arguments: Array(CommandLine.arguments.dropFirst()),
+                                  environmentKeys: RestrictedVoiceEntry.environmentKeys()) else { exit(78) }
+let app = NSApplication.shared
+let delegate = MainActor.assumeIsolated { RestrictedVoiceAppDelegate() }
+#else
+guard Bundle.main.object(forInfoDictionaryKey: "JevLocalProfile") == nil else { exit(78) }
+if NoFnTrace.entry == .refuse { exit(78) }
+if CommandLine.arguments.dropFirst().contains(where: { argument in
+    let flag = argument.prefix { $0 != "=" }
+    return flag == "--p3-voice-replay" || flag == "--p3-record-holdouts"
+}) {
+    fputs("Local speech replay and holdout recording are retired from this app. Use the historical developer checkout at 073fedeb1101d50466ff46b7c007d085e08d9e15.\n", stderr)
+    exit(2)
 }
+MainActor.assumeIsolated { VoiceNormalQualification.preflight() }
 if ProcessInfo.processInfo.arguments.contains("--p3-live") {
     VoiceLiveTrial.main()
 }
@@ -783,5 +782,6 @@ if ProcessInfo.processInfo.arguments.contains("--mcp-stdio") {
 
 let app = NSApplication.shared
 let delegate = MainActor.assumeIsolated { AppDelegate() }
+#endif
 app.delegate = delegate
 app.run()

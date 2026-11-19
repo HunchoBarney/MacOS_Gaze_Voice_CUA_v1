@@ -97,6 +97,18 @@ final class TrackerArgumentsTests: XCTestCase {
         XCTAssertEqual(value(after: "--host-pid", in: args(useProdRenderer: true, hostPid: 777)), "777")
     }
 
+    func testHostedMarkerSurvivesForwardedGestureAndConflictingFlags() {
+        defaults.set(24, forKey: "trackerDisplaySizeInch")
+        let extras = "--enable-lip-motion --detector yolo --tray --no-tray=false --host-pid 99 --no-tray"
+        for prod in [false, true] {
+            let ordinary = args(useProdRenderer: prod)
+            XCTAssertFalse(ordinary.contains("--enable-lip-motion"))
+            let forwarded = args(useProdRenderer: prod, environment: ["JARVIS_EYE_TRACKER_ARGS": extras])
+            XCTAssertEqual(Array(forwarded.dropFirst().prefix(4)), ["--external-api", "--no-tray", "--host-pid", "4242"])
+            XCTAssertEqual(Array(forwarded.suffix(extras.split(separator: " ").count)), extras.split(separator: " ").map(String.init))
+        }
+    }
+
     // MARK: - Geometry defaults
 
     /// An explicit display size wins over display detection.
@@ -257,6 +269,35 @@ final class TrackerArgumentsTests: XCTestCase {
             XCTAssertFalse(resolved.path.hasPrefix(trackerDir.path),
                            "no staged node exists — resolution must not invent one")
         }
+    }
+
+    func testPortableTrackerRefusesMissingAndRedirectedPayloadWithoutHostFallback() throws {
+        XCTAssertEqual(TrackerHost.portableExtraArguments("--web-accelerator=webgpu", forceWasm: false), ["--web-accelerator", "webgpu"])
+        XCTAssertEqual(TrackerHost.portableExtraArguments("--web-accelerator webgpu", forceWasm: true), [])
+        XCTAssertNil(TrackerHost.portableExtraArguments("--web-accelerator wasm --detector yolo", forceWasm: false))
+        let root = trackerDir.appendingPathComponent("EyeTracker")
+        let fm = FileManager.default
+        let names = ["package.json", "scripts/start-prod.cjs", "electron/main.cjs", "dist/index.html",
+                     "dist/.vite/manifest.json", "node_modules/.bin/electron", "bin/node",
+                     "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"]
+        for name in names {
+            let file = root.appendingPathComponent(name)
+            try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data((name == "package.json" ? #"{"jevTrackerProfile":"retinaface-v1"}"# : "fixture").utf8).write(to: file)
+            try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        func resolve(_ profile: String = "retinaface-v1") -> URL? {
+            TrackerHost.portableDirectory(resources: trackerDir, profile: profile)
+        }
+        XCTAssertEqual(resolve()?.path, root.resolvingSymlinksInPath().path)
+        XCTAssertNil(resolve("unknown"))
+        let node = root.appendingPathComponent("bin/node"), decoy = trackerDir.appendingPathComponent("node")
+        try fm.moveItem(at: node, to: decoy)
+        XCTAssertNil(resolve())
+        XCTAssertNil(TrackerHost.nodeBinary(environment: ["PATH": trackerDir.path], trackerDir: root, bundledOnly: true))
+        try fm.createSymbolicLink(at: node, withDestinationURL: decoy)
+        XCTAssertNil(resolve())
+        XCTAssertNil(TrackerHost.nodeBinary(environment: [:], trackerDir: root, bundledOnly: true))
     }
 
     /// Full composition pinned end to end — script, markers, geometry,

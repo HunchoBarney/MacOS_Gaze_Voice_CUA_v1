@@ -63,22 +63,31 @@
 # SKIP_TRACKER_BUNDLE=1 turns every mode into a no-op.
 set -euo pipefail
 
-MODE="require"
+MODE=""
 APP=""
 DEST=""
 while [[ $# -gt 0 ]]; do
 	case "$1" in
-		--if-present) MODE="if-present"; shift ;;
-		--require)    MODE="require"; shift ;;
+		--if-present|--require|--release)
+			[[ -z "$MODE" ]] || { echo "Choose one tracker staging mode" >&2; exit 1; }
+			MODE="${1#--}"; shift ;;
 		--app)        APP="$2"; shift 2 ;;
 		--dest)       DEST="$2"; shift 2 ;;
 		-h|--help)    sed -n '2,15p' "$0"; exit 0 ;;
 		*)            APP="$1"; shift ;;
 	esac
 done
+MODE="${MODE:-require}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TRACKER_SRC="${TRACKER_SRC:-$ROOT/EyeTracking}"
+if [[ "$MODE" == "release" && ( "$TRACKER_SRC" != "$ROOT/EyeTracking" || -L "$TRACKER_SRC" ) ]]; then
+	echo "Release staging requires the repository tracker source" >&2
+	exit 1
+fi
+if [[ "$MODE" == "release" ]]; then
+	python3 "$ROOT/scripts/retinaface_release.py"
+fi
 [[ -n "$APP" ]] || APP="$ROOT/build/Jev Voice.app"
 [[ -n "$DEST" ]] || DEST="$APP/Contents/Resources/EyeTracker"
 
@@ -87,6 +96,7 @@ warn() { echo "bundle-tracker: WARNING — $*" >&2; }
 skip() { warn "$1 — tracker payload NOT staged"; [[ "$MODE" == "if-present" ]] && exit 0; exit 1; }
 
 if [[ "${SKIP_TRACKER_BUNDLE:-}" == "1" ]]; then
+	[[ "$MODE" != "release" ]] || { echo "Release tracker staging cannot be skipped" >&2; exit 1; }
 	log "SKIP_TRACKER_BUNDLE=1 — skipped"
 	exit 0
 fi
@@ -96,7 +106,7 @@ fi
 [[ -f "$TRACKER_SRC/package.json" ]]            || skip "no tracker checkout at $TRACKER_SRC"
 [[ -f "$TRACKER_SRC/electron/main.cjs" ]]       || skip "$TRACKER_SRC/electron/main.cjs missing"
 [[ -f "$TRACKER_SRC/scripts/start-prod.cjs" ]]  || skip "$TRACKER_SRC/scripts/start-prod.cjs missing"
-[[ -f "$TRACKER_SRC/dist/index.html" ]]         || skip "$TRACKER_SRC/dist missing — run \`make tracker-deps\` (pnpm build) first"
+[[ "$MODE" == "release" || -f "$TRACKER_SRC/dist/index.html" ]] || skip "$TRACKER_SRC/dist missing — run \`make tracker-deps\` (pnpm build) first"
 [[ -d "$TRACKER_SRC/node_modules/.pnpm" ]]      || skip "$TRACKER_SRC/node_modules missing — run \`make tracker-deps\` (pnpm install) first"
 
 # NM is the realpath-resolved node_modules — the closure walk compares
@@ -140,7 +150,7 @@ fingerprint() {
 
 STAMP="$DEST/TRACKER_BUNDLE.json"
 NEW_FP="$(fingerprint)"
-if [[ -f "$STAMP" ]] && grep -q "\"fingerprint\": \"$NEW_FP\"" "$STAMP" 2>/dev/null; then
+if [[ "$MODE" != "release" && -f "$STAMP" ]] && grep -q "\"fingerprint\": \"$NEW_FP\"" "$STAMP" 2>/dev/null; then
 	log "payload at $DEST is current — nothing to do"
 	exit 0
 fi
@@ -207,7 +217,28 @@ mkdir -p "$STAGE/node_modules/.bin" "$STAGE/node_modules/.pnpm"
 cp -X "$TRACKER_SRC/package.json" "$STAGE/package.json"
 ditto --norsrc "$TRACKER_SRC/electron" "$STAGE/electron"
 ditto --norsrc "$TRACKER_SRC/scripts" "$STAGE/scripts"
-ditto --norsrc "$TRACKER_SRC/dist" "$STAGE/dist"
+if [[ "$MODE" == "release" ]]; then
+	node "$TRACKER_SRC/scripts/build-release-renderer.mjs" "$STAGE/dist"
+	python3 - "$STAGE/package.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+package = json.loads(path.read_text())
+package["jevTrackerProfile"] = "retinaface-v1"
+path.write_text(json.dumps(package, indent=2) + "\n")
+PY
+	mkdir -p "$STAGE/dist/models" "$STAGE/dist/runtime-assets/onnxruntime-web"
+	while read -r digest name; do
+		[[ -f "$TRACKER_SRC/public/models/$name" && ! -L "$TRACKER_SRC/public/models/$name" ]] || exit 1
+		(cd "$TRACKER_SRC/public/models" && printf '%s  %s\n' "$digest" "$name" | shasum -a 256 -c -)
+		cp -X "$TRACKER_SRC/public/models/$name" "$STAGE/dist/models/$name"
+	done < "$ROOT/EyeTracking/scripts/retinaface-release.sha256"
+	(cd "$STAGE/dist/models" && shasum -a 256 -c "$ROOT/EyeTracking/scripts/retinaface-release.sha256")
+	cp -X "$NM/onnxruntime-web/dist"/ort-wasm-simd-threaded{,.jsep,.asyncify,.jspi}.{mjs,wasm} "$STAGE/dist/runtime-assets/onnxruntime-web/"
+	cp -X "$TRACKER_SRC/LICENSE" "$STAGE/LICENSE"
+else
+	ditto --norsrc "$TRACKER_SRC/dist" "$STAGE/dist"
+fi
 # Prod resolves model SOURCES under public/ then copies them into dist/ —
 # the sources are the same files vite already copied, so link them.
 mkdir -p "$STAGE/public"
@@ -235,11 +266,15 @@ done
 # Clean launcher — the pnpm .bin shim exports NODE_PATH pinned to this
 # checkout's absolute path, which would make a shipped bundle resolve modules
 # out of the dev tree. The shim only needs to exec cli.js beside it.
+if [[ "$MODE" == "release" ]]; then
+	printf '%s\n' '#!/bin/sh' 'exec "${0%/*}/../electron/dist/Electron.app/Contents/MacOS/Electron" "$@"' > "$STAGE/node_modules/.bin/electron"
+else
 cat > "$STAGE/node_modules/.bin/electron" <<'EOF'
 #!/bin/sh
 # Relocatable electron launcher (replaces the pnpm shim — see bundle-tracker.sh).
 exec node "$(dirname "$0")/../electron/cli.js" "$@"
 EOF
+fi
 chmod +x "$STAGE/node_modules/.bin/electron"
 
 # onnxruntime-web is require.resolve'd only for its wasm assets dir; the

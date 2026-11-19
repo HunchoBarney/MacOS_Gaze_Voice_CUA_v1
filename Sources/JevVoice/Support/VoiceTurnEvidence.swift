@@ -265,7 +265,7 @@ final class VoiceTurnEvidence {
                 return r
             },
             "works": works.map { w in
-                [
+                var entry: [String: Any] = [
                     "id": w.id.uuidString,
                     "request_sha256": Self.digest(w.request),
                     "application": w.spec.application ?? NSNull(),
@@ -276,7 +276,12 @@ final class VoiceTurnEvidence {
                     "dispatched_effect": w.dispatchedEffect,
                     "elapsed_ms": w.elapsedMs,
                     "history_sha256": Self.digest(w.history.joined(separator: "\n")),
-                ] as [String: Any]
+                ]
+                if w.captureID == turn, let code = w.desktopDecision {
+                    entry["desktop_decisions"] = [code.rawValue: 1]
+                    if let origin = w.desktopOverviewOrigin { entry["desktop_overview_origin"] = origin.rawValue }
+                }
+                return entry
             },
         ]
         if !["grace_timeout", "cancelled", "no_speech"].contains(terminal) {

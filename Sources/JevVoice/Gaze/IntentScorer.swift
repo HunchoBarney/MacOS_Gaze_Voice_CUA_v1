@@ -38,6 +38,8 @@ struct IntentCandidate: Sendable, Equatable, Codable {
     /// Weak prior only — 0 is frontmost.
     var zOrder: Int = 0
 
+    var gazeLease: UUID?
+
     /// Distance from `point` to the rect edge — 0 when inside. Edge
     /// distance, not center distance: a big element under the gaze should
     /// score as well as a small one containing the point.
@@ -367,14 +369,20 @@ final class IntentScorerCore {
         return exps.map { ($0.0, $0.1 / z) }.sorted { $0.1 > $1.1 }
     }
 
+    func recordSelection(of id: String) { selectionCounts[id, default: 0] += 1 }
+
     /// Drop all state — tracker restart or a calibration change means old
     /// evidence describes a different world.
     func reset() {
+        resetFixation()
+        selectionCounts.removeAll(); recentReferents.removeAll()
+    }
+
+    func resetFixation() {
         scores.removeAll(); lastSeen.removeAll(); candidatesByID.removeAll()
         feedIDs.removeAll(); argmaxHistory.removeAll(); argmaxSec.removeAll()
         focalCrossed.removeAll()
         winnerHistory.removeAll()
-        selectionCounts.removeAll(); recentReferents.removeAll()
         incumbent = nil; incumbentSince = nil
         lastCandidateSeenAt = nil; lastUpdateAt = nil; lastTickAt = nil
         tiePair = nil; tieSince = nil
@@ -629,10 +637,11 @@ actor GazeIntentScorer {
         isSaccade: Bool,
         speechHint: String? = nil,
         cursorPoint: CGPoint? = nil,
-        freshGaze: Bool = true
+        freshGaze: Bool = true,
+        observedAt: Date = Date()
     ) -> IntentEvent {
         core.update(candidates: candidates, at: point, isSaccade: isSaccade,
-                    now: Date(), speechHint: speechHint,
+                    now: observedAt, speechHint: speechHint,
                     cursorPoint: cursorPoint, freshGaze: freshGaze)
     }
 
@@ -643,7 +652,9 @@ actor GazeIntentScorer {
     }
 
     var currentReferent: GazeReferent? { core.currentReferent }
+    func recordSelection(of id: String) { core.recordSelection(of: id) }
     var recentReferents: [GazeReferent] { core.recentReferents }
 
     func reset() { core.reset() }
+    func resetFixation() { core.resetFixation() }
 }

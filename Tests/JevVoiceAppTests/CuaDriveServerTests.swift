@@ -9,6 +9,39 @@ import JevVoiceCore
 /// reason-string sniffing.
 final class CuaDriveServerTests: XCTestCase {
 
+    func testStdioWorkerYieldsForBothToolsWithoutAWindowOrInputDriver() {
+        func call(_ name: String) -> JSONValue? {
+            CuaDriveServer.response(to: .object(["id": .number(1), "method": .string("tools/call"),
+                "params": .object(["name": .string(name), "arguments": .object([
+                    "window_id": .number(7), "agent": .string("bench"), "standingGrant": .bool(true),
+                    "foreground": .bool(true), "user_idle": .bool(true)])])]))
+        }
+        for tool in ["drive_until", "suggest_action"] {
+            let result = call(tool)
+            XCTAssertEqual(result?["isError"], .bool(true))
+            XCTAssertEqual(result?["content"]?.array?.first?["text"]?.string,
+                           "Blocked: trusted operator handoff unavailable. The worker did not access the desktop.")
+        }
+        XCTAssertEqual(call("operator_override")?["content"]?.array?.first?["text"],
+                       .string("Unknown tool."))
+    }
+
+    func testStdioProtocolReadsRemainAvailableWithoutGrantingInput() {
+        func query(_ method: String) -> JSONValue? {
+            CuaDriveServer.response(to: .object(["id": .number(1), "method": .string(method)]))
+        }
+        XCTAssertEqual(query("ping"), .object([:]))
+        if let ping = query("ping") {
+            XCTAssertEqual(CuaDriveServer.envelope(id: .string("q"), payload: ping), .object([
+                "id": .string("q"), "jsonrpc": .string("2.0"), "result": .object([:])
+            ]))
+        }
+        XCTAssertEqual(query("initialize")?["serverInfo"]?["name"], .string("jev-drive"))
+        XCTAssertEqual(query("tools/list")?["tools"]?.array?.compactMap { $0["name"]?.string },
+                       ["drive_until", "suggest_action"])
+        XCTAssertNil(CuaDriveServer.response(to: .object(["method": .string("notifications/cancelled")])))
+    }
+
     /// A deny refusal reports itself — the agent relays "this is on the
     /// protected list", not the enable-the-grant remedy.
     func testDescribeDenyRefusalIsNotAGrantHint() {

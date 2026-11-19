@@ -92,8 +92,25 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", type=Path, required=True)
     parser.add_argument("--source", type=Path, default=os.environ.get("JEV_CONVERSATION_VAD_SOURCE"))
+    parser.add_argument("--profile", choices=("realtime", "diagnostic"))
     args = parser.parse_args()
     destination = args.app / "Contents/Resources/ConversationVAD"
+    if args.profile is not None:
+        for path in (args.app, destination.parent.parent, destination.parent, destination):
+            check(not path.is_symlink() and (not path.exists() or path.is_dir()),
+                  f"not a plain staging directory: {path}")
+        if args.profile == "realtime":
+            check(not destination.exists(),
+                  "ConversationVAD already exists; stage the Realtime package in a fresh app")
+            return
+        existing = destination if destination.exists() else args.source
+        if existing is not None:
+            check(existing.is_dir() and not existing.is_symlink()
+                  and not any(path.is_symlink() for path in existing.rglob("*")),
+                  "expected a plain ConversationVAD resource without symlinks")
+            if not destination.exists():
+                conversation_resource(existing)
+        destination.parent.mkdir(parents=True, exist_ok=True)
     print(json.dumps(prepare_conversation_resource(args.source, destination), sort_keys=True))
 
 

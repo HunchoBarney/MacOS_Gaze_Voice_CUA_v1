@@ -6,6 +6,67 @@ import XCTest
 /// into the isolated CODEX_HOME — never a copy — so token rotation in the
 /// real ~/.codex/auth.json reaches every agent.
 final class CodexRuntimeBridgeTests: XCTestCase {
+    func testTurnReceiptMatchesExactWorkerThreadAndSession() {
+        var first = WorkerTurnLedger(agent: "a", thread: "shared")
+        var second = WorkerTurnLedger(agent: "b", thread: "shared")
+        let a = first.accept("1", start: first.begin())
+        let b = second.accept("1", start: second.begin())
+        first.finish(thread: "foreign", turn: .init(id: "1", status: "completed"))
+        XCTAssertEqual(first.status(a), .working)
+        second.finish(thread: "shared", turn: .init(id: "1", status: "failed"))
+        XCTAssertEqual(second.status(b), .failed)
+        XCTAssertEqual(second.status(a), .unknown)
+        XCTAssertEqual(first.status(b), .unknown)
+        XCTAssertEqual(WorkerTurnLedger(agent: "a", thread: "shared").status(a), .unknown)
+        first.interruptSubmitted(a)
+        XCTAssertEqual(first.status(a), .unknown)
+        first.finish(thread: "shared", turn: .init(id: "1", status: "interrupted"))
+        XCTAssertEqual(first.status(a), .interrupted)
+    }
+
+    func testTerminalBeforeAcceptanceIsLifecycleOnlyAndEvictionIsUnknown() {
+        var ledger = WorkerTurnLedger(agent: "w", thread: "t")
+        let earlier = ledger.begin()
+        let start = ledger.begin()
+        ledger.finish(thread: "t", turn: .init(id: "early", status: "completed"))
+        let early = ledger.accept("early", start: start)
+        XCTAssertEqual(ledger.status(early), .workerFinished)
+        for n in 0..<17 {
+            ledger.finish(thread: "t", turn: .init(id: String(n), status: "completed"))
+        }
+        XCTAssertEqual(ledger.status(early), .unknown)
+        let late = ledger.accept("0", start: earlier)
+        XCTAssertEqual(ledger.status(late), .unknown)
+        XCTAssertFalse(ledger.active.contains(late))
+        ledger.finish(thread: "t", turn: .init(id: "early", status: "failed"))
+        XCTAssertEqual(ledger.status(early), .unknown)
+        let live = ledger.accept("new", start: ledger.begin())
+        XCTAssertEqual(ledger.status(live), .working)
+        ledger.finish(thread: "t", turn: .init(id: "new", status: "unexpected"))
+        XCTAssertEqual(ledger.status(live), .unknown)
+    }
+
+    func testDuplicatedStartIDsNeverShareAStatus() {
+        var ledger = WorkerTurnLedger(agent: "worker", thread: "thread")
+        let first = ledger.accept("repeated", start: ledger.begin())
+        let duplicate = ledger.accept("repeated", start: ledger.begin())
+        ledger.finish(thread: "thread", turn: .init(id: "repeated", status: "completed"))
+        XCTAssertNotEqual(first, duplicate)
+        XCTAssertEqual(ledger.status(first), .unknown)
+        XCTAssertEqual(ledger.status(duplicate), .unknown)
+    }
+
+    func testDuplicateAfterEarlyEvictionCannotConfirmOrBecomeAnInterruptTarget() {
+        var ledger = WorkerTurnLedger(agent: "w", thread: "t")
+        let start = ledger.begin()
+        ledger.finish(thread: "t", turn: .init(id: "x", status: "failed"))
+        for n in 0..<16 { ledger.finish(thread: "t", turn: .init(id: String(n), status: "completed")) }
+        ledger.finish(thread: "t", turn: .init(id: "x", status: "completed"))
+        let receipt = ledger.accept("x", start: start)
+        XCTAssertEqual(ledger.status(receipt), .unknown)
+        XCTAssertFalse(ledger.active.contains(receipt))
+    }
+
     private var root: URL!
     private var home: URL!
     private var source: URL!

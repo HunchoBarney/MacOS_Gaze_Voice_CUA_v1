@@ -243,6 +243,7 @@ verdicts (real or `blocked:…` reason).
 |---|---|---|---|
 | D3 | 2026-10-18 | Bench task JSON gains `inject` (default `"mcp_stdio"`), `requires` (`"local-safe"\|"test-user"\|"human"`), optional `app` hint; verifier kinds `app_frontmost`+`dom_state` made explicit | The frozen §7 shape lacked how a prompt reaches the app and which account it may mutate; fields are additive, consumers unaffected |
 | D4 | 2026-10-19 | Bench children use a unique `--agent bench-<pid>-<n>` slug per spawn, not a shared `bench` slug | Reused slugs wedge permanently on the session-label tombstone bug (see Surprises); a per-child slug keeps the bench unblocked while the product fix lands elsewhere |
+| KAR-25 | 2026-11-17 | Record each selected real MCP trial as `blocked:operator_handoff` before fixture setup. | A bench slug cannot distinguish a trusted human handoff. No silent skips or changes to historical cases, stubs or historical measurements. |
 
 ## Outcomes & Retrospective
 

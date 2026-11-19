@@ -13,6 +13,8 @@ ZIP = build/Jev-Voice-$(VERSION).zip
 LOCAL_DIR ?= $(HOME)/jarvis-local
 LOCAL_APP = $(LOCAL_DIR)/Jev Voice.app
 STAGE_APP ?= $(APP)
+JEV_SPEECH_PACKAGE ?= realtime
+app local dist: export JEV_SPEECH_PACKAGE := $(JEV_SPEECH_PACKAGE)
 
 .PHONY: setup build app run local stage test test-tools dist clean vendor tracker-deps bundle-tracker check-tracker install-tracker
 
@@ -25,13 +27,14 @@ setup:
 	@echo "Runtime prerequisites: see ThirdParty/Cua/README.md and AGENTS.md"
 
 build:
-	swift build -c release
+	swift build -c release $(JEV_BUILD_SWIFT_FLAGS)
 
 vendor:
 	ThirdParty/Cua/fetch-embedded-binaries.sh "$(VENDOR)"
 
 # Assemble the bundle without signing — STAGE_APP picks the destination.
 stage: build vendor
+	python3 scripts/bundle-conversation-vad.py --app "$(STAGE_APP)" --profile "$(JEV_SPEECH_PACKAGE)"
 	mkdir -p "$(STAGE_APP)/Contents/MacOS"
 	cp "$(BINARY)" "$(STAGE_APP)/Contents/MacOS/JevVoice"
 	cp Info.plist "$(STAGE_APP)/Contents/Info.plist"
@@ -46,7 +49,6 @@ stage: build vendor
 	cp ThirdParty/FluidVoice/LICENSE ThirdParty/FluidVoice/NOTICE.md "$(STAGE_APP)/Contents/Resources/ThirdParty/FluidVoice/"
 	mkdir -p "$(STAGE_APP)/Contents/Resources/ThirdParty/CuaDriver"
 	cp ThirdParty/Cua/LICENSE.md ThirdParty/Cua/THIRD_PARTY_NOTICES.md "$(STAGE_APP)/Contents/Resources/ThirdParty/CuaDriver/"
-	python3 scripts/bundle-conversation-vad.py --app "$(STAGE_APP)"
 	# Tracker payload — staged into Contents/Resources/EyeTracker/ when the
 	# EyeTracking checkout can produce a complete one (built dist/ + a pnpm
 	# node_modules), warned and skipped when it can't: a bare app must still
@@ -75,9 +77,16 @@ tracker-deps:
 	echo "tracker-deps: node = $$NODE"; \
 	export PATH="$$(dirname "$$NODE"):$$PATH"; \
 	cd "$(CURDIR)/EyeTracking" || exit 1; \
-	if [ ! -d node_modules ]; then \
-		echo "tracker-deps: node_modules missing — corepack pnpm install --frozen-lockfile"; \
+	if [ ! -f node_modules/electron/install.js ]; then \
+		echo "tracker-deps: dependency tree incomplete — corepack pnpm install --frozen-lockfile"; \
 		corepack pnpm install --frozen-lockfile || exit 1; \
+	fi; \
+	node -e 'const pin = require("./package.json").dependencies.electron; if (require("./node_modules/electron/package.json").version !== pin) { console.error("tracker-deps: Electron does not match the pin " + pin + "; run corepack pnpm install --frozen-lockfile in EyeTracking"); process.exit(1); }' || exit 1; \
+	echo "tracker-deps: checking the pinned Electron binary"; \
+	(unset ELECTRON_OVERRIDE_DIST_PATH; ELECTRON_INSTALL_PLATFORM=darwin node node_modules/electron/install.js) || exit 1; \
+	if [ ! -x node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ]; then \
+		echo "tracker-deps: the pinned Electron binary is missing or not executable after bootstrap" >&2; \
+		exit 1; \
 	fi; \
 	if [ ! -f dist/index.html ]; then \
 		echo "tracker-deps: dist/index.html missing — corepack pnpm build"; \
@@ -207,9 +216,20 @@ test-tools:
 	python3 -B -m unittest discover -s Tests/Tooling -v
 
 # Zip suitable for a GitHub release asset / Homebrew cask (ditto preserves signatures).
-dist: app
+dist:
+	python3 scripts/retinaface_release.py
+	@test ! -e "$(STAGE_APP)" && test ! -L "$(STAGE_APP)" || { echo "Release staging needs a fresh app destination" >&2; exit 1; }
+	$(MAKE) stage SKIP_TRACKER_BUNDLE=1 STAGE_APP="$(STAGE_APP)" JEV_BUILD_SWIFT_FLAGS="-Xswiftc -DJEV_PORTABLE_TRACKER"
+	/usr/libexec/PlistBuddy -c 'Add :JevTrackerReleaseProfile string retinaface-v1' "$(STAGE_APP)/Contents/Info.plist"
+	scripts/bundle-tracker.sh --release "$(STAGE_APP)"
+	python3 scripts/check-packaged-tracker.py "$(STAGE_APP)"
+	scripts/sign-app.sh "$(STAGE_APP)"
 	rm -f "$(ZIP)"
-	ditto -c -k --keepParent "$(APP)" "$(ZIP)"
+	ditto -c -k --keepParent "$(STAGE_APP)" "$(ZIP)"
+	@unpacked="$$(mktemp -d)"; trap 'rm -rf "$$unpacked"' EXIT; \
+		ditto -x -k "$(ZIP)" "$$unpacked" && \
+		codesign --verify --deep --strict "$$unpacked/$$(basename "$(STAGE_APP)")" && \
+		python3 scripts/check-packaged-tracker.py "$$unpacked/$$(basename "$(STAGE_APP)")"
 	shasum -a 256 "$(ZIP)"
 
 clean:

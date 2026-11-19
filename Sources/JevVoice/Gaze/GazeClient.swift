@@ -21,6 +21,8 @@ struct GazeSample: Sendable, Equatable {
     /// When the tracker produced the sample (its clock, parsed from
     /// `updated_at` — nil when unparseable, which counts as stale).
     var updatedAt: Date?
+    var capturedAt: Date?
+    var observedAt: Date? { capturedAt ?? updatedAt }
 
     /// A sample older than this was taken before the user finished the
     /// sentence — acting on it means clicking where they *were*, not
@@ -30,8 +32,12 @@ struct GazeSample: Sendable, Equatable {
     static let confidenceFloor = 0.4
 
     var isFresh: Bool {
-        guard let updatedAt else { return false }
-        return Date().timeIntervalSince(updatedAt) <= Self.freshnessWindow
+        isFresh(within: Self.freshnessWindow)
+    }
+
+    func isFresh(within limit: TimeInterval) -> Bool {
+        guard let observedAt else { return false }
+        return (0...limit).contains(Date().timeIntervalSince(observedAt))
     }
 }
 
@@ -82,7 +88,7 @@ struct GazeClient: Sendable {
     }
 
     static var defaultBaseURL: URL {
-        let env = ProcessInfo.processInfo.environment["JARVIS_GAZE_URL"]
+        let env = TrackerHost.releaseProfile == nil ? ProcessInfo.processInfo.environment["JARVIS_GAZE_URL"] : nil
         return URL(string: env ?? "http://127.0.0.1:\(TrackerHost.port)")!
     }
 
@@ -126,21 +132,31 @@ struct GazeClient: Sendable {
               let x = num(obj["x_px"]), let y = num(obj["y_px"]) else {
             throw GazeError.malformed
         }
-        var updated: Date?
-        if let text = obj["updated_at"] as? String {
-            updated = Self.isoFormatter.date(from: text)
-                ?? Self.isoFormatterNoFraction.date(from: text)
-        }
+        guard obj["held_reason"] == nil, obj["away"] as? Bool != true,
+              obj["blink"] as? Bool != true, obj["head_turned"] as? Bool != true
+        else { throw GazeError.lowConfidence }
+        let captured = captureTime(obj["captured_at_ms"])
+        if obj["captured_at_ms"] != nil && captured == nil { throw GazeError.malformed }
         let sample = GazeSample(
             x: x, y: y,
             confidence: num(obj["confidence"]) ?? 0,
             state: obj["gaze_state"] as? String ?? "",
-            updatedAt: updated)
+            updatedAt: receiptTime(obj["updated_at"]), capturedAt: captured)
         guard sample.isFresh else { throw GazeError.stale }
         guard sample.confidence >= GazeSample.confidenceFloor else {
             throw GazeError.lowConfidence
         }
         return sample
+    }
+
+    static func captureTime(_ value: Any?) -> Date? {
+        guard let ms = num(value), ms.isFinite else { return nil }
+        return Date(timeIntervalSince1970: ms / 1000)
+    }
+
+    static func receiptTime(_ value: Any?) -> Date? {
+        guard let text = value as? String else { return nil }
+        return isoFormatter.date(from: text) ?? isoFormatterNoFraction.date(from: text)
     }
 
     private static func num(_ value: Any?) -> Double? {

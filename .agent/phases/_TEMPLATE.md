@@ -1,7 +1,8 @@
 # P<n> — <slug> ExecPlan
 
 > Status: draft | contracted | in-progress | judged | done
-> Track: main | agent+voice | eyes · Depends on: <phases> · Branch: `ship/v1-p<n>`
+> Subsystem: <area> · Depends on: <phases> · Baseline: <revision + local delta, if any>
+> Outcome owner: <issue/thread> · Integration owner: <owner>
 > Acceptance: `.agent/acceptance/P<n>.json` · Contracts touched: <ids or none>
 
 ## Purpose
@@ -69,7 +70,7 @@ riskiest seam is proven early.
 - G5 budgets this phase must hit: <LatencyLedger spans / RSS / CPU>
 - Report applicable PROGRAM speed-goal IDs separately from measured
   achievement and existing release bars.
-- G6 human checklist (UX phases): <steps>
+- G6 human checklist (UX phases): <candidate, operator, action, visible effect, privacy-safe failure signal and stop condition; PLANS §5>
 
 ## Progress
 

@@ -1,3 +1,5 @@
+import AppKit
+import AVFoundation
 import XCTest
 @testable import JevVoice
 
@@ -6,24 +8,73 @@ import XCTest
 /// injected actions then re-poll. Probes are stubbed — no TCC, no tracker.
 @MainActor
 final class UXOnboardingTests: XCTestCase {
-
-    private func model() -> OnboardingChecklistModel {
-        let suite = "ux-onboarding-\(UUID().uuidString)"
-        return OnboardingChecklistModel(defaults: UserDefaults(suiteName: suite)!)
+    func testQuietHandsFreePanelOnlyAppearsForActionableWork() {
+        for status: VoiceController.Status in [.idle, .thinking, .executing, .replied, .done, .stopped] {
+            XCTAssertFalse(VoiceWindows.showsPanel(status: status, automatic: true, hasAsk: false,
+                linger: true, microphoneTest: false))
+        }
+        for status: VoiceController.Status in [.error("Action needed"), .awaitingAnswer("Which?"), .awaitingConfirm, .reviewTranscript] {
+            XCTAssertTrue(VoiceWindows.showsPanel(status: status, automatic: true, hasAsk: false,
+                linger: false, microphoneTest: false))
+        }
+        XCTAssertTrue(VoiceWindows.showsPanel(status: .idle, automatic: true, hasAsk: true, linger: false, microphoneTest: false))
+        XCTAssertFalse(VoiceWindows.showsPanel(status: .idle, automatic: true, hasAsk: true, linger: false, microphoneTest: true))
+        for status: VoiceController.Status in [.starting, .listening, .finishing, .executing, .replied] {
+            XCTAssertTrue(VoiceWindows.showsPanel(status: status, automatic: false, hasAsk: false,
+                linger: false, microphoneTest: false))
+        }
     }
 
-    /// Everything pending → the card shows, rows are undone, and the
-    /// try-it line tracks the FIRST unfinished row.
-    func testAllPendingShowsCard() async {
-        let m = model()
-        // Stub every probe off — the real TCC/tracker state of the host
-        // must not flip rows in a unit test.
+    func testQuietPresentationOrdersOnlyAtVisibilityBoundaries() {
+        var visible = false
+        let steps = [false, false, true, true, false, false, false]
+        let orders = steps.map { ask in
+            let show = VoiceWindows.showsPanel(status: .idle, automatic: true, hasAsk: ask, linger: true, microphoneTest: false)
+            let order = VoiceWindows.panelOrder(show: show, visible: visible)
+            visible = show
+            return order
+        }
+        XCTAssertEqual(orders, [.unchanged, .unchanged, .front, .unchanged, .out, .unchanged, .unchanged])
+        XCTAssertFalse(visible)
+    }
+
+    func testVoiceMenuUsesActualStateAndRejectsUnsafeResume() {
+        func menu(_ state: ConversationListeningState, enabled: Bool = true, userPaused: Bool = true,
+                  available: Bool = true, permitted: Bool = true) -> HandsFreeMenuState {
+            HandsFreeMenuState(state: state, enabled: enabled, label: "Listening hands-free", userPaused: userPaused,
+                controlsAvailable: available, canResume: permitted, stoppable: true, pending: 2)
+        }
+        XCTAssertEqual(menu(.listening).accessibilityValue, "Listening hands-free, 2 pending")
+        XCTAssertEqual(menu(.listening).toggle, .pause); XCTAssertTrue(menu(.listening).stoppable)
+        XCTAssertEqual(menu(.preparing).toggle, .pause)
+        XCTAssertEqual(menu(.paused).toggle, .resume)
+        XCTAssertNil(menu(.paused, available: false).toggle)
+        XCTAssertNil(menu(.paused, userPaused: false).toggle)
+        XCTAssertNil(menu(.paused, permitted: false).toggle)
+        XCTAssertNil(menu(.unavailable("fixture")).toggle)
+        XCTAssertNil(menu(.off).toggle)
+        XCTAssertEqual(menu(.listening, enabled: false).accessibilityValue, "Hands-free off, 2 pending")
+        XCTAssertNil(menu(.listening, enabled: false).toggle)
+        let symbols = [menu(.off), menu(.preparing), menu(.paused), menu(.listening), menu(.unavailable("fixture"))].map(\.symbol)
+        XCTAssertEqual(Set(symbols).count, 5)
+        for symbol in symbols { XCTAssertNotNil(NSImage(systemSymbolName: symbol, accessibilityDescription: nil)) }
+    }
+
+    private func model(defaults: UserDefaults = UserDefaults(suiteName: "ux-onboarding-\(UUID().uuidString)")!) -> OnboardingChecklistModel {
+        let m = OnboardingChecklistModel(defaults: defaults)
         m.microphoneGranted = { false }
         m.accessibilityGranted = { false }
         m.screenRecordingGranted = { false }
         m.trackerEnabled = { false }
         m.trackerRunning = { false }
+        m.cameraAuthorization = { .notDetermined }
         m.voiceKeyConfigured = { false }
+        m.enableTracker = { XCTFail("Unexpected tracker enable") }
+        return m
+    }
+
+    func testAllPendingShowsCard() async {
+        let m = model()
         await m.refresh()
         XCTAssertTrue(m.visible)
         XCTAssertFalse(m.allClear)
@@ -34,37 +85,80 @@ final class UXOnboardingTests: XCTestCase {
         XCTAssertNotNil(m.pendingTryIt)
     }
 
-    /// Grants flip their rows on the next refresh; all-clear retires the
-    /// card without any dismissal.
-    func testRowsFlipAndAllClearHides() async {
+    func testNonGazeRowsClearIndependentlyOfOptionalGaze() async {
         let m = model()
         m.microphoneGranted = { true }
         m.accessibilityGranted = { true }
         m.screenRecordingGranted = { true }
         m.trackerEnabled = { true }
         m.trackerRunning = { true }
+        m.cameraAuthorization = { .authorized }
         m.voiceKeyConfigured = { true }
         await m.refresh()
 
-        XCTAssertTrue(m.allClear)
-        XCTAssertFalse(m.visible)
-        XCTAssertTrue(m.rows.allSatisfy(\.done))
+        XCTAssertFalse(m.allClear)
+        XCTAssertTrue(m.visible)
+        XCTAssertEqual(m.rows.filter { !$0.done }.map(\.id), [.tracker])
         XCTAssertNil(m.pendingTryIt)
     }
 
-    /// The tracker row needs BOTH the config toggle and a live host — an
-    /// enabled-but-stopped tracker still reads undone.
-    func testTrackerRowNeedsRunning() async {
+    func testCameraRemediesFollowPermissionNotLiveness() async throws {
         let m = model()
         m.trackerEnabled = { true }
-        m.trackerRunning = { false }
-        await m.refresh()
-        let row = m.rows.first { $0.id == .tracker }
-        XCTAssertEqual(row?.done, false)
-
         m.trackerRunning = { true }
+        for (status, guidance): (AVAuthorizationStatus, String) in [
+            (.denied, "System Settings → Privacy & Security → Camera"),
+            (.restricted, "restricted"),
+            (.notDetermined, "Camera under Permissions"),
+            (.authorized, "Gaze hasn’t been verified")
+        ] {
+            m.cameraAuthorization = { status }
+            await m.refresh()
+            let row = try XCTUnwrap(m.rows.first { $0.id == .tracker })
+            XCTAssertTrue(row.detail.contains(guidance))
+            XCTAssertEqual(row.detail.contains("denied"), status == .denied)
+            XCTAssertFalse(row.done)
+            XCTAssertNil(row.fixLabel)
+            XCTAssertNil(row.tryIt)
+        }
+    }
+
+    func testWakeAndRegrantCannotVerifyGaze() async throws {
+        let m = model()
+        m.trackerEnabled = { true }
+        for (camera, running): (AVAuthorizationStatus, Bool) in [
+            (.authorized, true), (.authorized, false), (.authorized, true),
+            (.denied, true), (.authorized, true)
+        ] {
+            m.cameraAuthorization = { camera }
+            m.trackerRunning = { running }
+            await m.refresh()
+            let row = try XCTUnwrap(m.rows.first { $0.id == .tracker })
+            XCTAssertFalse(row.done)
+            XCTAssertEqual(row.detail.contains("tracker responded"), running && camera == .authorized)
+            XCTAssertTrue(m.visible)
+        }
+    }
+
+    func testEnableRequiresExplicitActionAndCurrentPermission() async throws {
+        let m = model()
+        var enabled = false
+        m.trackerEnabled = { enabled }
+        m.enableTracker = { enabled = true }
+        m.cameraAuthorization = { .authorized }
         await m.refresh()
-        XCTAssertEqual(m.rows.first { $0.id == .tracker }?.done, true)
+        XCTAssertEqual(m.rows.first { $0.id == .tracker }?.fixLabel, "Enable")
+        XCTAssertFalse(enabled)
+        m.cameraAuthorization = { .denied }
+        m.fix(.tracker)
+        XCTAssertFalse(enabled)
+        m.cameraAuthorization = { .authorized }
+        m.fix(.tracker)
+        XCTAssertTrue(enabled)
+        await m.refresh()
+        let row = try XCTUnwrap(m.rows.first { $0.id == .tracker })
+        XCTAssertNil(row.fixLabel)
+        XCTAssertFalse(row.done)
     }
 
     /// A fix runs the injected action then refreshes — the row flips only
@@ -92,13 +186,15 @@ final class UXOnboardingTests: XCTestCase {
     func testDismissalPersists() async {
         let suite = "ux-onboarding-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
-        let first = OnboardingChecklistModel(defaults: defaults)
+        let first = model(defaults: defaults)
         await first.refresh()
         XCTAssertTrue(first.visible)
         first.dismissed = true
+        first.trackerRunning = { true }
+        await first.refresh()
         XCTAssertFalse(first.visible)
 
-        let second = OnboardingChecklistModel(defaults: defaults)
+        let second = model(defaults: defaults)
         XCTAssertTrue(second.dismissed)
         await second.refresh()
         XCTAssertFalse(second.visible)

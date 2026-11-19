@@ -47,6 +47,12 @@ final class AgentShelfOverlayTests: XCTestCase {
 @MainActor
 private final class BridgeSpy: AgentBridging {
     var requests: [DelegationRequest] = []
+    var ledger = WorkerTurnLedger(agent: "fixture-worker", thread: "fixture-thread")
+    func delegateWithReceipt(_ request: DelegationRequest) async throws -> (payload: String, receipt: WorkerTurnReceipt?) {
+        let payload = try await delegate(request)
+        let start = ledger.begin()
+        return (payload, ledger.accept("fixture-turn-\(requests.count)", start: start))
+    }
     func roster() async -> [CompanionAgent] { [] }
     func delegate(_ request: DelegationRequest) async throws -> String {
         requests.append(request)
@@ -67,6 +73,21 @@ private struct MemoryKeys: APIKeyStore {
 
 @MainActor
 final class GazeDelegationTests: XCTestCase {
+    func testAcceptedDelegationReceiptStaysOffWireAndAmbiguityIsUnknown() async throws {
+        let c = coordinator(), spy = BridgeSpy()
+        defer { c.shutdown() }
+        c.agentBridge = spy; c.gazeContextProvider = { nil }
+        let before = c.voiceDelegation
+        let first = await c.delegateToAgent(task: "fixture", agent: "fixture-worker")
+        XCTAssertEqual(first, "{}")
+        let bound = c.voiceDelegation
+        let receipt = try XCTUnwrap(bound.receipt)
+        XCTAssertNotEqual(before.revision, bound.revision)
+        XCTAssertEqual(spy.ledger.status(receipt), .working)
+        _ = await c.delegateToAgent(task: "other fixture", agent: "fixture-worker")
+        XCTAssertNil(c.voiceDelegation.receipt)
+        XCTAssertNotEqual(c.voiceDelegation.revision, bound.revision)
+    }
 
     private func coordinator() -> VoiceTaskCoordinator {
         let suite = "gaze-wiring-\(UUID().uuidString)"

@@ -10,6 +10,8 @@ protocol AgentBridging: Sendable {
     /// `delegate_to_agent` tool: found or reuse a persistent agent. Returns
     /// the acknowledgement payload the runtime reports.
     func delegate(_ request: DelegationRequest) async throws -> String
+    func delegateWithReceipt(_ request: DelegationRequest) async throws -> (payload: String, receipt: WorkerTurnReceipt?)
+    func status(of receipt: WorkerTurnReceipt) async -> WorkerTurnStatus
     /// A follow-up into an existing agent's thread. Implemented but not yet
     /// wired into a voice tool — kept as public API for a later lane.
     func sendToAgent(slug: String, message: String) async throws -> String
@@ -26,6 +28,10 @@ protocol AgentBridging: Sendable {
 }
 
 extension AgentBridging {
+    func delegateWithReceipt(_ request: DelegationRequest) async throws -> (payload: String, receipt: WorkerTurnReceipt?) {
+        (try await delegate(request), nil)
+    }
+    func status(of receipt: WorkerTurnReceipt) async -> WorkerTurnStatus { .unknown }
     func interruptAll() async -> String { await interruptAgent(hint: nil) }
 }
 
@@ -81,7 +87,13 @@ final class VoiceAgentBridge: AgentBridging {
     }
 
     func delegate(_ request: DelegationRequest) async throws -> String {
+        try await delegateWithReceipt(request).payload
+    }
+
+    func delegateWithReceipt(_ request: DelegationRequest) async throws -> (payload: String, receipt: WorkerTurnReceipt?) {
+        try Task.checkCancellation()
         guard let runtime = await currentRuntime() else { throw Failure.unavailable }
+        try Task.checkCancellation()
         let agent: CompanionAgent
         if let slug = request.agentSlug {
             // A delegation that names an agent binds it — a stale slug is a
@@ -98,9 +110,17 @@ final class VoiceAgentBridge: AgentBridging {
                 role: request.newAgentRole ?? "assistant",
                 description: request.newAgentDescription ?? request.message)
         }
-        try await runtime.send(request.message, to: agent)
-        return VoiceToolResult(status: VoiceToolResult.Status.delegated,
+        try Task.checkCancellation()
+        let receipt = try await runtime.sendBound(request.message, to: agent)
+        let ack = VoiceToolResult(status: VoiceToolResult.Status.delegated,
             say: VoiceToolResult.spoken("On it, \(agent.name) has it", words: 12)).encoded()
+        return (ack, receipt)
+    }
+
+    func status(of receipt: WorkerTurnReceipt) async -> WorkerTurnStatus {
+        guard !Task.isCancelled, let runtime else { return .unknown }
+        let status = await runtime.bridge.status(of: receipt)
+        return Task.isCancelled ? .unknown : status
     }
 
     func sendToAgent(slug: String, message: String) async throws -> String {

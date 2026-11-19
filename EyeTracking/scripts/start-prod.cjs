@@ -8,6 +8,7 @@ const path = require("path");
 
 const repoRoot = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
+require("../electron/releaseProfile.cjs").retinafaceRelease(require("../package.json").jevTrackerProfile, args);
 const binSuffix = process.platform === "win32" ? ".cmd" : "";
 const electronBin = path.join(repoRoot, "node_modules", ".bin", `electron${binSuffix}`);
 const indexHtml = path.join(repoRoot, "dist", "index.html");
@@ -60,6 +61,7 @@ process.on("SIGHUP", () => shutdown("SIGHUP"));
 const env = { ...process.env, NODE_ENV: "production" };
 delete env.VITE_DEV_SERVER_URL;
 delete env.ELECTRON_RUN_AS_NODE;
+delete env.ELECTRON_OVERRIDE_DIST_PATH;
 
 electron = spawn(electronBin, [".", ...args], {
   cwd: repoRoot,

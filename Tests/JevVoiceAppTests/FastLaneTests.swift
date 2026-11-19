@@ -259,29 +259,16 @@ final class FastLaneTests: XCTestCase {
         }
     }
 
-    /// The executor maps only window-level effects to a deictic control —
-    /// the same effect gate the parser used to mark the action.
     func testDeicticWindowControlMapping() {
-        func control(_ phrase: String) -> DriveLoop.DeicticWindowControl? {
-            guard let parsed = FastAction.parse(phrase) else { return nil }
-            return DriveLoop.deicticWindowControl(for: parsed.action)
+        for phrase in ["minimize this", "close it", "hide this app", "close on this monitor",
+                       "minimize the window on this screen", "type hello there here",
+                       "type hello into this field", "Please close this window."] {
+            XCTAssertEqual(FastAction.retiredTargetRequest(phrase), .unboundGaze, phrase)
         }
-        guard case .minimize? = control("minimize this") else {
-            return XCTFail("minimize this → .minimize")
-        }
-        guard case .close? = control("close it") else {
-            return XCTFail("close it → .close")
-        }
-        guard case .hideApp? = control("hide this app") else {
-            return XCTFail("hide this app → .hideApp")
-        }
-        XCTAssertNil(control("press enter"))
-        XCTAssertNil(control("new window"))
-        // "minimize everything" shares .windowOffScreen so the mapping
-        // exists, but its action never carries the deictic flag — the
-        // executor's gate is the pair, and the flag tests cover it.
-        guard case .minimize? = control("minimize everything") else {
-            return XCTFail("the effect maps; the flag is what withholds it")
+        for phrase in ["press enter", "minimize everything", "close the window", "hide Notes",
+                       "scroll down", "click this", "what is this", "type come here",
+                       #"type "close it here""#, "type close it"] {
+            XCTAssertNil(FastAction.retiredTargetRequest(phrase), phrase)
         }
     }
 
@@ -1164,41 +1151,22 @@ final class FastLaneParseTests: XCTestCase {
         }
     }
 
-    /// Overlay phrases and the numbered pick.
-    func testOverlayRows() {
-        guard let show = FastAction.parse("show numbers"),
-              case .overlay(let verb) = show.action.body else {
-            return XCTFail("'show numbers' should parse to overlay")
+    func testRetiredTargetPhrasesAreNotAppOrClickActions() {
+        let numbers = appRow("Numbers", "com.apple.iWork.Numbers", pid: 42)
+        for phrase in ["show numbers", "show me the numbers", "numbers", "all numbers",
+                       "numbers everywhere", "show numbers on everything", "show all numbers",
+                       "hide the numbers", "clear numbers", "click two", "press 12", "choose 7",
+                       "pick 7", "number 42", "click two in Safari", "click two on this monitor"] {
+            XCTAssertNotNil(FastAction.retiredTargetRequest(phrase), phrase)
+            XCTAssertNil(DriveLoop.resolveFastLane(goal: phrase, apps: [numbers],
+                                                   appHint: nil, frontmostBundle: nil), phrase)
         }
-        XCTAssertEqual(verb, .showNumbers)
-        guard let bare = FastAction.parse("numbers"),
-              case .overlay(let bareVerb) = bare.action.body else {
-            return XCTFail("'numbers' should parse to overlay")
+        for phrase in ["open Numbers", "hide the Numbers app", "tab two", "switch to desktop 2",
+                       "type click two", "press 2 in the menu"] {
+            XCTAssertNil(FastAction.retiredTargetRequest(phrase), phrase)
         }
-        XCTAssertEqual(bareVerb, .showNumbers)
-        for phrase in ["show numbers everywhere", "numbers everywhere", "all numbers"] {
-            guard let parsed = FastAction.parse(phrase),
-                  case .overlay(let v) = parsed.action.body else {
-                XCTFail("'\(phrase)' should parse to overlay"); continue
-            }
-            XCTAssertEqual(v, .showNumbersAll, phrase)
-        }
-        // "hide numbers" is the overlay phrase, never the Numbers app.
-        for phrase in ["hide numbers", "clear numbers"] {
-            guard let parsed = FastAction.parse(phrase),
-                  case .overlay(let v) = parsed.action.body else {
-                XCTFail("'\(phrase)' should parse to overlay"); continue
-            }
-            XCTAssertEqual(v, .hideNumbers, phrase)
-        }
-        for (phrase, n) in [("click 3", 3), ("click three", 3), ("press 12", 12),
-                            ("choose 7", 7), ("pick 7", 7), ("number 42", 42)] {
-            guard let parsed = FastAction.parse(phrase),
-                  case .overlay(let v) = parsed.action.body else {
-                XCTFail("'\(phrase)' should parse to overlay"); continue
-            }
-            XCTAssertEqual(v, .clickIndex(n), phrase)
-        }
+        XCTAssertEqual(DriveLoop.resolveFastLane(goal: "open Numbers", apps: [numbers],
+                                                 frontmostBundle: nil)?.bundle, "com.apple.iWork.Numbers")
     }
 
     /// Repeat and locate lanes.

@@ -1,7 +1,7 @@
 # P11 — eye-polish ExecPlan
 
 > Status: draft; documentation authorized, source G1/G2 pending
-> Track: eyes plus serialized agent-owned gaze integration
+> Track: eyes plus sequenced gaze integration
 > Depends on: P8, P5; M0 corrects an already-required default in C1
 > Branch: `ship/v1-p11` · Acceptance: `.agent/acceptance/P11.json`
 > Contracts: resolved-target hint, separate selection, tracker IPC, §1/§2/§8
@@ -16,8 +16,8 @@ selection explicit, and meet whole-product resource/recovery budgets.
 Read PROGRAM's visionOS interaction decision, SHIP-PLAN and P8 handoff.
 `Gaze/DwellClick.swift` currently defaults an absent mode to `.safe`;
 PROGRAM requires off. GazeService/CandidateFeed/Stream/Pointer and
-TargetOverlay already exist. Swift source belongs to the agent writer,
-EyeTracking to the eyes writer; freeze shared integration before testing.
+TargetOverlay already exist. Assign disjoint tracker and Swift changes
+by owned path under PLANS §5; freeze shared integration before testing.
 
 ## Reuse decision
 
@@ -150,6 +150,14 @@ unintended physical click was observed. Keep that distinction in reports.
 
 ## Decision Log
 
+2026-11-17, KAR-28: a passive scorer tie releases the highlight without
+asking a question or opening labels. A parked task choice may still show a
+bounded radial, but looking only previews: selection belongs to the explicit
+spoken or accessibility answer bound to that ask. Suppressed dwell never
+shows an activation countdown. The scorer, camera cadence, calibration
+and pointer ownership do not change. Do not count tracker timer savings as
+improved target-switch time, measured CPU or signed-app acceptance.
+
 | Date | Decision | Reason |
 |---|---|---|
 | 2026-11-15 | Correct dwell early; qualify the full gaze path with P8/P5 later | Preserve the locked interaction model without waiting to remove the unsafe default |
@@ -173,4 +181,4 @@ Next: M1 target integration with its P8/P5 consumers and the later combined
 physical qualification. Reuse the completed C1 correction. Keep gaze
 non-actuating on invalid state, preserve the prior
 verified runtime, and report actual degraded behavior instead of a stale
-target. Agent and eyes writers never edit each other's paths concurrently.
+target. Sequence changes to shared tracker/host paths with their owners.

@@ -37,6 +37,8 @@ import {
   type DetectionResult
 } from "./core";
 import InferenceWorker from "./inferenceWorker.ts?worker";
+import { PresentedFrames } from "./presentedFrame";
+import { RuntimeSources } from "./runtimeSource";
 import { createRuntimeModels, setGpuDeviceLostListener, warmupRuntimeModels, withTimeout, type RuntimeModels } from "./runtimes";
 
 export interface WebFilterOptions {
@@ -84,13 +86,19 @@ const SWAPPED_SET_DISPOSE_DELAY_MS = 2000;
 // (waitForVideo's own 5s only covers the post-play leg).
 const CAMERA_OPEN_TIMEOUT_MS = 15000;
 
-export async function startWebRuntime(
+const runtimeSources = new RuntimeSources();
+
+export function startWebRuntime(
+  config: WebInferenceConfig, publish: (payload: BackendMessage) => void, signal: AbortSignal
+): Promise<WebRuntimeController> {
+  return runtimeSources.start(signal, publish, emit =>
+    config.webInferenceWorker === "dedicated" ? startDedicatedWorkerRuntime(config, emit) : startMainThreadRuntime(config, emit));
+}
+
+async function startMainThreadRuntime(
   config: WebInferenceConfig,
   emit: (payload: BackendMessage) => void
 ): Promise<WebRuntimeController> {
-  if (config.webInferenceWorker === "dedicated") {
-    return startDedicatedWorkerRuntime(config, emit);
-  }
   let stopped = false;
   let latestRaw: [number, number] | null = null;
   const recentFeatures: TimedFeature[] = [];
@@ -127,6 +135,7 @@ export async function startWebRuntime(
   let forceRedetect = false;
   let appliedGeometryKey: string | null = null;
   let stream: MediaStream | null = null;
+  let presentedFrames: PresentedFrames | undefined;
   let models: RuntimeModels | null = null;
   let lastStatus = 0;
   let lastPreview = 0;
@@ -201,8 +210,7 @@ export async function startWebRuntime(
           type: "gaze",
           away: true,
           held_reason: "no_face",
-          confidence: 0,
-          captured_at_ms: Date.now()
+          confidence: 0
         });
       }
       return;
@@ -214,7 +222,6 @@ export async function startWebRuntime(
       y_norm: coasted[1],
       raw_x_norm: rejectedRaw?.[0],
       raw_y_norm: rejectedRaw?.[1],
-      captured_at_ms: Date.now(),
       confidence: 0.2,
       distance_m: lastEmitCore.distance,
       yaw_deg: lastEmitCore.yaw,
@@ -718,6 +725,7 @@ export async function startWebRuntime(
     }
 
     const previewInterval = 1000 / Math.max(0.5, config.previewFps);
+    const frames = presentedFrames = new PresentedFrames(video);
 
     const loop = async () => {
       if (stopped || models === null) {
@@ -731,7 +739,12 @@ export async function startWebRuntime(
           return;
         }
         const captureStart = performance.now();
-        ctx.drawImage(video, 0, 0, captureWidth, captureHeight);
+        const observation = frames.take();
+        try {
+          ctx.drawImage(observation.source, 0, 0, captureWidth, captureHeight);
+        } finally {
+          observation.close?.();
+        }
         const frame = ctx.getImageData(0, 0, captureWidth, captureHeight);
         const captureMs = performance.now() - captureStart;
         const detectStart = performance.now();
@@ -940,7 +953,6 @@ export async function startWebRuntime(
               type: "gaze",
               x_norm: coasted[0],
               y_norm: coasted[1],
-              captured_at_ms: Date.now(),
               confidence: 0,
               distance_m: distanceM,
               iris_distance_m: irisDistanceM,
@@ -1190,7 +1202,7 @@ export async function startWebRuntime(
           y_norm: clamp01(smoothed[1]),
           raw_x_norm: latestRaw[0],
           raw_y_norm: latestRaw[1],
-          captured_at_ms: performance.timeOrigin + captureStart,
+          captured_at_ms: observation.capturedAtMs,
           confidence,
           distance_m: distanceM,
           iris_distance_m: irisDistanceM,
@@ -1318,6 +1330,7 @@ export async function startWebRuntime(
     },
     stop: () => {
       stopped = true;
+      presentedFrames?.stop();
       if (repromotionTimer !== null) {
         window.clearTimeout(repromotionTimer);
         repromotionTimer = null;
@@ -1446,7 +1459,7 @@ type MainToWorkerMessage =
       height: number;
       captureMs: number;
       capturedAt: number;
-      capturedAtMs: number;
+      capturedAtMs?: number;
       frameIntervalMs?: number;
       droppedFrames: number;
       mainThreadLongTasks: number;
@@ -1477,6 +1490,7 @@ async function startDedicatedWorkerRuntime(
 ): Promise<WebRuntimeController> {
   let stopped = false;
   let stream: MediaStream | null = null;
+  let presentedFrames: PresentedFrames | undefined;
   let paused = false;
   let inFlight = false;
   let inFlightSince = 0;
@@ -1615,6 +1629,7 @@ async function startDedicatedWorkerRuntime(
     // A frame_done that never arrives (worker wedged mid-frame) must not stall
     // the pump forever — this is the only self-wake while a frame is in flight.
     const IN_FLIGHT_WATCHDOG_MS = 2000;
+    const frames = presentedFrames = new PresentedFrames(video);
     const scheduleCapture = (delayMs: number) => {
       if (captureTimer !== null) {
         window.clearTimeout(captureTimer);
@@ -1707,11 +1722,13 @@ async function startDedicatedWorkerRuntime(
       const mainThreadLongTasks = longTasks.count();
       const dropped = droppedFrames;
       let bitmap: ImageBitmap | null = null;
+      const observation = frames.take();
       try {
-        bitmap = await createImageBitmap(video);
+        bitmap = await createImageBitmap(observation.source);
       } catch {
-        // createImageBitmap can fail on detached/ended tracks; fall back to
-        // canvas readback below.
+        if (!stopped) ctx.drawImage(observation.source, 0, 0, captureWidth, captureHeight);
+      } finally {
+        observation.close?.();
       }
       if (stopped) {
         bitmap?.close();
@@ -1726,7 +1743,7 @@ async function startDedicatedWorkerRuntime(
             height: captureHeight,
             captureMs: performance.now() - captureStart,
             capturedAt: captureStart,
-            capturedAtMs: performance.timeOrigin + captureStart,
+            capturedAtMs: observation.capturedAtMs,
             frameIntervalMs,
             droppedFrames: dropped,
             mainThreadLongTasks
@@ -1734,7 +1751,6 @@ async function startDedicatedWorkerRuntime(
           [bitmap]
         );
       } else {
-        ctx.drawImage(video, 0, 0, captureWidth, captureHeight);
         const frame = ctx.getImageData(0, 0, captureWidth, captureHeight);
         post(
           {
@@ -1744,7 +1760,7 @@ async function startDedicatedWorkerRuntime(
             height: frame.height,
             captureMs: performance.now() - captureStart,
             capturedAt: captureStart,
-            capturedAtMs: performance.timeOrigin + captureStart,
+            capturedAtMs: observation.capturedAtMs,
             frameIntervalMs,
             droppedFrames: dropped,
             mainThreadLongTasks
@@ -1804,6 +1820,7 @@ async function startDedicatedWorkerRuntime(
       if (captureTimer !== null) {
         window.clearTimeout(captureTimer);
       }
+      presentedFrames?.stop();
       longTasks.stop();
       post({ type: "stop" });
       // Terminating synchronously discards the queued stop — let the worker's

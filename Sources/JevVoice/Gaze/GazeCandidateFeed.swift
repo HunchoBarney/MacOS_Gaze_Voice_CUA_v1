@@ -32,6 +32,7 @@ struct GazeCandidateFeed: Sendable {
     struct Batch: Sendable, Equatable {
         var candidates: [IntentCandidate] = []
         var windowID: Int?
+        var nativeWitness: UUID?
         static let empty = Batch()
     }
 

@@ -1,17 +1,28 @@
 import Foundation
+import AVFoundation
 import CryptoKit
 import XCTest
 import JevVoiceCore
 @testable import JevVoice
 
 /// Protocol fixtures replace only the remote wire. They are not ASR/acoustic evidence.
-private actor RecordedVoiceWire: RealtimeVoiceWire {
+actor RecordedVoiceWire: IsolatedControlWire {
+    nonisolated let controlFrames = LockedBox<[JSONValue]>([])
+    @MainActor func submitControl(_ text: String, completion: @escaping @Sendable (Error?) -> Void) {
+        do {
+            let frame = try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+            controlFrames.set(controlFrames.value + [frame])
+            completion(nil)
+        } catch { completion(error) }
+    }
     private var incoming: [String] = []
     private var waiter: CheckedContinuation<String, Error>?
     private var closed = false
     private var written: [JSONValue] = []
     private var responses: [String] = []
     private var failTextSends = false
+    private var computerGoal: String?
+    func setComputerGoal(_ goal: String?) { computerGoal = goal }
     private let identity = UUID().uuidString
     private let acknowledgeUpdates: Bool
     private let sessionAcknowledgement: JSONValue?
@@ -45,6 +56,13 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
             let id = identity + "-\(responses.count + 1)"
             responses.append(id)
             try push(["type": .string("response.created"), "response": .object(["id": .string(id)])])
+            if let goal = computerGoal {
+                let arguments = try JSONEncoder().encode(JSONValue.object(["goal": .string(goal)]))
+                try push(["type": .string("response.function_call_arguments.done"), "response_id": .string(id),
+                          "call_id": .string("call-" + id), "name": .string("computer_task"),
+                          "arguments": .string(String(decoding: arguments, as: UTF8.self))])
+                try push(["type": .string("response.done"), "response": .object(["id": .string(id), "output": .array([])])])
+            }
         default: break
         }
     }
@@ -63,12 +81,16 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
     func push(_ object: [String: JSONValue]) throws {
         let data = try JSONEncoder().encode(JSONValue.object(object))
         let text = String(decoding: data, as: UTF8.self)
+        pushRaw(text)
+    }
+
+    func pushRaw(_ text: String) {
         if let waiter { self.waiter = nil; waiter.resume(returning: text) }
         else { incoming.append(text) }
     }
 
     func responseIDs() -> [String] { responses }
-    func frames() -> [JSONValue] { written }
+    func frames() -> [JSONValue] { written + controlFrames.value }
     func audioItemID() -> String { "audio-" + identity }
     func setTextSendFailure(_ value: Bool) { failTextSends = value }
 }
@@ -167,6 +189,204 @@ final class VoiceOneBrainTests: XCTestCase {
             XCTAssertEqual(executed, ["scroll down"])
             client.teardown()
         }
+    }
+
+    func testControlQuestionCannotEnterGenericConversationOrManualRequest() async throws {
+        for manual in [false, true] {
+            for final in ["What does that button do?", "What does the Close button in the current window do?",
+                          "What’s on my screen?", "“What does the Minimize button in this window do?”",
+                          "What am I looking at?", "What does the button I’m pointing at do?",
+                          "Is this button enabled?", "Read my screen.",
+                          "I want a summary of the information on my screen.",
+                          "What does that button do? Then click it."] {
+                let wire = RecordedVoiceWire()
+                let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+                let lane = RealtimeVoiceLane(apiKey: { "fixture" }, client: client)
+                var notes = 0, cards = [String]()
+                lane.contextProvider = { notes += 1; return "private-fixture-task-gaze-url" }
+                lane.onControlCard = { _, message in cards.append(message) }
+                lane.conversation.readContext = { self.context() }
+                lane.conversation.execute = { _ in XCTFail("executor"); throw CancellationError() }
+                lane.conversation.interpret = { _, _, _ in XCTFail("semantic"); return .init(kind: .clarify) }
+                lane.conversation.onControl = { _ in }
+                try await lane.prepareRealtimeTransport(manual ? .manual : .conversation)
+                if manual {
+                    let turn = try lane.beginRemoteManualInput(id: UUID(), mode: .command, context: context(), at: 0)
+                    let finishing = Task { try await lane.finalizeRemoteManualInput(turn) }
+                    await waitFor { await wire.frames().contains { $0["type"]?.string == "input_audio_buffer.commit" } }
+                    try await wire.push(["type": .string("conversation.item.input_audio_transcription.completed"),
+                        "item_id": .string(await wire.audioItemID()), "transcript": .string(final)])
+                    let result = try await finishing.value
+                    await lane.completeRemoteManualAdmission(try XCTUnwrap(result))
+                } else {
+                    try lane.beginRealtimeConversation(session: UUID())
+                    for event in ["input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped", "input_audio_buffer.committed"] {
+                        try await wire.push(["type": .string(event), "item_id": .string("owned")])
+                    }
+                    try await wire.push(["type": .string("conversation.item.input_audio_transcription.completed"),
+                        "item_id": .string("owned"), "transcript": .string(final)])
+                }
+                await waitFor { !cards.isEmpty || notes > 0 }
+                let frames = await wire.frames()
+                XCTAssertEqual(notes, 0)
+                XCTAssertEqual(cards, ["I can’t identify that button. Ask about Close or Minimize in this window."])
+                XCTAssertFalse(frames.contains { ["conversation.item.create", "response.create"].contains($0["type"]?.string) })
+                if manual { lane.cancel() } else { lane.stopConversation() }
+                client.teardown()
+            }
+        }
+    }
+
+    func testControlQuestionVerifiedAnswerUsesOnlyEnumAndSettledAudio() async throws {
+        for manual in [false, true] {
+            for control in ScreenQuestionObservation.Control.allCases {
+                try await exerciseControl(manual: manual, control: control, disruption: .none)
+            }
+        }
+    }
+
+    private enum ControlDisruption: CaseIterable {
+        case none, denied, initiallyMuted, changedBeforeSend, changedBeforePlay, staleNonce, tool, malformed, muteBeforeCreated, pauseBuffered
+    }
+
+    func testControlQuestionRevocationAndCorruptWireNeverReleaseAudio() async throws {
+        for manual in [false, true] {
+            for disruption in ControlDisruption.allCases where disruption != .none {
+                try await exerciseControl(manual: manual, control: .close, disruption: disruption)
+            }
+        }
+    }
+
+    private func exerciseControl(manual: Bool, control: ScreenQuestionObservation.Control,
+                                 disruption: ControlDisruption) async throws {
+        let wire = RecordedVoiceWire(), player = RealtimePlayer()
+        let played = LockedBox<[Data]>([])
+        player.setPlaybackRoute(.init(id: UUID(), isReady: { true }, schedule: { _, _ in XCTFail("stream") },
+            play: { XCTFail("generic play") }, stop: {}, playVerified: { bytes, done in
+                played.set(played.value + [bytes]); done(); return true
+            }))
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = RealtimeVoiceLane(apiKey: { "fixture" }, client: client, player: player)
+        let answer = control.spokenAnswer
+        let text = "What does the \(control.rawValue) button in this window do?"
+        var context = self.context(), cards = [String]()
+        context.targetID = "window:27:100"; context.targetAppID = "private-fixture-app"
+        var binds = 0
+        let reads = LockedBox(0)
+        lane.controlPermitted = { _ in disruption != .denied }
+        lane.bindControl = { final, scope, current in
+            binds += 1
+            XCTAssertEqual(final, text)
+            XCTAssertEqual(scope, .init(bundleID: "private-fixture-app", pid: 27, windowID: 100))
+            return await ScreenQuestionObservation.bind(final: final, window: scope, isCurrent: current,
+                clock: { 0 }, read: { _, _ in
+                    let count = reads.value + 1
+                    reads.set(count)
+                    let changed = disruption == .changedBeforeSend && count == 2
+                        || disruption == .changedBeforePlay && count == 3
+                    return .init(window: 1, button: 2, focus: changed ? 4 : 3)
+                })
+        }
+        lane.onControlCard = { _, message in cards.append(message) }
+        var withdrawals = 0
+        lane.onControlWithdrawn = { _ in withdrawals += 1 }
+        lane.audioRepliesEnabled = disruption != .initiallyMuted
+        lane.contextProvider = { XCTFail("generic context"); return "private-fixture-task-url-gaze" }
+        lane.screenShotProvider = { XCTFail("screenshot"); return nil }
+        lane.commandHandler = { _, _, _, _, _, _ in XCTFail("command"); return "{}" }
+        lane.conversation.readContext = { context }
+        lane.conversation.interpret = { _, _, _ in XCTFail("semantic"); return .init(kind: .clarify) }
+        lane.conversation.execute = { _ in XCTFail("executor"); throw CancellationError() }
+        lane.conversation.onControl = { _ in }
+        try await lane.prepareRealtimeTransport(manual ? .manual : .conversation)
+        defer {
+            if manual { lane.cancel() } else { lane.stopConversation() }
+            client.teardown()
+        }
+        var resuming: Task<Void, Never>?
+        let item: String
+        if manual {
+            item = await wire.audioItemID()
+            let turn = try lane.beginRemoteManualInput(id: UUID(), mode: .command, context: context, at: 0)
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1))
+            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800))
+            buffer.frameLength = 4_800
+            buffer.floatChannelData![0].initialize(repeating: 0, count: 4_800)
+            let feed = try ConvertedAudioFeed(input: format, output: format)
+            feed.append(buffer); feed.finish()
+            let session = RealtimeVoiceLane.Session(name: "fixture", feed: feed, sendsAudio: true)
+            session.localTurn = turn; lane.active = (turn.id, session)
+            lane.admissionContextProvider = { context }
+            lane.finish()
+            if disruption == .none {
+                lane.playbackRoutingReady = { XCTAssertEqual(cards, [answer]); return false }
+                resuming = Task { try? await lane.startConversation(inputUID: nil) }
+            }
+            await waitFor { await wire.frames().contains { $0["type"]?.string == "input_audio_buffer.commit" } }
+        } else {
+            item = "voice-fixture-id"
+            try lane.beginRealtimeConversation(session: UUID())
+            for event in ["input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped", "input_audio_buffer.committed"] {
+                try await wire.push(["type": .string(event), "item_id": .string(item)])
+            }
+        }
+        try await wire.push(["type": .string("conversation.item.input_audio_transcription.completed"),
+            "item_id": .string(item), "transcript": .string(text)])
+        if disruption == .denied || disruption == .initiallyMuted || disruption == .changedBeforeSend {
+            await waitFor { !cards.isEmpty }
+            XCTAssertTrue(wire.controlFrames.value.isEmpty)
+            XCTAssertTrue(played.value.isEmpty)
+            XCTAssertEqual(cards, [ScreenQuestionObservation.unknown])
+            XCTAssertEqual(reads.value, disruption == .changedBeforeSend ? 2 : 0)
+            return
+        }
+        await waitFor { !wire.controlFrames.value.isEmpty }
+        let frame = try XCTUnwrap(wire.controlFrames.value.first)
+        let response = try XCTUnwrap(frame["response"]), nonce = try XCTUnwrap(response["metadata"]?["control_nonce"]?.string)
+        XCTAssertNotNil(UUID(uuidString: nonce))
+        XCTAssertEqual(frame, .object(["type": .string("response.create"), "response": .object([
+            "conversation": .string("none"), "tools": .array([]), "tool_choice": .string("none"),
+            "output_modalities": .array([.string("audio")]), "metadata": .object(["control_nonce": .string(nonce)]),
+            "input": .array([.object(["type": .string("message"), "role": .string("user"), "content": .array([
+                .object(["type": .string("input_text"), "text": .string(control.rawValue)])])])]),
+            "instructions": .string("Say exactly the sentence for the input, with nothing else. Close: Close normally closes the current window. Minimize: Minimize normally moves the current window to the Dock.")
+        ])]))
+        let bytes = Data([42, 0, 43, 0])
+        let trace = ControlReplyEnvelopeTests.trace(nonce: disruption == .staleNonce ? "wrong" : nonce,
+                                                    answer: answer, bytes: bytes)
+        if disruption == .muteBeforeCreated { lane.audioRepliesEnabled = false }
+        for (i, object) in trace.enumerated() {
+            if i == 1, disruption == .malformed {
+                await wire.pushRaw("{")
+                break
+            }
+            if i == 1, disruption == .tool {
+                try await wire.push(function("resp_a", call: "forged", goal: "private-fixture"))
+                break
+            }
+            if i == trace.count - 1, disruption == .pauseBuffered {
+                if manual { lane.cancel() } else { lane.stopConversation() }
+            }
+            let data = try JSONSerialization.data(withJSONObject: object)
+            let decoded = try JSONDecoder().decode([String: JSONValue].self, from: data)
+            if i == trace.count - 1, disruption != .staleNonce {
+                XCTAssertTrue(played.value.isEmpty); XCTAssertTrue(cards.isEmpty)
+            }
+            try await wire.push(decoded)
+        }
+        if disruption == .muteBeforeCreated || disruption == .pauseBuffered {
+            await waitFor { !lane.responseInFlight }
+            XCTAssertTrue(cards.isEmpty)
+            XCTAssertEqual(withdrawals, disruption == .muteBeforeCreated ? 1 : 0)
+        } else {
+            await waitFor { cards.count == 1 }
+            XCTAssertEqual(cards, [disruption == .none ? answer : ScreenQuestionObservation.unknown])
+        }
+        XCTAssertEqual(played.value, disruption == .none ? [bytes] : []); XCTAssertEqual(binds, 1)
+        let frames = await wire.frames()
+        XCTAssertTrue(frames.allSatisfy { ["session.update", "input_audio_buffer.commit", "response.create", "response.cancel"].contains($0["type"]?.string) })
+        XCTAssertEqual(wire.controlFrames.value.count, 1)
+        await resuming?.value
     }
 
     func testC1RealtimeDictationUsesMatchingInputOnceWithoutCreatingResponseOrTool() async throws {

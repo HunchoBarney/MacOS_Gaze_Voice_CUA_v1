@@ -1,68 +1,37 @@
 # Working in Jarvis
 
-This repo runs the `.agent/` harness. **`.agent/PROGRAM.md` is the source
-of truth for "done"** — goals, locked decisions, phase DAG, release bars.
-**`.agent/PLANS.md`** defines how every phase plans, gates, and hands off.
-**`.agent/PROGRESS.md`** is the append-only session log — read it before
-resuming anything, write it before stopping phase work (a Stop hook
-enforces the write).
+[PROGRAM](.agent/PROGRAM.md) defines done; [SHIP-PLAN](.agent/SHIP-PLAN.md)
+sets delivery order. [PLANS](.agent/PLANS.md) is the repository authority
+for delegation, workspace ownership, verification and phase gates. Read
+the current issue/handoff and relevant [progress entries](.agent/PROGRESS.md)
+when resuming; append a handoff before stopping phase work.
 
-**`.agent/SHIP-PLAN.md`** is the current delivery sequence and next
-candidate scope. **`.agent/REUSE.md`** records the open-source-first
-decisions. Read both before starting new phase work.
-**`.agent/COMPETITIVE.md`** defines matched dictation/category comparisons.
-Latest routing: direct grounded actions, Jev as primary semantic chooser,
-Cua/native execution, Terra API only when needed. The user has authorized
-that API choice; no replacement-model tournament is part of the plan.
+- Delegate bounded questions within approved scope. Use crew threads for
+  outcomes, shared readers for the exact tree and isolated writers for
+  disjoint changes. Sequence overlap. One integrator holds the Mac build
+  token; one operator runs an authorized physical session. A pause applies
+  to the whole crew. Delegation grants no new data, spending or live access.
+- Use the smallest proof that answers the claim. A focused green run
+  is not phase acceptance; a signature or dispatched action is not a
+  physical result. Preserve final words, exactly-once authority and
+  independently observed effects. Speed goals are targets, not measurements.
+- Read [REUSE](.agent/REUSE.md) before new phase work: existing code and
+  platform APIs first, then maintained free open source, then minimum glue
+  or a documented gap. Record capability, version and license at G2.
+- Keep direct grounded actions, Jev as primary chooser, Cua/native execution
+  and the approved Terra recovery route. No replacement-model tournament.
+  [COMPETITIVE](.agent/COMPETITIVE.md) defines matched comparisons.
+- Phase ExecPlans declare owned paths; only independent verdicts can pass
+  default-FAIL criteria with evidence. Changing a frozen [contract](.agent/CONTRACTS.md)
+  requires a Decision Log entry and re-review of every consumer.
 
-Phase work lives in `.agent/phases/P<n>-*.md` (self-contained ExecPlans
-with explicit owned paths) and is judged against
-`.agent/acceptance/P<n>.json` — default-FAIL criteria only a
-fresh-context judge may flip, with evidence. Frozen cross-phase
-interfaces live in `.agent/CONTRACTS.md`; changing one needs a Decision
-Log entry plus re-review of every consumer.
-
-Verify before you claim. Every claim ties to evidence the user can check
-— a test run, a file:line, command output — proportional to the size of
-the claim. Assume you're wrong until the evidence says otherwise. You may
-search the web and papers for current truth; installed versions beat
-remembered ones.
-
-## Gates and worktrees (summary — PLANS.md owns the rules)
-
-- **Open source first:** reuse existing repository code and platform APIs,
-  then maintained free open-source projects before implementing a missing
-  subsystem from scratch. Record the license, exact required capability,
-  candidate/version and any concrete gap in the phase's G2 reuse decision.
-  Build only the minimum product adapter or necessary gap; no duplicate
-  SDK, driver, speech engine, runtime or harness when a suitable one exists.
-- The new speed goals in PROGRAM are unproven goals, not measured results.
-  Preserve final-utterance accuracy, exactly-once authority and independent
-  outcomes. Never count partial feedback as completed dictation.
-- No helper agents without the user's explicit request. A reviewer role
-  in a plan is not itself permission to spawn one.
-- Gate loop per phase: G1 user plan approval → G2 implementer/judge
-  contract → G3 serialized build+tests → G4 fresh-context `jarvis-judge`
-  PASS → G5 live bench + budgets → G6 human try (UX phases) → G7 handoff
-  + milestone commit.
-- ≤2 write tracks, in worktrees: `jarvis-v1-agent` owns
-  `Sources/** Tests/** development/**`; `jarvis-v1-eyes` owns
-  `EyeTracking/**`. Never two writers in one tree. User merges
-  `ship/v1-<phase>` branches.
-- All builds/tests go through the single serialized lane:
-  `scripts/verification-lane.sh` (swift test → EyeTracking typecheck →
-  vitest). Writers don't compile a half-frozen tree.
-- Owned-paths enforcement: `python3 scripts/check-owned-paths.py P<n>`.
-- Sign/review coherent candidates; reuse valid evidence and run checks for
-  changed dependencies. Final physical Fn/pill qualification stays on the
-  frozen artifact, rather than repeating it after every internal patch.
-
-## Commands
+## Commands (references, not permission to install, sign or launch)
 
 - `make local` — **the daily driver**: build → stage → sign → install to
   `~/jarvis-local/Jev Voice.app` → relaunch → wait for the tracker API.
   One command from clean checkout to running app; `make run` aliases it.
-- `make test` / `swift test --filter <Suite>` for focused checks
+- Use the assigned `scripts/verification-lane.sh <scope>` for product
+  checks; report what that scope actually ran.
 - `make app` stages + signs `build/Jev Voice.app` in place — in this
   synced checkout the final seal can hit the provenance detritus tripwire
   below; `make local` is the reliable path.
@@ -93,8 +62,6 @@ remembered ones.
   behavior.
 - `codesign --verify --deep --strict` fails spuriously in this synced
   Documents checkout — verify on a copy outside it.
-- Other agents share this folder: never stash/reset/clean; commit or push
-  only when asked. Stage milestone commits by file name — never
-  `git add -A`.
-- Parallel work: `git worktree add`, then
-  `python3 scripts/setup-workspace-development.py` inside the worktree.
+- Preserve inherited work; never stash/reset/clean it. Leave changes
+  unstaged unless asked. Commit, push, publish or merge only with explicit
+  authorization for that action; stage approved files by name, never `git add -A`.

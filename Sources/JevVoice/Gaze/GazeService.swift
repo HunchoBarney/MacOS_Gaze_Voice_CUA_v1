@@ -72,6 +72,20 @@ final class GazeService {
     var labels = ImplicitLabeler()
 
     private var pump: Task<Void, Never>?
+    private var lifecycle: Task<Void, Never>?
+    private var generation: UInt64 = 0
+    private var consumedAt: Date?
+    private var consumedEpoch: UInt64?
+    private var batchAt: TimeInterval = -.greatestFiniteMagnitude
+    private struct Fixation {
+        let target: IntentCandidate
+        let epoch: UInt64
+        let nativeWitness: UUID?
+        let lease: UUID
+        let began: Date
+        var last: Date
+    }
+    private var fixation: Fixation?
     private(set) var running = false
     private var gate = FeedGate()
     /// One enumeration in flight at a time — a call still inside the
@@ -140,11 +154,19 @@ final class GazeService {
         // earns its stale-dim inside the freshness window, not instantly
         // on "last fresh: never".
         lastFreshAt = now()
-        Task { await stream.start() }
+        generation &+= 1
+        let run = generation
+        let previous = lifecycle
+        let startup = Task { [stream] in
+            await previous?.value
+            await stream.start()
+        }
+        lifecycle = startup
         guard pump == nil else { return }
         pump = Task { @MainActor [weak self] in
-            while let self, !Task.isCancelled, self.running {
-                await self.tick()
+            await startup.value
+            while let self, self.isCurrent(run) {
+                await self.tick(run)
                 try? await Task.sleep(for: Self.tick)
             }
         }
@@ -154,8 +176,15 @@ final class GazeService {
     /// voice tasks read `latest()`, they never hold the socket.
     func stop() {
         running = false
+        generation &+= 1
         pump?.cancel(); pump = nil
-        Task { await stream.stop() }
+        let previous = lifecycle
+        lifecycle = Task { [stream, scorer, labels] in
+            await previous?.value
+            await stream.stop()
+            await scorer.reset()
+            await labels.reset()
+        }
         // Terminal ring-down — the scorer reset lands async, so the
         // service retires the ring itself: .release shrinks it back
         // onto its element, .none when nothing was up. The teardown
@@ -168,8 +197,10 @@ final class GazeService {
             eventSink(.none)
         }
         overlayTeardown?()
-        Task { await scorer.reset() }
-        Task { await labels.reset() }
+        consumedAt = nil
+        consumedEpoch = nil
+        fixation = nil
+        batchAt = -.greatestFiniteMagnitude
         gate.reset(); batch = .empty
         // A wedged enumerate may outlive the stop — its flag must not
         // latch into the next start's ticks (its finish into a dead race
@@ -185,11 +216,16 @@ final class GazeService {
 
     // MARK: - One tick
 
-    private func tick() async {
+    private func isCurrent(_ run: UInt64) -> Bool {
+        running && generation == run && !Task.isCancelled
+    }
+
+    private func tick(_ run: UInt64) async {
         let t = now()
         // A dropped socket reconnects on a budgeted cadence — fast while
         // the tracker was recently alive, slow once it's clearly down.
         if !(await stream.streaming) {
+            guard isCurrent(run) else { return }
             let cadence = restarts < Self.fastRestartAttempts
                 ? Self.fastRestartCadence : Self.slowRestartCadence
             if t - lastRestartAt >= cadence {
@@ -198,24 +234,64 @@ final class GazeService {
                 await stream.start()
             }
         }
-        if let sample = await stream.latest(), sample.isFresh {
-            lastFreshAt = t
+        var observations = stream.liveObservations()
+        guard isCurrent(run) else { return }
+        if var sample = observations.samples.last, let sampledAt = sample.observedAt, sample.isFresh {
+            guard sampledAt != consumedAt else {
+                if !sample.isFresh(within: GazeStream.continuityWindow) { fixation = nil }
+                return
+            }
+            lastFreshAt = now() - Date().timeIntervalSince(sampledAt)
             restarts = 0
             reportStale(false)
-            let point = CGPoint(x: sample.x, y: sample.y)
-            lastPoint = point
-            let saccade = sample.state == "saccade"
-            if gate.shouldEnumerate(point: point, saccade: saccade,
+            var point = CGPoint(x: sample.x, y: sample.y)
+            if gate.shouldEnumerate(point: point, saccade: sample.state == "saccade",
                                     windowUnder: windowIDUnder(point), now: t) {
-                batch = await enumerateWithinDeadline(point)
+                let epoch = observations.epoch
+                batchAt = -.greatestFiniteMagnitude
+                let incoming = await enumerateWithinDeadline(point, run: run)
+                observations = stream.liveObservations()
+                guard isCurrent(run) else { return }
+                guard observations.epoch == epoch,
+                      now() - t <= gate.refreshTTL,
+                      let first = observations.samples.firstIndex(of: sample),
+                      let latest = observations.samples.last,
+                      latest.isFresh(within: GazeStream.continuityWindow),
+                      observations.samples[first...].allSatisfy({
+                          $0.state != "saccade" && hypot($0.x - point.x, $0.y - point.y) <= gate.settleRadius
+                      }),
+                      incoming.windowID == windowIDUnder(CGPoint(x: latest.x, y: latest.y))
+                else {
+                    gate.reset(); batch = .empty; fixation = nil
+                    return
+                }
+                batch = incoming
+                batchAt = t
+                sample = latest
+                point = CGPoint(x: sample.x, y: sample.y)
             }
+            guard let stamp = sample.observedAt, sample.isFresh(within: GazeStream.continuityWindow) else {
+                fixation = nil
+                return
+            }
+            consumedAt = stamp
+            lastPoint = point
+            if let consumedEpoch, consumedEpoch != observations.epoch {
+                await scorer.resetFixation()
+                guard isCurrent(run) else { return }
+            }
+            consumedEpoch = observations.epoch
             let event = await scorer.update(candidates: batch.candidates,
-                                            at: point, isSaccade: saccade,
+                                            at: point, isSaccade: sample.state == "saccade",
                                             speechHint: speechHint(),
-                                            cursorPoint: cursorPoint())
-            await handle(event)
+                                            cursorPoint: cursorPoint(), observedAt: stamp)
+            guard isCurrent(run), stream.isCurrent(observations),
+                  sample.isFresh(within: GazeStream.continuityWindow) else { return }
+            updateFixation(event, observations: observations)
             gazePointSink(point)
+            await handle(event, run: run)
         } else {
+            fixation = nil
             reportStale(true)
             // Tracker silent: feed an EMPTY feed with freshGaze:false.
             // The cached batch must NOT ride — re-marking lastSeen keeps
@@ -229,7 +305,7 @@ final class GazeService {
                 let event = await scorer.update(candidates: [], at: point,
                                                 isSaccade: true,
                                                 freshGaze: false)
-                await handle(event, dwellLive: false)
+                await handle(event, run: run, dwellLive: false)
             }
         }
     }
@@ -240,7 +316,7 @@ final class GazeService {
     /// to its own end; nothing reads its late result, and TaskGroup
     /// can't express this because a suspended child still gates scope
     /// exit.
-    private func enumerateWithinDeadline(_ point: CGPoint) async -> Batch {
+    private func enumerateWithinDeadline(_ point: CGPoint, run: UInt64) async -> Batch {
         // One in flight at a time — a call still inside the driver's own
         // timeout ladder would just queue another behind it on the same
         // wedged transport. Skipping reads as the same .empty a deadline
@@ -249,8 +325,9 @@ final class GazeService {
         enumerateInFlight = true
         let race = EnumerateRace()
         Task {
+            guard isCurrent(run) else { race.finish(.empty); return }
             let batch = await enumerate(point)
-            enumerateInFlight = false
+            if generation == run { enumerateInFlight = false }
             race.finish(batch)
         }
         Task {
@@ -274,10 +351,10 @@ final class GazeService {
         }
     }
 
-    private func handle(_ event: IntentEvent, dwellLive: Bool = true) async {
+    private func handle(_ event: IntentEvent, run: UInt64, dwellLive: Bool = true) async {
         // A tick still in flight when stop() ran must not re-arm
         // overlays the teardown already cleared.
-        guard running else { return }
+        guard isCurrent(run) else { return }
         eventSink(event)
         // Mirror the ring's live target so stop() can retire it
         // synchronously — the scorer's own reset is async.
@@ -303,8 +380,16 @@ final class GazeService {
         } else {
             share = 0
         }
-        switch dwell.advance(event, share: share, policy: dwellPolicy) {
-        case .fire(let candidate):
+        guard isCurrent(run) else { return }
+        var dwellEvent = event
+        if case .hold(let c, _) = event {
+            guard let fixation, fixation.target == c else { dwell.reset(); return }
+            dwellEvent = .hold(c, progress: fixation.last.timeIntervalSince(fixation.began))
+        }
+        switch dwell.advance(dwellEvent, share: share, policy: dwellPolicy) {
+        case .fire(var candidate):
+            candidate.gazeLease = fixation?.lease
+            guard await authorizes(candidate), isCurrent(run), dwellPolicy.allows(candidate) else { return }
             // A suppressed fire is an aborted intent — feed it into the
             // learned-multiplier accounting or suppression would silently
             // tighten nothing and widen nothing.
@@ -315,7 +400,7 @@ final class GazeService {
             }
             let name = candidate.label.isEmpty ? candidate.role : candidate.label
             noteOut("dwell → \(name.isEmpty ? candidate.id : name)")
-            if await actuate(candidate) {
+            if await actuate(candidate), isCurrent(run) {
                 dwellPolicy.recordCommit()
                 dwellPolicy.saveLearned(to: defaults)
                 let point = candidate.motorRect.contains(lastPoint ?? .zero)
@@ -334,20 +419,117 @@ final class GazeService {
 
     // MARK: - B4 / B6 — the referent API
 
+    private func supports(_ candidate: IntentCandidate, at point: CGPoint) -> Bool {
+        guard candidate.motorRect.contains(point),
+              batch.candidates.contains(candidate),
+              candidate.windowID == nil || candidate.windowID == batch.windowID
+        else { return false }
+        return !batch.candidates.contains { other in
+            guard other != candidate else { return false }
+            if other.id == candidate.id { return true }
+            guard other.motorRect.contains(point) else { return false }
+            if let window = other.windowID, window != batch.windowID { return false }
+            return !(other.kind == .window && other.windowID == batch.windowID && candidate.kind != .window)
+        }
+    }
+
+    private func supports(_ candidate: IntentCandidate, sample: GazeSample) -> Bool {
+        sample.capturedAt != nil && (sample.state == "fixation" || sample.state == "dwell")
+            && supports(candidate, at: CGPoint(x: sample.x, y: sample.y))
+    }
+
+    private func continues(_ fixation: Fixation, through observations: GazeStream.Observations) -> Bool {
+        guard observations.epoch == fixation.epoch,
+              let start = observations.samples.firstIndex(where: { $0.observedAt == fixation.last })
+        else { return false }
+        return observations.samples[start...].allSatisfy { supports(fixation.target, sample: $0) }
+    }
+
+    private func updateFixation(_ event: IntentEvent, observations: GazeStream.Observations) {
+        guard let latest = observations.samples.last, let stamp = latest.observedAt else {
+            fixation = nil
+            return
+        }
+        let candidate: IntentCandidate
+        switch event {
+        case .acquire(let c), .hold(let c, _): candidate = c
+        default: fixation = nil; return
+        }
+        guard supports(candidate, sample: latest) else { fixation = nil; return }
+        if let previous = fixation, previous.target == candidate, previous.nativeWitness == batch.nativeWitness,
+           continues(previous, through: observations) {
+            fixation?.last = stamp
+        } else {
+            dwell.reset()
+            fixation = Fixation(target: candidate, epoch: observations.epoch, nativeWitness: batch.nativeWitness,
+                                lease: UUID(), began: stamp, last: stamp)
+        }
+    }
+
+    func authorizes(_ candidate: IntentCandidate, at point: CGPoint? = nil,
+                    checkingTarget: @MainActor (CGPoint) -> Bool = { _ in true }) -> Bool {
+        authorizedPoint(for: candidate, checking: point, checkingTarget: checkingTarget) != nil
+    }
+
+    var currentActionLease: UUID? {
+        guard running, !Task.isCancelled, let fixation, fixation.nativeWitness == batch.nativeWitness,
+              fixation.last > fixation.began,
+              (0...GazeStream.continuityWindow).contains(Date().timeIntervalSince(fixation.last)),
+              now() - batchAt <= gate.refreshTTL else { return nil }
+        let observations = stream.liveObservations()
+        guard continues(fixation, through: observations),
+              stream.isCurrent(observations) else { return nil }
+        return fixation.lease
+    }
+
+    func authorizedPoint(for candidate: IntentCandidate) async -> CGPoint? {
+        authorizedPoint(for: candidate, checking: nil, checkingTarget: { _ in true })
+    }
+
+    private func authorizedPoint(for candidate: IntentCandidate, checking dispatchPoint: CGPoint?,
+                                 checkingTarget: @MainActor (CGPoint) -> Bool) -> CGPoint? {
+        let run = generation
+        let observations = stream.liveObservations()
+        let rosterAt = batchAt
+        var target = candidate
+        target.gazeLease = nil
+        guard isCurrent(run), let fixation, fixation.lease == candidate.gazeLease,
+              fixation.nativeWitness == batch.nativeWitness,
+              target == fixation.target, fixation.last > fixation.began,
+              now() - batchAt <= gate.refreshTTL,
+              let sample = observations.samples.last,
+              sample.isFresh(within: GazeStream.continuityWindow),
+              windowIDUnder(CGPoint(x: sample.x, y: sample.y)) == batch.windowID
+        else { return nil }
+        if let dispatchPoint {
+            guard supports(target, at: dispatchPoint), windowIDUnder(dispatchPoint) == batch.windowID else { return nil }
+        }
+        guard continues(fixation, through: observations), checkingTarget(CGPoint(x: sample.x, y: sample.y)) else { return nil }
+        guard isCurrent(run), self.fixation?.lease == fixation.lease,
+              rosterAt == batchAt, now() - rosterAt <= gate.refreshTTL,
+              sample.isFresh(within: GazeStream.continuityWindow),
+              stream.isCurrent(observations) else { return nil }
+        return CGPoint(x: sample.x, y: sample.y)
+    }
+
     /// The one referent answer every commit path reads: the winner
     /// `lookBackSec` into the sentence, plus its softmax share. nil =
-    /// cold start or stalled feed — callers keep their raw-point
-    /// fallback exactly as before. `recordSelection` false reads the
+    /// no current authority to actuate. `recordSelection` false reads the
     /// referent without recording a commit — read-only polls
     /// (gazed-agent lookup) must not bias the scorer's selection
     /// priors or post an implicit calibration label.
     @discardableResult
     func commitTarget(lookBackSec: Double = 0.6,
                       recordSelection: Bool = true) async -> (IntentCandidate, Double)? {
-        guard let hit = await scorer.commitTarget(lookBackSec: lookBackSec,
-                                                  recordSelection: recordSelection)
-        else { return nil }
+        let run = generation
+        guard let lease = fixation?.lease,
+              var hit = await scorer.commitTarget(lookBackSec: lookBackSec, recordSelection: false),
+              isCurrent(run) else { return nil }
+        hit.0.gazeLease = lease
+        guard await authorizes(hit.0) else { return nil }
         if recordSelection {
+            await scorer.recordSelection(of: hit.0.id)
+            guard isCurrent(run), await authorizes(hit.0) else { return nil }
             let point = candidatePoint(hit.0)
             Task { await labels.commit(hit.0, at: point) }
         }

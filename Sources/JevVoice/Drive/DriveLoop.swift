@@ -141,7 +141,7 @@ actor DriveLoop {
     /// The cursorless direct-action session — fast-lane dispatches ride
     /// it when set (voice path); nil keeps the caller's `session`.
     private let directSession: String?
-    var requiresCapturedTextTarget: Bool { explicitConsent && directSession != nil }
+    var isDirectVoiceLoop: Bool { explicitConsent && directSession != nil }
     /// Dictation-mode verbs hand their bool here — the coordinator wires
     /// it to VoiceController's literal-capture lane.
     /// Internal (not private): `FastLaneExecutor`'s extension lives in its
@@ -179,24 +179,24 @@ actor DriveLoop {
     let postMediaKey: (MediaKeys.Key) -> Bool
     /// Host-side app activation — the reopen trigger the driver won't do.
     /// Injectable so tests never activate real processes.
-    let activateApp: (Int) -> Void
+    let activateApp: @MainActor (Int) throws -> Void
     /// Window restoration for an explicitly requested raise. Kept separate
     /// from activation: activate() alone does not unhide a running app.
     let appIsHidden: (Int) -> Bool
-    let unhideApp: (Int) -> Bool
+    let unhideApp: @MainActor (Int) throws -> Bool
     /// A normal OS reopen can restore a closed main window; activate() alone
     /// only fronts existing windows. Pinned-window requests never use this.
-    let activateRestoredApp: (Int, String?) -> Void
-    let foregroundAppLauncher: ((String) async throws -> Int)?
+    let activateRestoredApp: @MainActor (Int, String?) throws -> Void
+    let foregroundAppLauncher: (@MainActor (String) async throws -> Int)?
     let observeLaunchedPID: (String) async -> Int?
     /// The freshest eye-tracker sample — injected so tests serve canned
     /// points and agent contexts can leave it nil (a nil seam reads to the
     /// caller as "tracker unreachable": gaze referents refuse honestly).
     let gaze: (() async throws -> GazeSample)?
     /// The scorer's committed referent — the semantic answer to "what is
-    /// 'this'". Nil seam or nil answer = cold feed; gaze verbs fall back
-    /// to the raw point exactly as before.
+    /// 'this'". Read-only description can still use a fresh point.
     let gazeCommit: (() async -> (IntentCandidate, Double)?)?
+    let gazeClick: ((IntentCandidate, FastAction.GazeVerb) async -> Bool)?
     /// Traffic-light discovery — host-side AX on the app's front window.
     /// Injectable so tests never open a real AX session.
     let windowControlButtons: (pid_t) -> [WindowControls.Button]
@@ -211,14 +211,6 @@ actor DriveLoop {
     let freshScrollContinuation: Bool
     let scrollContinuationIsCurrent: (@Sendable () async -> Bool)?
     let onVerifiedScroll: (@Sendable (NativeWindowObservation.VerifiedScroll) async -> Void)?
-    /// App-side overlay seam for `.overlay` verbs — numbered chips and
-    /// radial picks resolve against TargetOverlay on the main actor.
-    /// Receives the verb, the resolved target frames (top-left screen
-    /// points) with labels, and the current gaze point. A nil seam (agent
-    /// contexts, headless runs) makes overlay verbs refuse honestly.
-    let overlayDispatch: ((FastAction.OverlayVerb,
-                           [(frame: CGRect, label: String)],
-                           CGPoint?) async -> DriveResult?)?
     /// The frontmost non-self app's bundle — injectable so fast-lane
     /// resolution in tests doesn't read the real workspace roster.
     let frontmostBundleID: () -> String?
@@ -307,16 +299,15 @@ actor DriveLoop {
              NSWorkspace.shared.openApplication(at: url, configuration: configuration, completionHandler: nil)
          },
          foregroundAppLauncher: ((String) async throws -> Int)? = nil,
+         nativeAdmission: (@MainActor @Sendable () -> Bool)? = nil,
          observeLaunchedPID: @escaping (String) async -> Int? = { await DriveLoop.observedPID(bundle: $0) },
          gaze: (() async throws -> GazeSample)? = nil,
          gazeCommit: (() async -> (IntentCandidate, Double)?)? = nil,
+         gazeClick: ((IntentCandidate, FastAction.GazeVerb) async -> Bool)? = nil,
          windowControlButtons: ((pid_t) -> [WindowControls.Button])? = nil,
          windowControlPress: ((WindowControls.Kind, pid_t) -> Bool)? = nil,
          windowControlButtonsInWindow: ((pid_t, Int) -> [WindowControls.Button])? = nil,
          windowControlPressInWindow: ((WindowControls.Kind, pid_t, Int) -> Bool)? = nil,
-         overlayDispatch: ((FastAction.OverlayVerb,
-                            [(frame: CGRect, label: String)],
-                            CGPoint?) async -> DriveResult?)? = nil,
          frontmostBundleID: @escaping () -> String? = {
              NSWorkspace.shared.frontmostApplication.flatMap {
                  $0.bundleIdentifier != Bundle.main.bundleIdentifier
@@ -448,14 +439,29 @@ actor DriveLoop {
         self.nativeEvent = nativeEvent
         self.nativeTextEvent = nativeTextEvent
         self.postMediaKey = postMediaKey
-        self.activateApp = activateApp
+        self.activateApp = { pid in
+            guard !Task.isCancelled, nativeAdmission?() != false else { throw CancellationError() }
+            activateApp(pid)
+        }
         self.appIsHidden = appIsHidden
-        self.unhideApp = unhideApp
-        self.activateRestoredApp = activateRestoredApp
-        self.foregroundAppLauncher = foregroundAppLauncher
+        self.unhideApp = { pid in
+            guard !Task.isCancelled, nativeAdmission?() != false else { throw CancellationError() }
+            return unhideApp(pid)
+        }
+        self.activateRestoredApp = { pid, bundle in
+            guard !Task.isCancelled, nativeAdmission?() != false else { throw CancellationError() }
+            activateRestoredApp(pid, bundle)
+        }
+        self.foregroundAppLauncher = foregroundAppLauncher.map { launch in
+            { @MainActor bundle in
+                guard !Task.isCancelled, nativeAdmission?() != false else { throw CancellationError() }
+                return try await launch(bundle)
+            }
+        }
         self.observeLaunchedPID = observeLaunchedPID
         self.gaze = gaze
         self.gazeCommit = gazeCommit
+        self.gazeClick = gazeClick
         self.windowControlButtons = windowControlButtons ?? { WindowControls.buttons(pid: $0) }
         self.windowControlPress = windowControlPress ?? { WindowControls.press($0, pid: $1) }
         self.windowControlButtonsInWindow = windowControlButtonsInWindow ?? { pid, windowID in
@@ -464,7 +470,6 @@ actor DriveLoop {
         self.windowControlPressInWindow = windowControlPressInWindow ?? { kind, pid, windowID in
             windowControlPress?(kind, pid) ?? WindowControls.press(kind, pid: pid, windowID: windowID)
         }
-        self.overlayDispatch = overlayDispatch
         self.frontmostBundleID = frontmostBundleID
         self.frontmostPID = frontmostPID
         self.frontmostWindowID = frontmostWindowID
@@ -517,13 +522,16 @@ actor DriveLoop {
         guard let window = task.windowID, window > 0, task.scope == .work,
               task.application != nil, task.values.isEmpty, task.successContains.isEmpty,
               task.previousContext?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
-              resolved.openVerb == nil, resolved.launchURLs.isEmpty, !resolved.displayScoped,
+              resolved.openVerb == nil, resolved.launchURLs.isEmpty,
               let action = resolved.action, !action.deictic,
               case .scroll(_, let pages) = action.body, pages == 1 else { return false }
         return true
     }
 
     func runWindowScroll(_ request: WindowScrollRequest, task: DriveTask, session: String) async -> DriveResult {
+        if FastAction.retiredTargetRequest(task.goal) != nil {
+            return DriveResult(status: .blocked("Please name the control you want to use."))
+        }
         var history: [String] = []
         do {
             try Task.checkCancellation()
@@ -574,6 +582,9 @@ actor DriveLoop {
     /// a primitive or fall through to the generic chooser.
     func runAppFocus(bundleID: String, task: DriveTask, session: String,
                      nativeEvents: (@Sendable (VoiceCommandTrace.Stage) async -> Void)? = nil) async -> DriveResult {
+        if FastAction.retiredTargetRequest(task.goal) != nil {
+            return DriveResult(status: .blocked("Please name the control you want to use."))
+        }
         var history: [String] = []
         do {
             try Task.checkCancellation()
@@ -606,6 +617,9 @@ actor DriveLoop {
     }
 
     func run(_ task: DriveTask, session: String) async -> DriveResult {
+        if FastAction.retiredTargetRequest(task.goal) != nil {
+            return DriveResult(status: .blocked("Please name the control you want to use."))
+        }
         let session = scopedCall == nil ? session : await resurrector.effectiveLabel(session)
         var history: [String] = []
         /// A per-task approval granted this run — one `ask` covers every
@@ -618,7 +632,7 @@ actor DriveLoop {
                 return settle(.blocked("An exact target window is required."), task, history)
             }
             let directLiteral: Bool
-            if requiresCapturedTextTarget, let parsed = FastAction.parse(task.goal),
+            if isDirectVoiceLoop, let parsed = FastAction.parse(task.goal),
                parsed.appQualifier == nil, !parsed.action.deictic, case .type = parsed.action.body {
                 directLiteral = true
                 guard task.windowID != nil, task.application != nil,
@@ -634,7 +648,7 @@ actor DriveLoop {
             //    local resolver the bind below needs are INDEPENDENT reads —
             //    overlap them. The inventory is skipped entirely when the
             //    goal can only take an app-free lane (a gaze referent,
-            //    tracker control, a media/system chord, an overlay verb,
+            //    tracker control, a media/system chord,
             //    dictation, a URL/web lane): a spoken "click" never pays
             //    for a list_apps roundtrip it can't consume.
             let needsInventory = Self.fastLaneNeedsInventory(goal: task.goal,
@@ -816,8 +830,8 @@ actor DriveLoop {
                 try await gateExplicit("bring_to_front", corpus: appName,
                                        denied: task.deny, confirmed: &confirmedTask)
                 try await focusLeased {
-                    if self.appIsHidden(pid) { _ = self.unhideApp(pid) }
-                    self.activateRestoredApp(pid, bundleID)
+                    if self.appIsHidden(pid) { _ = try await self.unhideApp(pid) }
+                    try await self.activateRestoredApp(pid, bundleID)
                 }
             }
             var rows = launchWindows
@@ -854,7 +868,7 @@ actor DriveLoop {
                     }
                     // A windowless open still activates the app — a visible
                     // effect — before reporting the observed running state.
-                    try? await focusLeased { self.activateApp(pid) }
+                    try await focusLeased { try await self.activateApp(pid) }
                     return settle(.done, task, history, pid: pid,
                                   bundleID: bundleID, confirmedAny: true)
                 }
@@ -1080,6 +1094,7 @@ actor DriveLoop {
     /// `suggest_action` — one resolve→observe→choose pass, no dispatch. The
     /// app must already be running; launching it would itself be an effect.
     func preview(_ task: DriveTask, session: String) async throws -> String {
+        if FastAction.retiredTargetRequest(task.goal) != nil { return "Please name the control you want to use." }
         let session = scopedCall == nil ? session : await resurrector.effectiveLabel(session)
         if config.windowOnly, task.windowID == nil { return "An exact target window is required." }
         let apps = await resolver.resolveDetailed(task.application ?? task.goal)
@@ -1224,14 +1239,14 @@ actor DriveLoop {
 
     /// Whether the fast-lane resolution for this goal could ever consult
     /// the app roster. The app-free bodies — gaze referents, tracker
-    /// control, media/system chords, overlay verbs, repeat/locate,
+    /// control, media/system chords, repeat/locate,
     /// dictation, and the URL/web-search lanes — dispatch without it, so
     /// a spoken "click" never waits on `list_apps`. Everything else
     /// (qualifier resolution, `parseOpen`, the appHint merge) reads it.
     static func fastLaneNeedsInventory(goal: String, appHint: String? = nil) -> Bool {
         if let parsed = FastAction.parse(goal) {
             switch parsed.action.body {
-            case .gaze, .tracker, .mediaKey, .systemHotkey, .overlay,
+            case .gaze, .tracker, .mediaKey, .systemHotkey,
                  .repeatLast, .locate, .dictation, .webSearch, .navigateURL:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,

@@ -4,7 +4,7 @@ import XCTest
 /// Overlay pick ownership: one pick path at a time, the scorer's
 /// conforming ring outlives every pick-set teardown, a pick may only
 /// resolve the ask it armed for, and Escape stays consumable while any
-/// pick is up — including bare number chips with no parked ask.
+/// pick is up.
 @MainActor
 final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
 
@@ -25,10 +25,15 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
             defaults: UserDefaults(suiteName: suite)!,
             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(),
             environment: [:])
+        config.sounds = false
+        let report = VoiceTaskCoordinator.accuracyReportURL
+        VoiceTaskCoordinator.accuracyReportURL = nil
+        addTeardownBlock { @MainActor in VoiceTaskCoordinator.accuracyReportURL = report }
         return VoiceTaskCoordinator(
             config: config, jevAPIKey: { "" },
             gazeService: GazeService(
-                stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
+                stream: GazeStream(frames: { AsyncThrowingStream { _ in } }),
+                defaults: UserDefaults(suiteName: suite)!),
             overlay: overlay)
     }
 
@@ -57,25 +62,22 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
         return condition()
     }
 
-    // MARK: - disarm must not kill the ring it just acquired
+    // MARK: - passive gaze never opens a choice
 
-    /// The scorer's `.acquire` presents the ring AND resolves the
-    /// ambiguity in the same event — the disarm is chip-scoped, so the
-    /// ring survives the tick that armed it.
-    func testNonAmbiguousEventDisarmsRadialButKeepsRing() async {
-        let overlay = TargetOverlay()
+    func testTieReleasesRingWithoutArmingChoiceThenNextControlHighlights() async {
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.now = { 0 }
         let c = coordinator(overlay: overlay)
         let a = candidate("a", x: 0), b = candidate("b", x: 200)
         c.gazeService.eventSink(.acquire(a))
         XCTAssertTrue(overlay.ringArmed)
         c.gazeService.eventSink(.ambiguous([a, b]))
-        XCTAssertEqual(overlay.pendingCount, 2)
-        XCTAssertTrue(c.hasActiveChoiceAsk)
+        XCTAssertEqual(overlay.pendingCount, 0)
+        XCTAssertFalse(overlay.ringArmed)
+        XCTAssertFalse(c.hasActiveChoiceAsk)
         c.gazeService.eventSink(.acquire(b))
         XCTAssertEqual(overlay.pendingCount, 0)   // chips retracted
         XCTAssertNil(c.pendingOverlayPick)
-        XCTAssertNil(c.gazeRadialPair)
         XCTAssertTrue(overlay.ringArmed)          // ring survived
         XCTAssertFalse(c.hasActiveChoiceAsk)
         overlay.hideAll()
@@ -83,17 +85,14 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
 
     // MARK: - task radials own the pick once armed
 
-    /// A task's `.choice` radial taking `pendingOverlayPick` clears the
-    /// gaze pair — the next scorer tick can't disarm the task's radial
-    /// out from under its parked ask.
-    func testTaskRadialArmClearsGazePairAndSurvivesTicks() async {
-        let overlay = TargetOverlay()
+    func testTaskRadialSurvivesPassiveAmbiguityAndAcquisition() async {
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.now = { 0 }
         let c = coordinator(overlay: overlay)
         let a = candidate("a", x: 0), b = candidate("b", x: 200)
         c.gazeService.eventSink(.ambiguous([a, b]))
-        XCTAssertEqual(c.overlayPickOwner, .gaze)
-        XCTAssertNotNil(c.gazeRadialPair)
+        XCTAssertNil(c.pendingOverlayPick)
+        XCTAssertEqual(overlay.pendingCount, 0)
 
         let work = VoiceTaskCoordinator.Work(
             label: "pick one", request: "pick", spec: DriveTask(goal: "pick"))
@@ -103,8 +102,9 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
         let didPark = await waitFor { work.askContinuation != nil }
         XCTAssertTrue(didPark)
         XCTAssertEqual(overlay.pendingCount, 2)
-        XCTAssertEqual(c.overlayPickOwner, .choice)
-        XCTAssertNil(c.gazeRadialPair)      // task radial owns the slot
+        XCTAssertNotNil(c.pendingOverlayPick)
+        c.gazeService.eventSink(.ambiguous([a, b]))
+        XCTAssertEqual(overlay.pendingCount, 2)
 
         // A resolved contest must not retract the task's radial.
         c.gazeService.eventSink(.acquire(a))
@@ -122,42 +122,164 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
 
     // MARK: - Escape consumability
 
-    /// Bare number chips are an overlay pick — Escape is consumable
-    /// while they're up and retracts them instead of leaking to the
-    /// frontmost app.
-    func testNumbersArmMakesEscapeConsumable() async {
-        let overlay = TargetOverlay()
-        overlay.now = { 0 }
+    func testRetiredTargetCommandsCreateNoWorkOrPanels() async {
+        let overlay = TargetOverlay(presentsPanels: false)
         let c = coordinator(overlay: overlay)
-        let targets = [
-            (frame: CGRect(x: 10, y: 10, width: 40, height: 20), label: "Save"),
-            (frame: CGRect(x: 100, y: 10, width: 40, height: 20), label: "Open"),
-        ]
-        _ = await c.handleOverlayVerb(.showNumbers, targets: targets, gaze: nil)
-        XCTAssertEqual(overlay.pendingCount, 2)
-        XCTAssertEqual(c.overlayPickOwner, .numbers)
-        XCTAssertTrue(c.hasActiveChoiceAsk)
-        XCTAssertTrue(c.declineTopmostChoiceAsk())
-        XCTAssertFalse(c.hasActiveChoiceAsk)
-        XCTAssertEqual(overlay.pendingCount, 0)
-        XCTAssertNil(c.pendingOverlayPick)
-        // Nothing up → Escape falls through.
-        XCTAssertFalse(c.declineTopmostChoiceAsk())
+        for (phrase, final) in [("show numbers", "show numbers"), ("show numbers everywhere", "show numbers everywhere"),
+                                ("hide numbers", "hide numbers"), ("click two", "click two"), ("open Numbers", "show numbers")] {
+            let result = await c.beginVoiceTask(phrase, transcriptHint: final)
+            XCTAssertTrue(result.contains("Please name the control"), phrase)
+            XCTAssertTrue(c.tasks.isEmpty)
+            XCTAssertNil(c.pendingOverlayPick)
+            XCTAssertFalse(c.hasActiveChoiceAsk)
+            XCTAssertFalse(c.declineTopmostChoiceAsk())
+            XCTAssertEqual(overlay.pendingCount, 0)
+        }
     }
 
-    /// The gaze radial declines the same way — Escape retracts the
-    /// chips but leaves the ring alone.
-    func testEscapeOnGazeRadialKeepsRing() async {
-        let overlay = TargetOverlay()
+    func testRetiredPicksNeedExactAskAndNumericLabelsWin() async {
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
+        for (reply, expected) in [("Report 2", "0"), ("click two", "1")] {
+            let work = VoiceTaskCoordinator.Work(label: "fixture", request: "fixture", spec: DriveTask(goal: "fixture"))
+            work.ask = .choice(prompt: "Which report?", options: ["Report 2", "Annual report"])
+            c.tasks = [work]
+            let answer = Task {
+                await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+                    work.askContinuation = continuation
+                }
+            }
+            let armed = await waitFor { work.askContinuation != nil }
+            XCTAssertTrue(armed)
+            _ = await c.respondToTask("click two")
+            XCTAssertNotNil(work.askContinuation)
+            for invalid in ["click two in Safari", "pick 3"] {
+                _ = await c.respondToTaskExact(invalid, taskID: work.id, askID: work.askID, captureID: UUID())
+                XCTAssertNotNil(work.askContinuation)
+            }
+            let another = VoiceTaskCoordinator.Work(label: "other", request: "", spec: DriveTask(goal: "other"))
+            another.ask = .choice(prompt: "Other?", options: ["a", "b"])
+            another.agentAskID = "fixture"
+            c.tasks.append(another)
+            _ = await c.respondToTaskExact("click two", taskID: work.id, askID: work.askID, captureID: UUID())
+            XCTAssertNotNil(work.askContinuation)
+            c.tasks.removeAll { $0.id == another.id }
+            _ = await c.respondToTaskExact(reply, taskID: work.id, askID: work.askID, captureID: UUID())
+            work.askContinuation?.resume(returning: nil)
+            let selected = await answer.value
+            XCTAssertEqual(selected, expected)
+        }
+    }
+
+    func testPassiveTieDoesNotCaptureEscape() async {
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.now = { 0 }
         let c = coordinator(overlay: overlay)
         let a = candidate("a", x: 0), b = candidate("b", x: 200)
         c.gazeService.eventSink(.acquire(a))
         c.gazeService.eventSink(.ambiguous([a, b]))
-        XCTAssertTrue(c.declineTopmostChoiceAsk())
+        XCTAssertFalse(c.declineTopmostChoiceAsk())
         XCTAssertEqual(overlay.pendingCount, 0)
-        XCTAssertTrue(overlay.ringArmed)
+        XCTAssertFalse(overlay.ringArmed)
         overlay.hideAll()
+    }
+
+    func testBareClickFreeformResumesOnlyTheAddressedQuestionWithOriginalWords() async {
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
+        let work = VoiceTaskCoordinator.Work(label: "fixture", request: "fixture", spec: .init(goal: "fixture"))
+        c.tasks = [work]
+        let answer = Task { await c.park(.question("Which word?"), on: work) }
+        let armed = await waitFor { work.askContinuation != nil }
+        XCTAssertTrue(armed)
+        _ = await c.respondToTask("Click.")
+        _ = await c.respondToTaskExact("Click.", taskID: work.id, askID: UUID(), captureID: UUID())
+        _ = await c.respondToTaskExact("Click two.", taskID: work.id, askID: work.askID, captureID: UUID())
+        XCTAssertNotNil(work.askContinuation)
+        _ = await c.respondToTaskExact("Click.", taskID: work.id, askID: work.askID, captureID: UUID())
+        work.askContinuation?.resume(returning: nil)
+        let literal = await answer.value
+        XCTAssertEqual(literal, "Click.")
+    }
+
+    func testDesktopSwitchQuestionLeavesOriginalChoiceAndDeadlineIntact() async {
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
+        let ask = DriveLoop.Ask.choice(prompt: "Which option?", options: ["Did it switch?", "Other"])
+        for choose in [false, true] {
+            let work = VoiceTaskCoordinator.Work(label: "fixture", request: "fixture", spec: .init(goal: "fixture"))
+            c.tasks = [work]
+            c.askExpirySeconds = choose ? 2 : 0.15
+            var prompts = 0
+            c.taskEventSink = { _, _, _ in prompts += 1 }
+            let answer = Task { await c.park(ask, on: work) }
+            let armed = await waitFor { work.askContinuation != nil }
+            XCTAssertTrue(armed)
+            let askID = work.askID
+            _ = await c.respondToTask("Did it switch?")
+            _ = await c.respondToTaskExact("Did it switch?", taskID: work.id, askID: askID, captureID: UUID())
+            XCTAssertEqual(work.ask, ask)
+            XCTAssertEqual(work.askID, askID)
+            XCTAssertNotNil(work.askContinuation)
+            if choose {
+                _ = await c.respondToTaskExact("Choose one.", taskID: work.id, askID: askID, captureID: UUID())
+            }
+            let result = await answer.value
+            XCTAssertEqual(result, choose ? "0" : nil)
+            XCTAssertEqual(prompts, 1)
+            XCTAssertNil(work.ask)
+            XCTAssertNil(work.askContinuation)
+        }
+    }
+
+    func testRetiringAnotherChoicePreservesTheDisplayedAsk() async {
+        for expiry in [false, true] {
+            let overlay = TargetOverlay(presentsPanels: false), c = coordinator(overlay: overlay)
+            let older = VoiceTaskCoordinator.Work(label: "older", request: "", spec: .init(goal: "older"))
+            let newer = VoiceTaskCoordinator.Work(label: "newer", request: "", spec: .init(goal: "newer"))
+            c.tasks = [older, newer]
+            let ask = DriveLoop.Ask.choice(prompt: "Which?", options: ["Alpha", "Beta"])
+            c.askExpirySeconds = expiry ? 0.20 : 1
+            let first = Task { await c.park(ask, on: older) }
+            let firstReady = await waitFor { older.askContinuation != nil }
+            XCTAssertTrue(firstReady)
+            let stalePick = c.pendingOverlayPick
+            c.askExpirySeconds = 1
+            let second = Task { await c.park(ask, on: newer) }
+            let secondReady = await waitFor { newer.askContinuation != nil }
+            XCTAssertTrue(secondReady)
+            stalePick?(1)
+            XCTAssertNotNil(older.askContinuation)
+            if !expiry {
+                _ = await c.respondToTaskExact("Alpha", taskID: older.id, askID: older.askID, captureID: UUID())
+            }
+            let answer = await first.value
+            XCTAssertEqual(answer, expiry ? nil : "0")
+            XCTAssertEqual(overlay.pendingCount, 2)
+            c.pendingOverlayPick?(1)
+            let selected = await second.value
+            XCTAssertEqual(selected, "1")
+        }
+    }
+
+    func testCaptureAndParkedChoiceSuppressDwellFillEvenWhenOptedIn() async {
+        let overlay = TargetOverlay(presentsPanels: false), c = coordinator(overlay: overlay)
+        c.gazeService.dwellPolicy.mode = .safe
+        let target = candidate("safe")
+        c.captureActiveProbe = { false }
+        c.gazeService.eventSink(.acquire(target))
+        c.gazeService.eventSink(.hold(target, progress: 0.4))
+        XCTAssertEqual(overlay.ringProgress, 0.4)
+        c.captureActiveProbe = { true }
+        c.gazeService.eventSink(.hold(target, progress: 0.45))
+        XCTAssertEqual(overlay.ringProgress, 0)
+        c.captureActiveProbe = { false }
+        let work = VoiceTaskCoordinator.Work(label: "choice", request: "", spec: .init(goal: "choice"))
+        c.tasks = [work]
+        let parked = Task { await c.park(.choice(prompt: "Which?", options: ["A", "B"]), on: work) }
+        let ready = await waitFor { work.askContinuation != nil }
+        XCTAssertTrue(ready)
+        c.gazeService.eventSink(.hold(target, progress: 0.5))
+        XCTAssertEqual(overlay.ringProgress, 0)
+        XCTAssertTrue(c.declineTopmostChoiceAsk())
+        _ = await parked.value
     }
 
     // MARK: - park re-entrancy
@@ -166,7 +288,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// continuation can never be orphaned because the row's ask slots
     /// were never overwritten.
     func testSecondParkOnSameWorkDeclines() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let work = VoiceTaskCoordinator.Work(
             label: "two asks", request: "work", spec: DriveTask(goal: "work"))
         let first = Task { await c.park(.question("first?"), on: work) }
@@ -186,7 +308,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// A radial pick armed for ask A declining once the parked ask
     /// moved on — never resolving ask B with A's index.
     func testStaleChoicePickDeclinesInsteadOfResolvingWrongAsk() async {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.now = { 0 }
         let c = coordinator(overlay: overlay)
         let work = VoiceTaskCoordinator.Work(
@@ -232,7 +354,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// "the first one" means the OLDEST parked ask — the previous
     /// newest-fallback answered the wrong task.
     func testRespondToTaskFirstOrdinalAnswersOldest() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let older = VoiceTaskCoordinator.Work(
             label: "older", request: "old task", spec: DriveTask(goal: "old"))
         let newer = VoiceTaskCoordinator.Work(
@@ -266,7 +388,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
 
     /// An out-of-range ordinal refuses honestly instead of guessing.
     func testRespondToTaskOutOfRangeOrdinalRefuses() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let work = VoiceTaskCoordinator.Work(
             label: "only one", request: "only", spec: DriveTask(goal: "only"))
         work.ask = .question("one ask")
@@ -292,7 +414,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// work settles cancelled and no Work row is created for the stop
     /// request itself.
     func testCancelUtteranceInterruptsNewestWork() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let work = VoiceTaskCoordinator.Work(
             label: "running", request: "do the thing", spec: DriveTask(goal: "x"))
         c.tasks = [work]
@@ -305,7 +427,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
 
     /// Nothing running → the honest nothing_running, still no Work row.
     func testCancelWithNothingRunning() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let reply = await c.beginVoiceTask("stop")
         XCTAssertTrue(reply.contains("nothing_running"))
         XCTAssertTrue(c.tasks.isEmpty)
@@ -326,7 +448,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// A live capture suppresses dwell even with nothing parked —
     /// "click this" mid-sentence can't double-actuate.
     func testDwellSuppressionIncludesActiveCapture() {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         c.captureActiveProbe = { true }
         XCTAssertTrue(c.gazeService.dwellSuppressed())
         c.captureActiveProbe = { false }
@@ -336,32 +458,32 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// Service stop() tears ALL overlay state down — ring included —
     /// plus every pick claim, so nothing survives into the next start.
     func testOverlayTeardownClearsEverything() async {
-        let overlay = TargetOverlay()
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.now = { 0 }
         let c = coordinator(overlay: overlay)
         let a = candidate("a", x: 0), b = candidate("b", x: 200)
         c.gazeService.eventSink(.acquire(a))
         c.gazeService.eventSink(.ambiguous([a, b]))
+        XCTAssertFalse(overlay.ringArmed)
+        XCTAssertEqual(overlay.pendingCount, 0)
+        c.gazeService.eventSink(.acquire(b))
         XCTAssertTrue(overlay.ringArmed)
-        XCTAssertEqual(overlay.pendingCount, 2)
         c.gazeService.overlayTeardown?()
         XCTAssertEqual(overlay.pendingCount, 0)
         XCTAssertFalse(overlay.ringArmed)
         XCTAssertNil(c.pendingOverlayPick)
-        XCTAssertNil(c.gazeRadialPair)
-        XCTAssertEqual(c.overlayPickOwner, .none)
     }
 
     // MARK: - pending ask badge
 
-    func testPendingAskCountTracksAsksAndGazeRadial() async {
-        let overlay = TargetOverlay()
+    func testPendingAskCountTracksOnlyExplicitAsks() async {
+        let overlay = TargetOverlay(presentsPanels: false)
         overlay.now = { 0 }
         let c = coordinator(overlay: overlay)
         XCTAssertEqual(c.pendingAskCount, 0)
         let a = candidate("a", x: 0), b = candidate("b", x: 200)
         c.gazeService.eventSink(.ambiguous([a, b]))
-        XCTAssertEqual(c.pendingAskCount, 1)
+        XCTAssertEqual(c.pendingAskCount, 0)
         c.gazeService.eventSink(.acquire(a))
         XCTAssertEqual(c.pendingAskCount, 0)
         let work = VoiceTaskCoordinator.Work(
@@ -402,7 +524,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
         defaults.set(false, forKey: "agentCursorEnabled")
         let config = Config(defaults: defaults, keyStore: MemoryKeys(),
                             openAIKeyStore: MemoryKeys(), environment: [:])
-        let c = coordinator(overlay: TargetOverlay(), config: config)
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false), config: config)
         XCTAssertFalse(config.agentCursorEnabled)
         let spy = Spy()
         c.agentBridge = spy
@@ -423,7 +545,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// A pick on a protected-phrase candidate refuses the same way the
     /// dwell engine's deny list refuses — explicit pick ≠ deny bypass.
     func testDeniedCandidateRefusesActuation() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let denied = candidate("d", kind: .dom, label: "Empty trash")
         let deniedResult = await c.actuateCommitted(denied)
         XCTAssertFalse(deniedResult)
@@ -438,7 +560,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// shared input lease is held by dictation, so the actuation is
     /// refused instead of landing late.
     func testActuationDropsWhileInputLeaseHeld() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let lease = DictationDelivery.sharedLease
         await lease.acquire()
         let benign = candidate("ok", kind: .dom, label: "Save")
@@ -453,7 +575,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     /// "OK" inside a money-movement context refuses, same as the spoken
     /// gaze verb's corpus check.
     func testRadialPickScansWindowAndURLContext() async {
-        let c = coordinator(overlay: TargetOverlay())
+        let c = coordinator(overlay: TargetOverlay(presentsPanels: false))
         let confirmDialog = candidate("ok", kind: .axElement, label: "OK",
                                       windowTitle: "Confirm Purchase")
         let dialogResult = await c.actuateCommitted(confirmDialog)

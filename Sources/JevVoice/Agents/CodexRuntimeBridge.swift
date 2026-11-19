@@ -2,6 +2,124 @@ import Foundation
 import JevVoiceCore
 import OSLog
 
+struct WorkerTurnReceipt: Hashable, Sendable {
+    fileprivate let binding: UUID
+    let agent: String
+    let thread: String
+    let generation: UUID
+    let turn: String
+}
+
+enum WorkerTurnStatus: Equatable, Sendable {
+    case working, workerFinished, failed, interrupted, unknown
+
+    var localMessage: String {
+        switch self {
+        case .working: return "The worker is still working."
+        case .workerFinished: return "The worker finished its turn. I can’t confirm the task result."
+        case .failed: return "The worker’s turn failed."
+        case .interrupted: return "The worker’s turn was interrupted."
+        case .unknown: return "I can’t confirm the delegated task’s status."
+        }
+    }
+}
+
+struct WorkerTurnLedger {
+    struct Start {
+        fileprivate let binding = UUID()
+        fileprivate let sequence: UInt64
+    }
+
+    private struct Terminal {
+        let turn: String
+        let sequence: UInt64
+        var receipt: WorkerTurnReceipt?
+        var status: WorkerTurnStatus?
+    }
+
+    let agent: String
+    let thread: String
+    let generation = UUID()
+    private(set) var active: [WorkerTurnReceipt] = []
+    private var terminal: [Terminal] = []
+    private var pending: Set<UUID> = []
+    private var sequence: UInt64 = 0
+    private var evictedThrough: UInt64 = 0
+
+    init(agent: String, thread: String) {
+        self.agent = agent
+        self.thread = thread
+    }
+
+    mutating func begin() -> Start {
+        let start = Start(sequence: sequence)
+        pending.insert(start.binding)
+        return start
+    }
+
+    mutating func end(_ start: Start) {
+        pending.remove(start.binding)
+        if pending.isEmpty { terminal.removeAll { $0.receipt == nil } }
+    }
+
+    mutating func accept(_ id: String, start: Start) -> WorkerTurnReceipt {
+        let receipt = WorkerTurnReceipt(binding: start.binding, agent: agent, thread: thread,
+                                       generation: generation, turn: id)
+        guard pending.contains(start.binding), !id.isEmpty, !thread.isEmpty else { return receipt }
+        defer { end(start) }
+        if let i = terminal.firstIndex(where: { $0.turn == id }) {
+            if terminal[i].receipt == nil, terminal[i].sequence > start.sequence,
+               evictedThrough <= start.sequence {
+                terminal[i].receipt = receipt
+            } else {
+                terminal[i].status = .unknown
+            }
+        } else if active.contains(where: { $0.turn == id }) {
+            finish(thread: thread, turn: .init(id: id, status: "ambiguous"))
+        } else if evictedThrough <= start.sequence {
+            active.append(receipt)
+        }
+        return receipt
+    }
+
+    mutating func finish(thread: String, turn: CodexTurnResult) {
+        guard !thread.isEmpty, self.thread == thread, !turn.id.isEmpty else { return }
+        let status: WorkerTurnStatus
+        switch turn.status {
+        case "completed": status = .workerFinished
+        case "interrupted": status = .interrupted
+        case "failed": status = .failed
+        default: status = .unknown
+        }
+        if let i = terminal.firstIndex(where: { $0.turn == turn.id }) {
+            if terminal[i].status == nil { terminal[i].status = status }
+            else if terminal[i].status != status { terminal[i].status = .unknown }
+            return
+        }
+        let index = active.firstIndex { $0.turn == turn.id }
+        guard index != nil || !pending.isEmpty else { return }
+        let receipt = index.map { active.remove(at: $0) }
+        record(turn: turn.id, receipt: receipt, status: status)
+    }
+
+    mutating func interruptSubmitted(_ receipt: WorkerTurnReceipt) {
+        guard let i = active.firstIndex(of: receipt) else { return }
+        active.remove(at: i)
+        record(turn: receipt.turn, receipt: receipt, status: nil)
+    }
+
+    private mutating func record(turn: String, receipt: WorkerTurnReceipt?, status: WorkerTurnStatus?) {
+        sequence += 1
+        terminal.append(.init(turn: turn, sequence: sequence, receipt: receipt, status: status))
+        if terminal.count > 16 { evictedThrough = terminal.removeFirst().sequence }
+    }
+
+    func status(_ receipt: WorkerTurnReceipt) -> WorkerTurnStatus {
+        if let ended = terminal.first(where: { $0.receipt == receipt }) { return ended.status ?? .unknown }
+        return active.contains(receipt) ? .working : .unknown
+    }
+}
+
 /// Custom OpenAI-compatible provider written into the agent's config.toml.
 /// `envKey` names the environment variable codex reads the API key from —
 /// the key itself is only ever placed in the child process environment.
@@ -98,17 +216,8 @@ public actor CodexRuntimeBridge {
 
     private struct Session {
         var client: CodexProtocolClient
-        var threadID: String
-        /// Turn ids accepted by turn/start and not yet finished — ordered,
-        /// most recent last. Concurrent sends (chat + a routine tick)
-        /// share the thread, so a single last-write-wins id used to leave
-        /// every earlier turn uninterruptible.
-        var activeTurnIDs: [String] = []
-        /// Recently finished turn ids — `turn/completed` can land before
-        /// `send` writes the id back, so a bare "still listed" check can't
-        /// catch the finish and it would latch as in-flight forever.
-        /// Bounded: oldest entries fall out.
-        var completedTurns: [String] = []
+        var turns: WorkerTurnLedger
+        var threadID: String { turns.thread }
         var forwarder: Task<Void, Never>
     }
 
@@ -164,19 +273,24 @@ public actor CodexRuntimeBridge {
     /// the reply from `events` filtered on `agentSlug`.
     @discardableResult
     public func send(to agent: CompanionAgent, message: String) async throws -> String {
+        try await sendBound(to: agent, message: message).turn
+    }
+
+    func sendBound(to agent: CompanionAgent, message: String) async throws -> WorkerTurnReceipt {
         let session = try await self.session(for: agent)
+        guard sessions[agent.slug]?.client === session.client,
+              let start = sessions[agent.slug]?.turns.begin() else { throw CodexConnectionError.closed }
+        defer { sessions[agent.slug]?.turns.end(start) }
         let turnID = try await session.client.startTurn(threadID: session.threadID, text: message)
-        // Write back only while this is still the registered session — a
-        // concurrent sessionEnded/stop must not be resurrected. Consult
-        // the registered session's completed-turn ledger too:
-        // turn/completed landing between startTurn and this write-back
-        // means the turn already finished — latching it in-flight would
-        // let a later interrupt fire at a dead turn.
-        if sessions[agent.slug]?.client === session.client,
-           sessions[agent.slug]?.completedTurns.contains(turnID) != true {
-            sessions[agent.slug]?.activeTurnIDs.append(turnID)
+        guard sessions[agent.slug]?.client === session.client,
+              let receipt = sessions[agent.slug]?.turns.accept(turnID, start: start) else {
+            throw CodexConnectionError.closed
         }
-        return turnID
+        return receipt
+    }
+
+    func status(of receipt: WorkerTurnReceipt) -> WorkerTurnStatus {
+        sessions[receipt.agent]?.turns.status(receipt) ?? .unknown
     }
 
     /// Interrupts the agent's most recent in-flight turn. Returns false —
@@ -184,21 +298,21 @@ public actor CodexRuntimeBridge {
     /// the caller can answer "nothing is running" honestly.
     @discardableResult
     public func interrupt(slug: String) async throws -> Bool {
-        guard let session = sessions[slug], let turnID = session.activeTurnIDs.last else {
+        guard let session = sessions[slug], let receipt = session.turns.active.last else {
             return false
         }
-        try await session.client.interruptTurn(threadID: session.threadID, turnID: turnID)
+        try await session.client.interruptTurn(threadID: session.threadID, turnID: receipt.turn)
         // The interrupt is accepted — turn/completed (status "interrupted")
         // closes the ledger on the forwarder, but drop the id now so a
         // second stop doesn't aim at an already-dying turn.
-        sessions[slug]?.activeTurnIDs.removeAll { $0 == turnID }
+        if sessions[slug]?.client === session.client { sessions[slug]?.turns.interruptSubmitted(receipt) }
         return true
     }
 
     /// Slugs with at least one in-flight turn — the only honest target set
     /// for a no-hint "stop".
     public func activeTurnSlugs() -> [String] {
-        sessions.filter { !$0.value.activeTurnIDs.isEmpty }.keys.sorted()
+        sessions.filter { !$0.value.turns.active.isEmpty }.keys.sorted()
     }
 
     /// Thread the agent is currently bound to, if a session is live.
@@ -272,8 +386,8 @@ public actor CodexRuntimeBridge {
         let events = client.events
         let forwarder = Task { [weak self] in
             for await event in events {
-                if case .turnCompleted(_, let turn) = event {
-                    await self?.turnEnded(slug: slug, client: client, turnID: turn.id)
+                if case .turnCompleted(let thread, let turn) = event {
+                    await self?.turnEnded(slug: slug, client: client, thread: thread, turn: turn)
                 }
                 continuation.yield(AgentCodexEvent(agentSlug: slug, event: event))
             }
@@ -297,7 +411,7 @@ public actor CodexRuntimeBridge {
                                                         model: model,
                                                         sandbox: "workspace-write")
             }
-            let session = Session(client: client, threadID: threadID,
+            let session = Session(client: client, turns: WorkerTurnLedger(agent: slug, thread: threadID),
                                   forwarder: forwarder)
             try Task.checkCancellation()
             sessions[slug] = session
@@ -313,13 +427,9 @@ public actor CodexRuntimeBridge {
     /// The ledger matters because turn/completed can land BEFORE send's
     /// write-back — without it the id would latch active and a later
     /// interrupt() would fire turn/interrupt at a dead turn.
-    private func turnEnded(slug: String, client: CodexProtocolClient, turnID: String) {
+    private func turnEnded(slug: String, client: CodexProtocolClient, thread: String, turn: CodexTurnResult) {
         guard sessions[slug]?.client === client else { return }
-        sessions[slug]?.activeTurnIDs.removeAll { $0 == turnID }
-        sessions[slug]?.completedTurns.append(turnID)
-        if let turns = sessions[slug]?.completedTurns, turns.count > 16 {
-            sessions[slug]?.completedTurns = Array(turns.suffix(16))
-        }
+        sessions[slug]?.turns.finish(thread: thread, turn: turn)
     }
 
     /// Only clears the registry when the finished stream belongs to the

@@ -12876,3 +12876,533 @@ jarvis-v1-agent, which is now the sole worktree on main@45865ef clean.
 Safety net: 5 git stashes hold every deleted worktree's uncommitted state
 (stash@{0} staging p2d, stash@{1-4} capy/jarvis trees) — recoverable via
 `git stash list`. C1 acceptance still OPEN: live G6 speech check pending.
+
+2026-11-17 KAR-6, read-only investigation before the Spaces contract:
+R10 has Mission Control and next-window shortcuts but no named Space
+primitive in FastAction. On macOS 26.2 this Mac's symbolic-hotkey records
+for desktops 1–4 are disabled. Carbon cannot identify actions returned by
+CopySymbolicHotKeys; a delivered key or active-Space notification does
+not identify Desktop 2. Proposed inspecting the single display's live
+Mission Control AX Spaces list and pressing a uniquely grounded thumbnail.
+G2 review requested before writing source/tests; no live run, build,
+settings change or acceptance claim.
+
+KAR-6 G2 accepted by read-only judge; G3 red c1-realtime-protocol:
+the matching Desktop 2 final reached interpretation; zero native commands.
+Added the hands-free switch through the consumed final, original words,
+captured window, single display, existing explicit policy and focus lease.
+Numbered desktops use LaunchServices + live Dock AX list, localized
+ordinary thumbnail and one AXPress; never a shortcut, array index, private
+Space API or verified-success history. Next/previous ask for a number.
+G4 caught missing overview context after a press or spoken stop; fixed
+both result and cancellation feedback. Final offline c1-r2: 359 tests,
+7 skipped, 0 failures; independent G4 PASS for source only. Local logs:
+~/.capy/work/KAR-6/{red,green3}.log. Physical Desktop 1 → Desktop 2,
+actual Dock AX exposure/label and preserved focus after launch are
+unverified; coordinate a signed candidate separately. No live run,
+settings change, install, acceptance flip, stage or commit.
+
+KAR-8: G2/G4 independent source review passed. Current hands-free onset
+and ignored/waiting transitions now clear only the relevant turn's
+caption. The pill no longer borrows an unrelated settled task's outcome;
+protected progress, a parked approval and errors use the actual owner's
+message. Red c1-lifecycle had 8 assertions; G4 also found an unrelated
+approval preserving stale detail (2 reproduced assertions). Final c1-r2:
+360 tests, 7 skipped, 0 failed. Logs ~/.capy/work/KAR-8/{red2,parked-red,integrated}.log.
+Mixed-language synthetic final stayed verbatim; no private speech used,
+ASR/language setting changed, physical qualification or acceptance flip.
+
+KAR-9 G2 approved a single new retained-base label: final-first-minute-1.
+P12 retained-base red: 3 new errors (label not admitted; missing collision
+and build/freeze controls). Green: 9 tests, then 18 target-specific P12
+tests. Serialized c1-package-release bound unsigned main ebda098c53ad7a3cc4806df1b74ac137e218af53c05b1b579f989200376b4b63
+to the private 121-input source freeze .context/c1-local/final-first-minute-1-source/manifest.json
+(SHA 4194a5117c365b58e11153dc02c9e90640d4778065158457a04f67785b2b3d8d).
+Signed app ~/jarvis-local/c1-candidates/jev-c1-final-first-minute-1/Jev Voice.app,
+executable SHA e17cb2175eb7d613eb07ab210869bec6183fab205bef844093295d745d99625c.
+New .agent/results/P12/c1-final-first-minute-1-stage.json and
+c1-manifest-final-first-minute-1.json; strict deep signature and target
+verification passed outside Documents. Independent artifact G4 PASS;
+all 39 file-backed executable sections matched release. 18 protected
+baseline path identities unchanged; daily absent, R9-2 and R10 intact.
+No app launch, installation, new signing identity, archive replacement,
+private audio, acceptance change, commit or push. Coordinate one physical
+session on this exact artifact; this is not a live C1 or release verdict.
+
+2026-11-17 — COORD-1 (policy only). PLANS now distinguishes an approved
+bug repair from phase/release gates, assigns owned deltas to isolated
+writers, and separates the conventional build token from the desktop lock.
+See PROGRAM Decision Log COORD-1 and SHIP-PLAN's R10 qualification note.
+Product work remains paused; no candidate, acceptance flag or live result
+was changed by this policy amendment.
+
+KAR-6 resumed after explicit release of the policy pause. The first-minute-1
+physical Desktop 2 attempt FAILED: one exact final/local executor, 268 ms
+worker, 787 ms settle, generic blocked. No stored terminal decision or
+failure hash; constrained known-message unified-log query returned zero.
+The other turn's activation failure is not evidence about this request.
+No further private data read or desktop action. No inferred root cause.
+
+Diagnostic-only amendment: exact first terminal boundary in Work-scoped
+evidence (one allowlisted code with count 1), same AX actions/user text.
+Injected synthetic hierarchy now exercises the production parser and
+installed Dock localization. Red: missing Work code; final c1-r2 361 tests,
+7 skipped, 0 failures. Independent scoped source G4 PASS. Separate
+final-spaces-diagnostic-1 built from 121 frozen inputs; P12 strict deep
+verification + 19 tests passed. Signed executable
+0cbd2c153422703e037896653349a6c10fb91a222073b64f5b154f339ff503b9,
+snapshot 3971dfb33aadf1aed0b1fc890516a5eebe709603c717840317f5e235873fa842.
+R10 and first-minute-1 reverified, R9-2 retained/daily absent, governance
+and inherited changes preserved. No install, launch, new live evidence,
+acceptance flip, stage or commit. KAR-8 remains physically untested.
+
+The independent G4 artifact judge matched all 39 file-backed sections,
+121 frozen inputs and 5,605 resource records on final-spaces-diagnostic-1.
+KAR-6 has the coordinated operator checklist; no further trial here.
+
+KAR-12, subsequent source only (not in that signed candidate): synthetic
+uncertain background launch returned a premature blocked/not-running
+message instead of awaiting the injected process observer (red, 6 tests,
+13 assertions). The one background launch now awaits the existing bounded
+observer, checks cancellation, reports unavailable proof as Uncertain
+with identical spoken/visible wording, and continues existing target
+verification on positive PID. Permission rejection stays blocked.
+c1-native: 169 tests, 1 skipped, 0 failures. Fresh source G4 PASS,
+no real launch, timings change, new artifact, commit or PR.
+
+Quiet first-minute cohort, after the coordinated diagnostic trial:
+two matching Desktop 2 work rows reported pressAcceptedUnverified only.
+Neither recorded starting overview state or actual arrival. The user
+reported better results after first opening Mission Control. No private
+transcript or desktop inspection here. A distinct synthetic closed-start
+counterexample (closed → recognized empty list → populated exact target)
+sent zero presses before the fix. Only a Work that requested one open
+may wait for that positive loading state within the original bounded
+loop. An observed close, ambiguous display/target or revoked authority
+stops; only a fresh identical exact target may be pressed, once. Record
+startedOpen/launchRequested where known on the owning Work. A receipt is
+Uncertain in Activity and short caveated speech; no arrival claim. Public
+Space-change notification and window on-active-Space properties do not
+identify a numbered desktop; independent human observation still required.
+
+KAR-13 hands-free ambient panel now orders out and ignores mouse events;
+confirmed state/menu accessibility, Pause/Resume and Stop live in the
+existing status item. Preserve actionable errors, parked asks and manual
+post-Fn feedback. Review caught duplicate overlay Resume, manual owner
+loss and ambient feedback dismissing a blocker; red/green and re-reviewed.
+No live UI, hit-test, VoiceOver, mic or gaze proof. KAR-12 source repair
+included. KAR-14 supplied patch 38d65da2 integrated after baseline recheck:
+red reproduced the Work-owned numbered speech request plus an extra bare
+toolSay; stable synthetic tests now count one request and preserve the wire
+clarification. Playback/teardown under overlapping speech not demonstrated.
+KAR-15 narrow deictic this/that page/window/button guard only (generic
+button question remains generic); no new screen reader or data forwarding.
+
+Final c1-r2 371 tests, 7 skipped, 0 failures; scoped independent source
+reviews pass. c1-package-release e28109ba6dc7c08d633c24d1e7cae22dbbdcd1fe1534493ee110668e524b0c46;
+124-file freeze .context/c1-local/final-first-minute-quiet-1-source/manifest.json
+SHA 98905778a22ae84066feae024e7de6622992b225dc26897e23d90faeabe75fc1.
+Guarded P12 stage, 20/20 packaging tests, strict deep signature on
+~/jarvis-local/c1-candidates/jev-c1-final-first-minute-quiet-1/Jev Voice.app,
+signed b2ab08831d55e3f2ffb90a546928958499b90b2d0ddc80c5bf5e7c7bd60fd95c.
+R9-2/R10 and both predecessor first-minute candidates retained, original
+daily absent, 24 protected baseline identities unchanged. No app launch,
+daily installation, permission change, commit, push or acceptance flip.
+
+### 2026-11-17 — KAR-15 source freeze, then separate KAR-17 tooling
+
+KAR-15 source G4 passed after closing review findings on onset snapshots,
+screen-query routing, manual resume, malformed response input, protected cards
+and mute. Both spoken entries exercised with an offline wire. Focused 20/20;
+wide 376 executed, seven skipped, zero failures. The immutable local 21-file
+identity manifest is `~/.capy/work/KAR-15/source-freeze-v1.json`, SHA-256
+`5277bd7812a96a2fbdd73f34ba8faa4098257a906f5ced73dfc0ba223573325f`.
+Only named Close/Minimize can qualify. Bare pointing and overviews get no
+reader or generic screen answer. No provider, waveform or physical verdict.
+No signed candidate contains this integration; the quiet package is unchanged.
+
+KAR-17 applied afterwards: five synthetic packaging tests passed. Fresh
+ordinary stages omit VAD; diagnostic fixture eight files/1,476 logical bytes,
+ordinary zero. Historical payload receipt 1,066,972 bytes is not a measured
+archive saving. No asset download, signature, launch or daily replacement.
+Primary HEAD 35f885125; origin/main 073fedeb1 preserved separately. KAR-20
+begins from this source boundary, never a merged or released baseline.
+
+### 2026-11-17 — KAR-20 fresh ask projection (pre-KAR-18)
+
+Independent G4 passed for source safety, matched synthetic outcomes and
+fewer full-context reads; not for a product speedup. Baseline/optimized
+full reads at ask-only sites: 1/0 for either scroll outcome, 2/0 for
+one exact choice, 3/0 on a remote tool and its second process pass. The
+controller note replacement was source-confirmed; its measured visit was
+the isolated provider seam. Selected task still derives from all active
+work. No focus cache, scope check or post-suspension ask check was removed.
+
+800 timed A/B pairs plus eight safety-control pairs, all attempts retained.
+The 100 ms profile is a virtual charge per full read, not Mac latency.
+Zero-delay ready-session final-to-terminal p95 ms A/B: moved 0.983/1.001,
+unchanged 0.864/0.918, answer 1.725/1.731, remote 4.925/4.895. Per-row
+receipt: `.agent/results/P4/kar-20-ask-projection.json`, digest
+`14168a548d8f9e4f5aa456649291c95766d9ce952a92ba70695412bab5287945`.
+No cold, live or physical result. Three focused tests, 20 control/privacy
+tests and 376 wider tests (seven skipped) passed. The separate 28-input
+freeze is `~/.capy/work/KAR-20/source-freeze-v1.json`, digest
+`daf5c128d7feb84ac10f9df9dfe8a377e38a616a221ababe01f59530aa8ceae4`.
+
+### 2026-11-17 — KAR-18 final authority, KAR-23 roadmap and KAR-21 handoff
+
+KAR-18's 30 design and 19 held-out cases passed at the committed-final
+boundary. Post-integration independent G4 also found and closed the
+coordinator's separate cancellation path, guarded quoted/inquiry raises
+and a pending ask arriving before app interpretation, and rechecked live
+app identity and permission at the native effect (including after lease
+acquisition). The scoped final run had 32 XCTest methods, zero failures;
+adjacent control 20, ask 3, native 171 (1 skipped), wide 378 (7 skipped),
+zero failures. No physical or packaged outcome. The pre-KAR-18 timings
+are not a measurement of this amended candidate.
+
+KAR-23's reviewed three-file roadmap landed unstaged on the agreed
+governance hashes. Its historical plan matches the former working plan
+byte for byte after the archive warning; 13 active-roadmap links checked.
+No acceptance ledger changed. KAR-21 received one named 61-input, source-
+only manifest: `~/.capy/work/KAR-21/post-kar18-source-v1.json`, SHA-256
+`cb5b3392131164cd41109f3480f9d19c2d186ea5d5537851b417bf16bed6f7a5`.
+The manifest distinguishes each primary hash from both Git baselines;
+it does not authorize a wholesale copy, build, install, commit or launch.
+
+KAR-21 value-only follow-up: integrated the reviewed two-path extraction
+from `LocalTranscriber.swift` to `VoicePCMFrame.swift`. Both the primary
+and separate upstream source replica retained exactly their own provider
+bytes outside the move. The three moved type declarations were identical.
+Delta fingerprint `5825fb58cacd050e2fa832881a6a3feab3c3ba304af10a982e683125dd852dfb`
+at `~/.capy/work/KAR-21/integrated-shared-values-v1.json`. Root dependency
+and lock remain unchanged; compile to be checked in the next KAR-24 lane,
+not a new signed candidate or a FluidAudio unlink.
+
+### 2026-11-17 — KAR-24 numbered-target retirement
+
+The grid, saved-frame click, sticky setting and show-numbers coaching are
+removed. Obsolete target phrases refuse before driver/provider setup.
+The bounded clarification radial, explicit Apple Numbers, desktop ordinals
+and dictation keep separate owners. Integrated G4 caught an auto-selected
+task masking a second ask and a literal quoted choice reaching semantic
+routing. Corrected source and fixtures passed re-review: grid 7, final
+admission 32, control/privacy 20 and ask projection 3, zero failures.
+Both shared-value sources compiled in the same build. No visible-panel
+test, live input, package change, signing, launch or physical claim.
+`~/.capy/work/KAR-24/primary/post-grid-source-delta-v2.json` SHA-256
+`20703aab711ad5fca58e595f7ef501b8e8ee31c7729b1a67cfd8e3a6f1edfa2e`.
+KAR-25's separate worker guard apply-checks over the retained decoder
+guard; it is not part of this cohort.
+
+### 2026-11-17 — KAR-25 local worker status and KAR-21 replay-only cut
+
+KAR-25 source G4 passed after correcting stale manual presentation ownership
+with and without other work on the card. Real stdio drive and preview refuse
+before preparation; the operator bench keeps a blocked row per trial. Worker
+status stays on the local card, not a new voice response or a verified goal.
+The manual/automatic recorded-wire paths and producer/guard ran in the
+47-test scope; four Python bench fixtures passed. Fingerprint before gaze:
+`~/.capy/work/KAR-25/primary/source-delta-v1.json` (`b0a9da5e…`).
+P1/P3/P4 Decision Logs name the temporary compatibility boundary.
+
+Separately, KAR-21 removes the primary replay implementation only. A newly
+linked debug executable (`fee2d19e…`) returned 2 and the exact developer
+revision message in two empty homes for the retired replay and recording
+modes. Neither wrote into its home. One tooling and 27 verifier fixtures
+passed. Fingerprint: `~/.capy/work/KAR-21/replay-primary/source-delta-v1.json`
+(`434aa1ab…`). No root dependency change, private input or GUI launch.
+
+### 2026-11-17 — KAR-28 gaze source integration, candidate held
+
+The default tie no longer raises labels or a pick. The transient control
+outline does not show a countdown while capture or a parked ask suppresses
+dwell; explicit choice chips preview without selecting. A prior ask's
+answer/expiry/teardown cannot retire newer choices; a re-enabled tracker
+dot starts at the current target instead of its hidden position.
+
+Independent G4 passed the eight-input primary fingerprint
+`~/.capy/work/KAR-28/primary/source-delta-v2.json`, SHA-256
+`7f5ca0d6ee35a80b745494f9262428220303efd4220a729a6bac193fd2389601`.
+119 selected Swift tests, TypeScript and 34 tracker tests passed; the
+separate visible agent-shelf fixture was not run. Same input/10s: hidden
+animation callbacks 600 to 0, unused region sends 41 to 0; intended
+diagnostic work rearms. Settle times 66/594/660/594 ms on both versions.
+Not a CPU%, camera latency or physical gaze result. Retained staging
+would inherit the old bundled tracker. Do not sign or invite a retest
+until its replacement assets, source provenance and rollback are verified.
+
+### 2026-11-17 — KAR-28 stale action authority, integration handoff
+
+The untouched service replay called the fake opted-in dwell sink 1,065 ms
+after its last input. A delayed roster still yielded a selectable target
+3,196 ms after the last input. Those are synthetic failures, not physical
+clicks. Source now distinguishes capture time from display/receipt time;
+only distinct observed captures support dwell. A committed click must
+still match the native control witnessed before and after enumeration.
+The native press does not move the pointer or fall back to coordinates.
+
+The intermediate primary passed 88 authority, 120 feedback and 379 wide
+Swift cases (seven wide skips). Independent review still caught a missing
+foreground-window qualifier, a replaced witness during scorer suspension,
+a source change inside the target rectangle, and tracker pause. This is
+not G4 or candidate approval. Serialized proof is under
+`~/.capy/work/KAR-28/primary`. The release recipe is authorized for one
+new label only, after fresh source, offline renderer and binary receipts.
+The prior signed bundles, daily install and hardware session are untouched.
+
+### 2026-11-17 — KAR-28 non-daily signed candidate verified; no launch
+
+The Captain approved reviewed cohort `97a8e64e…`, offline renderer receipt
+`702d10cc…`, linked release receipt `f1ba903a…`, and unsigned arm64
+executable `c818394c…`. Freeze `05eeae50…` binds 267 source/evidence
+paths plus the six renderer outputs. The hosted tracker never constructs the
+lip-motion pointer controller, including with conflicting experiment flags.
+Standalone opt-in remains separate. Action requires a measured capture time;
+frames without one can still drive display, not selection or dwell.
+
+Candidate: `~/jarvis-local/c1-candidates/jev-c1-final-gaze-quiet-1/Jev Voice.app`.
+Signed executable SHA-256
+`545a26ac1f4e567022db5e6e0e0856d2074ba6ec2ab76a18b309f306ea9792cf`.
+Stage receipt `.agent/results/P12/c1-final-gaze-quiet-1-stage.json`
+(`e3e4c688…`); P12 manifest `c1-manifest-final-gaze-quiet-1.json`
+(`1726e75d…`). Staged and independent nonsynced copies passed strict
+deep verification and matched across all 5,612 entries. All 39 file-backed
+Mach-O sections matched the reviewed release. The resolved bundled tracker
+loaded by the production recipe selects the six approved assets, not the
+checkout; no app was launched to make this static determination.
+
+Final authority: 93 Swift/21 tracker tests. Feedback: 120 Swift/34 tracker.
+Twenty actual P12 resource/negative tests passed. The ten old signed bundles
+and 35 receipts match the before witness; the historical daily path remains
+absent. No installs, launches, physical observations, commits or publication.
+P12 reports candidate verified and release not ready (C3).
+
+### 2026-11-17 — KAR-26 optional TypeSafe startup, source only
+
+Integrated after sealing the gaze candidate. Automatic TypeSafe reads and
+add-only legacy migration now request no authentication UI. Inaccessible
+is not absent; a failed migration keeps its source, and a blank or unchanged
+draft cannot replace an unread item. Only explicit Settings retry uses the
+original store. OpenAI's existing environment/read policy is unchanged.
+In the blocked state, Settings omits removal instructions and offers retry
+or replacement. Successful retry returns keyboard focus to the named secure
+field without animation. This is a source review, not an observed UI result.
+
+Independent G4 and `scripts/verification-lane.sh c3-startup-credentials`
+passed on `~/.capy/work/KAR-26/primary/final-source-delta.json` SHA-256
+`d1c30cc6ca48baae0c4fa45443be7c88883dd7474e9b57f010a85c75507f51b9`:
+eight synthetic store cases and two diagnostic/query-policy tests.
+The signed candidate, rollback, seals and receipts matched the before
+witness. No real Keychain item, launch, reinstall, signing or timing test;
+the signed gaze candidate does not include this source change.
+
+### 2026-11-17 — KAR-21 PocketTTS adapter moves to app tests
+
+Applied isolated handoff `937a9582…` to its matching primary preimages.
+Normal and audit composition both select Realtime. Removed the unreachable
+PocketTTS adoption branch, leaving `SpeechOutput`/AVSpeech, Realtime,
+duplex and cancellation in production. SwiftPM now compiles
+`Tests/JevVoiceAppTests/Legacy/LocalVoice.swift` only for the app tests.
+The six historical compatibility cases and their assertions are unchanged.
+
+The resolved target graph, compiler source lists, link file lists and
+defined symbols agree. Neither the debug nor release JevVoice executable
+contains Jev's LocalVoice/PocketVoiceEngine adapter; the XCTest binary
+links its object under JevVoiceAppTests. FluidAudio **remains linked** in
+production at 0.17.5 for local ASR/EOU and conversation VAD. This is not
+an SDK, transitive code-size or startup-speed result.
+
+The serialized lane passed the seven requested cases (six compatibility
+plus Realtime no-fallback), seven additional routing/startup/stop/duplex
+cases and ten startup credential cases, with no skips or failures. Release
+build passed, executable `38ace7d7…`. Evidence in
+`~/.capy/work/KAR-21/pocket-primary/`: source delta SHA-256 `814d2c1d…`,
+compiled membership `77de767e…`. No signature, install, app launch, live
+audio or change to the previously sealed gaze candidate or rollback.
+
+### 2026-11-17 — KAR-21 local Silero source/target cut
+
+Only the four paths in the approved `742defb2…` patch were changed.
+Default and audit voice continue using hosted semantic VAD. The local
+conversation entry refuses before opening a session without an injected
+segmenter. The application retains a shared actor/event contract; only
+the test target compiles the concrete Silero adapter and audio timeline.
+The supported Fn/self-test recognizer is still Parakeet. The root
+FluidAudio 0.17.5 edge and the model resource guard were not removed.
+
+Both debug and release ran 11 synthetic cases with no failures or skips:
+local refusal, invalid fixture resource, timeline/padding, Realtime
+admission and simulated hosted VAD frames. Separate compiler file lists,
+linked objects and demangled names verify all four app/XCTest products.
+The private recorded fixture is compiled in both test products; it was
+not selected, opened or run. Source receipt `ad204093…`; compiled proof
+`~/.capy/work/KAR-21/silero-primary/membership.json`, SHA-256
+`88b53e060b6a2e0f9daa1272f6af6a9c662aaed8e1b6e1602b1e6f8b91441205`.
+No packaging, signing or real audio, and no change to the gaze candidate.
+
+### 2026-11-17 — KAR-14 numbered Desktop status, source only
+
+The exact spoken “Did it switch?” now answers locally for the preceding
+numbered Desktop request. An accepted press is a request, not a verified
+switch. A missing or stale receipt asks which desktop the person meant.
+A parked ask keeps its prompt, options, continuation and original timeout;
+the status appears separately. “Choose one” still selects deliberately.
+Quoted text and literal dictation do not acquire status authority.
+
+The original admission fixture failed remote vs local. A second red fixture
+took manual control after parking woke the command waiter, but before its
+task resumed. Cancellation now requires that exact waiter's registration:
+pending work still cancels, but a completed waiter cannot cancel the ask.
+Final serialized scope counts: follow-up 23, admission 34, controls 20,
+retired targets 9; zero failures or skips. Independent routing and waiter
+reviews passed within scope. Source receipt at
+`~/.capy/work/KAR-14/primary-followup/source-receipt.json`, SHA-256
+`f8d8d1e3af5a60aedf679eac9a8444d8eed901bb2fadd2be0bfc98b4327ef9c9`.
+No new observer, provider call, speech playback, installation or physical
+switch. The sealed gaze and rollback bindings remain unchanged.
+
+### 2026-11-17 — C1 candidate audit / KAR-6 display identity
+
+Four shared read-only audits compared the signed candidate and final text,
+Desktop authority and quiet controls. The smallest target-binding gap was
+reproduced: five malformed NSNumber inputs reached the thumbnail under
+the old display-ID narrowing, including UInt64 4294967305 as display 9.
+The display source and the Dock attribute now share an exact nonzero
+UInt32 integer decoder. All five refuse before checking the thumbnail;
+ordinary IDs and UInt32.max still match. Independent source review passed.
+The final-admission and desktop-followup lanes passed 34 and 23 fixtures,
+respectively, without skips. Neither a press nor Space arrival was observed.
+Receipt `~/.capy/work/KAR-6/exact-display/receipt.json` SHA-256
+`447983e72ca97ac984a75fbc549fad72441d6f9a6c7b9497991f904819b95174`.
+
+The 71 retained seal/rollback bindings match. The gaze candidate omits
+the later credential, legacy speech cuts, Desktop status and display-ID
+repairs. The literal quoted-edit hazard is recorded on KAR-5; inconsistent
+preparing-state Pause/Resume on KAR-13. Neither was changed in this cohort.
+The Captain's `handoffs/JARA-5-C1-qualification.md` separates the physical
+oracle for the existing seal from qualification requiring a new candidate.
+
+### 2026-11-17 — three separate offline handoffs and a rejected cut
+
+- KAR-5: the quoted editing final requested five backward deletes in
+  each of two simulated controller paths. Fn+Ctrl and voice-latched
+  dictation now insert the exact quoted phrase once, without deletion.
+  Unquoted correction still edits; wrong-owner, partial and duplicate
+  finals cannot apply a second edit. Bounded independent review and 21
+  synthetic tests passed. Two-file receipt `dc9280bb84d47e47da0cdebb678efb0edd63a21658cfdeb8197713a8cf1bba10`.
+- KAR-30: independent G2 held the distributable profile. See the
+  [RetinaFace contract](results/P12/retinaface-release-contract.md).
+  Offline renderer builds matched byte for byte and included the Vite
+  manifest. Five package fixture tests, nine tracker fixture tests and
+  21 native host/argument tests passed. The normal release path refuses
+  before copying weights. No archive, positive Node probe or signature.
+  Local receipt `~/.capy/work/KAR-30/primary/held-profile.json`,
+  SHA-256 `f4cbd4b037071ee7d95df700415de516583f3f7f7fe2cd8ce8d3b91fad2cf8dd`.
+  Both required default weights lack verified distribution grants;
+  transitive notices and positive producer/client identity remain open.
+- KAR-29: the two-file `787d7fda…` contract was verified on the dirty
+  primary. Ten synthetic tests passed, including seven identity/content
+  mutations. The class has no production caller. Reopen/readback, not
+  writer success, owns completion. No real voice, worker or save path.
+- KAR-28: did not apply `d823a52a…`. A 1.5 s no-face heartbeat is within
+  the 6 s native freshness window and cannot preserve an old target. But
+  the isolated counterexample loses the one-frame return the baseline
+  detects at 253 ms. Verified unchanged worker preimage `2de79b18…`.
+
+Only two attributable synthetic compiler caches were discarded to restore
+the 3 GiB Swift guard; no development assets, signed artifacts or receipts
+were removed. The final C3 receipt records 4,353,318,912 free bytes; the
+archive remains held for rights regardless of available storage.
+
+### 2026-11-17 — KAR-13 controls and separate KAR-29 voice fixture
+
+KAR-13 Settings and menu now share state, action and guarded activation.
+Preparing offers Pause; a transient hold never grants Resume. Permission
+loss preserves listening intent across regrant, while explicit pause still
+prevents preparation. Blocker changes refresh the menu remedy, and the
+native Settings button requests focus on the mode toggle if it disappears
+while focused. Seven guarded tests passed, plus independent bounded source
+review. No physical focus, TCC, VoiceOver or rendered verdict. Four-file
+receipt at `~/.capy/work/KAR-13/settings-controls/cohort.sha256`,
+`d01bdc34436d1b2ae4f82df2f08f1ab688210de374cb9b2be8aa76ce3531024c`.
+
+KAR-29: a DEBUG-only reserved fixture owner consumes the actual committed
+input for Fn or automatic capture before generic routing. A distinct,
+current approval resolves the real parked Work/ask continuation. The
+disposable job and readback share its task identity; failed evidence is
+unverified. A cancellation of the owning Work or lane after writing can
+leave the file present but cannot earn late success. The guarded run passed
+11 Swift Testing tests (including an 18-case voice matrix) and 4 adjacent
+XCTest cases. No production save/transport, foreground app, live voice,
+provider, packaging or physical typing was exercised. Five-file receipt
+`~/.capy/work/KAR-29/primary/voice-fixture-receipt.json`, SHA-256
+`40d5320c29f8adb6811b855bc4d4fbb2f4e0a8f7b54ed280fe9f41935a839719`.
+
+### 2026-11-18 — onboarding gaze false-ready: reproduced, not repaired
+
+With other rows satisfied, the unmodified checklist marked gaze done and
+hid itself on enabled + running alone. The fixture included denied Camera
+with no sample, a pre-wake stale condition, and regrant with no sample;
+the checklist does not consult either Camera or gaze. A separate direct
+exercise of the real readiness handler returned 200 for pause with no
+frame, a coordinate-free away heartbeat, and an old capture carrying a new
+receipt time. No sockets, real permission checks, cameras or live app.
+Guarded baseline source `b8020057…`, logs under
+`~/.capy/work/KAR-30/onboarding-vId3ZQbv/`: `observed.log` `330e1b32…`
+and `ready-handler.log` `5613b4f8…`.
+
+Two independent readers confirmed the stop condition: a current Jev
+camera grant, a responding tracker and stream continuity cannot establish
+which producer made a usable capture after the latest wake. Keep these
+claims distinct. A vNext host-owned readiness observation needs producer
+and resume generation, source-capture freshness/quality and invalidation;
+late previous-generation observations must not reopen ready. Actual Camera
+denial can name the Camera privacy pane; no-face never implies denial.
+KAR-30 records the proposal. No product code, UI or authority changed.
+
+### 2026-11-18 — onboarding no longer clears gaze on tracker liveness
+
+The optional eye-tracking row now reports Jev’s Camera authorization separately from tracker liveness. A denial names System Settings → Privacy & Security → Camera; a responding tracker with permission says gaze hasn’t been verified. No gaze signal currently clears the row. Other onboarding rows can complete, and “Set up later” still persists. No change to actuation, keyboard/voice, tracker protocol or packaging.
+
+Guarded offline `UXOnboardingTests`: 11 passed. Against the final checklist and a simulated running host, the five recorded denied/no-frame, paused, away, old-capture and regrant cases all yielded `row_done=false all_clear=false visible=true`. Pause, away and old capture are external fixture conditions, not diagnoses made by the UI. Source/design review found no blocker. Two-file receipt `bcbf7180…`, replay log `b9ef771c…` under `~/.capy/work/KAR-30/onboarding-vId3ZQbv/`. All 71 protected package bindings matched. No live Camera, UI render, signed build or positive producer/wake proof. JARA-20 owns that last contract; KAR-30’s separate C3 hold is unchanged.
+
+### 2026-11-18 — fresh C1 input freeze; Mac yielded before release link
+
+Named input set `C1-first-minute-offline-1` freezes 115 native/build inputs, 120 verification inputs, 26 retained tracker inputs, and six retained renderer outputs. The exact 20-path seal delta includes KAR-21 source retirement, KAR-29’s inert draft type/debug-only interception, and KAR-30’s profile-gated host changes alongside the requested Desktop, pause, quote, credential and onboarding fixes. The local profile is not C3. The two signed resources inventories (5,605 rows each) and all 71 protected bindings matched; no weights were cloned. Six focused and 125 combined named offline tests passed, zero missing or unexpected cases. The physical packet was updated but not run. Scratch root `~/.capy/work/C1-first-minute-offline-1/`, checkpoint `receipts/prepared.json` (`57113265…`).
+
+The guarded release build was interrupted, with shutdown confirmed, to yield to the Captain’s timing window. No unsigned binary accepted at this checkpoint. Once the Captain releases the slot, rerun the guarded `c1-package-release` lane via the local `run-offline.py link` and `verify-link.py` on the frozen cohort before binding or presenting any unsigned artifact. No old manifests, apps or rollback were altered.
+
+### 2026-11-18 — no-Fn typing failure: two reproduced boundaries, no physical attribution
+
+After the second signed trial failed, the Captain’s seven content-free rows showed preparation and Realtime connection but no downstream witness. Rebuilt the sealed and new C1 source as nonlaunching libraries with injected Realtime, window/field and delivery seams. In both, an owned matching commit/final admitted the exact local typing literal but called the optional-key interpreter; a missing key yielded zero executions. A separate same-window focus change before binding yielded one verified readback in the wrong fixture field. Missing VAD/final, wrong item, missing field, changed window, inert write, duplicate and successful controls are recorded in the identical 11-case matrices (`39384dfb…`). Do not bypass the interpreter until an exact onset-field witness can be revalidated.
+
+The independent diagnostic patch (`c4d6d90e…`) is **not** in primary or either sealed app. It logs a bounded fixed vocabulary, rejects mixed legacy evidence/audit modes before launch and disallows joining replacement sessions. Its 26 fixture invocations verified toggle parity, allowed output, rejection and replacement (`20d73fe1…`). No host account, mic, AX, app UI, live server, signing or install. Inputs of `C1-first-minute-offline-1` unchanged; a new uninstrumented link would not resolve this incident. KAR-31/32 remain outside the cohort. Scratch: `~/.capy/work/KAR-5/no-fn-rca-1/`.
+
+### 2026-11-18 — no-Fn literal repair, verified local release link
+
+A new ten-file native/test delta captures a bounded, nonsecure focused-field witness at observed automatic Realtime speech start. A current committed standalone literal uses a one-shot native selected-text write under the shared input lease, with a fresh permission/turn/field/selection check at the setter, followed by independent exact readback on that same field. No inference, provider, second dispatch or targeting fallback on this path. Quotes, retired-target guidance, parked choices and explicit dictation/interrupt ownership retain separate authority. Two superseded interpreter/task expectations now require an exact field effect and no generic call. A polite request with no onset window was independently red before the final fix. Optional startup/wire trace is now integrated with direct-path fixed enums; it adds no field text, IDs or content hashes to logs.
+
+`C1-onset-literal-repair-1`, freeze `3f6ba37c…`. Two focused tests (23 wire scenarios and six security-failure fixtures) and 148 combined named XCTest cases passed. Independent pre-code contract and final source/field-privacy reviews; no physical verdict. Six separate synthetic trace-on/off runs had equal reads, writes and readback outcomes. Arm64 release link (433 objects) `efbd587c19f914dacd64111a7ea9ee5c18d7ad9267ea9c95217ec520f412b7db`; receipt `d50084ac…`, trace receipt `8a63d80f…`. Scratch `~/.capy/work/KAR-5/no-fn-repair-1/`, executable `unsigned/JevVoice`. Canonical gaze seal/rollback, 71 protected bindings and retained renderer matched. Nothing staged/signed/installed/launched, no weights copied. The separate badge and EventKit cohorts are not in this link.
+
+### 2026-11-18 — repair plus hands-free indicator, unsigned local stage decision
+
+`C1-onset-literal-indicator-1` freezes a four-path presentation/test delta over `C1-onset-literal-repair-1`. Startup Setup, approval or question keeps its actionable card and adds the current hands-free state there; ordinary listening uses the passive 114×26 pt corner badge. No new target, capture operation, transcript, animation or continuous ordering. Five focused and 153 combined offline tests passed. Six same-source trace-on/off fixtures matched effect/read counts. Offline rendering with synthetic state verified both card captions without app launch. Exact source `381c3244…`, link `aa25983b6db30b261cf1853d9b0fb9caca9d367fb1b7883e8b902fb4abe65fbb`, decision receipt `b7090362…` under `~/.capy/work/KAR-32/combined-1/`. Calendar and C2 activation excluded.
+
+Retained gaze and R9-2 apps each matched 5,605 resource rows and passed strict/deep in place. Same-Mac COW staging must use a fresh reviewed label/recipe, unchanged resources and a separate local proof copy, with at least 5 GiB free before each clone. The stage preflight measured 5,906,374,656 bytes free. APFS clones still duplicate logical model files: clarify local-use/copy authority before any staging, and authorize signing separately from launch. No archive, weight copy, signing, staging or launch in this cohort.
+
+### 2026-11-18 — weight-free voice and badge: old link ineligible
+
+**Read-only session discriminator (one sample, no state change):** dictionary present/typed; console true; login complete true; lock field missing. Protected data not observed without an application; the missing lock key alone makes this sample ineligible even if protected data were available. Physical lock state was not independently known. No repeat probe, stage, sign or launch; do not convert an absent field to unlocked.
+
+**Subsequent approved implementation:** `C1-voice-badge-no-model-1` has a genuinely unsigned arm64 link `3a76cc7561144b80c46603c74bb75a6b8b6d04cc4c9861cdfc15e2c31012f3cb` and local closure `b992b798…`. Its compile-time entry selects the same VoiceController, checked duplex/Realtime turn, native literal and badge with no Cua/agent/tracker/diagnostic provider. Input gaps, grant changes and stale routes revoke the old generation; only an independently checked readback claims success. 43 restricted and 19 normal offline fixtures passed, not physical proof. The two-object release plus an Apple compiler-rt built-in excludes FluidAudio and the control link’s 7,179,142 B of NeMo grammar tables. Four-file unsigned proposal 10,651,019 B, SHA `e9835dcf…`; source freeze `bb99146a…`, decision `f3214536…` under `~/.capy/work/KAR-32/model-free-refactor-1/`. The private 640 MiB scratch image detached and was removed. Nothing staged/signed/launched. Hold: an unconfirmed cold-start session lock state refuses; separately scoped read-only observation before any physical qualification.
+
+Subsequent conditional implementation approval reached the explicit safety stop. The sole production authority predicate lives on VoiceController; the concrete required task coordinator configures gaze, and Fn begin/Escape/teardown involve that same controller’s private manual and delivery state. A direct lane shell would replace that authority, not preserve it. Restricted background permission injection also misses init/synchronous checks. No product edits or new executable. Source evidence with 238 frozen/working input hashes matched: `~/.capy/work/KAR-32/model-free-owner-stop-1/decision.json`, SHA `5dcfcb0d…`. Further work requires separately scoped shared-owner refactoring; no stage, signing or physical retest.
+
+The preceding COW proposal is superseded; do not clone either retained app. From combined freeze `381c3244…`, a nonlaunching fixture selected a dummy external tracker and invoked its injected snapshot fetch despite an empty resource layout. Source review also found health/adoption ahead of the spawn guard, menu/Settings pollers, Cua prewarm and Codex scheduler/revival paths. Fixture receipt `8d6981f5…`. The verified voice/AX/badge unit behavior is not a whole-app isolation proof. Local `~/.capy/work/KAR-32/model-free-plan-1/decision.json` (`275cb44a…`) records ten pinned fixed files, one deliberately unbound executable, zero helpers/weights and a 64 MiB per-bundle cap. Synthetic manifest rejection cases passed; a new runtime profile and independent offline verdict are required. Protected mains matched in place. No model copies, downloads, product changes, signing, stage or launch.
+
+### 2026-11-18 — foreground voice preview: source scope only, held
+
+The frozen literal owner can verify a write to an owned in-memory field, but the existing controller still requires Fn observation and a TextEdit target. Spoken “stop” cancels work without stopping capture, successive onsets can replace the target, and the existing post-commit and target timers do not bound a run from Start. The native preparation queue also lacks a cancellation recheck immediately before starting or restarting the engine. Keep the physical preview held pending an offline proof of a separate, expiring foreground arm on the same owner. The Mac preflight was 43,778,048 bytes below the 5 GiB floor; zero preview fixtures ran. All 246 frozen inputs and both unsigned mains matched. Source audit only: `~/.capy/work/KAR-32/foreground-voice-preview-stop-1/audit.json` (`aa9051df…`). No product source change, mount, model assets, provider call, signing or live action.
+
+After headroom recovered, six bounded offline boundary cases passed (three new, three inherited). Explicit Start without a Fn witness never reached device/key/wire/field access. The real conversation owner independently refused the app-owned identity even with an allowed input. In the inherited TextEdit test composition “Stop” returned “Stopped.” while PCM continued; observed session loss then closed the feed and wire. No positive preview or deadline case could be run without changing the owner. Fixture-only receipt `~/.capy/work/KAR-32/foreground-voice-preview-feasibility-1/fixture-receipt.json` (`aa70596c…`); both scratch mounts cleaned and all 246 inputs/both unsigned mains rechecked. No product code change, product entry, model assets, provider, real capture, signing or launch. Preview remains held.

@@ -17,13 +17,15 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
     let navigation = SettingsNavigation()
     /// Agents surface — coordinator binds store/runtime/gate via
     /// `agents.bind(...)`; cursorLabels receives per-agent cursor positions.
-    let agents = AgentsViewModel()
-    let cursorLabels = AgentCursorLabels()
+    lazy var agents = AgentsViewModel()
+    lazy var cursorLabels = AgentCursorLabels()
     private let controller: VoiceController
-    private let microphones: MicrophoneCatalog
+    private let microphones: MicrophoneCatalog?
+    private let reviewRestricted: (() -> Void)?
     private let input: FnInputMonitor
     private var panel: VoicePanel!
     private var overlay: OverlayHostingView<OverlayView>!
+    private let handsFreeIndicator = HandsFreeIndicator()
     private var settingsWindow: NSWindow?
     private var agentsWindow: NSWindow?
     private var targetScreen: NSScreen?
@@ -38,8 +40,10 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
     /// to read, short enough not to feel stuck.
     private static let outcomeLinger: TimeInterval = 4.5
 
-    init(controller: VoiceController, microphones: MicrophoneCatalog, input: FnInputMonitor) {
+    init(controller: VoiceController, microphones: MicrophoneCatalog?, input: FnInputMonitor,
+         reviewRestricted: (() -> Void)? = nil) {
         self.controller = controller; self.microphones = microphones; self.input = input
+        self.reviewRestricted = reviewRestricted
         super.init()
         panel = VoicePanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -57,11 +61,18 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
             openSettings: { [weak self] in self?.show(.voice) }))
         panel.contentView = overlay
         controller.objectWillChange.sink { [weak self] in self?.queueRefresh() }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+        controller.config.$handsFreeEnabled.combineLatest(controller.config.$handsFreePaused)
             .sink { [weak self] _ in self?.queueRefresh() }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+            .sink { [weak self] _ in
+                self?.handsFreeIndicator.refreshPlacement()
+                self?.queueRefresh()
+            }.store(in: &subscriptions)
     }
 
     func show(_ section: SettingsNavigation.Section) {
+        if controller.config.isRestrictedVoice { reviewRestricted?(); return }
+        guard let microphones else { return }
         controller.refreshPermissions(); microphones.refresh(); input.refresh()
         navigation.section = section
         if section != .voice { controller.stopMicrophoneTest() }
@@ -89,6 +100,7 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
     /// Roster + per-agent chat window. Lives outside SettingsNavigation —
     /// its Section enum is owned by SettingsView.
     func showAgents() {
+        guard !controller.config.isRestrictedVoice else { return }
         if agentsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 560),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -122,8 +134,12 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
         // seen — hold the panel on the fresh outcome before ordering out.
         // Every settled row is consumed so only a NEWER outcome re-arms;
         // the card always renders the newest settled one.
-        if status == .idle, !controller.isMicrophoneTest,
-           controller.cuaTasks.contains(where: { $0.outcome != nil && !lingeredOutcomeIDs.contains($0.id) }) {
+        let automatic = controller.quietHandsFreePresentation
+        if automatic {
+            lingeredOutcomeIDs.formUnion(controller.cuaTasks.filter { $0.outcome != nil }.map(\.id))
+            outcomeLingerTask?.cancel(); outcomeLingerTask = nil
+        } else if status == .idle, !controller.isMicrophoneTest,
+                  controller.cuaTasks.contains(where: { $0.outcome != nil && !lingeredOutcomeIDs.contains($0.id) }) {
             for work in controller.cuaTasks where work.outcome != nil {
                 lingeredOutcomeIDs.insert(work.id)
             }
@@ -135,9 +151,15 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
                 self?.queueRefresh()
             }
         }
-        guard status != .idle || outcomeLingerTask != nil || controller.handsFreeEnabled,
-              !controller.isMicrophoneTest else {
-            panel.orderOut(nil); return
+        let show = Self.showsPanel(status: status, automatic: automatic,
+                                   hasAsk: controller.pendingTaskApproval != nil || !controller.pendingQuestions.isEmpty,
+                                   linger: outcomeLingerTask != nil, microphoneTest: controller.isMicrophoneTest)
+        handsFreeIndicator.update(.current(controller, obscured: show))
+        panel.ignoresMouseEvents = !show
+        let order = Self.panelOrder(show: show, visible: panel.isVisible)
+        guard show else {
+            if order == .out { panel.orderOut(nil) }
+            return
         }
         if status == .starting && previousStatus != .starting || targetScreen == nil {
             targetScreen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
@@ -149,9 +171,27 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
         let frame = Self.frame(contentSize: size, visibleFrame: screen.visibleFrame)
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         // Meter updates arrive at 25Hz; they must not repeatedly reorder a visible panel.
-        if !panel.isVisible { panel.orderFrontRegardless() }
+        if order == .front { panel.orderFrontRegardless() }
         panel.displayIfNeeded()
         controller.recordOverlayPresentation()
+    }
+
+    static func showsPanel(status: VoiceController.Status, automatic: Bool, hasAsk: Bool,
+                           linger: Bool, microphoneTest: Bool) -> Bool {
+        guard !microphoneTest else { return false }
+        if hasAsk { return true }
+        guard automatic else { return status != .idle || linger }
+        switch status {
+        case .error, .awaitingAnswer, .awaitingConfirm, .reviewTranscript: return true
+        default: return false
+        }
+    }
+
+    enum PanelOrder { case front, out, unchanged }
+
+    static func panelOrder(show: Bool, visible: Bool) -> PanelOrder {
+        guard show != visible else { return .unchanged }
+        return show ? .front : .out
     }
 
     static func frame(contentSize: NSSize, visibleFrame: NSRect) -> NSRect {

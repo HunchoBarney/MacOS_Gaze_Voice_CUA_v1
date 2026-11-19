@@ -6,7 +6,7 @@ import SwiftUI
 /// blue frosted halo marks the user's current target and anchors to
 /// element frames (never the raw gaze point, so it can't lag the
 /// tracker's dead-reckoned pearl dot); dark compact pills carry the
-/// numbered targets and the micro-radial; a ring flash confirms a
+/// options for a bounded choice; a ring flash confirms a
 /// verified action landed. While an agent acts on the same element the
 /// halo stands down (dims) rather than fighting the agent's flash.
 ///
@@ -18,6 +18,12 @@ import SwiftUI
 @MainActor
 final class TargetOverlay {
     static let shared = TargetOverlay()
+
+    private let presentsPanels: Bool
+
+    init(presentsPanels: Bool = true) {
+        self.presentsPanels = presentsPanels
+    }
 
     /// Chips are currently up and a voice index should resolve against them.
     private(set) var pendingCount: Int = 0
@@ -34,16 +40,10 @@ final class TargetOverlay {
     /// the set stays painted but reads "not tracking", never a live
     /// dwell target.
     static let chipsDimmedAlpha: CGFloat = 0.4
-    /// Number chips are refused past this many — a spoken index can't
-    /// honestly resolve against more.
-    static let maxNumberChips = 60
     static let maxRadialChips = 8
     /// Chips land ON the tracker error band; the floor keeps them off
     /// the target itself.
     nonisolated static let minRadialRadius: Double = 40
-    /// Number-chip center nudge from the target's top-left corner —
-    /// slightly outboard so the chip tags the target without covering it.
-    static let numberNudge = CGPoint(x: -6, y: -6)
     /// Floored chip side so dwell hit rects never degenerate.
     static let minChipSide: CGFloat = 22
     static let flashCanvas: CGFloat = 80
@@ -267,10 +267,7 @@ final class TargetOverlay {
     /// Reused chip panels, ordered by chip index.
     private var chipPanels: [NSPanel] = []
     private var dwell = DwellTracker()
-    private var onPick: (@MainActor (Int) -> Void)?
-    /// Whether a resolved pick retires the armed set — always true for
-    /// radials (one answer), `!persistent` for number chips.
-    private var dismissOnPick = true
+    private(set) var previewedChip: Int?
     /// The stale-feed dim on armed chips — driven only by `gazeLost`,
     /// so a re-arm during the same outage keeps the dim.
     private var gazeDimmed = false
@@ -324,7 +321,7 @@ final class TargetOverlay {
         haloRect = rect
         haloPanel?.setFrame(Self.appKitFrame(for: rect), display: true)
         applyHaloAlpha()
-        if haloPanel?.isVisible == false { haloPanel?.orderFrontRegardless() }
+        if presentsPanels, haloPanel?.isVisible == false { haloPanel?.orderFrontRegardless() }
     }
 
     func hideHalo() {
@@ -367,12 +364,14 @@ final class TargetOverlay {
         }
     }
 
-    // MARK: Chips (numbers + radial share one pool)
+    // MARK: Choice chips
 
     /// Dark compact pill — a 1-based number with an optional caption.
     private struct TargetChip: View {
         let index: Int
         var caption: String? = nil
+        var previewed = false
+        var select: () -> Void = {}
         var body: some View {
             HStack(spacing: 5) {
                 Text("\(index)")
@@ -387,7 +386,10 @@ final class TargetOverlay {
             .padding(.horizontal, caption?.isEmpty == false ? 9 : 0)
             .frame(minWidth: 24, minHeight: 24)
             .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+            .overlay(Capsule().stroke(previewed ? Color.accentColor : .white.opacity(0.3), lineWidth: 1))
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { select() }
             .colorScheme(.dark)
         }
     }
@@ -405,17 +407,13 @@ final class TargetOverlay {
 
     /// Arms (or re-arms — a second call replaces, never stacks) the chip
     /// set: panels positioned, hit rects loaded into the dwell clock.
-    /// `dismissOnPick` false keeps a persistent set armed after a pick.
     private func armChips(_ specs: [(center: CGPoint, index: Int, caption: String?)],
-                          dismissOnPick: Bool,
                           onPick: @escaping @MainActor (Int) -> Void) {
         clearChips()
-        self.onPick = onPick
-        self.dismissOnPick = dismissOnPick
         var rects: [(index: Int, rect: CGRect)] = []
         for (i, spec) in specs.enumerated() {
             let (panel, hosting) = chipPanel(at: i)
-            hosting.rootView = TargetChip(index: spec.index, caption: spec.caption)
+            hosting.rootView = TargetChip(index: spec.index, caption: spec.caption, select: { onPick(i) })
             let fit = hosting.fittingSize
             let size = CGSize(width: max(fit.width, Self.minChipSide),
                               height: max(fit.height, Self.minChipSide))
@@ -423,7 +421,7 @@ final class TargetOverlay {
                               y: spec.center.y - size.height / 2,
                               width: size.width, height: size.height)
             panel.setFrame(Self.appKitFrame(for: rect), display: true)
-            panel.orderFrontRegardless()
+            if presentsPanels { panel.orderFrontRegardless() }
             rects.append((i, rect))
         }
         // A set armed mid-outage inherits the stale-feed dim.
@@ -435,8 +433,7 @@ final class TargetOverlay {
     private func clearChips() {
         for panel in chipPanels { panel.orderOut(nil) }
         dwell.chips = []
-        onPick = nil
-        dismissOnPick = true
+        previewedChip = nil
         pendingCount = 0
     }
 
@@ -452,25 +449,7 @@ final class TargetOverlay {
             centers.enumerated().map { (i, center) in
                 (center: center, index: i + 1, caption: labels[i])
             }
-        armChips(specs, dismissOnPick: true, onPick: onPick)
-    }
-
-    /// Numbered chips (1…n) on each target's top-left corner — scoped
-    /// calls pass only the gazed window's candidates, everywhere passes
-    /// all. onPick gets the 0-based target index; past `maxNumberChips`
-    /// the extras are refused, not drawn. `persistent` keeps the set
-    /// armed after a pick (the "persistent number chips" setting) until
-    /// an explicit dismiss — hideAll, a re-arm, or a radial taking over.
-    func showNumbers(targets: [(frame: CGRect, label: String)],
-                     persistent: Bool = false,
-                     onPick: @escaping @MainActor (Int) -> Void) {
-        let specs: [(center: CGPoint, index: Int, caption: String?)] =
-            targets.prefix(Self.maxNumberChips).enumerated().map { (i, t) in
-                (center: CGPoint(x: t.frame.minX + Self.numberNudge.x,
-                                 y: t.frame.minY + Self.numberNudge.y),
-                 index: i + 1, caption: nil)
-            }
-        armChips(specs, dismissOnPick: !persistent, onPick: onPick)
+        armChips(specs, onPick: onPick)
     }
 
     /// Retract ONLY the chip pick set — a resolved pick (or a gaze
@@ -492,39 +471,44 @@ final class TargetOverlay {
         cheatPanel = nil
     }
 
-    /// Live gaze feed (top-left points): dwells the chip set toward a
-    /// pick — 500ms inside one chip fires its index. A pick retires the
-    /// set unless it armed as persistent, in which case the chips stay
-    /// up for the next pick.
+    /// Looking may preview a parked choice; only an explicit answer selects it.
     func ingestGaze(_ point: CGPoint) {
         lastGazePoint = point
-        guard let hit = dwell.advance(point: point, now: now()) else { return }
-        let pick = onPick
-        if dismissOnPick { clearChips() }
-        pick?(hit)
+        guard pendingCount > 0 else { return }
+        if let index = previewedChip, !dwell.chips[index].rect.contains(point) {
+            chipPanel(at: index).1.rootView.previewed = false
+            previewedChip = nil
+        }
+        if let index = dwell.advance(point: point, now: now()) {
+            chipPanel(at: index).1.rootView.previewed = true
+            previewedChip = index
+        }
     }
 
     // MARK: Conforming ring
 
     /// Gaze-intent event feed — the scorer's acquire/hold/release
-    /// transitions drive the conforming ring on the element frame (the
-    /// visionOS "feedback lives on the element" pattern). `ambiguous`
-    /// only bubbles up through `onAmbiguous`; the coordinator owns the
-    /// radial itself.
-    var onAmbiguous: (([IntentCandidate]) -> Void)?
-
-    func intentEvent(_ event: IntentEvent) {
+    /// transitions drive the conforming ring on a resolved control.
+    func intentEvent(_ event: IntentEvent, dwellFeedback: Bool = false) {
         switch event {
-        case .none:
+        case .none, .ambiguous:
             releaseRing()
         case .acquire(let c):
-            acquireRing(on: c)
+            if dwellFeedback || Self.highlightsControl(c) { acquireRing(on: c) }
+            else { releaseRing() }
         case .hold(let c, let progress):
-            holdRing(on: c, progress: progress)
+            if dwellFeedback { holdRing(on: c, progress: progress) }
+            else if progress < 0.55 && Self.highlightsControl(c) { holdRing(on: c, progress: 0) }
+            else { releaseRing() }
         case .release(let c):
             releaseRing(fallbackAnchor: CGPoint(x: c.frame.midX, y: c.frame.midY))
-        case .ambiguous(let candidates):
-            onAmbiguous?(candidates)
+        }
+    }
+
+    private static func highlightsControl(_ candidate: IntentCandidate) -> Bool {
+        switch candidate.kind {
+        case .axElement, .trafficLight, .menuBar, .dom: true
+        case .window, .ocr, .agentCursor, .chip: false
         }
     }
 
@@ -639,23 +623,26 @@ final class TargetOverlay {
         ringView?.setProgress(0)
         ringView?.fade(to: 1, duration: Self.ringMorphSeconds)
         applyRingAlpha()
-        if ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
+        if presentsPanels, ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
     }
 
     /// Streams the dwell countdown onto the fill stroke and re-targets
     /// the morph when a refreshed feed moved the element.
     private func holdRing(on c: IntentCandidate, progress: Double) {
-        if !ringLive { acquireRing(on: c) }
+        if !ringLive || ringReleasing { acquireRing(on: c) }
         let target = Self.ringTarget(for: c)
+        let previousRect = ringRect
         if target != ringMorph.to {
             ringMorph.retarget(to: target, at: now(),
                                duration: Self.ringRetargetSeconds)
             presentRing(duration: Self.ringRetargetSeconds)
         }
         ringRect = target.rect
-        ringProgress = progress
-        ringView?.setProgress(progress)
-        applyRingAlpha()
+        if ringProgress != progress {
+            ringProgress = progress
+            ringView?.setProgress(progress)
+        }
+        if target.rect != previousRect { applyRingAlpha() }
     }
 
     /// Reverse morph + fade; the panel retires itself, generation-
@@ -757,6 +744,7 @@ final class TargetOverlay {
     /// fading 1→0 over ~400ms at `point` (top-left points). Non-blocking;
     /// the panel retires itself.
     func flash(at point: CGPoint) {
+        guard presentsPanels else { return }
         let size = Self.flashCanvas
         let rect = CGRect(x: point.x - size / 2, y: point.y - size / 2,
                           width: size, height: size)
@@ -818,7 +806,7 @@ final class TargetOverlay {
         panel.setFrame(NSRect(x: sf.midX - size.width / 2,
                               y: sf.maxY - size.height - Self.cheatSheetDrop,
                               width: size.width, height: size.height), display: true)
-        panel.orderFrontRegardless()
+        if presentsPanels { panel.orderFrontRegardless() }
         cheatPanel = panel
     }
 }

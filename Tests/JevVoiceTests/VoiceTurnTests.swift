@@ -3,6 +3,30 @@ import XCTest
 @testable import JevVoiceCore
 
 final class VoiceTurnTests: XCTestCase {
+    func testControlQuestionRequiresCommittedSpokenInputAndNeverGetsTools() throws {
+        let input = VoiceRealtimeInput(connectionID: UUID(), itemID: "input")
+        let nonce = UUID().uuidString
+        var gate = VoiceTurnGate(), authority = VoiceResponseAuthority()
+        let turn = gate.begin(mode: .command, ready: true, now: 0, realtimeConnection: input.connectionID)
+        XCTAssertTrue(gate.acknowledgeRealtimeCommit(turn, input: input, now: 1))
+        let admission = try XCTUnwrap(gate.finalize(turn, text: "fixture",
+            proposal: .init(route: .remote, intent: "screen_question"), drainedFrames: 0, now: 1.1, realtimeInput: input))
+        authority.connect(input.connectionID)
+        XCTAssertFalse(authority.request(admission: admission, purpose: .reasoning, inputItemID: input.itemID))
+        XCTAssertFalse(authority.request(admission: admission, purpose: .spokenControl, inputItemID: input.itemID))
+        XCTAssertFalse(authority.request(admission: admission, purpose: .spokenControl, inputItemID: "other", nonce: nonce))
+        XCTAssertTrue(authority.request(admission: admission, purpose: .spokenControl, inputItemID: input.itemID, nonce: nonce))
+        var interrupted = authority
+        XCTAssertNil(interrupted.interruptConversation())
+        XCTAssertFalse(interrupted.retireCreated(connection: input.connectionID, responseID: "other"))
+        XCTAssertTrue(interrupted.retireCreated(connection: input.connectionID, responseID: "retired", nonce: nonce))
+        XCTAssertFalse(interrupted.takeExecutor(connection: input.connectionID, responseID: "retired", callID: "forged"))
+        XCTAssertFalse(authority.bindCreated(connection: input.connectionID, responseID: "other", nonce: UUID().uuidString))
+        XCTAssertTrue(authority.bindCreated(connection: input.connectionID, responseID: "r", nonce: nonce))
+        XCTAssertFalse(authority.takeExecutor(connection: input.connectionID, responseID: "r", callID: "forged"))
+        authority.finish(connection: input.connectionID, responseID: "r")
+        XCTAssertFalse(authority.request(admission: admission, purpose: .spokenControl, inputItemID: input.itemID, nonce: nonce))
+    }
     func testIndependentConversationTurnOwnersCanEachRequestExactlyOnce() {
         var authority = VoiceResponseAuthority()
         let connection = UUID(), first = remoteAdmission(), second = remoteAdmission()

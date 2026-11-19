@@ -8,6 +8,29 @@ protocol RealtimeVoiceWire: Sendable {
     func close() async
 }
 
+protocol IsolatedControlWire: RealtimeVoiceWire {
+    @MainActor func submitControl(_ text: String, completion: @escaping @Sendable (Error?) -> Void)
+}
+
+private final class NoRealtimeRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let space = challenge.protectionSpace
+        completionHandler(space.authenticationMethod == NSURLAuthenticationMethodServerTrust && space.host == "api.openai.com"
+                          ? .performDefaultHandling : .cancelAuthenticationChallenge, nil)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 enum VoiceToolCatalog {
     static let version = 1
     static let names = ["run_script", "browser_task", "computer_task", "ask_about_screen",
@@ -219,6 +242,7 @@ enum VoiceToolCatalog {
 ///              back as conversation.item.create function_call_output + response.create
 @MainActor
 final class RealtimeVoiceClient {
+    nonisolated let literalOnly: Bool
     private nonisolated static let log = Logger(subsystem: "com.chriswozniczek.jevvoice.voice", category: "realtime")
 
     enum InputMode: Sendable {
@@ -263,6 +287,10 @@ final class RealtimeVoiceClient {
     private var requestedInputMode: InputMode?
     private var configurationID = UUID()
     private var configurationTimeout: Task<Void, Never>?
+    private var restrictedUpdateStarted = false
+    private var restrictedUpdateSent = false
+    private var restrictedAckReceived = false
+    private var restrictedPermission: (@MainActor () -> Bool)?
 
     enum Event: Sendable {
         case sessionStarted(id: String)
@@ -294,6 +322,8 @@ final class RealtimeVoiceClient {
         let responseID: String?
         let inputItemID: String?
         let events: [Event]
+        var controlFrame: ControlReplyEnvelope.Frame? = nil
+        var controlNonce: String? = nil
     }
 
     private(set) var connectionID = UUID()
@@ -315,6 +345,8 @@ final class RealtimeVoiceClient {
     private let urlSession: URLSession
     private let wireFactory: ((URLRequest) -> any RealtimeVoiceWire)?
     private nonisolated let injectedWire = LockedBox<(any RealtimeVoiceWire)?>(nil)
+    private nonisolated let isolatedConnection = LockedBox<UUID?>(nil)
+    func endControlDecoding() { isolatedConnection.set(nil) }
     /// nonisolated so mic frames can send without a MainActor hop — any
     /// UI stall would otherwise land in the stream as an audible gap.
     /// Mutated only on the actor (connect/teardown); a stale read just
@@ -323,10 +355,22 @@ final class RealtimeVoiceClient {
     private var receiver: Task<Void, Never>?
     private(set) var connectedAt: Date?
 
-    init(urlSession: URLSession? = nil, wireFactory: ((URLRequest) -> any RealtimeVoiceWire)? = nil) {
+    init(literalOnly: Bool = false, urlSession: URLSession? = nil, wireFactory: ((URLRequest) -> any RealtimeVoiceWire)? = nil) {
+        self.literalOnly = literalOnly
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForResource = 3600
-        self.urlSession = urlSession ?? URLSession(configuration: configuration)
+        if literalOnly {
+            precondition(urlSession == nil)
+            configuration.httpCookieStorage = nil
+            configuration.httpShouldSetCookies = false
+            configuration.urlCredentialStorage = nil
+            configuration.urlCache = nil
+            configuration.connectionProxyDictionary = ["HTTPEnable": 0, "HTTPSEnable": 0, "SOCKSEnable": 0,
+                "ProxyAutoConfigEnable": 0, "ProxyAutoDiscoveryEnable": 0]
+            self.urlSession = URLSession(configuration: configuration, delegate: NoRealtimeRedirects(), delegateQueue: nil)
+        } else {
+            self.urlSession = urlSession ?? URLSession(configuration: configuration)
+        }
         self.wireFactory = wireFactory
     }
 
@@ -359,11 +403,17 @@ final class RealtimeVoiceClient {
     /// Connect and configure. Resolves once the server confirms the session
     /// update — the socket is then warm for immediate audio streaming.
     func connect(apiKey: String, model: String = "gpt-realtime-2.1",
-                 voice: String = "marin", inputMode: InputMode = .conversation) async throws {
+                 voice: String = "marin", inputMode: InputMode = .conversation,
+                 restrictedPermission: (@MainActor () -> Bool)? = nil) async throws {
         teardown()
+        guard !literalOnly || (inputMode == .conversation && model == "gpt-realtime-2.1") else {
+            throw VoiceError("This profile only permits continuous transcription.")
+        }
         connectionID = UUID()
         let identity = connectionID
         phase = .connecting
+        self.restrictedPermission = restrictedPermission
+        if literalOnly { try requireRestrictedPermission(connection: identity) }
         var components = URLComponents(string: "wss://api.openai.com/v1/realtime")!
         components.queryItems = [URLQueryItem(name: "model", value: model)]
         var request = URLRequest(url: components.url!)
@@ -390,7 +440,7 @@ final class RealtimeVoiceClient {
             socket.resume()
             startReceiver(socket)
         }
-        let session: [String: Any] = [
+        let session: [String: Any] = literalOnly ? Self.literalSession : [
             "type": "realtime",
             "output_modalities": ["audio"],
             "audio": [
@@ -404,18 +454,27 @@ final class RealtimeVoiceClient {
             "tools": Self.toolDefinitions,
             "tool_choice": "auto"
         ]
-        try await updateSession(session, inputMode: inputMode)
+        do {
+            try await updateSession(session, inputMode: inputMode)
+        } catch {
+            if literalOnly, connectionID == identity { teardown() }
+            throw error
+        }
         guard identity == connectionID, !Task.isCancelled else { throw CancellationError() }
         connectedAt = Date()
-        startKeepalive()
+        if !literalOnly { startKeepalive() }
         Self.log.notice("realtime_connected model=\(model, privacy: .public)")
     }
 
     func configureInput(_ mode: InputMode) async throws {
+        guard !literalOnly || mode == .conversation else {
+            throw VoiceError("This profile only permits continuous transcription.")
+        }
         guard isReady, sessionReady == nil else {
             throw VoiceError("The realtime connection is not ready to change input mode.")
         }
         if mode == inputMode { return }
+        guard !literalOnly else { throw CancellationError() }
         try await updateSession(["type": "realtime", "audio": ["input": mode.configuration]], inputMode: mode)
     }
 
@@ -423,6 +482,9 @@ final class RealtimeVoiceClient {
         let identity = connectionID
         let request = UUID()
         configurationID = request
+        restrictedUpdateStarted = false
+        restrictedUpdateSent = false
+        restrictedAckReceived = false
         requestedInputMode = inputMode
         phase = .connecting
         audioDestination.set(nil)
@@ -431,7 +493,19 @@ final class RealtimeVoiceClient {
                 sessionReady = c
                 Task { [weak self] in
                     guard let self, self.connectionID == identity, self.configurationID == request else { return }
-                    do { try await self.send(["type": "session.update", "session": session]) }
+                    do {
+                        if self.literalOnly {
+                            self.restrictedUpdateStarted = true
+                            let data = try JSONSerialization.data(withJSONObject: ["type": "session.update", "session": Self.literalSession])
+                            try await self.sendRestrictedFrame(String(decoding: data, as: UTF8.self), connection: identity)
+                        } else {
+                            try await self.send(["type": "session.update", "session": session])
+                        }
+                        if self.literalOnly, self.connectionID == identity, self.configurationID == request {
+                            self.restrictedUpdateSent = true
+                            if self.restrictedAckReceived { self.finishSessionReady() }
+                        }
+                    }
                     catch {
                         guard self.configurationID == request else { return }
                         self.failSessionReady(error, connection: identity)
@@ -449,9 +523,10 @@ final class RealtimeVoiceClient {
                 self.failSessionReady(CancellationError(), connection: identity)
             }
         }
-        guard identity == connectionID, configurationID == request, !Task.isCancelled else {
+        guard identity == connectionID, configurationID == request, !literalOnly || phase != .closed, !Task.isCancelled else {
             throw CancellationError()
         }
+        if literalOnly { try requireRestrictedPermission(connection: identity) }
         self.inputMode = inputMode
         phase = .ready
         audioDestination.set(.init(connection: identity, wire: injectedWire.value, socket: socket))
@@ -479,16 +554,35 @@ final class RealtimeVoiceClient {
     private var sessionReady: CheckedContinuation<Void, Error>?
 
     private func confirmSessionReady(connection identity: UUID, session: JSONValue?) -> Bool {
-        guard identity == connectionID, sessionReady != nil, let requestedInputMode else { return false }
+        guard identity == connectionID else { return false }
+        if literalOnly, sessionReady == nil || !restrictedUpdateStarted || restrictedAckReceived || requestedInputMode != .conversation
+            || session?["type"]?.string != "realtime" || session?["tools"] != .array([])
+            || session?["tool_choice"]?.string != "none" || session?["instructions"]?.string != ""
+            || session?["output_modalities"] != .array([.string("text")])
+            || session?["tracing"].map({ $0 != .null }) == true
+            || session?["audio"]?["input"]?["transcription"]?["prompt"]?.string?.isEmpty == false
+            || !InputMode.conversation.matches(session) {
+            rejectRestrictedSession(connection: identity)
+            return false
+        }
+        guard sessionReady != nil, let requestedInputMode else { return false }
         guard requestedInputMode.matches(session) else {
             failSessionReady(VoiceError("OpenAI did not confirm the requested voice input settings."), connection: identity)
             return false
         }
+        if literalOnly {
+            restrictedAckReceived = true
+            if !restrictedUpdateSent { return false }
+        }
+        finishSessionReady()
+        return true
+    }
+
+    private func finishSessionReady() {
         let c = sessionReady; sessionReady = nil
         self.requestedInputMode = nil
         configurationTimeout?.cancel(); configurationTimeout = nil
         c?.resume()
-        return true
     }
 
     private func failSessionReady(_ error: Error, connection identity: UUID? = nil) {
@@ -511,6 +605,12 @@ final class RealtimeVoiceClient {
     /// wire. The socket tolerates sends from any thread; a torn-down one
     /// fails the send, which the pump turns into a capture failure.
     nonisolated func sendAudio(_ pcm: Data, connection: UUID? = nil) async throws {
+        if literalOnly {
+            guard let connection else { throw CancellationError() }
+            let frame = "{\"type\":\"input_audio_buffer.append\",\"audio\":\"" + pcm.base64EncodedString() + "\"}"
+            try await sendRestrictedFrame(frame, connection: connection, audio: true)
+            return
+        }
         guard let destination = audioDestination.value,
               connection == nil || connection == destination.connection else {
             throw VoiceError("The realtime audio input is not ready for this conversation.")
@@ -527,6 +627,25 @@ final class RealtimeVoiceClient {
 
     func commitAudio() async throws { try await send(["type": "input_audio_buffer.commit"]) }
     func clearAudio() async throws { try await send(["type": "input_audio_buffer.clear"]) }
+    func submitControl(_ control: ScreenQuestionObservation.Control, connection: UUID, nonce: String,
+                       completion: @escaping @Sendable (Error?) -> Void) throws {
+        guard !literalOnly, connectionID == connection, isReady else { throw CancellationError() }
+        let content = [["type": "input_text", "text": control.rawValue]]
+        let response: [String: Any] = ["conversation": "none", "input": [
+            ["type": "message", "role": "user", "content": content]], "tools": [],
+            "tool_choice": "none", "output_modalities": ["audio"], "metadata": ["control_nonce": nonce],
+            "instructions": "Say exactly the sentence for the input, with nothing else. Close: Close normally closes the current window. Minimize: Minimize normally moves the current window to the Dock."]
+        let data = try JSONSerialization.data(withJSONObject: ["type": "response.create", "response": response])
+        let text = String(decoding: data, as: UTF8.self)
+        isolatedConnection.set(connection)
+        if let wire = injectedWire.value {
+            guard let isolated = wire as? any IsolatedControlWire else { throw CancellationError() }
+            isolated.submitControl(text, completion: completion)
+        } else {
+            guard let socket else { throw CancellationError() }
+            socket.send(.string(text), completionHandler: completion)
+        }
+    }
     func requestResponse(allowTools: Bool = true, requireTool: Bool = false) async throws {
         if allowTools, requireTool {
             try await send(["type": "response.create", "response": ["tool_choice": "required"]])
@@ -616,7 +735,35 @@ final class RealtimeVoiceClient {
     /// nonisolated so control sends don't occupy the main thread — the
     /// release→response.create window already spends its latency on the
     /// wire. Ordering still comes from each caller awaiting its own send.
+    private nonisolated static var literalSession: [String: Any] {
+        ["type": "realtime", "output_modalities": ["text"], "audio": ["input": InputMode.conversation.configuration],
+         "instructions": "", "tools": [], "tool_choice": "none"]
+    }
+
+    private func requireRestrictedPermission(connection: UUID) throws {
+        guard connection == connectionID, phase != .closed else { throw CancellationError() }
+        guard !Task.isCancelled, restrictedPermission?() == true else {
+            teardown()
+            throw VoiceError("Hands-free input is no longer authorized.")
+        }
+    }
+
+    private func sendRestrictedFrame(_ frame: String, connection: UUID, audio: Bool = false) async throws {
+        try requireRestrictedPermission(connection: connection)
+        guard !audio || (isReady && inputMode == .conversation) else { throw CancellationError() }
+        if let wire = injectedWire.value { try await wire.send(frame); return }
+        guard let socket else { throw CancellationError() }
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            socket.send(.string(frame)) { error in
+                if let error { c.resume(throwing: error) } else { c.resume() }
+            }
+        }
+    }
+
     nonisolated private func send(_ object: [String: Any]) async throws {
+        guard !literalOnly else {
+            throw VoiceError("This profile only sends transcription configuration and microphone audio.")
+        }
         let data = try JSONSerialization.data(withJSONObject: object)
         if let wire = injectedWire.value {
             try await wire.send(String(decoding: data, as: UTF8.self))
@@ -642,6 +789,8 @@ final class RealtimeVoiceClient {
                     guard let self, !Task.isCancelled else { return }
                     if case .string(let payload) = message {
                         await self.processPayload(payload, connection: identity)
+                    } else if self.isolatedConnection.value == identity {
+                        await self.processPayload("", connection: identity)
                     }
                 } catch {
                     guard let self, !Task.isCancelled else { return }
@@ -659,7 +808,27 @@ final class RealtimeVoiceClient {
     }
 
     private nonisolated func processPayload(_ payload: String, connection identity: UUID) async {
-        guard let envelope = Self.decodeWire(payload, connectionID: identity) else { return }
+        let isolated = isolatedConnection.value == identity
+        guard let envelope = Self.decodeWire(payload, connectionID: identity, isolated: isolated, literalOnly: literalOnly) else {
+            if literalOnly { await rejectRestrictedSession(connection: identity); return }
+            if isolated {
+                wireCell.call(.init(connectionID: identity, kind: "response.invalid", responseID: nil,
+                                    inputItemID: nil, events: []))
+            }
+            return
+        }
+        if literalOnly {
+            switch envelope.kind {
+            case "session.created", "session.updated", "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped",
+                 "input_audio_buffer.committed", "conversation.item.input_audio_transcription.completed",
+                 "conversation.item.input_audio_transcription.failed": break
+            case "restricted.reject", "error", "invalid_request_error":
+                await rejectRestrictedSession(connection: identity)
+                return
+            default:
+                return
+            }
+        }
         if envelope.kind.hasPrefix("input_audio_buffer.")
             || envelope.kind.hasPrefix("conversation.item.input_audio_transcription.") {
             guard await acceptsInputEvents(connection: identity) else { return }
@@ -684,6 +853,21 @@ final class RealtimeVoiceClient {
         identity == connectionID && isReady && inputMode != nil
     }
 
+    private func rejectRestrictedSession(connection identity: UUID) {
+        guard identity == connectionID, phase != .closed else { return }
+        let message = "The transcription session did not match the restricted voice profile."
+        failSessionReady(VoiceError(message), connection: identity)
+        phase = .closed
+        audioDestination.set(nil)
+        receiver?.cancel()
+        keepalive?.cancel()
+        if let wire = injectedWire.value { Task { await wire.close() } }
+        socket?.cancel(with: .policyViolation, reason: nil)
+        let events: [Event] = [.failure(message)]
+        wireCell.call(.init(connectionID: identity, kind: "closed", responseID: nil, inputItemID: nil, events: events))
+        onEvent?(events)
+    }
+
     private func socketDidClose(httpStatus status: Int?, connection identity: UUID) {
         guard identity == connectionID else { return }
         phase = .closed
@@ -698,15 +882,26 @@ final class RealtimeVoiceClient {
         onEvent?(events)
     }
 
-    nonisolated static func decodeWire(_ payload: String, connectionID: UUID) -> WireEnvelope? {
+    nonisolated static func decodeWire(_ payload: String, connectionID: UUID, isolated: Bool = false,
+                                       literalOnly: Bool = false) -> WireEnvelope? {
         guard payload.utf8.count <= 16 * 1024 * 1024,
               let data = payload.data(using: .utf8),
               let frame = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let kind = frame["type"] as? String else { return nil }
+        if literalOnly {
+            let item = frame["item"] as? [String: Any]
+            if kind.hasPrefix("response.") || item?["role"] as? String == "assistant"
+                || (item?["type"] as? String).map({ $0 != "message" }) == true {
+                return .init(connectionID: connectionID, kind: "restricted.reject", responseID: nil, inputItemID: nil, events: [])
+            }
+        }
         let response = frame["response"] as? [String: Any]
         let responseID = frame["response_id"] as? String ?? response?["id"] as? String
+        let controlFrame = isolated ? ControlReplyEnvelope.decode(frame) : nil
         return WireEnvelope(connectionID: connectionID, kind: kind, responseID: responseID,
-                            inputItemID: frame["item_id"] as? String, events: decode(payload))
+                            inputItemID: frame["item_id"] as? String, events: controlFrame == nil ? decode(payload) : [],
+                            controlFrame: controlFrame,
+                            controlNonce: (response?["metadata"] as? [String: Any])?["control_nonce"] as? String)
     }
 
     /// Parse one JSON frame into zero or more events. Kept static and pure so
@@ -803,6 +998,8 @@ final class RealtimeVoiceClient {
     }
 
     func teardown() {
+        restrictedPermission = nil
+        endControlDecoding()
         phase = .closed
         audioDestination.set(nil)
         inputMode = nil

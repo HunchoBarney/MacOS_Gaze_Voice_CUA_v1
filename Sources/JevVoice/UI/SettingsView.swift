@@ -28,6 +28,9 @@ struct SettingsView: View {
     @StateObject private var cuaSetup = CuaSetup()
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = false
+    @FocusState private var typeSafeFieldFocused: Bool
+    private enum HandsFreeFocus { case mode, action }
+    @FocusState private var handsFreeFocus: HandsFreeFocus?
     @State private var openAIKeyDraft = ""
     @State private var openAIKeySaved = false
     /// Tracker-side settings — optimistic local copies, read back from
@@ -73,8 +76,7 @@ struct SettingsView: View {
                 VStack(spacing: 5) {
                     ForEach(SettingsNavigation.Section.allCases) { section in
                         Button {
-                            if navigation.section == .voice && section != .voice { controller.stopMicrophoneTest() }
-                            navigation.section = section
+                            selectSection(section)
                         } label: {
                             Label(section.rawValue, systemImage: section.symbol)
                                 .font(.system(size: 13, weight: .medium))
@@ -149,19 +151,32 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Speak replies aloud", isOn: $config.ttsEnabled)
                     Toggle("Hands-free conversation", isOn: $config.handsFreeEnabled)
+                        .focused($handsFreeFocus, equals: .mode)
                     if config.handsFreeEnabled {
+                        let controls = controller.handsFreeControls
                         HStack {
-                            Label(controller.handsFreeLabel, systemImage: "waveform")
+                            Label(controls.label, systemImage: controls.symbol)
                             Spacer()
-                            Button(controller.handsFreeListening ? "Pause" : "Resume") {
-                                if controller.handsFreeListening { controller.pauseHandsFree() }
-                                else { controller.resumeHandsFree() }
+                            if let action = controls.toggle {
+                                Button(action.rawValue) {
+                                    controller.applyHandsFreeToggle(action)
+                                    if handsFreeFocus == .action, controller.handsFreeControls.toggle == nil {
+                                        handsFreeFocus = .mode
+                                    }
+                                }
+                                .focused($handsFreeFocus, equals: .action)
                             }
                         }
-                        Text(controller.handsFreeDetail).font(.caption).foregroundStyle(.secondary)
+                        .onChange(of: controls.toggle) { next in
+                            if next == nil, handsFreeFocus == .action { handsFreeFocus = .mode }
+                        }
+                        Text(controls.detail).font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle("Use TypeSafe for unfamiliar requests", isOn: $config.semanticAppSuggestions)
-                    Text("Enabled by default using your saved TypeSafe key. "
+                    if config.needsAPIKeyRetry {
+                        Button("Review TypeSafe Keychain access…") { selectSection(.commands) }
+                    }
+                    Text("Enabled by default when a TypeSafe key is available. "
                          + "Sends unfamiliar final request text, app names/identities "
                          + "and default browser/mail app roles to TypeSafe. "
                          + "Clear requests to open or focus an app run without another approval. "
@@ -284,12 +299,23 @@ struct SettingsView: View {
                     Text("TypeSafe API key").font(.callout)
                     HStack {
                         SecureField("ts-…", text: $apiKeyDraft).textFieldStyle(.roundedBorder).onSubmit(saveAPIKey)
+                            .accessibilityLabel("TypeSafe API key")
+                            .focused($typeSafeFieldFocused)
                         Button("Save", action: saveAPIKey).buttonStyle(.borderedProminent)
+                            .disabled(!config.canSaveAPIKey(apiKeyDraft))
                     }
-                    Text("Stored in macOS Keychain. Clear the field and save to remove the stored key.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if !config.needsAPIKeyRetry {
+                        Text("Stored in macOS Keychain. Clear the field and save to remove the stored key.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if let error = config.apiKeyError { Text(error).font(.caption).foregroundStyle(.orange) }
                     else if apiKeySaved { Text(apiKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain").font(.caption).foregroundStyle(.secondary) }
+                    if config.needsAPIKeyRetry {
+                        Button("Retry Keychain access") {
+                            apiKeyDraft = config.retryAPIKeyAccess(keeping: apiKeyDraft)
+                            if !config.needsAPIKeyRetry { typeSafeFieldFocused = true }
+                        }
+                    }
                 }
             }
             VoiceCard {
@@ -309,7 +335,6 @@ struct SettingsView: View {
                          : "Actions dispatch directly to the target without an animated cursor. Every click follows this rule — the mode never mixes.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Interface sounds", isOn: $config.sounds)
-                    Toggle("Persistent number chips", isOn: $config.persistentNumbers)
                 }
             }
             VoiceCard {
@@ -458,6 +483,11 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private func selectSection(_ section: SettingsNavigation.Section) {
+        if navigation.section == .voice && section != .voice { controller.stopMicrophoneTest() }
+        navigation.section = section
     }
 
     private func saveAPIKey() { apiKeySaved = config.saveAPIKey(apiKeyDraft) }

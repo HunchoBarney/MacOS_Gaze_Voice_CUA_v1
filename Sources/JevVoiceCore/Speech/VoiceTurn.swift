@@ -238,11 +238,12 @@ public struct VoiceTurnGate: Sendable {
 
 /// Connection-tagged permit; response narration cannot grant another action.
 public struct VoiceResponseAuthority: Sendable {
-    public enum Purpose: String, Sendable { case reasoning, typed, outcomeOnly = "outcome_only" }
+    public enum Purpose: String, Sendable { case reasoning, typed, spokenControl, outcomeOnly = "outcome_only" }
     private struct Ticket: Sendable {
         let admission: VoiceAdmission?
         let purpose: Purpose
         let inputItemID: String?
+        let nonce: String?
         var responseID: String?
         var spent = false
     }
@@ -253,6 +254,7 @@ public struct VoiceResponseAuthority: Sendable {
     private var requestedTurns: Set<VoiceTurnToken> = []
     private var retiredResponses: Set<String> = []
     private var retiringCreation = false
+    private var retiringNonce: String?
 
     public init() {}
 
@@ -266,12 +268,15 @@ public struct VoiceResponseAuthority: Sendable {
         guard identity != connection else { return }
         connection = identity; ticket = nil; seenResponses = []
         retiredResponses = []; retiringCreation = false
+        retiringNonce = nil
         requiresReconnect = false
     }
 
     @discardableResult
-    public mutating func request(admission: VoiceAdmission?, purpose: Purpose, inputItemID: String?) -> Bool {
+    public mutating func request(admission: VoiceAdmission?, purpose: Purpose, inputItemID: String?,
+                                 nonce: String? = nil) -> Bool {
         guard connection != nil, !requiresReconnect, !waitingForRetirement, ticket == nil else { return false }
+        guard (purpose == .spokenControl) == (nonce != nil) else { return false }
         if purpose == .outcomeOnly {
             guard admission == nil else { return false }
         } else {
@@ -281,18 +286,23 @@ public struct VoiceResponseAuthority: Sendable {
             if let input = admission.realtimeInput {
                 guard input.connectionID == connection, input.itemID == inputItemID else { return false }
             }
-            guard (purpose == .reasoning && admission.turn.mode == .command)
-                    || (purpose == .typed && admission.turn.mode == .typed) else { return false }
+            if purpose == .spokenControl {
+                guard admission.turn.mode == .command, admission.intent == "screen_question",
+                      admission.realtimeInput != nil, let nonce, UUID(uuidString: nonce) != nil else { return false }
+            } else {
+                guard admission.intent != "screen_question", (purpose == .reasoning && admission.turn.mode == .command)
+                        || (purpose == .typed && admission.turn.mode == .typed) else { return false }
+            }
             requestedTurns.insert(admission.turn)
         }
-        ticket = Ticket(admission: admission, purpose: purpose, inputItemID: inputItemID)
+        ticket = Ticket(admission: admission, purpose: purpose, inputItemID: inputItemID, nonce: nonce)
         return true
     }
 
     @discardableResult
-    public mutating func bindCreated(connection identity: UUID, responseID: String) -> Bool {
+    public mutating func bindCreated(connection identity: UUID, responseID: String, nonce: String? = nil) -> Bool {
         guard identity == connection, !requiresReconnect, !responseID.isEmpty,
-              !seenResponses.contains(responseID), ticket?.responseID == nil, ticket != nil else { return false }
+              !seenResponses.contains(responseID), ticket?.responseID == nil, ticket != nil, ticket?.nonce == nonce else { return false }
         ticket?.responseID = responseID
         seenResponses.insert(responseID)
         return true
@@ -305,7 +315,8 @@ public struct VoiceResponseAuthority: Sendable {
     @discardableResult
     public mutating func takeExecutor(connection identity: UUID, responseID: String, callID: String) -> Bool {
         guard matches(connection: identity, responseID: responseID), !callID.isEmpty,
-              ticket?.purpose != .outcomeOnly, ticket?.admission != nil, ticket?.spent == false else { return false }
+              ticket?.purpose != .outcomeOnly, ticket?.purpose != .spokenControl,
+              ticket?.admission != nil, ticket?.spent == false else { return false }
         ticket?.spent = true
         return true
     }
@@ -329,11 +340,12 @@ public struct VoiceResponseAuthority: Sendable {
             return response
         }
         retiringCreation = true
+        retiringNonce = ticket.nonce
         return nil
     }
 
-    public mutating func retireCreated(connection identity: UUID, responseID: String) -> Bool {
-        guard identity == connection, !requiresReconnect, retiringCreation,
+    public mutating func retireCreated(connection identity: UUID, responseID: String, nonce: String? = nil) -> Bool {
+        guard identity == connection, !requiresReconnect, retiringCreation, retiringNonce == nonce,
               !responseID.isEmpty, !seenResponses.contains(responseID) else { return false }
         retiringCreation = false
         retiredResponses.insert(responseID)

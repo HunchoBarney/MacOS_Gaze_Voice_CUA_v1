@@ -12,6 +12,7 @@ struct VoicePlaybackRoute: Sendable {
     let schedule: @Sendable (Data, @escaping @Sendable () -> Void) -> Void
     let play: @Sendable () -> Void
     let stop: @Sendable () -> Void
+    var playVerified: (@Sendable (Data, @escaping @Sendable () -> Void) -> Bool)? = nil
 }
 
 struct VoicePlaybackOutputs: Sendable {
@@ -289,6 +290,35 @@ final class RealtimePlayer: @unchecked Sendable {
                 self?.completedBuffer(generation: gen, milliseconds: ms)
             }
             self.maybeStartPlayback()
+        }
+    }
+
+    func playIsolated(_ pcm: Data, owner: UInt64) -> Bool {
+        guard !pcm.isEmpty, pcm.count <= 384_000, pcm.count.isMultiple(of: 2) else { return false }
+        return queue.sync {
+            lock.lock(); defer { lock.unlock() }
+            guard generation == owner, !droppingUntilDone, scheduledMs - playedMs <= 0.5 else { return false }
+            let ms = Double(pcm.count) / 48
+            let completion: @Sendable () -> Void = { [weak self] in
+                self?.queue.async { [weak self] in self?.completedBuffer(generation: owner, milliseconds: ms) }
+            }
+            if let route = playbackRoute {
+                guard route.isReady(), route.playVerified?(pcm, completion) == true else { return false }
+            } else {
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(pcm.count / 2)),
+                      let target = buffer.int16ChannelData?[0] else { return false }
+                buffer.frameLength = buffer.frameCapacity
+                pcm.copyBytes(to: UnsafeMutableRawBufferPointer(start: target, count: pcm.count))
+                do { if !engine.isRunning { try engine.start() } } catch { return false }
+                player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in completion() }
+                player.play()
+                running = true
+            }
+            primeWork?.cancel(); primeWork = nil
+            currentItemID = nil
+            scheduledMs = ms; playedMs = 0; itemStartPlayedMs = 0
+            playing = true
+            return true
         }
     }
 

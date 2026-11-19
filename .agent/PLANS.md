@@ -22,7 +22,7 @@ Required properties:
   "the coordinator file" or absolute paths.
 - **Owned paths are explicit.** A fenced list of every file the phase
   may create or modify. Writing outside the list is a violation;
-  `scripts/check-owned-paths.py` enforces it at gates.
+  check the baseline-to-candidate delta as described in §5.
 - **Commands with expected output.** Every check is a copy-pastable
   command plus what success looks like (`swift test --filter X` →
   "12 passed, 0 failed"). An agent verifies; it does not believe.
@@ -79,17 +79,32 @@ Rules:
   pass counts; a phase is green only when every criterion passes with
   evidence.
 
-## 3. The gate loop (every phase)
+## 3. Choose the proof before starting
+
+**A bounded bug in an approved milestone** needs one owner, a reproducible
+failure (or falsifiable counterexample), a narrow repair, affected checks
+on the actual delta and a fresh read-only review. Repeat the same case
+and record what is still unverified. It does not need a new phase or a
+human sign-off per edit. For documentation, check the changed instructions,
+links and diff rather than building the product.
+
+**A phase or release** follows G1–G7 below. Do not route a change to a
+frozen interface, execution authority, provider, permissions, signing or
+release population through the bug shortcut. Return to its owning decision,
+review the affected consumers and run the applicable candidate/release gates.
+If a criterion no longer describes the shipped path, propose a versioned
+amendment mapping the surviving guarantees; never erase a receipt, silently
+flip an old failure or change a population after seeing results.
 
 | Gate | Owner | What happens |
 |---|---|---|
 | G1 Plan approval | planner → user | Judge checks the ExecPlan is self-contained and every criterion testable; **user approves** before code |
 | G2 Contract | implementer ⇄ judge | Implementer proposes milestone test plan + evidence forms; judge accepts **before** any code |
 | G3 Build + tests | verification lane | Serialized runner green; new checks must fail before / pass after |
-| G4 Judge | fresh-context `jarvis-judge` | Reviews the phase vs acceptance.json with file:line evidence; PASS or findings → loop back to implementer. Never fixes anything |
+| G4 Judge | fresh-context read-only reviewer | Reviews the phase vs acceptance.json with file:line evidence; PASS or findings → loop back to implementer. Never fixes anything |
 | G5 Live + budgets | verification lane | Phase's bench slice in the test user; `LatencyLedger` spans vs budgets; RSS/CPU check |
 | G6 Human try | user | UX phases only — short checklist from the ExecPlan |
-| G7 Handoff | orchestrating agent | Progress/Decision Log/Retrospective updated; `git status` clean; milestone commits exist on `ship/v1-<phase>` |
+| G7 Handoff | integration owner | Update Progress/Decision Log/Retrospective, account for inherited dirt and hand off the reviewed delta. Record milestone commits on `ship/v1-<phase>` when authorized; a pending commit or merge stays pending |
 
 A gate is not a courtesy: skipping one is how green tests shipped a
 broken product twice.
@@ -100,44 +115,86 @@ live/human evidence before the remaining criteria can pass. Reuse the
 unchanged source review rather than rerunning it for a report-only edit.
 Never self-award a fresh-context verdict.
 
-## 4. Roles
+## 4. Delegate outcomes within scope
 
-| Role | Profile | Model | Tools | Job |
-|---|---|---|---|---|
-| Planner | orchestrating agent in plan mode | — | read-only | Writes ExecPlans + acceptance.json; user approves at G1 |
-| Implementer | `jarvis-implementer` | `opus` | full, scoped to owned files | One writer per phase; contract first; reports evidence |
-| Judge | `jarvis-judge` | `gpt` | read-only + read-only exec | Contract review at G2; PASS/FAIL at G4 with file:line evidence |
-| Research/explore | `subagent_explore` | `swe` | read-only + web | Spike support, reference-codebase analysis |
-| Verification lane | one serialized runner | — | exec | `scripts/verification-lane.sh` owns builds/tests; writers never build a half-frozen tree |
-| User | — | — | — | G1 approvals, G6 hands-on, merges, release |
+The Captain owns the user outcome and stop decision. Give each independent
+outcome one issue owner and a durable crew thread for diagnosis through
+handoff. Inside a thread, use short-lived read-only subagents for bounded
+questions or independent review; they report to the assigning agent. No
+separate permission per helper within approved work. Start with two to four
+readers only when their answers can change the decision. Do not fan out
+recursively by default. Widen only for a named independent question with
+a time/cost budget; stop when the next fact requires one person or device.
 
-These are roles, not automatic permission to launch helper agents.
-Use subagents only when the user explicitly asks; otherwise perform
-authorized work directly and keep independent-review gates pending until
-an authorized reviewer is available. Do not substitute self-review.
+Assign roles by permissions and independence, not model name: the planner
+prepares the phase contract, the implementer edits assigned paths, and a
+fresh-context reviewer examines the actual diff and evidence, without
+writing fixes or awarding their own work a verdict. Devin profiles under
+`.devin/agents/` retain their own tool/model settings; they do not configure
+Capy. In Capy the Captain's Drive AGENTS.md governs the Captain, CREW.md
+guides its threads, and this repository's AGENTS.md points here.
 
-Model pins live in `.devin/agents/*.md` (`model:` frontmatter). Short
-names resolve to the latest family release via the Devin router.
+Delegation never expands a grant. Ask before changing scope or using data,
+money or a device outside the approved brief: no reading private speech,
+sharing raw logs, transcripts, screen content or secrets, paid provider
+runs, new capture, mic/camera use, TCC changes, desktop mutation, signing,
+installation/replacement or deployment by implication. Keep private inputs
+local; use synthetic or authorized content-free extracts for shared/cloud
+review. A pause stops the work and its descendants; a policy edit does not
+resume the product. Leave changes unstaged. Stage, commit, push, publish
+or merge only with explicit authority for that action; the user controls
+merge and release. Stage authorized milestone files by name, never wholesale.
 
-## 5. Worktree recipe and parallelism
+## 5. Own the delta and the shared Mac
 
-- Track **agent+voice**: `git worktree add ../jarvis-v1-agent ship/v1-<phase>`
-  then `python3 scripts/setup-workspace-development.py` inside it.
-  Owns `Sources/**`, `Tests/**`, `development/**`.
-- Track **eyes**: `../jarvis-v1-eyes` on its own `ship/v1-p8`-style
-  branch; owns `EyeTracking/**`.
-- **Never two writers in one tree.** Read-only agents run anywhere,
-  any time. A second concurrent writer = another worktree.
-- Owned paths are disjoint by construction; merges are sequential with
-  the full suite after each. Phases on track `main` (P0, P1, P12, P13)
-  run in the primary checkout on their `ship/v1-<phase>` branch.
-- Commits are per milestone, staged by name (never `git add -A` on a
-  shared tree). User merges; agents never push or force anything.
-- Existing inherited dirt is preserved and named in the baseline. An
-  empty staged set passing `check-owned-paths.py` does not prove that the
-  unstaged phase delta is owned. Compare the actual phase delta to its
-  owned list; use `--all` only with the documented clean-baseline scope.
-  Never clear inherited user files to manufacture a clean G7.
+1. **Choose the checkout by what it contains.** Record the revision and
+   status locally before writing. Save content diffs only for paths and
+   data the brief permits. For unrelated changes use status and permitted
+   local hashes, not copies; do not open private files to establish a baseline.
+   A shared reader sees the exact dirty tree; a fresh upstream checkout
+   does not. Verify base and inputs in each isolated worktree. If required
+   local changes lack an authorized common baseline, keep one writer in
+   the existing tree and parallelize reads. Never copy a dirty tree, stash,
+   reset, clean or publish someone's work to make a baseline.
+2. **Assign change sets, not directories for life.** Pilot at most two
+   concurrent writers, one per isolated worktree, with disjoint named paths
+   on the same frozen base. Track labels in phase plans describe subsystems,
+   not permanent owners. Sequence dependencies and overlaps (including
+   metadata, shared controllers and contracts) under one integration owner.
+   Raise the pilot limit only after usable shared baselines, conflict-free
+   integration and scope-aware checks are demonstrated; it is a Jarvis
+   resource decision, not a Capy ceiling. If a new worktree needs local
+   development assets, review `scripts/setup-workspace-development.py`
+   against its permitted inputs before running it.
+3. **Check ownership at handoff.** Compare baseline to candidate, including
+   unstaged hunks, deletions and new files, against the declared paths.
+   `scripts/check-owned-paths.py P<n>` checks only the index; an empty
+   index can pass. `--all` includes inherited dirt and attributes nothing.
+   Keep unrelated edits intact, including pre-existing hunks in owned files.
+4. **Schedule one build token.** One integrator schedules resource-conflicting
+   Mac builds, tests and signing on a coherent source freeze. Use
+   `scripts/verification-lane.sh <scope>`: it sequences commands *within*
+   one invocation, not across processes or worktrees. Record the revision
+   or artifact hash, scope, selected suites/counts, skips and failures.
+   The same green banner can follow a filtered run or `all`. Checked-in
+   macOS CI runs Swift build and `make test` (tooling/Python and Swift), not
+   the EyeTracking typecheck/Vitest. Neither a banner nor a workflow file
+   proves branch protection or a release pass.
+5. **Reserve one physical operator.** On an authorized session the operator
+   uses `scripts/with-desktop-lock.py`; its exclusive file lock coordinates
+   callers using the same lock file, not every Mac process. Before inviting
+   the person, put one current “what to try” record on the issue: signed
+   candidate hash and predecessor, who may launch it, harmless action,
+   visible pass condition and privacy-safe signal distinguishing likely
+   failures. Report source/checks, packaged readiness and observed physical
+   result separately. Fixtures/cloud cannot qualify AppKit/TCC, actual
+   Fn/microphone/gaze or user-visible effect. If the desktop does not
+   switch, opening Mission Control or delivering a press is not success.
+   Stop at the first failure and retest the same action after the repair.
+
+Judge the pilot by attempts per resolved failure, time to observed outcome,
+failures attributed, unnecessary approval interruptions, writer conflicts,
+build-token wait and cost. Shrink it if it adds rework or human retests.
 
 ## Shipping cadence and bounded verification
 
@@ -178,17 +235,16 @@ subject to the applicable gates.
   not a command presumed to exist. Until implemented, reviewed and shown
   to select a nonempty intended population, its criterion stays false.
 
-## 6. Task brief template (every implementer spawn)
+## 6. Task brief (every delegation)
 
 ```
 Assignment:  <result + user-visible behavior>
-Context:     <ExecPlan path> §<milestone>, contracts in .agent/CONTRACTS.md,
-             owned files: <named list — not "read everything">
-Constraints: <banned actions, hardware/vendor limits, no commits unless told>
+Context:     <issue, exact baseline/checkout, relevant plan and contracts>
+Scope:       <read-only or named writable paths; permitted data and actions>
+Constraints: <forbidden actions, hardware/vendor limits, time/cost budget>
 Boundaries:  free inside owned files; contract changes, new deps, scope
              changes → report back, do not improvise
-Done:        implement → run assigned checks → inspect → fix → report with
-             evidence (commands run, output, file:line)
+Done:        <success test, evidence to return to assigning agent, when to stop>
 ```
 
 ## 7. Verification layers (cheapest first)
@@ -209,6 +265,7 @@ Each phase's ExecPlan names which layers each milestone must reach.
 
 Before a phase session ends, `PROGRESS.md` gets an append-only entry
 (what / evidence / next), the phase ExecPlan's Progress section reflects
-reality, and `acceptance/P<n>.json` is current. The Stop hook
-(`scripts/hooks/phase-handoff-check.py`) blocks ending a session that
-leaves phase artifacts dirty without a `PROGRESS.md` update.
+reality, and `acceptance/P<n>.json` is current. The Devin Stop hook
+(`scripts/hooks/phase-handoff-check.py`) checks for dirty phase/acceptance
+files without a dirty progress file. It does not prove this session wrote
+a handoff, and it is not a Capy hook.

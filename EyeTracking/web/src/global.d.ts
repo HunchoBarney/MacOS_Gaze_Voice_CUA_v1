@@ -19,7 +19,7 @@ declare global {
       publishBackendMessage: (payload: BackendMessage) => void;
       onBackendMessage: (callback: (payload: BackendMessage) => void) => () => void;
       onRecalibrate: (callback: () => void) => () => void;
-      setPaused: (paused: boolean) => void;
+      setPaused: (ack: { paused: boolean; revision: number }) => void;
       getSettings: () => Promise<UserSettings>;
       setSettings: (patch: Partial<UserSettings>) => void;
       reportState: (state: SharedStateReport) => void;
@@ -53,7 +53,6 @@ export interface UserSettings {
 }
 
 export interface SharedStateReport {
-  paused?: boolean;
   calibration_status?: string;
   settings?: UserSettings;
 }
@@ -76,6 +75,7 @@ export interface RendererConfig {
   cameraScreenY: number;
   enableInferenceTime: boolean;
   debug?: boolean;
+  shapeOverlay?: boolean;
   showCameraMarker?: boolean;
   runtime: RuntimeName;
   webInference: WebInferenceConfig | null;
@@ -250,6 +250,7 @@ export type BackendMessage =
   | {
       type: "menu_action";
       action: string;
+      pause_revision?: number;
       value?: unknown;
     };
 

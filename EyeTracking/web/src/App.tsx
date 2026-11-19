@@ -380,6 +380,7 @@ function App() {
   // Presence: paused freezes the dot as a ghost; onboarding is the first-run
   // card shown when no calibration file exists yet.
   const [paused, setPaused] = useState(false);
+  const pauseRevisionRef = useRef(0);
   const pausedRef = useRef(false);
   const [onboarding, setOnboarding] = useState(false);
   const onboardingRef = useRef(false);
@@ -426,8 +427,7 @@ function App() {
     pausedRef.current = next;
     setPaused(next);
     webRuntimeRef.current?.setPaused?.(next);
-    window.gazeBridge.setPaused?.(next);
-    window.gazeBridge.reportState?.({ paused: next });
+    window.gazeBridge.setPaused?.({ paused: next, revision: pauseRevisionRef.current });
   }, []);
 
   // Answering the card — or finishing a calibration — persists the dismissal
@@ -729,18 +729,12 @@ function App() {
       // pair for drift correction.
       webRuntimeRef.current?.implicitSample(payload.x_norm, payload.y_norm);
     } else if (payload.type === "menu_action") {
-      if (payload.action === "pause_toggle") {
-        // Presence is a user toggle — never flip it mid-modal.
-        if (calibrationActiveRef.current || accuracyIndexRef.current !== null || onboardingRef.current) {
-          return;
-        }
-        applyPausedState(!pausedRef.current);
-      } else if (payload.action === "set_paused") {
-        // Host-driven target state (screen-lock parking) — deterministic,
-        // not a toggle, so a double-lock or a queued redelivery can't flip
-        // the flag. A mid-modal arrival still applies: lock-pausing a
-        // calibration screen is correct, and resume replays nothing.
-        applyPausedState(payload.value === true);
+      if (payload.action === "pause_toggle" || payload.action === "set_paused") {
+        const revision = payload.pause_revision;
+        if (revision === undefined || !Number.isSafeInteger(revision) || revision <= pauseRevisionRef.current) return;
+        pauseRevisionRef.current = revision;
+        const modal = calibrationActiveRef.current || accuracyIndexRef.current !== null || onboardingRef.current;
+        applyPausedState(payload.action === "pause_toggle" && modal ? pausedRef.current : payload.value === true);
       } else if (payload.action === "recalibrate") {
         // Menu entry — the same quick top-up ⌘⇧G performs.
         beginCalibration("quick");
@@ -808,15 +802,15 @@ function App() {
     if (!config?.webInference || webRuntimeRef.current || webRuntimeStartingRef.current) {
       return;
     }
-    let cancelled = false;
+    const owner = new AbortController();
     webRuntimeStartingRef.current = true;
-    startWebRuntime(config.webInference, handleRendererRuntimeMessage)
+    startWebRuntime(config.webInference, handleRendererRuntimeMessage, owner.signal)
       .then((runtime) => {
-        webRuntimeStartingRef.current = false;
-        if (cancelled) {
+        if (owner.signal.aborted) {
           runtime.stop();
           return;
         }
+        webRuntimeStartingRef.current = false;
         webRuntimeRef.current = runtime;
         // Re-apply presence/settings resolved while the runtime was starting.
         runtime.setPaused(pausedRef.current);
@@ -834,6 +828,7 @@ function App() {
         }
       })
       .catch((error) => {
+        if (owner.signal.aborted) return;
         webRuntimeStartingRef.current = false;
         console.error("Failed to start web runtime", error);
         handleRendererRuntimeMessage({
@@ -842,7 +837,7 @@ function App() {
           message: error instanceof Error ? error.message : String(error),
           runtime: config.webInference?.runtime
         });
-        if (!cancelled && pursuitAwaitingRuntimeRef.current) {
+        if (pursuitAwaitingRuntimeRef.current) {
           // The wait is hopeless — close the modal instead of leaving the
           // scrim up on a "starting up" notice that will never resolve.
           pursuitAwaitingRuntimeRef.current = false;
@@ -852,7 +847,7 @@ function App() {
         }
       });
     return () => {
-      cancelled = true;
+      owner.abort();
       webRuntimeStartingRef.current = false;
       webRuntimeRef.current?.stop();
       webRuntimeRef.current = null;
@@ -1225,14 +1220,20 @@ function App() {
     });
   }, [preview]);
 
+  const calibrationActive = calibrationCountdown !== null || pursuitActive;
+  const modalActive = calibrationActive || accuracyIndex !== null;
+  const showDot = dotVisible && !modalActive && !onboarding;
+
   // The 60fps dot loop runs only while a live unpaused stream has motion to
   // animate — a hidden (stale/absent) or paused-ghost dot is static, seeded
   // by the render-time transform below. Re-arms on the next live frame.
   useEffect(() => {
-    if (paused || !gazePresence.live) {
+    if (!showDot || paused || !gazePresence.live) {
       gazeDotRef.current?.classList.remove("fast");
       return;
     }
+    gazeDisplayRef.current = null;
+    gazeSpringVelRef.current = [0, 0];
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
@@ -1272,14 +1273,16 @@ function App() {
       // A stopped loop can't untoggle the class — never let "fast" freeze on.
       gazeDotRef.current?.classList.remove("fast");
     };
-  }, [paused, gazePresence.live]);
+  }, [showDot, paused, gazePresence.live]);
 
   // Discrete presences, not a confidence dial: gone / ghosted while blinking
   // or head-turned / held / tracking — and a frozen ghost while paused.
   // Computed at render (not memoized) so a click-effect remount seeds the
   // freshest ref-held position, same freshness the per-frame state gave it.
   const dotStyle = (() => {
-    const pos = gazeDisplayRef.current ?? gazeTargetRef.current;
+    const pos = !paused && !gazeDotRef.current
+      ? gazeTargetRef.current
+      : gazeDisplayRef.current ?? gazeTargetRef.current;
     const style: { opacity: number; transform?: string } = (() => {
       if (paused) {
         return { opacity: pos ? 0.2 : 0 };
@@ -1314,8 +1317,6 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [clickEffect]);
 
-  const calibrationActive = calibrationCountdown !== null || pursuitActive;
-  const modalActive = calibrationActive || accuracyIndex !== null;
   const markerShown = markerVisible || calibrationCountdown !== null || Boolean(config?.showCameraMarker);
 
   // Mirrored for the stable message handlers, which read modal state between
@@ -1443,6 +1444,7 @@ function App() {
   });
 
   useEffect(() => {
+    if (!config?.shapeOverlay) return;
     const collect = () => collectRegionsRef.current();
     collect();
     const intervalId = window.setInterval(collect, 250);
@@ -1451,7 +1453,7 @@ function App() {
       window.clearInterval(intervalId);
       window.removeEventListener("resize", collect);
     };
-  }, []);
+  }, [config?.shapeOverlay]);
 
   return (
     <main className="overlay">
@@ -1525,7 +1527,7 @@ function App() {
           <div className="camera-label">Camera position</div>
         </div>
       )}
-      {!modalActive && dotVisible && (
+      {showDot && (
         <div
           key={clickEffect?.id ?? 0}
           ref={gazeDotRef}

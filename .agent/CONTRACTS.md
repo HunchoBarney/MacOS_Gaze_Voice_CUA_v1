@@ -823,6 +823,22 @@ false proof before correction (jev-alias-drift-before.log).
 
 ## Decision Log: P4 Exact Agent Window Target (2026-11-09)
 
+**Current stdio availability (KAR-25, 2026-11-17):** the exact-window rules
+below remain targeting constraints, not a grant of exclusive input. Neither
+an agent nor an operator using the same untrusted stdio channel can call
+`drive_until` or `suggest_action` until a trusted host handoff exists.
+Both refuse before argument-driven preparation, credentials, driver or input;
+initialize, ping and tool discovery remain available. Authorized foreground
+actions are separate. P1 keeps one blocked row per selected real MCP trial
+before fixture setup. Do not reinterpret historical measurements.
+
+The P3 status query reads only one locally bound, accepted worker turn. A
+finished worker turn is not verified task success. Onset, committed final
+and display must agree; an unknown binding can show fixed unknown text,
+and a superseded question cannot expose status. No new wire item, synthesized
+speech, desktop observation or tool authority. Dictation and an admitted
+answer to a parked question keep their original owner.
+
 User explicitly approved Add Exact-Window Scope in the real-app
 qualification session. This overrides the earlier no-new-target-pins
 restriction only for an optional window_id in drive_until/suggest_action.
@@ -1100,6 +1116,57 @@ external ASR release blockers remain. Both normal staging and the final-r8
 candidate use it. Native/voice G3, G4, signed real-app and physical acceptance
 remain separate gates.
 
+### C1 KAR-15 named current-window control, v1 (2026-11-17)
+
+**KAR-28 local click authority (2026-11-17):** a standalone, final
+spoken `click` has one local meaning only when the same current native
+fixation was already bound at speech onset. A display sample, inference
+completion time, provider argument, repeated tracker snapshot or point
+alone cannot supply it. Only distinct pixel-matched observations of
+known capture age may earn dwell or an action lease. Check the current
+turn, capture freshness, stream generation, current native hit and
+retained object again at the effect. Looking away, a loss of source,
+replacement, ambiguity, pending question or cancellation revokes it.
+No new gaze or screen payload is permitted on Realtime. This does not
+expand the screen-question exception below. Raw point typing, window
+control, global double/right clicks and gaze-selected agent interruption
+are not substitutes when target identity cannot be established.
+The Jarvis-managed tracker always receives the host marker `--no-tray`.
+Hosted lip-motion experiments must not construct the native mouse
+controller, even when forwarded flags request them; standalone opt-in is
+unchanged. A buried control, a replaced witness, a source change during
+native proof, or tracker pause must deny the pending gaze press. A camera
+without a trustworthy capture timestamp is display-only.
+
+On one committed spoken command, the host may submit exactly one locally witnessed
+`Close` or `Minimize` kind on the existing Realtime connection. The question
+must name the control and current window; a pronoun, partial, model tool call,
+typed request, previous turn, pending ask or ordinary task cannot grant this
+permission. The host compares its onset window with the final scope and retains
+the AX window/button/focus witness for at most eight seconds. No screen contents,
+labels, identifiers or task context go in the isolated response. Ordinary audio
+transcription is unchanged.
+
+Realtime manual and hands-free onsets no longer arm the speculative gaze halo:
+before words are known it would fetch window state for every utterance. Preserve
+the local host turn/window identity, but resolve named targets only after
+admission. A changed gaze point cannot stand in for the earlier intended
+control; an unbound pointing command asks for a name. Nonvoice gaze gestures
+retain their existing owner. No claim of equivalent halo timing or latency.
+
+One non-executing ticket binds input, turn, transport, nonce and response.
+`conversation:none` and explicit one-kind input are both required. No tools,
+default-history items, response retry or feedback speech. Only one fully completed
+audio part, matching the host's exact answer and bounded to 384,000 PCM bytes,
+can reach the still-current playback generation after another local observation.
+An ungrounded screen question gets only the fixed host card. Historical P3 p08
+records refusal at the tool boundary; on this host path the refusal precedes
+inference. The public nine-tool contract and default unavailable set do not change.
+
+P3 admission and P5 response routing share this exception. P6 scripts,
+P7 browser actions, P11 gaze and R10 voice/packaging acquire no new authority;
+there is no new action, screenshot, speech provider, install or acceptance flag.
+
 ### C1 R10 retained packaging base (2026-11-17)
 
 The recorded daily app is absent; its historical hash is not evidence it
@@ -1117,3 +1184,13 @@ entitlement/requirement and source snapshot before/after clone. Existing
 native inputs and release2 binary stay frozen; only packaging snapshot
 changes. Stage helper, P12 validator/tests and normal-launch consumer
 are reviewed together. Artifact/live/human gates still required.
+
+### 2026-11-17 — KAR-30 portable tracker profile (G2 HOLD)
+
+The [RetinaFace release contract](results/P12/retinaface-release-contract.md)
+proposes a distinct two-weight profile, not an amendment to the development
+checksum list or historical C1 artifact. Provisioning, staging, archive
+checking, native host/clients and tracker startup must honor the same
+release identity. Keep WebGPU and WASM recovery. No weight-specific
+redistribution grant was established for either required default. No
+authority to sign, distribute or claim post-spawn ownership.
