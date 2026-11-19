@@ -25,7 +25,7 @@ extension AgentRuntime: AgentRuntimeHandling {
     }
 }
 
-/// A turn's final message decoded per mirror/10-message-protocol.md. `body`
+/// A turn's final message decoded from its trailing marker blocks. `body`
 /// is the visible reply with EVERY bracketed marker block removed — raw
 /// tags never reach the UI.
 struct AgentFinalMessage: Equatable {

@@ -1,9 +1,8 @@
 # Research notes — still-valid findings
 
 Consolidated 2026-10-18 (P0 doc normalization) from the deleted files
-`development/eyetracking-robustness-research.md`,
-`development/eyetracking-facelandmarker-eval.md`, and
-`development/agently-decompile-notes.md`. Point-in-time audits were
+`development/eyetracking-robustness-research.md` and
+`development/eyetracking-facelandmarker-eval.md`. Point-in-time audits were
 deleted outright; this file keeps only research that still informs P2a,
 P8, P10, and P11. Sources cited at the bottom.
 
@@ -127,45 +126,6 @@ not a standing dependency.
   head-to-head; GPU delegate inside an Electron worker unverified
   (assume CPU); trained `eyeBlink` vs mesh-EAR + state machine
   unproven; MediaPipe wasm is opaquer than our ONNX sessions.
-
-## 3. Agently decompile — UX patterns to steal
-
-Source: beta.agently.dev bundle (React+Vite SPA + Mac shell), analyzed
-2026-10-16. **No gaze features** — `eye.js` is a Lucide icon; our
-differentiation is unchallenged there. Ranked for Jarvis:
-
-1. **Adaptive onboarding** — drop steps already satisfied; persistent
-   "Skip setup"; per-step completion telemetry where skips are data →
-   calibration entry shows only "top-up" when a calibration exists.
-2. **Narrated progress feed** — mono typed-out lines, fading older
-   entries, aria-live ("Opening acme.com / Read 12 pages") →
-   thinking/executing narration on the pill during drive tasks (>2 s
-   tasks get narration — PROGRAM.md desirability layer).
-3. **Phase-word status + "N in progress"** — off→"Ready when you are",
-   thinking→"Working on it", error→"Voice needs attention" +
-   `· {n} in progress` suffix → `VoiceController.status` copy.
-4. **Platform-aware permission copy** — name System Settings explicitly
-   ("Allow Camera access for Jarvis in System Settings → Camera").
-5. **"Always allowed" consent ledger** — labeled standing grants +
-   per-row Revoke + teaching empty state → replaces bare "Reset
-   remembered permissions"; needs CuaStandingGrants enumerate/revoke.
-6. **"Finish setup" checklist** — `Setting up · N of M done`, success
-   line "macOS allows everything Jev uses, so nothing stops a task
-   midway" → OnboardingChecklist aggregate progress.
-7. **glance() lexical gate** — regex on utterance (this/that/here/
-   screen/window/selected) decides light vs full screen context →
-   deictic utterance attaches gaze+screen context.
-8. **Notch dwell grammar** — "rest your pointer on the notch…" =
-   dwell-to-reveal hotspot → top-edge gaze-dwell zone for overlay/status.
-9. **Cursor honesty** — "Jarvis's cursor glides… It never takes your
-   mouse" — the contract phrase for our agent-vs-user cursor rule.
-10. **Polish mechanics** — keyboard-hint footers, role=status/aria-live,
-    confirm modal autofocus+isLoading, auto-attached diagnostics on
-    support, status pills `{dot,label}` vocabulary.
-
-**Copy tone**: second-person, plain verbs, agent is actor; reassurance
-clause on failures; error copy names the fix location ("Needs attention.
-See Settings → Models."). Every error states what's still safe.
 
 ## Sources
 
