@@ -964,7 +964,7 @@ actor TrackerHost {
     /// Geometry comes from UserDefaults so Settings edits don't need a
     /// rebuild — `trackerDisplaySizeInch` (Double), `trackerCameraFovDeg`
     /// (Int), `trackerProjectionMode` (String), `trackerWasmThreads`
-    /// (Int); `JARVIS_EYE_TRACKER_ARGS` is the raw escape hatch — the
+    /// (Int), `trackerGazeMaxFps` (Int, default 15); `JARVIS_EYE_TRACKER_ARGS` is the raw escape hatch — the
     /// bundled-calibration redirect goes after it, since the tracker
     /// honors the first occurrence of a flag.
     nonisolated static func trackerArguments(trackerDir: URL,
@@ -1019,6 +1019,14 @@ actor TrackerHost {
         // trackerForceWasm default) — the fps cap keeps the pipeline from
         // burning cycles queuing frames wasm (~300ms/frame) can't reach.
         if forceWasm { arguments += ["--web-accelerator", "wasm", "--gaze-max-fps", "10"] }
+        // Hosted gaze rate: 15 fps keeps the MediaPipe tracker near 23% of
+        // one core on an M1 (20 fps measured 32–37%); `trackerGazeMaxFps`
+        // = 20 opts back into the smoother rate. The wasm fallback's own
+        // cap above comes first and wins.
+        else {
+            let fps = defaults.integer(forKey: "trackerGazeMaxFps")
+            arguments += ["--gaze-max-fps", "\(fps > 0 ? fps : 15)"]
+        }
         // Extra tracker flags (calibration overrides, experiment toggles)
         // come from the environment so Settings doesn't need a relaunch
         // to change them: JARVIS_EYE_TRACKER_ARGS="--display-size-inch 31.5".

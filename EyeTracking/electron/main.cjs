@@ -555,6 +555,12 @@ function handleControlAction(action, value) {
     requestRecalibration("control api");
     return;
   }
+  if (action === "accuracy_check") {
+    // Same lip-click shield as a recalibration: the check opens with one.
+    lipClickController?.setCalibrationActive(true);
+    dispatchMenuAction("accuracy_check");
+    return;
+  }
   // set_paused carries the target state (the host's screen-lock parking),
   // not a toggle — the renderer applies it through the same path a manual
   // pause uses and reports it back through set-paused / report-state.

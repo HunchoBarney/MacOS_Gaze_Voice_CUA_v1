@@ -339,6 +339,10 @@ function App() {
   // --calibrate-if-missing: the host's first enable starts calibration itself
   // instead of showing the invitation card.
   const [autoCalibrate, setAutoCalibrate] = useState(false);
+  // A Settings-initiated accuracy check: runs grid + hit test like
+  // --accuracy-test --hit-test, after its own calibration.
+  const [accuracyCheck, setAccuracyCheck] = useState(false);
+  const accuracyCheckRef = useRef(false);
   const autoCalibrateRef = useRef(false);
   autoCalibrateRef.current = autoCalibrate;
   const lastDriftTriggerRef = useRef(0);
@@ -767,7 +771,7 @@ function App() {
         }
         rejectedFitRetriesRef.current = 0;
         // The accuracy run shows its own report flow — no confetti on top.
-        if (!configRef.current?.accuracyTest && !configRef.current?.hitTest) {
+        if (!configRef.current?.accuracyTest && !configRef.current?.hitTest && !accuracyCheckRef.current) {
           setCalibratedFlash(true);
         }
         dismissOnboarding();
@@ -825,6 +829,16 @@ function App() {
       } else if (payload.action === "recalibrate") {
         // Menu entry — the same quick top-up ⌘⇧G performs.
         beginCalibration("quick");
+      } else if (payload.action === "accuracy_check") {
+        // Settings → "Check eye-tracking accuracy": a full calibration, then
+        // the held-out grid and the hit test, without any launch flags.
+        if (calibrationActiveRef.current || accuracyIndexRef.current !== null) {
+          return;
+        }
+        accuracyStartedRef.current = false;
+        accuracyCheckRef.current = true;
+        setAccuracyCheck(true);
+        beginCalibration("full");
       } else if (payload.action === "dot_scale") {
         const scale =
           typeof payload.value === "number" && Number.isFinite(payload.value)
@@ -1202,7 +1216,7 @@ function App() {
   }, []);
 
   const appendHitTrials = useCallback(() => {
-    if (!configRef.current?.hitTest) {
+    if (!configRef.current?.hitTest && !accuracyCheckRef.current) {
       return;
     }
     const geometry = protocolGeometry(accuracyBucketsRef.current.flatMap((b) => b.distances));
@@ -1213,10 +1227,12 @@ function App() {
   // Accuracy test start: after calibration when both flags are set, otherwise
   // once tracking is live. The test measures whatever map is loaded.
   useEffect(() => {
-    if (!(config?.accuracyTest || config?.hitTest) || accuracyStartedRef.current) {
+    const runGrid = Boolean(config?.accuracyTest || accuracyCheck);
+    const runHit = Boolean(config?.hitTest || accuracyCheck);
+    if (!config || !(runGrid || runHit) || accuracyStartedRef.current) {
       return;
     }
-    if ((config.calibrate || autoCalibrate) && !calibrationDone) {
+    if ((config.calibrate || autoCalibrate || accuracyCheck) && !calibrationDone) {
       return;
     }
     if (!gazePresence.live || calibrationCountdown !== null || pursuitActive) {
@@ -1228,10 +1244,8 @@ function App() {
     hitGeometryRef.current = null;
     // Hit trials are sized from the grid's measured distance, so they're
     // appended when the grid finishes (or right away for --hit-test alone).
-    accuracyPlanRef.current = config.accuracyTest
-      ? shuffled(ACCURACY_GRID).map((target): AccuracyStep => ({ kind: "grid", target }))
-      : [];
-    if (!config.accuracyTest) {
+    accuracyPlanRef.current = runGrid ? shuffled(ACCURACY_GRID).map((target): AccuracyStep => ({ kind: "grid", target })) : [];
+    if (!runGrid) {
       appendHitTrials();
     }
     // The test owns the screen — a first-run card still up must not linger
@@ -1240,9 +1254,11 @@ function App() {
     setOnboarding(false);
     setAccuracyIndex(0);
     showStatus("accuracy test — stare at each dot", "info");
-  }, [config, autoCalibrate, calibrationDone, gazePresence.live, calibrationCountdown, pursuitActive, showStatus, appendHitTrials]);
+  }, [config, autoCalibrate, accuracyCheck, calibrationDone, gazePresence.live, calibrationCountdown, pursuitActive, showStatus, appendHitTrials]);
 
   const finalizeAccuracyTest = useCallback(() => {
+    accuracyCheckRef.current = false;
+    setAccuracyCheck(false);
     const buckets = accuracyBucketsRef.current;
     const display = configRef.current?.displayBounds;
     const geometry = hitGeometryRef.current ?? protocolGeometry(buckets.flatMap((b) => b.distances));
@@ -1479,7 +1495,8 @@ function App() {
 
   const calibrationActive = calibrationCountdown !== null || pursuitActive;
   const accuracyStep = accuracyIndex !== null ? accuracyPlanRef.current[accuracyIndex] : undefined;
-  const accuracyStepTotal = (config?.accuracyTest ? ACCURACY_GRID.length : 0) + (config?.hitTest ? HIT_STEPS : 0);
+  const accuracyStepTotal =
+    (config?.accuracyTest || accuracyCheck ? ACCURACY_GRID.length : 0) + (config?.hitTest || accuracyCheck ? HIT_STEPS : 0);
   const modalActive = calibrationActive || accuracyIndex !== null;
   const markerShown = markerVisible || calibrationCountdown !== null || Boolean(config?.showCameraMarker);
 
@@ -1519,6 +1536,8 @@ function App() {
     accuracyCollectRef.current = null;
     accuracyPlanRef.current = [];
     hitStateRef.current = null;
+    accuracyCheckRef.current = false;
+    setAccuracyCheck(false);
     lastVerdictRef.current = null;
     // Escaping a first-enable auto run is a "not now" that sticks.
     if (autoCalibrateRef.current) {

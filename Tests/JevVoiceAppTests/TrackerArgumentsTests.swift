@@ -97,6 +97,17 @@ final class TrackerArgumentsTests: XCTestCase {
         XCTAssertEqual(value(after: "--host-pid", in: args(useProdRenderer: true, hostPid: 777)), "777")
     }
 
+    /// The hosted gaze rate defaults to 15 fps (under the 30%-of-a-core
+    /// budget) and the defaults key opts into 20; the wasm fallback keeps
+    /// its own 10 fps cap and emits no second flag.
+    func testGazeRateDefaultsToFifteenWithOverride() {
+        XCTAssertEqual(value(after: "--gaze-max-fps", in: args()), "15")
+        defaults.set(20, forKey: "trackerGazeMaxFps")
+        XCTAssertEqual(value(after: "--gaze-max-fps", in: args()), "20")
+        XCTAssertEqual(args(forceWasm: true).filter { $0 == "--gaze-max-fps" }.count, 1)
+        XCTAssertEqual(value(after: "--gaze-max-fps", in: args(forceWasm: true)), "10")
+    }
+
     /// First enable calibrates on its own: the tracker starts the full
     /// calibration whenever no usable calibration loads.
     func testCalibrateIfMissingAlwaysEmitted() {

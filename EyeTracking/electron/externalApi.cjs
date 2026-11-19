@@ -22,6 +22,10 @@ const CONTROL_ACTIONS = new Set([
   // posts the target state instead.
   "set_paused",
   "recalibrate",
+  // Settings → "Check eye-tracking accuracy": full calibration, then the
+  // protocol v1 accuracy grid and hit test; the report lands beside the
+  // calibration file.
+  "accuracy_check",
   "dot_scale",
   // Gaze-cursor visibility — Vision Pro default is off; the element-level
   // highlight carries the pointing cue instead of a drawn dot.
