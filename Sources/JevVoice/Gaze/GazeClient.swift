@@ -81,10 +81,8 @@ struct GazeClient: Sendable {
         }
     }
 
-    static var defaultBaseURL: URL {
-        let env = ProcessInfo.processInfo.environment["JARVIS_GAZE_URL"]
-        return URL(string: env ?? "http://127.0.0.1:\(TrackerHost.port)")!
-    }
+    /// The tracker's API on this Mac. Tests point it at a stub server.
+    nonisolated(unsafe) static var defaultBaseURL = URL(string: "http://127.0.0.1:\(TrackerHost.port)")!
 
     /// The current gaze point, gated on freshness + tracker confidence so a
     /// referent verb never acts on a point the tracker itself distrusts.

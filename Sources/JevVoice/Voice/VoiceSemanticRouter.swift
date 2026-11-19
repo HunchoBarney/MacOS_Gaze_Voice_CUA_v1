@@ -51,8 +51,7 @@ struct VoiceSemanticRouter: Sendable {
     typealias Infer = @Sendable (JSONValue, [String: Question]) async throws -> SystemOneResponse
     let infer: Infer
 
-    static func live(apiKey: String, transport: Infer? = nil,
-                     budget: SemanticRequestBudget? = nil, subject: String? = nil) -> Self {
+    static func live(apiKey: String, transport: Infer? = nil) -> Self {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return Self { _, _ in throw Failure.unavailable }
         }
@@ -70,23 +69,6 @@ struct VoiceSemanticRouter: Sendable {
         let client = JevClient(apiKey: apiKey)
         return Self { state, questions in
             Self.stageTimings?.record("reserve_ms", milliseconds: 0)
-            if let budget {
-                guard let subject else { throw Failure.unavailable }
-                struct Payload: Encodable {
-                    let model: String
-                    let state: JSONValue
-                    let questions: [String: Question]
-                }
-                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-                let data = try encoder.encode(Payload(model: client.model, state: state, questions: questions))
-                let started = ProcessInfo.processInfo.systemUptime
-                defer {
-                    Self.stageTimings?.record("reserve_ms",
-                        milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000)
-                }
-                _ = try await budget.reserve(subject: subject, requestSHA256: SemanticRequestBudget.digest(data),
-                                             allocation: "gui")
-            }
             let started = ProcessInfo.processInfo.systemUptime
             defer {
                 Self.stageTimings?.record("infer_ms",

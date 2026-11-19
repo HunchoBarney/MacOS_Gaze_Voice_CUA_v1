@@ -11,12 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var windows: VoiceWindows!
     private let speechOutput = SpeechOutput()
-    private lazy var controller: VoiceController = {
-        let config = VoiceUserAudit.enabled
-            ? VoiceUserAudit.diagnosticConfiguration()
-            : Config.shared
-        return VoiceController(config: config, speaker: speechOutput)
-    }()
+    private lazy var controller = VoiceController(config: Config.shared, speaker: speechOutput)
+    private let diagnostics = DiagnosticsReporter()
     private var agentRuntime: AgentRuntime?
     private let microphones = MicrophoneCatalog()
     private let input = FnInputMonitor()
@@ -26,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var sleeping = false
     private var screenLocked = false
     private var canPrepareMicrophone: Bool {
-        sessionActive && !sleeping && !screenLocked && !terminating && !VoiceUserAudit.enabled
+        sessionActive && !sleeping && !screenLocked && !terminating
     }
     private var permissionTimer: Timer?
     /// The Eyes section of the status menu — state arrives from one
@@ -40,10 +36,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eyesRestart: NSMenuItem?
     private var eyesPause: NSMenuItem?
     private var eyesRecalibrate: NSMenuItem?
-    /// Driver maintenance affordance — disabled while a restart is in
-    /// flight so a second request can't queue behind the kill/spawn.
-    private var driverRestartItem: NSMenuItem?
-    private var driverRestarting = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard acquireInstanceLock() else {
@@ -55,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             exit(0)
         }
         NSApp.setActivationPolicy(.accessory)
+        diagnostics.start()
         installEditMenu()
         // The status item is the only launch feedback an accessory app has —
         // it goes up before the controller, whose init reads Keychain and
@@ -86,11 +79,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let eyeSettings = menu.addItem(withTitle: "Eye Tracking Settings…", action: #selector(showEyeSettings), keyEquivalent: "")
         eyeSettings.target = self
         menu.addItem(.separator())
-        let driverRestart = menu.addItem(withTitle: "Restart Driver", action: #selector(restartDriver), keyEquivalent: "")
-        driverRestart.target = self
-        driverRestartItem = driverRestart
-        let latencyReport = menu.addItem(withTitle: "Copy Latency Report", action: #selector(copyLatencyReport), keyEquivalent: "")
-        latencyReport.target = self
+        let exportLogs = menu.addItem(withTitle: "Export Logs…", action: #selector(exportLogs), keyEquivalent: "")
+        exportLogs.target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Jev Voice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -136,9 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Telemetry taps — read-only subscriptions over streams the app
         // already publishes; they observe, never feed back.
         wireTelemetry()
-        // Composition seams — gaze-tap commit + universal stop are live;
-        // local STT/router/voice stay a documented stub until the
-        // Intelligence lane's types land (see the method's doc comment).
+        // Composition seams: gaze-tap commit and the universal stop.
         wireLocalIntelligence()
 
         agentRuntime = Self.makeAgentRuntime()
@@ -178,7 +166,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &subscriptions)
         input.$ready.removeDuplicates().sink { [weak self] ready in
             guard let self, self.canPrepareMicrophone else { return }
-            self.controller.recordQualificationInputReady(ready)
             if ready || self.controller.config.handsFreeEnabled { self.controller.prepareMicrophone() }
             else { self.controller.suspendMicrophone("Fn input is unavailable.") }
         }.store(in: &subscriptions)
@@ -242,10 +229,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             windows.show(.voice)
         } else if !controller.missingPermissions.isEmpty || !input.ready {
             controller.showSetup("Finish setup in Voice settings. " + input.message)
-        }
-        if VoiceUserAudit.enabled {
-            input.stop()
-            VoiceUserAudit.start(controller: controller)
         }
     }
 
@@ -322,16 +305,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { await agentRuntime?.stopAll() }
     }
 
-    /// Agents need a codex binary (vendored in the bundle, dev fallback
-    /// ~/.local/bin) and a configured model provider — without either the
-    /// roster stays empty and the feature stays off rather than half-working.
+    /// Agents need the bundled codex binary and a configured model
+    /// provider — without either the roster stays empty and the feature
+    /// stays off rather than half-working.
     private static func makeAgentRuntime() -> AgentRuntime? {
-        let bundled = Bundle.main.resourceURL?
-            .appendingPathComponent("CodexRuntime/codex")
-        let dev = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/bin/codex")
-        guard let codex = [bundled, dev].compactMap({ $0 })
-            .first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else {
+        guard let codex = Bundle.main.resourceURL?.appendingPathComponent("CodexRuntime/codex"),
+              FileManager.default.isExecutableFile(atPath: codex.path) else {
             return nil
         }
         // The user's own codex login preferred (real OpenAI models on
@@ -447,53 +426,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showActivity() { windows.show(.activity) }
     @objc private func showAgents() { windows.showAgents() }
 
-    // MARK: - Telemetry + driver maintenance
+    // MARK: - Telemetry
 
     /// Read-only subscriptions over the streams the app already publishes —
     /// the latency ledger taps Fn edges, capture-state transitions, the
-    /// decision feed and the gaze event sink; the spend counter taps the
-    /// same feed and capture edges. Nothing in the voice/drive lanes knows
-    /// they exist, which is the point of wiring them here.
+    /// decision feed and the gaze event sink. Nothing in the voice/drive
+    /// lanes knows it exists, which is the point of wiring it here.
     private func wireTelemetry() {
         LatencyLedger.shared.attach(controller: controller, input: input,
                                     gaze: GazeService.shared)
-        SpendCounter.shared.attach(controller: controller)
     }
 
-    /// Re-mint the embedded computer-use daemon — the host's own
-    /// `restartDriver()` stops the current generation and re-spawns with
-    /// the same socket-readiness wait a normal mint pays (a failed re-mint
-    /// stays non-fatal: the next `socket()` retries lazily). The menu item
-    /// disables while a restart is in flight so a second request can't
-    /// queue behind the kill/spawn window.
-    @objc private func restartDriver() {
-        guard !driverRestarting else { return }
-        driverRestarting = true
-        driverRestartItem?.title = "Restarting Driver…"
-        driverRestartItem?.isEnabled = false
-        Task { [weak self] in
-            await CuaDaemonHost.shared.restartDriver()
-            await MainActor.run {
-                guard let self else { return }
-                self.driverRestarting = false
-                self.driverRestartItem?.title = "Restart Driver"
-                self.driverRestartItem?.isEnabled = true
-                // Rebind the coordinator's cached transport to the new
-                // socket now instead of letting the next task pay it.
-                self.controller.cua.warm()
-            }
+    /// Writes recent app logs, crash and hang reports, and the latency
+    /// summary to one file the user picks, so a problem can be reported
+    /// without a developer build.
+    @objc private func exportLogs() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "Jev Voice Logs.txt"
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let report = diagnostics.exportReport(latency: LatencyLedger.shared.report())
+        do {
+            try report.write(to: url, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            Self.log.error("log export failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    /// p50/p95 per stage onto the pasteboard — the report is derived from
-    /// the ledger's ring, never re-reads the JSONL.
-    @objc private func copyLatencyReport() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(LatencyLedger.shared.report(), forType: .string)
-    }
-
-    /// Composition-seam + local-intelligence wiring.
+    /// Composition-seam wiring.
     ///
     ///   - `controller.gazeTapHandler` → `GazeService.commitTarget` +
     ///     `cua.actuateCommitted`: a speechless Fn tap (sub-100ms of
@@ -506,10 +467,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///     and in-flight agent turn, not just the capture.
     ///   - Local capture/final admission belongs to RealtimeVoiceLane;
     ///     composition never wires a second transcript/action authority.
-    ///   - `controller.speaker` → `LocalVoice.shared` once its models
-    ///     are ready (PocketTTS downloads on first prepare); the
-    ///     `ttsEnabled` toggle-off restores `speechOutput`, and any
-    ///     prepare failure leaves the AVSpeech lane in place.
     private func wireLocalIntelligence() {
         controller.gazeTapHandler = { [weak self] in
             guard !Task.isCancelled else { return false }
@@ -528,28 +485,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // The voice lane owns local capture, final admission and display.
         // No independently wired speculative transcript router may dispatch.
-        controller.localSpeechWindow = nil
-        controller.localSpeechSink = nil
-        guard !controller.usesRealtimeVoice else { return }
-        // Local voice — adopt only after its models are really present
-        // (first prepare downloads them); AVSpeech stays the fallback.
-        controller.config.$ttsEnabled
-            .sink { [weak self] on in
-                guard let self else { return }
-                if !on {
-                    self.controller.speaker = self.speechOutput
-                    return
-                }
-                Task { [weak self] in
-                    guard let self, await LocalVoice.shared.prepare() else { return }
-                    // Re-read the toggle — a user who flipped it off mid-
-                    // download shouldn't wake the lane anyway.
-                    if self.controller.config.ttsEnabled {
-                        self.controller.speaker = LocalVoice.shared
-                    }
-                }
-            }
-            .store(in: &subscriptions)
     }
 
     // MARK: - Eyes section
@@ -766,17 +701,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 // `JevVoice --mcp-stdio --agent <slug>` is an agent's MCP server process —
 // short-circuit before the app boots so codex children never become a
 // second Jev Voice instance.
-MainActor.assumeIsolated { VoiceNormalQualification.preflight() }
-if ProcessInfo.processInfo.arguments.contains("--p3-voice-replay")
-    || ProcessInfo.processInfo.arguments.contains("--p3-record-holdouts") {
-    VoiceReplay.main()
-}
-if ProcessInfo.processInfo.arguments.contains("--p3-live") {
-    VoiceLiveTrial.main()
-}
-if ProcessInfo.processInfo.arguments.contains("--p3-remote-live") {
-    VoiceRemoteTrial.main()
-}
 if ProcessInfo.processInfo.arguments.contains("--mcp-stdio") {
     CuaDriveServer.main()
 }

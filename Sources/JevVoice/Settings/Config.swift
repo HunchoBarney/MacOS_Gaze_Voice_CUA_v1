@@ -3,14 +3,9 @@ import Combine
 import ServiceManagement
 
 final class Config: ObservableObject {
-    static func startupKeychainInteractionAllowed(environment: [String: String], arguments: [String]) -> Bool {
-        !(environment["JARVIS_P3_GUI_AUDIT"] == "1" && arguments.contains("--p3-user-audit"))
-    }
     static let shared: Config = {
-        let allow = startupKeychainInteractionAllowed(environment: ProcessInfo.processInfo.environment,
-                                                       arguments: ProcessInfo.processInfo.arguments)
-        return Config(keyStore: KeychainAPIKeyStore(allowUserInteraction: allow),
-                      openAIKeyStore: KeychainAPIKeyStore(account: "openAIAPIKey", allowUserInteraction: allow))
+        Config(keyStore: KeychainAPIKeyStore(allowUserInteraction: true),
+               openAIKeyStore: KeychainAPIKeyStore(account: "openAIAPIKey", allowUserInteraction: true))
     }()
 
     private let defaults: UserDefaults

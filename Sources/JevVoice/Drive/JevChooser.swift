@@ -72,10 +72,7 @@ enum JevChooser {
 
     static func make(client: JevClient) -> DriveLoop.Choose {
         make(model: client.model) { state, questions in
-            let result = try await client.systemOne(state: state, questions: questions)
-            await recordSynthetic(state: state, questions: questions,
-                                  response: result.0, latencyMs: result.1)
-            return result
+            try await client.systemOne(state: state, questions: questions)
         }
     }
 
@@ -89,10 +86,7 @@ enum JevChooser {
 
     private static func visualInfer(client: JevClient) -> VisualInfer {
         { state, questions, assets in
-            let result = try await client.systemOne(state: state, questions: questions, assets: assets)
-            await recordSynthetic(state: state, questions: questions,
-                                  response: result.0, latencyMs: result.1)
-            return result
+            try await client.systemOne(state: state, questions: questions, assets: assets)
         }
     }
 
@@ -598,86 +592,5 @@ enum JevChooser {
         guard let before = try? encoder.encode(original), let after = try? encoder.encode(shared),
               after.count < before.count else { return original }
         return shared
-    }
-
-    private static func recordSynthetic(
-        state: JSONValue, questions: [String: Question],
-        response: SystemOneResponse, latencyMs: Double
-    ) async {
-        guard !Task.isCancelled else { return }
-        let process = ProcessInfo.processInfo
-        let args = process.arguments
-        guard args.contains("--mcp-stdio"), let agent = args.firstIndex(of: "--agent"),
-              args.indices.contains(agent + 1), args[agent + 1].hasPrefix("p4-native-"),
-              state["app"]?.string == "dev.jevvoice.workflow-fixture",
-              state["window"]?.string?.hasPrefix("Jev P4 Fixture") == true,
-              case .object(let fields) = state,
-              !fields.keys.contains(where: { $0.lowercased().contains("clipboard") }),
-              let directory = process.environment["JEV_P4_SYNTHETIC_TRACE_DIR"],
-              let fixture = process.environment["JEV_P4_TRACE_FIXTURE_EXECUTABLE"] else { return }
-        let front = await MainActor.run {
-            let app = NSWorkspace.shared.frontmostApplication
-            return (app?.bundleIdentifier, app?.executableURL?.resolvingSymlinksInPath().path)
-        }
-        guard front.0 == "dev.jevvoice.workflow-fixture",
-              front.1 == URL(fileURLWithPath: fixture).resolvingSymlinksInPath().path else { return }
-        let root = URL(fileURLWithPath: directory).standardizedFileURL
-        guard root == root.resolvingSymlinksInPath(),
-              root.lastPathComponent.hasPrefix("jev-synthetic-trace-"),
-              root.deletingLastPathComponent().path.hasSuffix("/.agent/results/P4") else { return }
-        do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: root.path)
-            guard attributes[.type] as? FileAttributeType == .typeDirectory,
-                  (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
-                  (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700 else { return }
-            let directoryFD = Darwin.open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-            guard directoryFD >= 0 else { return }
-            defer { Darwin.close(directoryFD) }
-            var directoryInfo = stat()
-            guard fstat(directoryFD, &directoryInfo) == 0,
-                  directoryInfo.st_uid == getuid(),
-                  directoryInfo.st_mode & 0o777 == 0o700,
-                  directoryInfo.st_mode & S_IFMT == S_IFDIR else { return }
-            let stateData = try JSONEncoder().encode(state)
-            let text = String(decoding: stateData, as: UTF8.self).lowercased()
-            guard !text.contains("securetextfield"), !text.contains("axpasswordfield") else { return }
-            var answers: [String: Any] = [:]
-            for (key, answer) in response.answers {
-                switch answer {
-                case .noul(let value):
-                    answers[key] = ["type": "noul", "noul": value]
-                case .choice(let choice, let confidence, let probabilities):
-                    answers[key] = ["type": "choice", "choice": choice,
-                                    "confidence": confidence, "probabilities": probabilities]
-                case .untrustedChoice(let choice, let probabilities):
-                    answers[key] = ["type": "untrusted_choice", "choice": choice,
-                                    "probabilities": probabilities]
-                case .score(let score, let confidence, let probabilities, let legend):
-                    answers[key] = ["type": "score", "score": score, "confidence": confidence,
-                                    "probabilities": probabilities, "legend": legend]
-                case .box(let box, let confidence):
-                    answers[key] = ["type": "box",
-                                    "box": ["top": box.top, "bottom": box.bottom,
-                                            "left": box.left, "right": box.right],
-                                    "confidence": confidence.map { $0 as Any } ?? NSNull()]
-                }
-            }
-            let data = try JSONSerialization.data(withJSONObject: [
-                "state": try JSONSerialization.jsonObject(with: stateData),
-                "questions": try JSONSerialization.jsonObject(with: JSONEncoder().encode(questions)),
-                "answers": answers, "model": response.model, "latency_ms": latencyMs,
-                "recorded_at": ISO8601DateFormatter().string(from: Date()),
-                "usage": response.usage.map { ["input_tokens": $0.inputTokens,
-                                               "output_tokens": $0.outputTokens] } ?? [:],
-            ], options: [.prettyPrinted, .sortedKeys])
-            let descriptor = Darwin.openat(directoryFD, UUID().uuidString + ".json",
-                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-            guard descriptor >= 0 else { return }
-            let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-            defer { try? file.close() }
-            try file.write(contentsOf: data)
-        } catch {
-            diagnostics.notice("Synthetic decision recording succeeded=false")
-        }
     }
 }

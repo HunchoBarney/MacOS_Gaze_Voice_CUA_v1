@@ -97,8 +97,8 @@ fi
 [[ -f "$TRACKER_SRC/package.json" ]]            || skip "no tracker checkout at $TRACKER_SRC"
 [[ -f "$TRACKER_SRC/electron/main.cjs" ]]       || skip "$TRACKER_SRC/electron/main.cjs missing"
 [[ -f "$TRACKER_SRC/scripts/start-prod.cjs" ]]  || skip "$TRACKER_SRC/scripts/start-prod.cjs missing"
-[[ -f "$TRACKER_SRC/dist/index.html" ]]         || skip "$TRACKER_SRC/dist missing — run \`make tracker-deps\` (pnpm build) first"
-[[ -d "$TRACKER_SRC/node_modules/.pnpm" ]]      || skip "$TRACKER_SRC/node_modules missing — run \`make tracker-deps\` (pnpm install) first"
+[[ -f "$TRACKER_SRC/dist/index.html" ]]         || skip "$TRACKER_SRC/dist missing — run \`make tracker\` (pnpm build) first"
+[[ -d "$TRACKER_SRC/node_modules/.pnpm" ]]      || skip "$TRACKER_SRC/node_modules missing — run \`make tracker\` (pnpm install) first"
 
 # NM is the realpath-resolved node_modules — the closure walk compares
 # resolved paths, and TRACKER_SRC may itself be a link (app support).
@@ -282,8 +282,8 @@ fi
 # TCC: every bundled plist needs NSCameraUsageDescription or a camera request
 # attributed to an unpatched helper is a SIGABRT, not a prompt. Same stamp
 # EyeTracking/scripts/patch-electron-app.sh applies to the dev copy, done
-# here on the STAGED bundle so it works even when tracker-deps was skipped.
-# Fast path first: a checkout that already ran tracker-deps carries patched
+# here on the STAGED bundle so it works even when `make tracker` was skipped.
+# Fast path first: a checkout that already ran `make tracker` carries patched
 # plists and a valid seal — nothing to do (and an in-checkout re-sign would
 # hit the provenance detritus tripwire anyway).
 STAGED_EAPP="$STAGE/node_modules/electron/dist/Electron.app"

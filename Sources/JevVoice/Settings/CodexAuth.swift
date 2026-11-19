@@ -1,29 +1,14 @@
 import Foundation
 import AppKit
 
-/// Locates the codex CLI the app itself would spawn — same search order as
-/// the agent runtime wiring (bundled CodexRuntime first, then the working-
-/// copy vendor tree, then the user's ~/.local/bin install). Unpackaged runs
-/// and tests land on the dev paths.
+/// Locates the codex CLI the app itself would spawn: the runtime bundled in
+/// Contents/Resources/CodexRuntime.
 enum CodexDependency {
     static var executable: URL? {
-        let fm = FileManager.default
-        var candidates: [URL] = []
-        if let resources = Bundle.main.resourceURL {
-            candidates.append(resources.appendingPathComponent("CodexRuntime/bin/codex"))
-            candidates.append(resources.appendingPathComponent("CodexRuntime/codex"))
-        }
-        // Repository root from this file's compile-time path — survives any
-        // process cwd, so `swift run`/`swift test` still find the vendor tree.
-        let sourceRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        candidates.append(sourceRoot.appendingPathComponent("build/vendor/CodexRuntime/bin/codex"))
-        candidates.append(URL(fileURLWithPath: fm.currentDirectoryPath)
-            .appendingPathComponent("build/vendor/CodexRuntime/bin/codex"))
-        candidates.append(fm.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/bin/codex"))
-        return candidates.first { fm.isExecutableFile(atPath: $0.path) }
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        return ["CodexRuntime/bin/codex", "CodexRuntime/codex"]
+            .map { resources.appendingPathComponent($0) }
+            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 }
 

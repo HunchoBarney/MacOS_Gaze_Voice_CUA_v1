@@ -62,12 +62,6 @@ final class ConvertedAudioFeed: @unchecked Sendable {
     private var emittedFrames = 0
     private var peakRMS: Float = 0
     private var hasFloatSamples = false
-    /// Local speech tee — every converted chunk is handed here too, so a
-    /// LocalTranscriber (attached at composition) hears the same PCM the
-    /// socket does. Fire-and-forget: invoked inside the conversion lock
-    /// on the audio tap thread, so the sink must stay cheap. Set it
-    /// before the feed starts streaming.
-    var localSpeechSink: (@Sendable (AVAudioPCMBuffer) -> Void)?
 
     init(input: AVAudioFormat, output: AVAudioFormat) throws {
         guard let converter = AVAudioConverter(from: input, to: output) else {
@@ -116,7 +110,6 @@ final class ConvertedAudioFeed: @unchecked Sendable {
             } else {
                 emittedFrames += 1
             }
-            localSpeechSink?(output)
         }
     }
     func level() -> Float { lock.lock(); defer { lock.unlock() }; return meter }
@@ -156,7 +149,6 @@ final class ConvertedAudioFeed: @unchecked Sendable {
                     continuation.finish(throwing: VoiceError("Speech processing could not finish the audio.")); return
                 }
                 emittedFrames += 1
-                localSpeechSink?(output)
             }
             if status == .endOfStream { continuation.finish(); return }
         }

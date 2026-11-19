@@ -85,14 +85,8 @@ final class EmbeddedDaemon {
                             "--grant", "existing-profile"]
         daemon.environment = environment
         // Daemon logs may contain observed content; do not persist them.
-        // JARVIS_DRIVER_STDERR redirects stderr for diagnostics only.
         daemon.standardOutput = FileHandle.nullDevice
-        if let logPath = ProcessInfo.processInfo.environment["JARVIS_DRIVER_STDERR"] {
-            _ = FileManager.default.createFile(atPath: logPath, contents: nil)
-            daemon.standardError = FileHandle(forWritingAtPath: logPath) ?? FileHandle.nullDevice
-        } else {
-            daemon.standardError = FileHandle.nullDevice
-        }
+        daemon.standardError = FileHandle.nullDevice
         daemon.standardInput = liveness
         try daemon.run()
         self.daemon = daemon

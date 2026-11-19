@@ -493,26 +493,4 @@ final class FocusedTextTargetTests: XCTestCase {
         XCTAssertFalse(FocusedTextBinding.accepts(role: "AXTextArea", subrole: nil, enabled: false, readOnly: false))
         XCTAssertFalse(FocusedTextBinding.accepts(role: "AXTextArea", subrole: nil, enabled: true, readOnly: true))
     }
-
-    func testNativeOwnedBrowserFocusReadOnly() async throws {
-        guard ProcessInfo.processInfo.environment["JARVIS_P3_NATIVE_FOCUS_PROBE"] == "1" else {
-            throw XCTSkip("Owned browser AX probe requires its explicit desktop gate.")
-        }
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let data = try Data(contentsOf: root.appendingPathComponent(".agent/results/P3/closeout03/owned-fields-probe.json"))
-        let proof = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let pid = try XCTUnwrap(proof["browser_pid"] as? Int)
-        let window = try XCTUnwrap(proof["window_id"] as? Int)
-        let captured = await FocusedTextBinding.capture(pid: pid, windowID: window)
-        let binding = try XCTUnwrap(captured)
-        let nativeWindow = await FocusedTextBinding.focusedWindowID(pid: pid)
-        XCTAssertEqual(nativeWindow, window)
-        XCTAssertEqual(FocusedTextBinding.capturedWindowID(pid: pid), window)
-        let current = await binding.isCurrent(), value = await binding.value()
-        XCTAssertTrue(current)
-        XCTAssertEqual(value, "")
-        let sibling = await FocusedTextBinding.capture(pid: pid, windowID: window + 1)
-        XCTAssertNil(sibling)
-    }
 }

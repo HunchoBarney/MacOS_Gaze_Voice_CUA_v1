@@ -200,7 +200,6 @@ enum ConversationListeningState: Equatable {
 
 enum ConversationPresentation {
     case began(UUID, TimeInterval)
-    case source(UUID, VoiceRealtimeInput)
     case sealed(UUID, TimeInterval)
     case final(UUID, String)
     case routed(UUID, local: Bool, startedAt: TimeInterval, endedAt: TimeInterval)
@@ -229,12 +228,7 @@ struct ConversationEffect: Sendable {
 
 @MainActor
 final class ConversationSession {
-    private struct Pending: Sendable {
-        let utterance: ConversationCapture.Utterance
-        let context: VoiceAdmissionContext
-    }
     private struct Final: Sendable {
-        let pending: Pending?
         let context: VoiceAdmissionContext
         let owner: LocalSpeechSession
         let admission: VoiceAdmission
@@ -252,7 +246,6 @@ final class ConversationSession {
 
     typealias RemoteExecutor = @MainActor () async throws -> ConversationEffect?
     var remote: ((VoiceAdmission, LocalSpeechSession, @escaping RemoteExecutor) async throws -> Void)?
-    let capture: ConversationCapture
     var makeSpeechSession: ((VoiceAdmissionContext) throws -> LocalSpeechSession)?
     var readContext: (() -> VoiceAdmissionContext)?
     var interpret: (@MainActor @Sendable (String, VoiceAdmissionContext, ConversationContext) async throws -> ConversationDecision)?
@@ -266,23 +259,13 @@ final class ConversationSession {
     var onDiagnostic: (@Sendable (VoiceSpeechDiagnostic) -> Void)?
     private(set) var id: UUID?
     private var epoch = UUID()
-    private var contexts: [UUID: VoiceAdmissionContext] = [:]
-    private var pending: [Pending] = []
     private var finals: [Final] = []
     private var owners: [UUID: LocalSpeechSession] = [:]
     private var memory = ConversationContext()
-    private var feedTask: Task<Void, Never>?
-    private var eventTask: Task<Void, Never>?
-    private var recognitionTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
     private var repetitionTask: Task<Void, Never>?
     private var repetitionID: UUID?
     private var previousFinal: String?
-    private var external = false
-
-    init(capture: ConversationCapture = ConversationCapture()) { self.capture = capture }
-
-    func prepare() async throws { try await capture.prepare() }
 
     func startExternal(session: UUID) throws {
         guard id == nil, makeSpeechSession != nil, readContext != nil,
@@ -293,11 +276,10 @@ final class ConversationSession {
         epoch = UUID()
         memory = ConversationContext()
         previousFinal = nil
-        external = true
     }
 
     func beginExternal(input: VoiceRealtimeInput, at detectedAt: TimeInterval) throws -> RemoteCapture {
-        guard external, let session = id, let context = readContext?(), let make = makeSpeechSession else {
+        guard let session = id, let context = readContext?(), let make = makeSpeechSession else {
             throw CancellationError()
         }
         let owner = try make(context)
@@ -307,7 +289,6 @@ final class ConversationSession {
         stopRepetition()
         onBargeIn?()
         onEvent?(.began(turn.id, detectedAt))
-        onEvent?(.source(turn.id, input))
         return .init(session: session, epoch: epoch, input: input,
                      owner: owner, turn: turn, context: context)
     }
@@ -343,75 +324,15 @@ final class ConversationSession {
             control(localControl, turn: record.turn.id)
             return
         }
-        finals.append(.init(pending: nil, context: record.context, owner: record.owner,
+        finals.append(.init(context: record.context, owner: record.owner,
                             admission: admission, epoch: record.epoch))
         processNext()
     }
 
-    func start(feed: ConvertedAudioFeed, session: UUID) async throws {
-        guard id == nil, makeSpeechSession != nil, readContext != nil,
-              interpret != nil, execute != nil, onControl != nil else {
-            throw VoiceError("Hands-free voice is not ready.")
-        }
-        let stream = try await capture.begin(session: session)
-        try Task.checkCancellation()
-        id = session
-        external = false
-        epoch = UUID()
-        memory = ConversationContext()
-        previousFinal = nil
-        eventTask = Task { [weak self] in
-            do {
-                for try await event in stream {
-                    guard let self, self.id == session, !Task.isCancelled else { return }
-                    switch event {
-                    case .began(let owner, let turn, _, let detectedAt):
-                        guard owner == session,
-                              ProcessInfo.processInfo.systemUptime - detectedAt <= 0.5 else {
-                            throw VoiceError("I couldn't capture the speaking target in time. Please try again.")
-                        }
-                        guard let context = self.readContext?() else { throw LocalSpeechError.unavailable }
-                        self.contexts[turn] = context
-                        self.stopRepetition()
-                        self.onBargeIn?()
-                        self.onEvent?(.began(turn, detectedAt))
-                    case .utterance(let utterance):
-                        guard utterance.session == session,
-                              let context = self.contexts.removeValue(forKey: utterance.id) else {
-                            throw LocalSpeechError.captureLoss
-                        }
-                        self.onEvent?(.sealed(utterance.id, utterance.sealedAt))
-                        self.pending.append(.init(utterance: utterance, context: context))
-                        self.recognizeNext()
-                    }
-                }
-            } catch {
-                self?.fail(session: session, message: error.localizedDescription)
-            }
-        }
-        let capture = self.capture
-        feedTask = Task.detached(priority: .userInitiated) { [weak self] in
-            do {
-                for try await buffer in feed.stream {
-                    try Task.checkCancellation()
-                    try await capture.consume(VoicePCMFrame(copying: buffer), session: session)
-                }
-                guard !Task.isCancelled else { return }
-                await self?.fail(session: session, message: "The listening audio stopped. Resume hands-free voice to try again.")
-            } catch {
-                guard !Task.isCancelled else { return }
-                await self?.fail(session: session, message: error.localizedDescription)
-            }
-        }
-    }
-
     func stop() {
-        guard let prior = id else { return }
+        guard id != nil else { return }
         id = nil
         epoch = UUID()
-        feedTask?.cancel(); feedTask = nil
-        eventTask?.cancel(); eventTask = nil
-        recognitionTask?.cancel(); recognitionTask = nil
         commandTask?.cancel(); commandTask = nil
         stopRepetition()
         for owner in owners.values {
@@ -420,13 +341,12 @@ final class ConversationSession {
                 Task { await owner.cancelCapture(turn) }
             }
         }
-        owners = [:]; contexts = [:]; pending = []; finals = []
+        owners = [:]; finals = []
         memory = ConversationContext()
-        if !external { Task { await capture.stop(session: prior) } }
     }
 
     func cancelExternalWork() {
-        guard external, id != nil else { return }
+        guard id != nil else { return }
         epoch = UUID()
         commandTask?.cancel(); commandTask = nil
         stopRepetition()
@@ -442,93 +362,8 @@ final class ConversationSession {
         id == command.session && epoch == command.epoch
     }
 
-    private func fail(session: UUID, message: String) {
-        guard id == session else { return }
-        stop()
-        onControl?(.stop)
-        onEnded?(session, message)
-    }
-
-    private func recognizeNext() {
-        guard recognitionTask == nil, let session = id else { return }
-        recognitionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { if self.id == session { self.recognitionTask = nil } }
-            while self.id == session, !Task.isCancelled, !self.pending.isEmpty {
-                let pending = self.pending.removeFirst()
-                let utterance = pending.utterance
-                do {
-                    guard let make = self.makeSpeechSession else { throw LocalSpeechError.unavailable }
-                    let owner = try make(pending.context)
-                    self.owners[utterance.id] = owner
-                    let seconds = Double(utterance.samples.count) / 16_000
-                    let deadline = utterance.sealedAt + min(8, max(2, 1.2 + seconds * 0.3))
-                    guard ProcessInfo.processInfo.systemUptime < deadline else { throw LocalSpeechError.deadline }
-                    let turn = try await owner.beginCapture(id: utterance.id, mode: .command,
-                        now: utterance.detectedAt, previews: false, readyDeadline: deadline)
-                    guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                        sampleRate: 16_000, channels: 1, interleaved: false) else {
-                        throw LocalSpeechError.captureLoss
-                    }
-                    var offset = 0, sequence = 0
-                    while offset < utterance.samples.count {
-                        guard self.id == session, !Task.isCancelled else { throw CancellationError() }
-                        let count = min(16_000, utterance.samples.count - offset)
-                        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)),
-                              let destination = buffer.floatChannelData?[0] else {
-                            throw LocalSpeechError.captureLoss
-                        }
-                        buffer.frameLength = AVAudioFrameCount(count)
-                        try utterance.samples.withUnsafeBufferPointer {
-                            guard let source = $0.baseAddress else { throw LocalSpeechError.captureLoss }
-                            destination.update(from: source.advanced(by: offset), count: count)
-                        }
-                        try await owner.consume(VoicePCMFrame(copying: buffer), sequence: sequence,
-                                                turn: turn, retainRemote: false)
-                        offset += count; sequence += 1
-                    }
-                    owner.context = self.readContext?() ?? VoiceAdmissionContext()
-                    guard let admission = try await owner.finishCapture(turn, acceptedFrames: sequence,
-                        releasedAt: utterance.sealedAt, capturedSeconds: seconds,
-                        executeAutomatically: false, drain: {}),
-                          self.id == session, !Task.isCancelled else { throw LocalSpeechError.stale }
-                    self.onDiagnostic?(.init(turn: turn.id, stage: "conversation.final", metrics: [
-                        "audio_samples": Double(utterance.samples.count),
-                        "audio_start": Double(utterance.range.lowerBound),
-                        "audio_end": Double(utterance.range.upperBound),
-                        "endpoint_to_final_ms": (ProcessInfo.processInfo.systemUptime - utterance.sealedAt) * 1000]))
-                    self.onEvent?(.final(turn.id, admission.text))
-                    let localControl = ConversationContext.localControl(admission.text, after: self.previousFinal)
-                    self.previousFinal = admission.text
-                    if let control = localControl,
-                       owner.consumeAdmission(turn) != nil {
-                        await self.acknowledge(pending)
-                        self.control(control, turn: turn.id)
-                    } else if admission.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        self.onEvent?(.ignored(turn.id))
-                        await self.acknowledge(pending)
-                    } else {
-                        self.finals.append(.init(pending: pending, context: pending.context, owner: owner,
-                                                admission: admission, epoch: self.epoch))
-                        self.processNext()
-                    }
-                } catch {
-                    guard self.id == session, !Task.isCancelled else { return }
-                    self.fail(session: session, message: "Speech could not finish safely. " + error.localizedDescription)
-                    return
-                }
-            }
-        }
-    }
-
-    private func acknowledge(_ pending: Pending) async {
-        owners.removeValue(forKey: pending.utterance.id)
-        await capture.acknowledge(pending.utterance)
-    }
-
-    private func acknowledge(_ record: Final) async {
+    private func acknowledge(_ record: Final) {
         owners.removeValue(forKey: record.admission.turn.id)
-        if let pending = record.pending { await capture.acknowledge(pending.utterance) }
     }
 
     private func control(_ kind: ConversationDecision.Kind, turn: UUID) {
@@ -539,7 +374,7 @@ final class ConversationSession {
         finals = []
         for record in discarded {
             record.owner.cancel(record.admission.turn)
-            Task { await acknowledge(record) }
+            acknowledge(record)
         }
         memory.discardFragment()
         onControl?(kind)
@@ -559,13 +394,13 @@ final class ConversationSession {
                 do { _ = try await self.process(record, session: session) }
                 catch {
                     guard self.id == session, self.epoch == executionEpoch, !Task.isCancelled else {
-                        await self.acknowledge(record)
+                        self.acknowledge(record)
                         return
                     }
                     self.memory.discardRequest()
                     self.onEvent?(.feedback(record.admission.turn.id, error.localizedDescription))
                 }
-                await self.acknowledge(record)
+                self.acknowledge(record)
             }
         }
     }

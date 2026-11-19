@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import XCTest
 import JevVoiceCore
 @testable import JevVoice
@@ -79,25 +78,5 @@ final class IntelligenceChooserTests: XCTestCase {
         let args = try JSONEncoder().encode(JSONValue.object(entries[7].1))
         XCTAssertThrowsError(try VoiceToolCatalog.validate("respond_to_task", arguments: String(decoding: args, as: UTF8.self),
                                                           admission: response, context: stale))
-        if let directory = ProcessInfo.processInfo.environment["JARVIS_P3_EVIDENCE_DIR"] {
-            let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-                .deletingLastPathComponent().deletingLastPathComponent()
-            let source = try Data(contentsOf: root.appendingPathComponent("Sources/JevVoice/Voice/RealtimeVoiceClient.swift"))
-            let hash = SHA256.hash(data: source).map { String(format: "%02x", $0) }.joined()
-            let evidence = JSONValue.object([
-                "schema_version": .number(1), "tool_count": .number(9),
-                "failures": .number(Double(testRun?.failureCount ?? 1)),
-                "run_id": .string(ProcessInfo.processInfo.environment["JARVIS_P3_RUN_ID"] ?? "unrecorded"),
-                "tools": .array(entries.map { .string($0.0) }), "source_sha256": .string(hash),
-                "consumers": .array(["P5", "P6", "P7", "P11"].map(JSONValue.string)),
-                "verification": .string("runtime-validation-and-source-consumer-audit-not-live-API")
-            ])
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let output = URL(fileURLWithPath: directory).appendingPathComponent("contract-review.json")
-            guard output.deletingLastPathComponent().standardizedFileURL == root.appendingPathComponent(".agent/results/P3").standardizedFileURL else {
-                return XCTFail("evidence directory is not phase-owned")
-            }
-            try encoder.encode(evidence).write(to: output, options: .atomic)
-        }
     }
 }

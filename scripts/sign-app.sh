@@ -9,13 +9,6 @@ set -euo pipefail
 APP="$1"
 IDENTITY_NAME="Jev Voice Local Dev"
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -f "$REPO_ROOT/Sources/JevVoice/Voice/ConversationCapture.swift" ]; then
-    python3 "$REPO_ROOT/scripts/bundle-conversation-vad.py" \
-        --source "$REPO_ROOT/build/vendor/ConversationVAD" \
-        --app "$APP"
-fi
-
 xattr -dr com.apple.FinderInfo "$APP" 2>/dev/null || true
 xattr -cr "$APP" 2>/dev/null || true
 

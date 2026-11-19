@@ -171,11 +171,8 @@ private final class NativeFocusedTextTarget {
     }
 
     private func reject(_ reason: String) -> Bool {
-        let env = ProcessInfo.processInfo.environment
-        if env["JARVIS_P3_GUI_AUDIT_TYPING_REPAIR"] == "1" || !(env["JARVIS_VOICE_EVIDENCE_DIR"] ?? "").isEmpty {
-            let front = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1
-            Self.diagnosticLog.notice("native_focus_rejected reason=\(reason, privacy: .public) expected_pid=\(self.pid) front_pid=\(front) expected_window=\(self.windowID)")
-        }
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1
+        Self.diagnosticLog.debug("native_focus_rejected reason=\(reason, privacy: .public) expected_pid=\(self.pid) front_pid=\(front) expected_window=\(self.windowID)")
         return false
     }
 
