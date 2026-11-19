@@ -23,6 +23,8 @@ import {
   clamp01,
   coastPosition,
   DriftMonitor,
+  FEATURE_SCHEMA_VERSION,
+  applyImplicitLabel,
   isHeadTurned,
   interpolateTargetAt,
   isRecoverableInferenceError,
@@ -30,6 +32,7 @@ import {
   type DetectionResult,
   type GazeEstimate,
   type GazeFeature,
+  type ImplicitLabelKind,
   type TimedFeature,
   height,
   type Detection,
@@ -67,7 +70,7 @@ type MainToWorkerMessage =
   | { type: "pursuit_target"; x: number; y: number; at: number }
   | { type: "pursuit_end" }
   | { type: "pursuit_abort" }
-  | { type: "implicit_sample"; x_norm: number; y_norm: number }
+  | { type: "implicit_sample"; x_norm: number; y_norm: number; kind?: ImplicitLabelKind }
   | { type: "set_paused"; paused: boolean }
   | { type: "filter_options"; dwellLock?: boolean }
   | { type: "set_preview"; enabled: boolean }
@@ -466,7 +469,7 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     lastPursuitCountEmit = 0;
     calibration?.abortPursuit();
   } else if (message.type === "implicit_sample") {
-    handleImplicitSample(message.x_norm, message.y_norm);
+    handleImplicitSample(message.x_norm, message.y_norm, message.kind ?? "cursor_rest");
   } else if (message.type === "set_paused") {
     paused = message.paused;
   } else if (message.type === "set_preview") {
@@ -655,6 +658,18 @@ async function initialize(nextConfig: WebInferenceConfig): Promise<void> {
       // Replaced mid-load — let the newer init own the flag and the models.
       void modelsPromise.then((built) => disposeRuntimeModels(built, "superseded boot session"), () => undefined);
       return;
+    }
+    // No usable calibration: start from the bundled prior when one ships for
+    // this feature schema; otherwise the raw projection runs until the
+    // bootstrap fit has enough labels.
+    const prior = nextConfig.calibrationPrior;
+    if (
+      calibration.featureMap === null &&
+      calibration.matrix === null &&
+      prior?.feature_version === FEATURE_SCHEMA_VERSION &&
+      calibration.seedPrior(prior.samples as Array<{ feature: GazeFeature; target: [number, number] }>, performance.now())
+    ) {
+      emit({ type: "status", level: "info", message: `Started from the calibration prior (${calibration.priorSamples.length} samples)` });
     }
     if (config.calibrate) {
       projector.retune(null, 1, 0.25);
@@ -1622,61 +1637,49 @@ function irisInBox(irisCenter: [number, number] | undefined, box: Detection): [n
 // fixated (cursor idle) is ground truth only if our estimate already roughly
 // agrees — accept it when the current map lands within ~9% of screen, which
 // filters "user looked elsewhere" events while keeping refinement local.
-function handleImplicitSample(xNorm: number, yNorm: number): void {
-  if (calibration === null || recentFeatures.length < 3) {
-    return;
-  }
-  // No live map means nothing to refine and no honest gate — and labels must
-  // never contaminate a calibration that's still being captured.
-  if ((calibration.featureMap === null && calibration.matrix === null) || pursuitActive) {
+function handleImplicitSample(xNorm: number, yNorm: number, kind: ImplicitLabelKind): void {
+  // Labels must never contaminate a calibration that's still being captured.
+  if (calibration === null || pursuitActive) {
     return;
   }
   const now = performance.now();
-  // Gaze leads the cursor by ~200-300ms — label with the feature from then.
-  const featureAt = now - 250;
-  let best: TimedFeature | null = null;
-  for (const entry of recentFeatures) {
-    if (best === null || Math.abs(entry.at - featureAt) < Math.abs(best.at - featureAt)) {
-      best = entry;
-    }
-  }
-  if (best === null || Math.abs(best.at - featureAt) > 400) {
+  const outcome = applyImplicitLabel(calibration, recentFeatures, xNorm, yNorm, kind, now, driftMonitor);
+  if (outcome === null) {
     return;
   }
-  const target: [number, number] = [clamp01(xNorm), clamp01(yNorm)];
-  const estimate = calibration.applyFeature(best.feature);
-  const offset: [number, number] = [target[0] - estimate[0], target[1] - estimate[1]];
-  const agreed = Math.hypot(offset[0], offset[1]) <= 0.09;
-  // Sustained, directionally-consistent rejection = the camera/laptop moved.
-  // The rejection vector is the translation error — apply it (damped) instead
-  // of interrupting the user for a recalibration.
-  const correction = driftMonitor.record(agreed, offset, now, target);
-  if (correction !== null && calibration !== null) {
-    const applied = calibration.applyDriftCorrection(correction[0] * 0.85, correction[1] * 0.85);
-    // Escalate well before the 0.35 hard bound: 0.15 cumulative means ~8
-    // separate sustained confirmations — a real reposition the user should
-    // heal with one recalibration rather than minutes of nudges.
-    const saturated = Math.hypot(applied[0], applied[1]) >= 0.15;
-    console.info("Drift auto-corrected", JSON.stringify({ applied, saturated }));
-    if (saturated) {
-      post({
-        type: "backend",
-        payload: { type: "status", level: "warning", message: "drift_detected" }
-      });
-    }
+  if (outcome.driftSaturated) {
+    post({
+      type: "backend",
+      payload: { type: "status", level: "warning", message: "drift_detected" }
+    });
   }
-  if (!agreed) {
-    // Bounded rejects still carry regional-bias signal: the map predicted a
-    // point within 0.2 of this label — close enough that the miss is the
-    // map's bias, not a look-elsewhere label. Low weight keeps a stray from
-    // steering the field.
-    if (Math.hypot(offset[0], offset[1]) <= 0.2) {
-      calibration.addResidualBiasEvidence(best.feature, target, 0.3);
+  emitLearning(now, false);
+  void outcome.refit?.then((adopted) => {
+    if (adopted) {
+      emitLearning(performance.now(), true);
     }
+  });
+}
+
+// Learning progress for the host: the running out-of-sample error behind the
+// "near your gaze" band and the accuracy check's measure-only context.
+// Throttled; an adopted refit always reports.
+let lastLearningEmit = 0;
+function emitLearning(now: number, force: boolean): void {
+  if (calibration === null || (!force && now - lastLearningEmit < 2000)) {
     return;
   }
-  calibration.addImplicitSample(best.feature, target);
-  void calibration.refitWithImplicit(now);
+  lastLearningEmit = now;
+  const learned = calibration.learnedError;
+  emit({
+    type: "calibration",
+    status: "learning",
+    count: calibration.personalSampleCount,
+    learned_median: learned?.median,
+    learned_labels: learned?.labels,
+    prior_active: calibration.priorActive,
+    settled: !calibration.learning
+  });
 }
 
 // A lost calibration_read/write response (terminated bridge, dropped relay)

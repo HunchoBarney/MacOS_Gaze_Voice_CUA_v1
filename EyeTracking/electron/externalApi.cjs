@@ -55,9 +55,13 @@ function isNormalizedPoint(value) {
     value.x_norm >= 0 &&
     value.x_norm <= 1 &&
     value.y_norm >= 0 &&
-    value.y_norm <= 1
+    value.y_norm <= 1 &&
+    (value.kind === undefined || IMPLICIT_LABEL_KINDS.has(value.kind))
   );
 }
+
+// Label sources the tracker knows how to weigh (core.ts IMPLICIT_LABEL_KINDS).
+const IMPLICIT_LABEL_KINDS = new Set(["cursor_rest", "click", "voice", "caret", "gaze_pick"]);
 
 // A gaze frame inside this window counts as "actively producing" for /ready.
 const READY_GAZE_WINDOW_MS = 3000;

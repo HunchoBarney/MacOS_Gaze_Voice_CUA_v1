@@ -342,6 +342,12 @@ function App() {
   // A Settings-initiated accuracy check: runs grid + hit test like
   // --accuracy-test --hit-test, after its own calibration.
   const [accuracyCheck, setAccuracyCheck] = useState(false);
+  const [accuracyMeasureOnly, setAccuracyMeasureOnly] = useState(false);
+  const accuracyMeasureOnlyRef = useRef(false);
+  // Latest learning progress from the worker — the measure-only report
+  // records what map it scored.
+  const learningRef = useRef<{ count?: number; learned_median?: number; learned_labels?: number; prior_active?: boolean; settled?: boolean } | null>(null);
+  const learningReportAtRef = useRef(0);
   const accuracyCheckRef = useRef(false);
   const autoCalibrateRef = useRef(false);
   autoCalibrateRef.current = autoCalibrate;
@@ -705,12 +711,55 @@ function App() {
       }));
     } else if (payload.type === "calibration") {
       // Keep the host's shared-state snapshot current — reported once per
-      // status value so pursuit_sampled progress doesn't spam IPC.
-      if (calibrationStatusRef.current !== payload.status) {
-        calibrationStatusRef.current = payload.status;
-        window.gazeBridge.reportState?.({ calibration_status: payload.status });
+      // status value so pursuit_sampled progress doesn't spam IPC. A geometry
+      // retune is not a calibration state; under --learn-if-missing a missing
+      // calibration is the learning state, and a settled learned map reads as
+      // loaded.
+      const learnMissing = payload.status === "missing" && configRef.current?.learnIfMissing === true;
+      const reported =
+        payload.status === "geometry"
+          ? null
+          : learnMissing || (payload.status === "learning" && !payload.settled)
+            ? "learning"
+            : payload.status === "learning"
+              ? "loaded"
+              : payload.status;
+      if (reported !== null && calibrationStatusRef.current !== reported) {
+        calibrationStatusRef.current = reported;
+        window.gazeBridge.reportState?.({ calibration_status: reported });
       }
-      if (payload.status === "missing") {
+      if (payload.status === "learning") {
+        // The running out-of-sample label error is the host's gaze spread
+        // while no calibration or accuracy run is newer (GazeErrorBand reads
+        // the newest report). Same √(w·h) points convention as the
+        // calibration report; written at most every 10 s.
+        learningRef.current = {
+          count: payload.count,
+          learned_median: payload.learned_median,
+          learned_labels: payload.learned_labels,
+          prior_active: payload.prior_active,
+          settled: payload.settled
+        };
+        if (payload.learned_median !== undefined && Date.now() - learningReportAtRef.current >= 10_000) {
+          learningReportAtRef.current = Date.now();
+          const bounds = configRef.current?.displayBounds;
+          const scale = Math.sqrt((bounds?.width ?? window.innerWidth) * (bounds?.height ?? window.innerHeight));
+          void window.gazeBridge
+            .writeReport("learning_report.json", {
+              kind: "implicit",
+              created_at: new Date().toISOString(),
+              detector: configRef.current?.webInference?.detector,
+              median_pt: payload.learned_median * scale,
+              labels: payload.learned_labels,
+              personal_samples: payload.count,
+              prior_active: payload.prior_active,
+              settled: payload.settled
+            })
+            .catch((error) => console.error("Learning report write failed", error));
+        }
+        return;
+      }
+      if (payload.status === "missing" && !learnMissing) {
         // First run: no calibration on disk — invite, don't hijack. Under the
         // host's --calibrate-if-missing (first enable) it starts directly; a
         // "not now" from an earlier run still holds.
@@ -809,10 +858,10 @@ function App() {
         lastVerdictRef.current = payload.verdict;
       }
     } else if (payload.type === "cursor_idle") {
-      // Implicit recalibration label (COMETIC/WebGazer): the cursor resting on
-      // a spot the gaze estimate already agrees with is a free ground-truth
-      // pair for drift correction.
-      webRuntimeRef.current?.implicitSample(payload.x_norm, payload.y_norm);
+      // Implicit calibration label (COMETIC/WebGazer): a cursor rest, a click,
+      // a voice-named pick or the text caret — a free ground-truth pair the
+      // worker weighs by kind.
+      webRuntimeRef.current?.implicitSample(payload.x_norm, payload.y_norm, payload.kind);
     } else if (payload.type === "menu_action") {
       if (payload.action === "pause_toggle") {
         // Presence is a user toggle — never flip it mid-modal.
@@ -832,13 +881,20 @@ function App() {
       } else if (payload.action === "accuracy_check") {
         // Settings → "Check eye-tracking accuracy": a full calibration, then
         // the held-out grid and the hit test, without any launch flags.
+        // { measure_only: true } skips the calibration and scores whatever
+        // map is live — how good invisible calibration has become.
         if (calibrationActiveRef.current || accuracyIndexRef.current !== null) {
           return;
         }
+        const measureOnly = (payload.value as { measure_only?: unknown } | undefined)?.measure_only === true;
         accuracyStartedRef.current = false;
         accuracyCheckRef.current = true;
+        accuracyMeasureOnlyRef.current = measureOnly;
+        setAccuracyMeasureOnly(measureOnly);
         setAccuracyCheck(true);
-        beginCalibration("full");
+        if (!measureOnly) {
+          beginCalibration("full");
+        }
       } else if (payload.action === "dot_scale") {
         const scale =
           typeof payload.value === "number" && Number.isFinite(payload.value)
@@ -1232,7 +1288,7 @@ function App() {
     if (!config || !(runGrid || runHit) || accuracyStartedRef.current) {
       return;
     }
-    if ((config.calibrate || autoCalibrate || accuracyCheck) && !calibrationDone) {
+    if ((config.calibrate || autoCalibrate || (accuracyCheck && !accuracyMeasureOnly)) && !calibrationDone) {
       return;
     }
     if (!gazePresence.live || calibrationCountdown !== null || pursuitActive) {
@@ -1254,11 +1310,14 @@ function App() {
     setOnboarding(false);
     setAccuracyIndex(0);
     showStatus("accuracy test — stare at each dot", "info");
-  }, [config, autoCalibrate, accuracyCheck, calibrationDone, gazePresence.live, calibrationCountdown, pursuitActive, showStatus, appendHitTrials]);
+  }, [config, autoCalibrate, accuracyCheck, accuracyMeasureOnly, calibrationDone, gazePresence.live, calibrationCountdown, pursuitActive, showStatus, appendHitTrials]);
 
   const finalizeAccuracyTest = useCallback(() => {
+    const measureOnly = accuracyMeasureOnlyRef.current;
     accuracyCheckRef.current = false;
+    accuracyMeasureOnlyRef.current = false;
     setAccuracyCheck(false);
+    setAccuracyMeasureOnly(false);
     const buckets = accuracyBucketsRef.current;
     const display = configRef.current?.displayBounds;
     const geometry = hitGeometryRef.current ?? protocolGeometry(buckets.flatMap((b) => b.distances));
@@ -1296,8 +1355,12 @@ function App() {
         distance_source: configRef.current?.viewingDistanceCm ? "tape" : "tracker",
         tracker_distance_median_m: median(buckets.flatMap((b) => b.distances))
       },
-      calibration_run: calibrationRunRef.current,
-      calibration_verdict: lastVerdictRef.current,
+      measure_only: measureOnly,
+      // Measure-only scores the live map, so an earlier calibration's run
+      // and verdict don't describe it; the learning state does.
+      calibration_run: measureOnly ? null : calibrationRunRef.current,
+      calibration_verdict: measureOnly ? null : lastVerdictRef.current,
+      learning: learningRef.current,
       held_out: buckets.length
         ? heldOutReport(
             buckets.map((b) => ({ target: b.target, samplesPt: b.points })),
@@ -1538,6 +1601,8 @@ function App() {
     hitStateRef.current = null;
     accuracyCheckRef.current = false;
     setAccuracyCheck(false);
+    accuracyMeasureOnlyRef.current = false;
+    setAccuracyMeasureOnly(false);
     lastVerdictRef.current = null;
     // Escaping a first-enable auto run is a "not now" that sticks.
     if (autoCalibrateRef.current) {

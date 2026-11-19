@@ -17,7 +17,7 @@ import JarvisCore
 final class GazeService {
     typealias Batch = GazeCandidateFeed.Batch
 
-    static let shared = GazeService()
+    static let shared = GazeService(inputLabels: true)
 
     let stream: GazeStream
     let scorer: GazeIntentScorer
@@ -39,8 +39,11 @@ final class GazeService {
     /// Every tick's fresh point — the overlay's chip dwell and the
     /// coordinator's radial anchor.
     var gazePointSink: (CGPoint) -> Void = { TargetOverlay.shared.ingestGaze($0) }
-    /// Scorer transitions → the conforming ring.
+    /// Scorer transitions → the gaze highlight.
     var eventSink: (IntentEvent) -> Void = { TargetOverlay.shared.intentEvent($0) }
+    /// Whether the highlight sweeps a dwell countdown — only when dwell
+    /// can actually click; otherwise it's a plain look-highlight.
+    var dwellProgressSink: (Bool) -> Void = { TargetOverlay.shared.showsDwellProgress = $0 }
     /// Feed health → stale-dim; while the feed is stale it carries the
     /// live outage duration (seconds since the last fresh sample) on
     /// every tick, so duration-keyed thresholds actually fire; a 0
@@ -70,6 +73,13 @@ final class GazeService {
     var dwell = GazeDwell()
     /// Commit-time labels — breaker on the first unsupported answer.
     var labels = ImplicitLabeler()
+    /// The user's own clicks and the text caret, as invisible-calibration
+    /// labels — only the app's shared service listens to global input.
+    private let inputLabels: Bool
+    private var interactionLabels: InteractionLabels?
+    /// Last σ re-read — the learning report changes as the map learns.
+    private var sigmaReadAt: TimeInterval = -.greatestFiniteMagnitude
+    static let sigmaRefreshInterval: TimeInterval = 5
 
     private var pump: Task<Void, Never>?
     private(set) var running = false
@@ -91,6 +101,10 @@ final class GazeService {
     /// re-reads the dwell policy instead of pinning the launch-time mode.
     private var defaultsObserver: NSObjectProtocol?
 
+    /// The pump runs on every new gaze sample, so the highlight follows the
+    /// tracker within one frame; this is only the idle beat that keeps
+    /// stale detection, dwell clocks and reconnects running when no
+    /// sample arrives.
     static let tick: Duration = .milliseconds(66)
     /// The enumeration budget per tick — a wedged driver call inside the
     /// feed suspends `enumerate` for the driver's whole timeout ladder
@@ -108,10 +122,11 @@ final class GazeService {
     static let slowRestartCadence: TimeInterval = 15
 
     init(stream: GazeStream = .shared, scorer: GazeIntentScorer = GazeIntentScorer(),
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard, inputLabels: Bool = false) {
         self.stream = stream
         self.scorer = scorer
         self.defaults = defaults
+        self.inputLabels = inputLabels
         dwellPolicy = DwellPolicy.load(from: defaults)
         // A Settings write to the gaze keys re-reads the policy live —
         // the launch-time load is never the last word.
@@ -141,11 +156,21 @@ final class GazeService {
         // on "last fresh: never".
         lastFreshAt = now()
         Task { await stream.start() }
+        dwellProgressSink(dwellPolicy.mode != .off)
+        if inputLabels, interactionLabels == nil {
+            let interaction = InteractionLabels { [weak self] point, kind in
+                guard let self else { return }
+                Task { await self.labels.label(at: point, kind: kind) }
+            }
+            interaction.start()
+            interactionLabels = interaction
+        }
         guard pump == nil else { return }
         pump = Task { @MainActor [weak self] in
+            var seen = 0
             while let self, !Task.isCancelled, self.running {
                 await self.tick()
-                try? await Task.sleep(for: Self.tick)
+                seen = await self.stream.waitForSample(after: seen, timeout: Self.tick)
             }
         }
     }
@@ -155,6 +180,7 @@ final class GazeService {
     func stop() {
         running = false
         pump?.cancel(); pump = nil
+        interactionLabels?.stop(); interactionLabels = nil
         Task { await stream.stop() }
         // Terminal ring-down — the scorer reset lands async, so the
         // service retires the ring itself: .release shrinks it back
@@ -181,12 +207,19 @@ final class GazeService {
     }
 
     /// A mode flip or exemptions change re-reads the persisted policy.
-    func reloadPolicy() { dwellPolicy = DwellPolicy.load(from: defaults) }
+    func reloadPolicy() {
+        dwellPolicy = DwellPolicy.load(from: defaults)
+        dwellProgressSink(dwellPolicy.mode != .off)
+    }
 
     // MARK: - One tick
 
     private func tick() async {
         let t = now()
+        if t - sigmaReadAt >= Self.sigmaRefreshInterval {
+            sigmaReadAt = t
+            await scorer.refreshMeasuredSigma()
+        }
         // A dropped socket reconnects on a budgeted cadence — fast while
         // the tracker was recently alive, slow once it's clearly down.
         if !(await stream.streaming) {
@@ -318,11 +351,10 @@ final class GazeService {
             if await actuate(candidate) {
                 dwellPolicy.recordCommit()
                 dwellPolicy.saveLearned(to: defaults)
-                let point = candidate.motorRect.contains(lastPoint ?? .zero)
-                    ? (lastPoint ?? CGPoint(x: candidate.motorRect.midX,
-                                            y: candidate.motorRect.midY))
-                    : CGPoint(x: candidate.motorRect.midX, y: candidate.motorRect.midY)
-                Task { await labels.commit(candidate, at: point) }
+                // Gaze alone chose this target, so the label is
+                // low-weight bias evidence (gaze_pick), never ground truth.
+                let point = CGPoint(x: candidate.motorRect.midX, y: candidate.motorRect.midY)
+                Task { await labels.commit(candidate, at: point, kind: .gazePick) }
             }
         case .aborted:
             dwellPolicy.recordAbort()
@@ -348,17 +380,24 @@ final class GazeService {
                                                   recordSelection: recordSelection)
         else { return nil }
         if recordSelection {
-            let point = candidatePoint(hit.0)
-            Task { await labels.commit(hit.0, at: point) }
+            // The element's centre, never the gaze point inside it — a
+            // label at the gaze estimate would teach the map nothing.
+            let point = CGPoint(x: hit.0.motorRect.midX, y: hit.0.motorRect.midY)
+            let kind: ImplicitLabelKind = Self.voiceNamed(hit.0, hint: speechHint(), among: batch.candidates)
+                ? .voice : .gazePick
+            Task { await labels.commit(hit.0, at: point, kind: kind) }
         }
         return hit
     }
 
-    /// Where a commit's label lands — the motor rect's midpoint, or the
-    /// live gaze point when it's still inside the target.
-    private func candidatePoint(_ c: IntentCandidate) -> CGPoint {
-        if let point = lastPoint, c.motorRect.contains(point) { return point }
-        return CGPoint(x: c.motorRect.midX, y: c.motorRect.midY)
+    /// The utterance named this target on its own — its label matches the
+    /// hint and no other candidate's does — so it's ground truth for
+    /// calibration. Anything else gaze picked, and only echoes the map.
+    nonisolated static func voiceNamed(_ candidate: IntentCandidate, hint: String?,
+                                       among candidates: [IntentCandidate]) -> Bool {
+        guard let hint, !hint.isEmpty,
+              IntentScorerCore.labelMatches(hint: hint, label: candidate.label) else { return false }
+        return candidates.filter { $0.id != candidate.id && IntentScorerCore.labelMatches(hint: hint, label: $0.label) }.isEmpty
     }
 
     /// Referents below this share are glances, not context.

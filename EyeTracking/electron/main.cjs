@@ -457,8 +457,26 @@ function webInferenceConfig(args, displayBounds) {
     eyePositionWeightY: readNumberOption(args, "--eye-position-weight-y", 0.25),
     retinafaceHeadFaceRatio: readNumberOption(args, "--retinaface-head-face-ratio", 1.545),
     gazeProjectionMode: readOption(args, "--gaze-projection-mode", "legacy"),
+    calibrationPrior: detector === "mediapipe" ? readCalibrationPrior(args) : undefined,
     enableLipMotion
   };
+}
+
+// The starting map for a user with no calibration yet: labelled feature
+// samples (scripts/build-calibration-prior.cjs) the worker fits before any
+// personal label arrives. Absent or unreadable means the raw geometric
+// projection starts instead.
+function readCalibrationPrior(args) {
+  const file = resolveRepoPath(readOption(args, "--calibration-prior", "public/priors/mediapipe-prior.json"));
+  try {
+    const prior = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!prior || !Array.isArray(prior.samples) || prior.detector !== "mediapipe") {
+      return undefined;
+    }
+    return { feature_version: prior.feature_version, samples: prior.samples };
+  } catch {
+    return undefined;
+  }
 }
 
 function maybeStartExternalApi(args) {
@@ -593,7 +611,7 @@ function handleControlAction(action, value) {
     if (!mainWindow || mainWindow.isDestroyed() || !rendererReady || modalInteractive || paused || !inferenceUp) {
       return { status: 409, error: "tracking_inactive" };
     }
-    sendToRenderer({ type: "cursor_idle", x_norm: value.x_norm, y_norm: value.y_norm }, { updateStore: false });
+    sendToRenderer({ type: "cursor_idle", x_norm: value.x_norm, y_norm: value.y_norm, kind: value.kind }, { updateStore: false });
     return;
   }
   dispatchMenuAction(action, value);
@@ -672,7 +690,8 @@ function trayStateLabel() {
   if (
     typeof calibrationStatus === "string" &&
     calibrationStatus !== "loaded" &&
-    calibrationStatus !== "saved"
+    calibrationStatus !== "saved" &&
+    calibrationStatus !== "learning"
   ) {
     return "Calibrating";
   }
@@ -982,6 +1001,7 @@ function createWindow() {
     accuracyTest: hasFlag(args, "--accuracy-test"),
     hitTest: hasFlag(args, "--hit-test"),
     calibrateIfMissing: hasFlag(args, "--calibrate-if-missing"),
+    learnIfMissing: hasFlag(args, "--learn-if-missing"),
     viewingDistanceCm: readNumberOption(args, "--viewing-distance-cm", 0) > 0 ? readNumberOption(args, "--viewing-distance-cm", 0) : undefined,
     calibrationTier: ["full", "standard", "quick"].includes(readOption(args, "--calibration-tier", "full"))
       ? readOption(args, "--calibration-tier", "full")

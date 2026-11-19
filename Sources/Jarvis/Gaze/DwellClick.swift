@@ -253,11 +253,25 @@ struct GazeDwell: Sendable, Equatable {
     }
 }
 
-/// B5's other half — a confirmed commit posts one implicit calibration
-/// label through the tracker's control plane (`implicit_sample`,
-/// normalized to the tracker display's bounds). The first transport
-/// error trips the breaker — a tracker build without the action must
-/// not eat a POST per click; `reset()` clears it on tracker restart.
+/// Where an implicit calibration label came from — the tracker weighs each
+/// kind differently (EyeTracking core.ts `IMPLICIT_LABEL_KINDS`): how far
+/// back the eyes were on the target, whether it may seed a first map, and
+/// whether it is ground truth at all. A commit gaze itself chose only echoes
+/// the map's guess, so it rides as low-weight bias evidence.
+enum ImplicitLabelKind: String, Sendable {
+    case cursorRest = "cursor_rest"
+    case click
+    case voice
+    case caret
+    case gazePick = "gaze_pick"
+}
+
+/// Invisible calibration's host half — confirmed commits, the user's own
+/// clicks and the text caret post implicit calibration labels through the
+/// tracker's control plane (`implicit_sample`, normalized to the tracker
+/// display's bounds). The first transport error trips the breaker — a
+/// tracker build without the action must not eat a POST per click;
+/// `reset()` clears it on tracker restart.
 actor ImplicitLabeler {
     /// Control-plane POST — production is `TrackerControl.post`.
     var post: @Sendable (String, Any?) async throws -> Void = { action, value in
@@ -285,25 +299,44 @@ actor ImplicitLabeler {
     /// The same candidate re-committed inside this window doesn't
     /// re-label — labels mark changes of intent, not dwell duration.
     static let dedupeWindow: TimeInterval = 1.5
+    /// A commit on anything bigger than this (a window, a page) says
+    /// little about where the eyes were inside it — no label.
+    static let maxLabelSide: CGFloat = 240
 
-    /// Label one confirmed commit. Fails silently — a label is a
-    /// courtesy to the calibration, never a reason to refuse a click.
-    func commit(_ candidate: IntentCandidate, at point: CGPoint) async {
-        guard !tripped else { return }
+    /// Label one confirmed commit at `point`. Fails silently — a label is
+    /// a courtesy to the calibration, never a reason to refuse a click.
+    func commit(_ candidate: IntentCandidate, at point: CGPoint, kind: ImplicitLabelKind) async {
+        guard !tripped,
+              max(candidate.frame.width, candidate.frame.height) <= Self.maxLabelSide
+        else { return }
         let t = now()
         if let last = lastLabelled,
            last.id == candidate.id, t - last.at < Self.dedupeWindow { return }
+        if await send(point, kind: kind) { lastLabelled = (candidate.id, t) }
+    }
+
+    /// One label with no candidate behind it — the user's own click or
+    /// the text caret.
+    func label(at point: CGPoint, kind: ImplicitLabelKind) async {
+        guard !tripped else { return }
+        _ = await send(point, kind: kind)
+    }
+
+    /// Normalize against the tracker display and POST. A point off that
+    /// display is no label (clamping it would invent one at the edge).
+    private func send(_ point: CGPoint, kind: ImplicitLabelKind) async -> Bool {
         guard let bounds = await displayBounds(),
-              bounds.width > 0, bounds.height > 0 else { return }
+              bounds.width > 0, bounds.height > 0, bounds.contains(point) else { return false }
         // Wire values are Double — a CGFloat in the Any dict won't
         // read back as Double for the tracker's JSON decoder.
         let value: [String: Any] = [
-            "x_norm": min(1, max(0, Double((point.x - bounds.minX) / bounds.width))),
-            "y_norm": min(1, max(0, Double((point.y - bounds.minY) / bounds.height))),
+            "x_norm": Double((point.x - bounds.minX) / bounds.width),
+            "y_norm": Double((point.y - bounds.minY) / bounds.height),
+            "kind": kind.rawValue,
         ]
         do {
             try await post("implicit_sample", value)
-            lastLabelled = (candidate.id, t)
+            return true
         } catch {
             // Only a hard rejection trips the breaker — a 400/404 means
             // this tracker build doesn't know `implicit_sample`, and
@@ -315,6 +348,7 @@ actor ImplicitLabeler {
                code != 409 {
                 tripped = true
             }
+            return false
         }
     }
 

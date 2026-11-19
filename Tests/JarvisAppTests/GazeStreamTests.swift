@@ -117,6 +117,27 @@ final class GazeStreamTests: XCTestCase {
         await stream.stop()
     }
 
+    /// The gaze pump parks on `waitForSample`: a new good sample wakes it
+    /// at once (no fixed poll between the tracker and the highlight), and
+    /// with nothing new it returns after the timeout with the same count.
+    func testWaitForSampleWakesOnArrivalAndTimesOutWithout() async {
+        let source = Source()
+        let stream = GazeStream(frames: { source.stream() })
+        await stream.start()
+        let idle = await stream.waitForSample(after: 0, timeout: .milliseconds(30))
+        XCTAssertEqual(idle, 0)
+        async let woke = stream.waitForSample(after: 0, timeout: .seconds(5))
+        try? await Task.sleep(for: .milliseconds(50))
+        let sent = ContinuousClock.now
+        source.yield(updateFrame(gaze(10, 20)))
+        let seen = await woke
+        XCTAssertEqual(seen, 1)
+        XCTAssertLessThan(ContinuousClock.now - sent, .seconds(1))
+        let already = await stream.waitForSample(after: 0, timeout: .seconds(5))
+        XCTAssertEqual(already, 1, "a reader behind the count returns without waiting")
+        await stream.stop()
+    }
+
     /// Garbage between good frames is dropped — a malformed frame never
     /// clears or corrupts the latest sample.
     func testMalformedFramesAreIgnored() async {

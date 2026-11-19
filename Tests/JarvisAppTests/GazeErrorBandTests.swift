@@ -21,10 +21,21 @@ final class GazeErrorBandTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
     }
 
-    func testNoReportFallsBackToFortyPoints() {
+    /// Never measured means invisible calibration hasn't learned yet: the
+    /// band starts wide (~4° median) instead of claiming calibrated accuracy.
+    func testNoReportFallsBackToTheUncalibratedBand() {
         XCTAssertNil(GazeErrorBand.medianErrorPt(in: dir))
-        XCTAssertEqual(GazeErrorBand.sigmaPt(in: dir), 40)
-        XCTAssertEqual(GazeErrorBand.sigmaPt(in: nil), 40)
+        XCTAssertEqual(GazeErrorBand.sigmaPt(in: dir), 150)
+        XCTAssertEqual(GazeErrorBand.sigmaPt(in: nil), 150)
+    }
+
+    /// The running learning report competes like the others: newest wins.
+    func testLearningReportWinsWhenNewest() throws {
+        try write("calibration_report.json", ["median_pt": 50], modified: Date(timeIntervalSinceNow: -60))
+        try write("learning_report.json", ["median_pt": 100], modified: Date())
+        XCTAssertEqual(GazeErrorBand.medianErrorPt(in: dir), 100)
+        try write("accuracy_report.json", ["error_px": ["overall": ["median": 70]]], modified: Date(timeIntervalSinceNow: 5))
+        XCTAssertEqual(GazeErrorBand.medianErrorPt(in: dir), 70)
     }
 
     /// σ = median / √(2 ln 2): a 100 pt median radial error is σ ≈ 84.9 pt.

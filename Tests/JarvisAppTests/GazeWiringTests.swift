@@ -158,20 +158,53 @@ final class ImplicitLabelerTests: XCTestCase {
     func testCommitLabelsNormalizedPoint() async {
         let posts = Posts()
         let labeler = labeler(posts: posts, bounds: display)
-        await labeler.commit(candidate, at: CGPoint(x: 250, y: 500))
+        await labeler.commit(candidate, at: CGPoint(x: 250, y: 500), kind: .voice)
         XCTAssertEqual(posts.count, 1)
         XCTAssertEqual(posts.entries[0].action, "implicit_sample")
         let value = posts.entries[0].value as? [String: Any]
         XCTAssertEqual(value?["x_norm"] as? Double, 0.25)
         XCTAssertEqual(value?["y_norm"] as? Double, 0.5)
+        XCTAssertEqual(value?["kind"] as? String, "voice")
+    }
+
+    /// The user's own click labels with its kind and no candidate.
+    func testClickLabelCarriesItsKind() async {
+        let posts = Posts()
+        let labeler = labeler(posts: posts, bounds: display)
+        await labeler.label(at: CGPoint(x: 100, y: 900), kind: .click)
+        let value = posts.entries.first?.value as? [String: Any]
+        XCTAssertEqual(value?["kind"] as? String, "click")
+        XCTAssertEqual(value?["y_norm"] as? Double, 0.9)
+    }
+
+    /// A point off the tracked display is no label — clamping would
+    /// invent one at the edge (a click on the second monitor).
+    func testOffDisplayPointIsNoLabel() async {
+        let posts = Posts()
+        let labeler = labeler(posts: posts, bounds: display)
+        await labeler.label(at: CGPoint(x: 1500, y: 300), kind: .click)
+        await labeler.commit(candidate, at: CGPoint(x: -5, y: 300), kind: .voice)
+        XCTAssertEqual(posts.count, 0)
+    }
+
+    /// A commit on something window-sized says little about where the
+    /// eyes were inside it.
+    func testLargeCandidateIsNoLabel() async {
+        let posts = Posts()
+        let labeler = labeler(posts: posts, bounds: display)
+        let window = IntentCandidate(
+            id: "win:7", kind: .window, frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            motorRect: CGRect(x: 0, y: 0, width: 800, height: 600), role: "window", label: "Doc")
+        await labeler.commit(window, at: CGPoint(x: 400, y: 300), kind: .voice)
+        XCTAssertEqual(posts.count, 0)
     }
 
     /// The same candidate inside the dedupe window doesn't re-label.
     func testDedupe() async {
         let posts = Posts()
         let labeler = labeler(posts: posts, bounds: display)
-        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1))
-        await labeler.commit(candidate, at: CGPoint(x: 2, y: 2))
+        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1), kind: .voice)
+        await labeler.commit(candidate, at: CGPoint(x: 2, y: 2), kind: .voice)
         XCTAssertEqual(posts.count, 1)
     }
 
@@ -182,12 +215,12 @@ final class ImplicitLabelerTests: XCTestCase {
         let posts = Posts()
         let labeler = labeler(posts: posts, bounds: display,
                               rejection: .rejected(400))
-        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1))
+        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1), kind: .voice)
         XCTAssertEqual(posts.count, 0)
         let tripped = await labeler.tripped
         XCTAssertTrue(tripped)
         // The same labeler: still tripped, transport never consulted.
-        await labeler.commit(candidate, at: CGPoint(x: 2, y: 2))
+        await labeler.commit(candidate, at: CGPoint(x: 2, y: 2), kind: .voice)
         XCTAssertEqual(posts.count, 0)
         await labeler.reset()
         let open = await labeler.tripped
@@ -207,10 +240,10 @@ final class ImplicitLabelerTests: XCTestCase {
                 posts.record(action, value)
             },
             displayBounds: { bounds })
-        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1))
+        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1), kind: .voice)
         let tripped = await labeler.tripped
         XCTAssertFalse(tripped, "a 409 is transient — the breaker stays open")
-        await labeler.commit(candidate, at: CGPoint(x: 2, y: 2))
+        await labeler.commit(candidate, at: CGPoint(x: 2, y: 2), kind: .voice)
         XCTAssertEqual(posts.count, 1, "the next commit retries the label")
     }
 
@@ -220,7 +253,7 @@ final class ImplicitLabelerTests: XCTestCase {
         let posts = Posts()
         let labeler = labeler(posts: posts, bounds: display,
                               rejection: .unreachable)
-        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1))
+        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1), kind: .voice)
         let tripped = await labeler.tripped
         XCTAssertFalse(tripped, "unreachable is transient — the breaker stays open")
         XCTAssertEqual(posts.count, 0)
@@ -230,7 +263,7 @@ final class ImplicitLabelerTests: XCTestCase {
     func testNoDisplayNoLabel() async {
         let posts = Posts()
         let labeler = labeler(posts: posts, bounds: nil)
-        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1))
+        await labeler.commit(candidate, at: CGPoint(x: 1, y: 1), kind: .voice)
         XCTAssertEqual(posts.count, 0)
     }
 }

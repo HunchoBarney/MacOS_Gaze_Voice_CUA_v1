@@ -1,5 +1,7 @@
 export {};
 
+export type ImplicitLabelKind = "cursor_rest" | "click" | "voice" | "caret" | "gaze_pick";
+
 declare global {
   interface Window {
     gazeBridge: {
@@ -67,6 +69,10 @@ export interface RendererConfig {
   // --calibrate-if-missing: the host's first-enable path — start the full
   // calibration on its own when no usable calibration loads.
   calibrateIfMissing?: boolean;
+  // --learn-if-missing: invisible calibration — with no usable calibration
+  // the tracker runs on the prior or the raw projection and learns from
+  // ordinary use; nothing on screen asks for a calibration.
+  learnIfMissing?: boolean;
   // --viewing-distance-cm: the tape-measured eye-to-screen distance the
   // accuracy protocol scores angles against (else the tracker's estimate).
   viewingDistanceCm?: number;
@@ -142,6 +148,9 @@ export interface WebInferenceConfig {
   eyePositionWeightY: number;
   retinafaceHeadFaceRatio: number;
   gazeProjectionMode: GazeProjectionMode;
+  // Starting samples for a user with no calibration (main.cjs
+  // readCalibrationPrior); used only when feature_version matches.
+  calibrationPrior?: { feature_version?: number; samples: Array<{ feature: unknown; target: [number, number] }> };
   enableLipMotion: boolean;
 }
 
@@ -248,6 +257,12 @@ export type BackendMessage =
       path?: string;
       message?: string;
       verdict?: VerifyVerdict;
+      // status "learning": the running out-of-sample label error (normalized
+      // screen units) and whether the bundled prior still shapes the map.
+      learned_median?: number;
+      learned_labels?: number;
+      prior_active?: boolean;
+      settled?: boolean;
       geometry?: {
         eye_position_weight_x: number;
         eye_position_weight_y: number;
@@ -257,6 +272,7 @@ export type BackendMessage =
       type: "cursor_idle";
       x_norm: number;
       y_norm: number;
+      kind?: ImplicitLabelKind;
     }
   | {
       type: "menu_action";
