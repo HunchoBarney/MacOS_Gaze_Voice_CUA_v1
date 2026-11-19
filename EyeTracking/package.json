@@ -12,6 +12,7 @@
     "start": "node scripts/start.cjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.2.3",
     "@nut-tree-fork/nut-js": "4.2.6",
     "@vitejs/plugin-react": "6.0.2",
     "electron": "42.4.1",

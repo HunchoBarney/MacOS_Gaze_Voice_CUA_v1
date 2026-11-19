@@ -12886,3 +12886,19 @@ forwarder is removed. See RETENTION.md for observed candidate identities
 and retirement conditions. The isolated source run passed 1,488 Swift tests
 (29 skipped) and 27 P3 verifier tests; no tagged release, install, provider
 benchmark, physical qualification or acceptance change was performed.
+
+2026-11-19 — JARA-27 private gaze rebuild (Captain-directed build, owner
+approved the MediaPipe path; not a phase acceptance). MediaPipe Face
+Landmarker (@mediapipe/tasks-vision 1.2.3, Apache-2.0) is the default gaze
+front end; the five unlicensed ONNX weights load only behind
+--legacy-models and the build drops *.onnx from dist/models. Hosted
+launches pass --calibrate-if-missing; a calibration fit by the other
+detector family loads as "missing". --accuracy-test now runs protocol v1
+(16-target random 4x4 grid, angular median/p90 by region) and --hit-test
+adds step 3. The scorer σ and the Jev pick hint read the measured error
+(GazeErrorBand). Evidence: verification lane green (1,495 Swift tests, 29
+skipped; tsc; 253 vitest). The built worker on synthetic jittered frames
+(no camera) emitted 19.8 gaze/s at 15 ms p50 inference with 32–37% of one
+core across all Electron processes at 20 fps (23% at 15 fps), vs the legacy
+default's 2.4 gaze/s at 366 ms and ~100%. No physical camera run, accuracy
+measurement, install or signing was performed.

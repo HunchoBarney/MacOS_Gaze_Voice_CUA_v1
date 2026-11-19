@@ -762,3 +762,16 @@ body,
     animation: none;
   }
 }
+
+/* Hit-rate test target (--hit-test): the circle is the scored region, so
+   its edge is drawn exactly at the radius with a quiet centre mark. */
+.hit-target {
+  position: fixed;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 214, 10, 0.9);
+  background: radial-gradient(circle, #ffd60a 0 3px, rgba(255, 214, 10, 0.08) 4px);
+  box-sizing: border-box;
+  pointer-events: none;
+}

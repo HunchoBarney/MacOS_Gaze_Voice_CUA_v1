@@ -97,6 +97,13 @@ final class TrackerArgumentsTests: XCTestCase {
         XCTAssertEqual(value(after: "--host-pid", in: args(useProdRenderer: true, hostPid: 777)), "777")
     }
 
+    /// First enable calibrates on its own: the tracker starts the full
+    /// calibration whenever no usable calibration loads.
+    func testCalibrateIfMissingAlwaysEmitted() {
+        XCTAssertTrue(args().contains("--calibrate-if-missing"))
+        XCTAssertTrue(args(useProdRenderer: true).contains("--calibrate-if-missing"))
+    }
+
     // MARK: - Geometry defaults
 
     /// An explicit display size wins over display detection.
@@ -272,7 +279,7 @@ final class TrackerArgumentsTests: XCTestCase {
             args(forceWasm: true,
                  environment: ["JARVIS_EYE_TRACKER_ARGS": "--flag 1"]),
             ["scripts/dev.cjs", "--external-api", "--no-tray",
-             "--host-pid", "4242",
+             "--host-pid", "4242", "--calibrate-if-missing",
              "--display-size-inch", "31.5",
              "--camera-fov", "87",
              "--gaze-projection-mode", "monocular",

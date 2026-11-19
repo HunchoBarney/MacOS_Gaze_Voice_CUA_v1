@@ -150,9 +150,10 @@ enum IntentEvent: Equatable, Sendable {
 /// incumbent survives short candidate gaps (blinks, enumeration lag).
 final class IntentScorerCore {
     struct Config: Sendable {
-        /// Spatial spread of the gaze likelihood — calibration median error
-        /// in px; floor ≈ Meta's 2° cone at laptop distance (~40px).
-        var sigmaPx: Double = 40
+        /// Spatial spread of the gaze likelihood in points — the user's
+        /// measured error (GazeErrorBand) for the live scorer; 40 pt
+        /// (~2° at laptop distance) is only the unmeasured default.
+        var sigmaPx: Double = GazeErrorBand.fallbackSigmaPt
         /// Evidence half-life — stale evidence decays away in ~1s.
         var halfLifeSec: Double = 0.8
         /// Meta's consensus window for a handover.
@@ -173,6 +174,14 @@ final class IntentScorerCore {
         var historySec: Double = 2.0
 
         static let `default` = Config()
+
+        /// The default config with σ from the user's latest calibration or
+        /// accuracy report.
+        static func measured(in directory: URL? = GazeErrorBand.directory) -> Config {
+            var config = Config()
+            config.sigmaPx = GazeErrorBand.sigmaPt(in: directory)
+            return config
+        }
     }
 
     private var config: Config
@@ -367,6 +376,8 @@ final class IntentScorerCore {
         return exps.map { ($0.0, $0.1 / z) }.sorted { $0.1 > $1.1 }
     }
 
+    func setSigma(_ sigmaPx: Double) { config.sigmaPx = sigmaPx }
+
     /// Drop all state — tracker restart or a calibration change means old
     /// evidence describes a different world.
     func reset() {
@@ -384,10 +395,9 @@ final class IntentScorerCore {
 
     private func likelihood(of c: IntentCandidate, at point: CGPoint) -> Double {
         let d = c.edgeDistance(to: point)
-        // σ floor ~40px ≈ Meta's 2° targeting cone at laptop distance — a
-        // tighter σ would pretend to accuracy the webcam can't have and
-        // collapse real near-ties into false confidence.
-        let sigma = max(config.sigmaPx, 40)
+        // σ is the user's measured spread; the ~0.5° floor keeps a lucky
+        // report from collapsing real near-ties into false confidence.
+        let sigma = max(config.sigmaPx, GazeErrorBand.minimumSigmaPt)
         return exp(-(d * d) / (2 * sigma * sigma))
     }
 
@@ -618,8 +628,14 @@ final class IntentScorerCore {
 actor GazeIntentScorer {
     private var core: IntentScorerCore
 
-    init(config: IntentScorerCore.Config = .default) {
-        core = IntentScorerCore(config: config)
+    private let measuresSigma: Bool
+
+    /// With no explicit config the scorer reads σ from the user's latest
+    /// measured error, and re-reads it on every reset (tracker restart or
+    /// recalibration).
+    init(config: IntentScorerCore.Config? = nil) {
+        measuresSigma = config == nil
+        core = IntentScorerCore(config: config ?? .measured())
     }
 
     @discardableResult
@@ -645,5 +661,8 @@ actor GazeIntentScorer {
     var currentReferent: GazeReferent? { core.currentReferent }
     var recentReferents: [GazeReferent] { core.recentReferents }
 
-    func reset() { core.reset() }
+    func reset() {
+        core.reset()
+        if measuresSigma { core.setSigma(GazeErrorBand.sigmaPt()) }
+    }
 }

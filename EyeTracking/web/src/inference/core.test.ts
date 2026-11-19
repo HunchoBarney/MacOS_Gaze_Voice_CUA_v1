@@ -906,6 +906,38 @@ describe("Calibration", () => {
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({ level: "info", message: expect.stringContaining("context changed") }));
   });
 
+  it("treats a calibration fit by the other detector family as missing", async () => {
+    const ctx = (detector: string) => `binocular-screen|1512|982|13.32|90|640|480|0.5|0|1|1|0|${detector}`;
+    const write = vi.fn().mockResolvedValue({ ok: true, path: "c.json" });
+    const first = new Calibration("c.json", vi.fn(), {
+      read: vi.fn().mockResolvedValue({ ok: true, text: null }),
+      write
+    });
+    first.contextFingerprint = ctx("retinaface");
+    await pursuitAndVerify(first);
+    const payload = write.mock.calls[write.mock.calls.length - 1][1];
+
+    const emit = vi.fn();
+    const switched = new Calibration("c.json", emit, {
+      read: vi.fn().mockResolvedValue({ ok: true, text: JSON.stringify(payload) }),
+      write: vi.fn().mockResolvedValue({ ok: true, path: "c.json" })
+    });
+    switched.contextFingerprint = ctx("mediapipe");
+    await switched.load();
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: "calibration", status: "missing" }));
+    expect(switched.matrix).toBeNull();
+    expect(switched.samples).toHaveLength(0);
+
+    // Legacy-to-legacy keeps the old behaviour: the file still loads.
+    const legacy = new Calibration("c.json", vi.fn(), {
+      read: vi.fn().mockResolvedValue({ ok: true, text: JSON.stringify(payload) }),
+      write: vi.fn().mockResolvedValue({ ok: true, path: "c.json" })
+    });
+    legacy.contextFingerprint = ctx("yolo");
+    await legacy.load();
+    expect(legacy.samples.length).toBeGreaterThan(0);
+  });
+
   it("keeps the feature map and drops the drift offset across a context change", async () => {
     const write = vi.fn().mockResolvedValue({ ok: true, path: "c.json" });
     const first = new Calibration("c.json", vi.fn(), {

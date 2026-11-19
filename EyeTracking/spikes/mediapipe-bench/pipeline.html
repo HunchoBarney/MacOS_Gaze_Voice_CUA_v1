@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8" />
+<script>
+  (async () => {
+    const fail = (e) => window.bench.fail(String((e && e.stack) || e));
+    try {
+      const q = new URLSearchParams(location.search);
+      const seconds = Number(q.get("seconds"));
+      const config = JSON.parse(q.get("config"));
+      const portrait = await createImageBitmap(await (await fetch(q.get("image"))).blob());
+      const canvas = new OffscreenCanvas(640, 480);
+      const ctx = canvas.getContext("2d");
+      const drawW = (portrait.width * 480) / portrait.height;
+      const worker = new Worker(q.get("worker"));
+      const gaze = [];
+      const holds = {};
+      const statuses = [];
+      let ready = false;
+      let frameDone = null;
+      worker.onerror = (e) => fail(e.message);
+      worker.onmessage = (event) => {
+        const m = event.data;
+        if (m.type === "ready") ready = true;
+        else if (m.type === "frame_done") frameDone?.();
+        else if (m.type === "calibration_read") worker.postMessage({ type: "calibration_read_result", id: m.id, response: { ok: true, text: null } });
+        else if (m.type === "calibration_write") worker.postMessage({ type: "calibration_write_result", id: m.id, response: { ok: true, path: m.path } });
+        else if (m.type === "backend") {
+          const p = m.payload;
+          if (p.type === "gaze" && p.held_reason) holds[p.held_reason] = (holds[p.held_reason] || 0) + 1;
+          else if (p.type === "gaze") gaze.push({ at: performance.now(), inference: p.inference_ms, x: p.x_norm, y: p.y_norm });
+          else if (p.type === "status") statuses.push(p.level + ": " + p.message);
+        }
+      };
+      const bootStart = performance.now();
+      worker.postMessage({ type: "init", config });
+      worker.postMessage({ type: "camera_geometry", width: 640, height: 480, resolutionName: "640x480" });
+      while (!ready) {
+        if (performance.now() - bootStart > 60000) throw new Error("worker never became ready: " + statuses.join(" | "));
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      const bootMs = performance.now() - bootStart;
+      let n = 0;
+      const post = async () => {
+        n += 1;
+        ctx.fillStyle = "#333";
+        ctx.fillRect(0, 0, 640, 480);
+        ctx.drawImage(portrait, (640 - drawW) / 2 + 3 * Math.sin(n / 7), 2 * Math.cos(n / 11), drawW, 480);
+        const bitmap = canvas.transferToImageBitmap();
+        const done = new Promise((r) => (frameDone = r));
+        worker.postMessage(
+          { type: "frame", bitmap, width: 640, height: 480, captureMs: 0, capturedAt: performance.now(), capturedAtMs: Date.now(), frameIntervalMs: 50, droppedFrames: 0, mainThreadLongTasks: 0 },
+          [bitmap]
+        );
+        await done;
+      };
+      for (let i = 0; i < 20; i += 1) await post();
+      gaze.length = 0;
+      for (const k of Object.keys(holds)) delete holds[k];
+      window.bench.phase("measure");
+      const start = performance.now();
+      let next = start;
+      let posted = 0;
+      while (performance.now() - start < seconds * 1000) {
+        await post();
+        posted += 1;
+        next += 1000 / Number(q.get("fps"));
+        const wait = next - performance.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        else next = performance.now();
+      }
+      const elapsed = (performance.now() - start) / 1000;
+      const inf = gaze.map((g) => g.inference).filter(Number.isFinite).sort((a, b) => a - b);
+      const at = (qq) => inf[Math.min(inf.length - 1, Math.floor(inf.length * qq))];
+      window.bench.done({
+        boot_ms: bootMs,
+        seconds: elapsed,
+        frames_posted_fps: posted / elapsed,
+        gaze_emitted_fps: gaze.length / elapsed,
+        holds,
+        inference_ms: inf.length ? { p50: at(0.5), p95: at(0.95), n: inf.length } : null,
+        last_gaze: gaze[gaze.length - 1] ?? null,
+        statuses: statuses.slice(0, 8)
+      });
+    } catch (e) {
+      fail(e);
+    }
+  })();
+</script>

@@ -1996,11 +1996,11 @@ final class VoiceTaskCoordinator {
         return max(spacing, calibrationErrorBand())
     }
 
-    /// Median tracker error in pixels, from the calibration run's
-    /// `accuracy_report.json` in the tracker directory. Settable for
-    /// tests — production reads the file the tracker's accuracy test
-    /// writes via `writeReport("accuracy_report.json", …)`.
-    static var accuracyReportURL: URL? = TrackerHost.trackerDirectory()?
+    /// Median tracker error in points, from the accuracy test's
+    /// `accuracy_report.json` beside the calibration file (Application
+    /// Support for a bundled tracker). Settable for tests — production
+    /// reads the file the tracker writes via `writeReport("accuracy_report.json", …)`.
+    static var accuracyReportURL: URL? = GazeErrorBand.directory?
         .appendingPathComponent("accuracy_report.json")
 
     static func calibrationErrorBand() -> Double {

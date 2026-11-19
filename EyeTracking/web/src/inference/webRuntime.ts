@@ -37,6 +37,7 @@ import {
   type DetectionResult
 } from "./core";
 import InferenceWorker from "./inferenceWorker.ts?worker";
+import { headFaceWidthRatio as headFaceWidthRatioFor } from "./mediapipe";
 import { createRuntimeModels, setGpuDeviceLostListener, warmupRuntimeModels, withTimeout, type RuntimeModels } from "./runtimes";
 
 export interface WebFilterOptions {
@@ -305,7 +306,7 @@ export async function startWebRuntime(
     projector.projectFeatures(feature, config.gazeProjectionMode, weightX, weightY, !config.disableIrisDistance)
   );
 
-  const headFaceWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : 1;
+  const headFaceWidthRatio = headFaceWidthRatioFor(config);
   const previewWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : null;
   // ort-proxy mode exists because webgpu is unusable in that host context —
   // it pins wasm at create time AND opts out of webgpu-first recovery and
@@ -694,7 +695,8 @@ export async function startWebRuntime(
       cameraScreenY: config.cameraScreenY,
       flipX: config.flipX,
       flipY: config.flipY,
-      appearanceActive: Boolean(config.appearanceModelUrl)
+      appearanceActive: Boolean(config.appearanceModelUrl),
+      detector: config.detector
     });
     // Inside the try, matching the worker path: a load() rejection must
     // surface as an error status, not fail silently outside the guard.
@@ -740,9 +742,10 @@ export async function startWebRuntime(
         const noFaceMs = noFaceSince === 0 ? 0 : detectStart - noFaceSince;
         const searchInterval = noFaceMs > 5000 ? 1000 : 250;
         const detectDue =
-          lastDetection === null || forceRedetect
+          config.detector === "mediapipe" ||
+          (lastDetection === null || forceRedetect
             ? detectStart - lastDetectMs > searchInterval
-            : detectStart - lastDetectMs > DETECT_INTERVAL_MS;
+            : detectStart - lastDetectMs > DETECT_INTERVAL_MS);
         let head: Detection | null;
         let eyes: Detection[];
         let mouth: Detection | null;

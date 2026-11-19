@@ -1,0 +1,18 @@
+Jev Voice eye tracker — third-party notice
+
+This product includes MediaPipe Tasks Vision (@mediapipe/tasks-vision 1.2.3,
+https://github.com/google-ai-edge/mediapipe) and the MediaPipe Face
+Landmarker model bundle (face_landmarker.task, float16 v1: face detector,
+Face Mesh V2 landmarks with iris, Blendshape V2), both Copyright Google LLC
+and licensed under the Apache License, Version 2.0 (LICENSE in this
+directory).
+
+Distributed unmodified:
+  runtime-assets/mediapipe/vision_wasm_internal.js
+  runtime-assets/mediapipe/vision_wasm_internal.wasm
+  models/face_landmarker.task
+The tasks-vision JavaScript API is bundled into assets/vision_bundle-*.js.
+
+Model cards:
+  https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf
+  https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf

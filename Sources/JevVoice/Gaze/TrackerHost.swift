@@ -988,7 +988,11 @@ actor TrackerHost {
                          // and self-quits the moment we're gone — a crashed
                          // or force-quit host can't orphan it, because one
                          // app means the tracker never outlives the host.
-                         "--host-pid", "\(hostPid)"]
+                         "--host-pid", "\(hostPid)",
+                         // First enable: with no usable calibration (none
+                         // yet, or one fit by another gaze model) the
+                         // tracker starts the full calibration itself.
+                         "--calibrate-if-missing"]
         // Display size: explicit default wins; otherwise the main
         // display's physical diagonal (CGDisplayScreenSize is real
         // millimetres — pixel metrics would misreport Retina panels);
@@ -1028,16 +1032,26 @@ actor TrackerHost {
         // Support. Source-checkout trackers keep their repo-local files,
         // which is what dev runs expect. Appended after the env override
         // because the tracker reads the FIRST occurrence of a flag.
-        if let resources = Bundle.main.resourceURL,
-           trackerDir.resolvingSymlinksInPath().path
-               .hasPrefix(resources.resolvingSymlinksInPath().path + "/") {
-            let support = FileManager.default
-                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("JevVoice", isDirectory: true)
+        let calibrationDir = calibrationDirectory(trackerDir: trackerDir)
+        if calibrationDir != trackerDir {
             arguments += ["--calibration-file",
-                          support.appendingPathComponent(".gaze_calibration.json").path]
+                          calibrationDir.appendingPathComponent(".gaze_calibration.json").path]
         }
         return arguments
+    }
+
+    /// Where the tracker keeps .gaze_calibration.json and writes its
+    /// reports (accuracy_report.json, calibration_report.json): the
+    /// tracker dir for source checkouts, Application Support/JevVoice for
+    /// a tracker staged inside the sealed app bundle.
+    nonisolated static func calibrationDirectory(trackerDir: URL) -> URL {
+        guard let resources = Bundle.main.resourceURL,
+              trackerDir.resolvingSymlinksInPath().path
+                  .hasPrefix(resources.resolvingSymlinksInPath().path + "/")
+        else { return trackerDir }
+        return FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("JevVoice", isDirectory: true)
     }
 
     /// The main display's physical diagonal in inches from

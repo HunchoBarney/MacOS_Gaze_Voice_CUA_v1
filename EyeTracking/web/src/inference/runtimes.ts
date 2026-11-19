@@ -20,6 +20,7 @@ import {
   YOLO_INPUT_HEIGHT,
   YOLO_INPUT_WIDTH
 } from "./core";
+import { faceFromLandmarkerResult, mediapipeFrame, type MediaPipeFrameResult } from "./mediapipe";
 
 // WebGPU device-loss telemetry: runtimes reports a live `device.lost`
 // resolution so the worker/page can log it as a status line instead of
@@ -55,6 +56,9 @@ export interface RuntimeModels {
   detect(frame: ImageData): Promise<DetectionResult>;
   estimate(frame: ImageData, head: Detection, eyes: Detection[]): Promise<GazeEstimate>;
   estimateLipMotion(frame: ImageData, mouth: Detection): Promise<number | null>;
+  // Runtimes whose estimate needs a real face (MediaPipe) compile their
+  // graph here instead of through the synthetic-box estimate below.
+  warmup?(): Promise<void>;
   // Resolves only once ORT has actually freed every session's wasm heap —
   // callers reloading models must await it or the create races the free and
   // re-faults with the same "memory access out of bounds".
@@ -66,6 +70,16 @@ export interface RuntimeModels {
 // cleanly yet dies on its first real run must count as a failed attempt —
 // the OOM kills the heap, not session.create.
 export async function warmupRuntimeModels(models: RuntimeModels, strict = false): Promise<void> {
+  if (models.warmup) {
+    try {
+      await models.warmup();
+    } catch (error) {
+      if (strict) {
+        throw error;
+      }
+    }
+    return;
+  }
   const frame = new ImageData(160, 160);
   const head: Detection = { classId: 7, score: 1, x1: 20, y1: 10, x2: 140, y2: 150 };
   const eyes: Detection[] = [
@@ -90,7 +104,93 @@ let onnxSessionCreateQueue = Promise.resolve();
 
 export async function createRuntimeModels(config: WebInferenceConfig, accelerator: WebAccelerator): Promise<RuntimeModels> {
   runtimeAssetBaseUrl = config.assetBaseUrl ?? globalThis.location.href;
+  if (config.detector === "mediapipe") {
+    return createMediaPipeRuntimeModels(config);
+  }
   return createOnnxRuntimeModels(config, accelerator);
+}
+
+// MediaPipe Face Landmarker: one synchronous VIDEO-mode call per frame gives
+// boxes, iris and pose together. detect() runs it and estimate() reuses the
+// result for the same frame object, so the worker pays one model call per
+// frame. GPU (WebGL2 in the worker) is the default — 14 ms/frame and ~26% of
+// one core at 20 fps on the M1 vs 20 ms and ~44% for the XNNPACK wasm CPU
+// delegate — and a GPU create failure falls back to CPU. It never
+// touches ONNX Runtime, so the accelerator reads "wasm" and the WebGPU
+// recovery ladder stays out of the way.
+async function createMediaPipeRuntimeModels(config: WebInferenceConfig): Promise<RuntimeModels> {
+  const vision = await import("@mediapipe/tasks-vision");
+  const base = absoluteAssetUrl(config.mediapipeWasmBaseUrl ?? "runtime-assets/mediapipe/");
+  const model = await fetchModelBytes(config.detectorModelUrl);
+  const create = (delegate: "GPU" | "CPU") =>
+    vision.FaceLandmarker.createFromOptions(
+      { wasmLoaderPath: `${base}vision_wasm_internal.js`, wasmBinaryPath: `${base}vision_wasm_internal.wasm` },
+      {
+        baseOptions:
+          typeof model === "string" ? { modelAssetPath: absoluteAssetUrl(model), delegate } : { modelAssetBuffer: model, delegate },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true
+      }
+    );
+  let delegate: "GPU" | "CPU" = config.mediapipeDelegate === "cpu" ? "CPU" : "GPU";
+  let landmarker: Awaited<ReturnType<typeof create>>;
+  try {
+    landmarker = await create(delegate);
+  } catch (error) {
+    if (delegate === "CPU") {
+      throw error;
+    }
+    console.warn("MediaPipe GPU delegate failed to start; using the CPU delegate", error);
+    delegate = "CPU";
+    landmarker = await create(delegate);
+  }
+  const providers = [`mediapipe-${delegate.toLowerCase()}`];
+  let lastTimestamp = 0;
+  let cached: { frame: ImageData; result: MediaPipeFrameResult | null } | null = null;
+  let closed = false;
+  const run = (frame: ImageData): MediaPipeFrameResult | null => {
+    if (cached?.frame === frame) {
+      return cached.result;
+    }
+    if (closed) {
+      throw new Error("invalid session id: MediaPipe landmarker closed");
+    }
+    // VIDEO mode requires strictly increasing timestamps.
+    lastTimestamp = Math.max(lastTimestamp + 1, performance.now());
+    const face = faceFromLandmarkerResult(landmarker.detectForVideo(frame, lastTimestamp));
+    const result = face === null ? null : mediapipeFrame(face, frame.width, frame.height);
+    cached = { frame, result };
+    return result;
+  };
+  return {
+    accelerator: "wasm",
+    detectorProviders: providers,
+    gazeProviders: providers,
+    lipMotionProviders: [],
+    async detect(frame) {
+      return run(frame)?.detection ?? { head: null, eyes: [], mouth: null };
+    },
+    async estimate(frame) {
+      const result = run(frame);
+      if (result === null) {
+        throw new Error("MediaPipe found no face in this frame");
+      }
+      return result.estimate;
+    },
+    async estimateLipMotion() {
+      return null;
+    },
+    async warmup() {
+      run(new ImageData(640, 480));
+    },
+    async dispose() {
+      closed = true;
+      cached = null;
+      landmarker.close();
+    }
+  };
 }
 
 async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: WebAccelerator): Promise<RuntimeModels> {

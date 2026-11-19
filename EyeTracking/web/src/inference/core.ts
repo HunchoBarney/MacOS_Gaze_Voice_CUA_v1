@@ -2506,6 +2506,21 @@ export class Calibration {
       // prove a mismatch, so they keep loading their feature state as before.
       const savedParts = typeof payload.context_fingerprint === "string" ? payload.context_fingerprint.split("|") : [];
       const liveParts = this.contextFingerprint?.split("|") ?? [];
+      // MediaPipe and the legacy ONNX pipeline describe the eye in different
+      // feature spaces end to end — map, sample pool and raw fit alike. A
+      // switch either way starts fresh (status "missing", so first-run
+      // calibration fires) instead of refitting on foreign samples.
+      const liveDetector = liveParts[12];
+      const savedDetector = savedParts[12];
+      if (liveDetector !== undefined && (liveDetector === "mediapipe") !== (savedDetector === "mediapipe")) {
+        this.emit({
+          type: "status",
+          level: "info",
+          message: `Calibration was fit with the ${savedDetector ?? "legacy"} detector — recalibrate for ${liveDetector}`
+        });
+        this.emit({ type: "calibration", status: "missing", path: this.path });
+        return;
+      }
       const featureContextMismatch =
         (savedParts[11] !== undefined && liveParts[11] !== undefined && savedParts[11] !== liveParts[11]) ||
         (savedParts[12] !== undefined && liveParts[12] !== undefined && savedParts[12] !== liveParts[12]);
