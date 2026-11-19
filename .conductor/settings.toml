@@ -12,7 +12,7 @@ default = true
 icon = "test-tube"
 
 [scripts.run.package]
-command = "make app"
+command = "make release"
 available_in = ["local"]
 icon = "package"
 
