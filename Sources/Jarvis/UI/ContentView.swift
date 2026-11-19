@@ -1,198 +1,20 @@
 import SwiftUI
 import JarvisCore
 
-struct OverlayView: View {
-    @ObservedObject var controller: VoiceController
-    var openReview: () -> Void
-    var openSettings: () -> Void
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var showText: Bool { !controller.transcript.isEmpty && controller.status != .done }
-    private var message: String {
-        if case .error(let text) = controller.status { return text }
-        if case .awaitingAnswer(let prompt) = controller.status { return prompt }
-        if controller.status == .done { return controller.resultMessage }
-        if controller.status == .idle, let outcome = latestOutcome {
-            return "\(outcome.label) — \(outcome.message)"
-        }
-        return controller.detail
-    }
-    private var showsActions: Bool {
-        controller.status == .reviewTranscript || controller.status == .awaitingConfirm || isError
-    }
-    private var isError: Bool { if case .error = controller.status { return true }; return false }
-    /// The most recently settled computer-control task — surfaced on the
-    /// idle card while VoiceWindows lingers the panel on a fresh outcome.
-    /// `lastActivity` is the settle-time proxy (see VoiceWindows).
-    private var latestOutcome: VoiceTaskCoordinator.Work? {
-        controller.cuaTasks.filter { $0.outcome != nil }.max { $0.lastActivity < $1.lastActivity }
-    }
-    /// Idle-card presentation of the settled task: verdict glyph, status
-    /// word, and the work row's own outcome line.
-    private var statusSymbol: String {
-        if controller.status == .idle, let outcome = latestOutcome {
-            switch outcome.outcome {
-            case .done?, .alreadyDone?: return "checkmark.circle.fill"
-            case .cancelled?: return "xmark.circle"
-            default: return "exclamationmark.circle.fill"
-            }
-        }
-        return controller.status.symbol
-    }
-    private var statusTint: Color {
-        if isError { return .orange }
-        if controller.status == .idle, let outcome = latestOutcome {
-            switch outcome.outcome {
-            case .done?, .alreadyDone?: return .mint
-            case .cancelled?: return .white.opacity(0.6)
-            default: return .orange
-            }
-        }
-        return .mint
-    }
-    private var statusTitle: String {
-        if controller.handsFreeEnabled, controller.captureState == .idle { return controller.handsFreeLabel }
-        if controller.status == .idle, let outcome = latestOutcome { return outcome.statusText }
-        return controller.status.title
-    }
-    /// Every parked approval/question gets a row — capped at 3 with an
-    /// overflow count — each Confirm is id-scoped to its own ask.
-    private var approvalRows: [VoiceTaskCoordinator.Work] {
-        Array(controller.pendingTaskApprovals.prefix(3))
-    }
-    private var questionRows: [VoiceController.PendingQuestionItem] {
-        Array(controller.pendingQuestions.prefix(max(0, 3 - approvalRows.count)))
-    }
-    private var hiddenAsks: Int {
-        controller.pendingTaskApprovals.count + controller.pendingQuestions.count
-            - approvalRows.count - questionRows.count
-    }
-    private var hasAsks: Bool { !approvalRows.isEmpty || !questionRows.isEmpty }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if showText {
-                Text(controller.partialLive ? controller.transcript + "…" : controller.transcript)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(controller.partialLive ? 0.55 : 0.95))
-                    .lineLimit(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !message.isEmpty {
-                Text(message).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(3)
-            }
-            // Spoken-error parity: when the failure was voiced, the line
-            // the user heard stays visible as the card's detail — an error
-            // must never be audible-but-unreadable.
-            if isError, !controller.detail.isEmpty, controller.detail != message {
-                Text(controller.detail).font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55)).lineLimit(2)
-            }
-            if showText || !message.isEmpty { Divider().overlay(Color.white.opacity(0.08)) }
-            HStack(spacing: 12) {
-                if controller.status == .listening {
-                    VoiceWaveform(level: controller.audioLevel)
-                        .help(controller.inputName)
-                } else if [.starting, .finishing, .thinking, .executing, .stopping].contains(controller.status) {
-                    ProgressView().controlSize(.small).tint(.white).scaleEffect(0.85)
-                } else {
-                    Image(systemName: statusSymbol)
-                        .foregroundStyle(statusTint)
-                }
-                Text(statusTitle).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                Spacer(minLength: 4)
-                if controller.handsFreeEnabled {
-                    Button(controller.handsFreeListening ? "Pause" : "Resume") {
-                        if controller.handsFreeListening { controller.pauseHandsFree() }
-                        else { controller.resumeHandsFree() }
-                    }
-                    .buttonStyle(.plain).font(.system(size: 11))
-                    .accessibilityLabel(controller.handsFreeListening ? "Pause hands-free voice" : "Resume hands-free voice")
-                }
-                if controller.status == .listening {
-                    Text("fn").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.6))
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(.white.opacity(0.2)))
-                }
-                if controller.cuaTasks.contains(where: \.active) {
-                    Button("Stop All", action: controller.stopAll).buttonStyle(.plain).font(.system(size: 11))
-                }
-                Button(action: openReview) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11, weight: .semibold)).frame(width: 24, height: 24)
-                }.buttonStyle(.plain).accessibilityLabel("Expand activity").help("Expand activity and settings")
-                if controller.status != .stopping && controller.status != .done {
-                    Button(action: controller.cancel) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).frame(width: 24, height: 24) }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(controller.status == .executing ? "Stop command" : "Cancel command")
-                        .help("Escape to cancel")
-                }
-            }
-            ForEach(approvalRows) { task in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(task.request).font(.caption2).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
-                    if let prompt = task.askPrompt {
-                        Text(prompt).font(.caption).fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack {
-                        Button("Confirm") { controller.approveTask(task.id, approved: true) }
-                            .buttonStyle(.borderedProminent)
-                        Button("Cancel") { controller.approveTask(task.id, approved: false) }
-                    }.controlSize(.small)
-                }
-            }
-            ForEach(questionRows) { question in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(question.prompt).font(.caption).fixedSize(horizontal: false, vertical: true)
-                    Text("for: \(question.owner)").font(.caption2).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
-                }
-            }
-            if hiddenAsks > 0 {
-                Text("+\(hiddenAsks) more").font(.caption2).foregroundStyle(.white.opacity(0.5))
-            }
-            if showsActions {
-                HStack(spacing: 10) {
-                    if controller.status == .awaitingConfirm {
-                        Button("Run", action: controller.confirm).buttonStyle(.borderedProminent).tint(.mint).foregroundStyle(.black)
-                    } else if controller.status == .reviewTranscript {
-                        Button("Review transcript", action: openReview).buttonStyle(.borderedProminent).tint(.mint).foregroundStyle(.black)
-                    } else if isError {
-                        Button("Dismiss", action: controller.cancelCaptureAttempt).buttonStyle(.bordered)
-                    }
-                    Spacer()
-                }.controlSize(.small)
-            }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 13)
-        .frame(width: showText || !message.isEmpty || showsActions || hasAsks ? 380 : 290)
-        .fixedSize(horizontal: false, vertical: true)
-        .background {
-            let shape = RoundedRectangle(cornerRadius: showText || showsActions || hasAsks ? 22 : 26, style: .continuous)
-            if reduceTransparency { shape.fill(Color(white: 0.10)) }
-            else { shape.fill(.ultraThinMaterial).overlay(shape.fill(Color.black.opacity(0.68))) }
-        }
-        .overlay(RoundedRectangle(cornerRadius: showText || showsActions || hasAsks ? 22 : 26).stroke(.white.opacity(0.14), lineWidth: 1))
-        .foregroundStyle(.white)
-        .colorScheme(.dark)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: controller.status)
-    }
-}
-
 struct CuaTasksView: View {
     @ObservedObject var controller: VoiceController
     var body: some View {
         if !controller.cuaTasks.isEmpty || !controller.pendingQuestions.isEmpty {
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { Text("Computer control tasks").font(.headline); Spacer(); Button("Stop All", action: controller.stopAll) }
+                    HStack { Text("What Jarvis is doing").font(.headline); Spacer(); Button("Stop everything", action: controller.stopAll) }
                     ForEach(controller.cuaTasks) { task in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Button(task.label) { controller.selectTask(task.id) }.buttonStyle(.plain)
                                 Text(task.statusText).font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                if task.awaitingApproval { Button("Confirm operation") { controller.approveTask(task.id, approved: true) } }
+                                if task.awaitingApproval { Button("Go ahead") { controller.approveTask(task.id, approved: true) } }
                                 if task.active { Button("Stop") { controller.cancelTask(task.id) } }
                                 if controller.canRetryTask(task.id) {
                                     Button("Retry") { controller.retryTask(task.id) }
@@ -250,15 +72,15 @@ struct ActivityView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(!canRunCommand)
                     }
-                    Text("Runs through the same computer-control path as a spoken command — same targeting, verification, and confirmation rules.")
+                    Text("Works just like saying it out loud.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
             VoiceCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("Decision feed", systemImage: "list.bullet.rectangle").font(.headline)
+                    Label("What happened", systemImage: "list.bullet.rectangle").font(.headline)
                     if controller.cua.feed.entries.isEmpty {
-                        Text("Nothing yet — hold Fn and speak; each routing decision, dispatch, and verification lands here as it happens.")
+                        Text("Nothing yet. Ask Jarvis something and each step shows up here.")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         ForEach(controller.cua.feed.entries.suffix(30).reversed()) { entry in
@@ -315,7 +137,7 @@ struct ActivityView: View {
                         Text(controller.transcript).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if controller.status == .reviewTranscript {
-                        Text("Check the captured text. Continue submits it as your command.")
+                        Text("Check what Jarvis heard. Continue does it.")
                             .font(.callout).foregroundStyle(.secondary)
                         HStack {
                             Button("Continue", action: controller.acceptTranscript).buttonStyle(.borderedProminent)

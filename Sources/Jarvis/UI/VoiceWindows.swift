@@ -23,20 +23,14 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
     private let microphones: MicrophoneCatalog
     private let input: FnInputMonitor
     private var panel: VoicePanel!
-    private var overlay: OverlayHostingView<OverlayView>!
+    private var overlay: OverlayHostingView<ListeningIndicatorView>!
     private var settingsWindow: NSWindow?
     private var agentsWindow: NSWindow?
+    private var firstRunWindow: NSWindow?
     private var targetScreen: NSScreen?
     private var subscriptions: Set<AnyCancellable> = []
     private var refreshQueued = false
-    private var previousStatus: VoiceController.Status = .idle
-    /// Settled-task ids already granted an idle linger — each fresh outcome
-    /// gets one showing, never a re-show on later refresh ticks.
-    private var lingeredOutcomeIDs: Set<UUID> = []
-    private var outcomeLingerTask: Task<Void, Never>?
-    /// Seconds a fresh task outcome stays on the idle card — long enough
-    /// to read, short enough not to feel stuck.
-    private static let outcomeLinger: TimeInterval = 4.5
+    private var previousPhase: IndicatorPhase = .hidden
 
     init(controller: VoiceController, microphones: MicrophoneCatalog, input: FnInputMonitor) {
         self.controller = controller; self.microphones = microphones; self.input = input
@@ -52,18 +46,18 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
         panel.animationBehavior = .none
         panel.isMovableByWindowBackground = false
         panel.appearance = NSAppearance(named: .darkAqua)
-        overlay = OverlayHostingView(rootView: OverlayView(controller: controller,
-            openReview: { [weak self] in self?.show(.activity) },
-            openSettings: { [weak self] in self?.show(.voice) }))
+        overlay = OverlayHostingView(rootView: ListeningIndicatorView(controller: controller,
+            openSettings: { [weak self] in self?.show(.voice, anchor: .permissions) }))
         panel.contentView = overlay
         controller.objectWillChange.sink { [weak self] in self?.queueRefresh() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .sink { [weak self] _ in self?.queueRefresh() }.store(in: &subscriptions)
     }
 
-    func show(_ section: SettingsNavigation.Section) {
+    func show(_ section: SettingsNavigation.Section, anchor: SettingsNavigation.Anchor? = nil) {
         controller.refreshPermissions(); microphones.refresh(); input.refresh()
         navigation.section = section
+        navigation.anchor = anchor
         if section != .voice { controller.stopMicrophoneTest() }
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
@@ -73,8 +67,7 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
             window.isReleasedWhenClosed = false
             window.minSize = NSSize(width: 740, height: 520)
             window.contentView = NSHostingView(rootView: SettingsView(controller: controller, config: controller.config,
-                microphones: microphones, input: input, navigation: navigation,
-                collapse: { [weak self] in self?.settingsWindow?.close() })
+                microphones: microphones, input: input, navigation: navigation)
                 .environmentObject(agents)
                 .environment(\.openAgents) { [weak self] in self?.showAgents() })
             window.delegate = self
@@ -83,6 +76,23 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The three-step first run. Closing it early is fine: Settings has
+    /// the same permissions, and it shows again until it's finished.
+    func showFirstRun() {
+        if firstRunWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 400),
+                styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Set up Jarvis"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: FirstRunView(config: controller.config,
+                finish: { [weak self] in self?.firstRunWindow?.close() }))
+            window.center()
+            firstRunWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        firstRunWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// Roster + per-agent chat window. Lives outside SettingsNavigation —
@@ -115,30 +125,11 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
     }
 
     private func refreshOverlay() {
-        let status = controller.status
-        defer { previousStatus = status }
-        // A task that settles while the card is idle is otherwise never
-        // seen — hold the panel on the fresh outcome before ordering out.
-        // Every settled row is consumed so only a NEWER outcome re-arms;
-        // the card always renders the newest settled one.
-        if status == .idle, !controller.isMicrophoneTest,
-           controller.cuaTasks.contains(where: { $0.outcome != nil && !lingeredOutcomeIDs.contains($0.id) }) {
-            for work in controller.cuaTasks where work.outcome != nil {
-                lingeredOutcomeIDs.insert(work.id)
-            }
-            outcomeLingerTask?.cancel()
-            outcomeLingerTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(Self.outcomeLinger * 1e9))
-                guard !Task.isCancelled else { return }
-                self?.outcomeLingerTask = nil
-                self?.queueRefresh()
-            }
-        }
-        guard status != .idle || outcomeLingerTask != nil || controller.handsFreeEnabled,
-              !controller.isMicrophoneTest else {
-            panel.orderOut(nil); return
-        }
-        if status == .starting && previousStatus != .starting || targetScreen == nil {
+        let phase = IndicatorPhase.current(controller)
+        if phase != previousPhase { announce(phase) }
+        defer { previousPhase = phase }
+        guard phase != .hidden else { panel.orderOut(nil); return }
+        if previousPhase == .hidden || targetScreen == nil {
             targetScreen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         }
         if !NSScreen.screens.contains(where: { $0 == targetScreen }) { targetScreen = NSScreen.main ?? NSScreen.screens.first }
@@ -153,9 +144,26 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
         controller.recordOverlayPresentation()
     }
 
+    /// One VoiceOver announcement per change, never per meter tick.
+    private func announce(_ phase: IndicatorPhase) {
+        let text: String
+        switch phase {
+        case .hidden: return
+        case .hearing: text = "Listening"
+        case .working: text = "Working"
+        case .asking: text = controller.pendingTaskApproval?.askPrompt
+            ?? controller.pendingQuestions.last?.prompt ?? "Jarvis has a question"
+        case .problem:
+            if case .error(let message) = controller.status { text = message } else { text = "Something went wrong" }
+        }
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+    }
+
+    /// The tab hangs from the menu bar, centred under the notch.
     static func frame(contentSize: NSSize, visibleFrame: NSRect) -> NSRect {
         let width = min(contentSize.width, visibleFrame.width)
-        let height = min(contentSize.height, max(0, visibleFrame.height - 32))
-        return NSRect(x: visibleFrame.midX - width / 2, y: visibleFrame.minY + 16, width: width, height: height)
+        let height = min(contentSize.height, visibleFrame.height)
+        return NSRect(x: visibleFrame.midX - width / 2, y: visibleFrame.maxY - height, width: width, height: height)
     }
 }
