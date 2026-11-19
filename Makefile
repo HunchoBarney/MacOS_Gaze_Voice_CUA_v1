@@ -41,7 +41,7 @@ stage-core: build vendor
 	# the bundle has no embedded copy.
 	cp "$(VENDOR)/cua-driver" "$(STAGE_APP)/Contents/Resources/cua-driver"
 	rm -rf "$(STAGE_APP)/Contents/Resources/CodexRuntime"
-	cp -R "$(VENDOR)/CodexRuntime" "$(STAGE_APP)/Contents/Resources/CodexRuntime"
+	ditto "$(VENDOR)/CodexRuntime" "$(STAGE_APP)/Contents/Resources/CodexRuntime"
 	mkdir -p "$(STAGE_APP)/Contents/Resources/ThirdParty/FluidVoice"
 	cp ThirdParty/FluidVoice/LICENSE ThirdParty/FluidVoice/NOTICE.md "$(STAGE_APP)/Contents/Resources/ThirdParty/FluidVoice/"
 	mkdir -p "$(STAGE_APP)/Contents/Resources/ThirdParty/CuaDriver"
