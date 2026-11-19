@@ -20,7 +20,7 @@ class ReleaseTests(unittest.TestCase):
         refs = [s["with"]["ref"] for s in steps if s.get("uses", "").startswith("actions/checkout@")]
         self.assertEqual(refs, ["${{ github.sha }}"])
         commands = "\n".join(s.get("run", "") for s in steps)
-        gates = ["${GITHUB_REF}^{commit}", "verification-lane.sh release-dist", "ditto -x -k", "codesign --verify --deep --strict",
+        gates = ["${GITHUB_REF}^{commit}", "make release PUBLIC=1", "ditto -x -k", "codesign --verify --deep --strict",
                  'scripts/check-packaged-tracker.py "$app"', "shasum -a 256", "gh release create"]
         self.assertEqual(sorted(gates, key=commands.index), gates)
         cask = self.jobs["cask"]

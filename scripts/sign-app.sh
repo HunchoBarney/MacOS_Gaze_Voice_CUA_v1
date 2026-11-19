@@ -64,7 +64,9 @@ EOF
     [ -n "$(find_identity)" ]
 )
 
-IDENTITY=$(find_identity)
+# SIGN_IDENTITY=- signs ad-hoc for CI packaging checks, which never run the
+# app and so never touch TCC.
+IDENTITY="${SIGN_IDENTITY:-$(find_identity)}"
 if [ -z "$IDENTITY" ]; then
     echo "sign-app: '$IDENTITY_NAME' not in the login keychain — minting it"
     mint_identity && IDENTITY=$(find_identity) || true

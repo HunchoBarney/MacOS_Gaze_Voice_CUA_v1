@@ -50,7 +50,7 @@
 #                                        be produced (make bundle-tracker)
 #   bundle-tracker.sh --if-present <app> stage when the checkout can produce
 #                                        a complete payload, else warn and
-#                                        exit 0 (make stage auto-include)
+#                                        exit 0
 #   bundle-tracker.sh --dest <dir>       write the tracker root at <dir>
 #                                        instead of inside an app — the
 #                                        installed-layout path
@@ -116,7 +116,7 @@ done
 [[ -d "$NM/electron/dist/Electron.app" ]] || skip "Electron.app missing at $NM/electron/dist — run \`corepack pnpm rebuild electron\` in EyeTracking"
 
 if [[ -z "$(ls -A "$TRACKER_SRC/dist/models" 2>/dev/null || true)" ]]; then
-	warn "dist/models is empty — the tracker will boot but report model errors; run \`make tracker-deps\` to fetch ONNX models"
+	warn "dist/models is empty — the tracker will boot but report model errors; run \`make tracker\` to fetch the tracker models"
 fi
 
 # --- fingerprint: skip a restage when nothing that feeds it changed ---------
@@ -191,7 +191,7 @@ log "node_modules closure: $(wc -l < "$SEEN" | tr -d ' ') .pnpm dirs"
 # --- assemble ----------------------------------------------------------------
 
 case "$DEST" in
-	"$APP"/*) [[ -d "$APP" ]] || skip "app bundle $APP not staged — run \`make stage\` first" ;;
+	"$APP"/*) [[ -d "$APP" ]] || skip "app bundle $APP not staged — run \`make release\`" ;;
 esac
 mkdir -p "$(dirname "$DEST")"
 STAGE="${DEST}.staging.$$"
@@ -205,6 +205,7 @@ mkdir -p "$STAGE/node_modules/.bin" "$STAGE/node_modules/.pnpm"
 cp -X "$TRACKER_SRC/package.json" "$STAGE/package.json"
 ditto --norsrc "$TRACKER_SRC/electron" "$STAGE/electron"
 ditto --norsrc "$TRACKER_SRC/scripts" "$STAGE/scripts"
+find "$STAGE/electron" "$STAGE/scripts" -name '*.test.*' -delete
 ditto --norsrc "$TRACKER_SRC/dist" "$STAGE/dist"
 # Prod resolves model SOURCES under public/ then copies them into dist/ —
 # the sources are the same files vite already copied, so link them.
@@ -270,7 +271,12 @@ done
 if [[ -n "$NODE_BIN" ]]; then
 	NODE_REAL="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$NODE_BIN")"
 	mkdir -p "$STAGE/bin"
-	cp -X "$NODE_REAL" "$STAGE/bin/node"
+	# The app is arm64-only, so a universal node ships only its arm64 slice.
+	if lipo -archs "$NODE_REAL" 2>/dev/null | grep -qw arm64 && [[ "$(lipo -archs "$NODE_REAL")" != "arm64" ]]; then
+		lipo "$NODE_REAL" -thin arm64 -output "$STAGE/bin/node"
+	else
+		cp -X "$NODE_REAL" "$STAGE/bin/node"
+	fi
 fi
 
 # TCC: every bundled plist needs NSCameraUsageDescription or a camera request
