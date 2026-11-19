@@ -20,10 +20,10 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
 
     var purpose: String {
         switch self {
-        case .microphone: return "hear your commands"
-        case .camera: return "see your face for eye tracking"
-        case .screenRecording: return "read the screen for gaze and computer control"
-        case .accessibility: return "enable Fn and control your Mac"
+        case .microphone: return "To hear you"
+        case .camera: return "For eye tracking only"
+        case .screenRecording: return "To read what's on screen when you ask about it"
+        case .accessibility: return "To click, type and open apps"
         }
     }
 
@@ -72,7 +72,16 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    static var missing: [Permission] { allCases.filter { !$0.isGranted } }
+    /// What Jarvis needs. The camera only feeds eye tracking, so it's
+    /// required only while eye tracking is on.
+    static func required(gaze: Bool) -> [Permission] {
+        allCases.filter { gaze || $0 != .camera }
+    }
+
+    /// The stored eye-tracking switch, readable from any thread.
+    static var gazeEnabled: Bool { UserDefaults.standard.bool(forKey: "gazeTracking") }
+
+    static var missing: [Permission] { required(gaze: gazeEnabled).filter { !$0.isGranted } }
 
     /// Triggers the system prompt where one is still available, otherwise opens System Settings.
     @MainActor

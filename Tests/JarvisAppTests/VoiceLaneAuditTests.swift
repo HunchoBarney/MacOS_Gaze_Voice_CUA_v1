@@ -689,7 +689,7 @@ final class VoiceLaneAuditTests: XCTestCase {
                                          speaker: speaker)
         controller.begin()
         await poll(until: { !speaker.spoken.isEmpty })
-        XCTAssertEqual(speaker.spoken, ["I need microphone access — check Voice settings."])
+        XCTAssertEqual(speaker.spoken, ["I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone."])
         guard case .error = controller.status else {
             return XCTFail("the failed capture must end on the error pill")
         }
@@ -700,21 +700,21 @@ final class VoiceLaneAuditTests: XCTestCase {
     func testSpokenFailurePhrasing() {
         XCTAssertEqual(VoiceController.spokenFailure(
             for: "No editable field is focused for dictation."),
-            "I couldn't insert that text.")
+            "I couldn't type that in. Click where you want it and try again.")
         XCTAssertEqual(VoiceController.spokenFailure(
             for: "The window server rejected the click."),
-            "I couldn't reach the window server.")
+            "Your Mac didn't let me do that. Try again in a moment.")
         XCTAssertEqual(VoiceController.spokenFailure(
-            for: "Microphone access is needed. Open Voice settings."),
-            "I need microphone access — check Voice settings.")
+            for: "Microphone access is needed. It's under Privacy & Security, then Microphone."),
+            "I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone.")
         XCTAssertEqual(VoiceController.spokenFailure(
             for: "No speech was captured — hold Fn and dictate again."),
-            "I didn't catch that.")
+            "Sorry, I didn't catch that.")
         XCTAssertEqual(VoiceController.spokenFailure(
             for: "The voice model is unavailable: connection dropped"),
-            "I couldn't reach the voice server.")
+            "I can't connect right now. Give it a second and try again.")
         XCTAssertEqual(VoiceController.spokenFailure(
             for: "Something weird happened at /Users/x/secret"),
-            "That didn't work.")
+            "That didn't work, sorry.")
     }
 }

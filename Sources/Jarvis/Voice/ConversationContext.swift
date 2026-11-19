@@ -270,7 +270,7 @@ final class ConversationSession {
     func startExternal(session: UUID) throws {
         guard id == nil, makeSpeechSession != nil, readContext != nil,
               interpret != nil, execute != nil, onControl != nil else {
-            throw VoiceError("Hands-free voice is not ready.")
+            throw VoiceError("I'm not ready to listen yet.")
         }
         id = session
         epoch = UUID()
@@ -378,7 +378,7 @@ final class ConversationSession {
         }
         memory.discardFragment()
         onControl?(kind)
-        onEvent?(.feedback(turn, kind == .pause ? "Hands-free voice is paused." : "Stopped."))
+        onEvent?(.feedback(turn, kind == .pause ? "Okay, I'll stop listening. Press fn when you need me." : "Stopped."))
     }
 
     private func processNext() {

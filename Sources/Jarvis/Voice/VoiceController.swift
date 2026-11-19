@@ -103,17 +103,20 @@ final class VoiceController: ObservableObject {
     @Published private(set) var handsFreeState: ConversationListeningState = .off
     @Published private(set) var continuousScrolling = false
     @Published private(set) var handsFreeSpeaking = false
+    /// A hands-free turn is open: the user started speaking and the turn
+    /// hasn't sealed. The on-screen indicator shows while this is true.
+    @Published private(set) var conversationTurnOpen = false
     var handsFreeEnabled: Bool { config.handsFreeEnabled }
     var handsFreeListening: Bool { handsFreeState == .listening }
     var handsFreeLabel: String {
         switch handsFreeState {
-        case .off: return "Hands-free off"
-        case .preparing: return "Preparing hands-free voice…"
+        case .off: return "Not listening"
+        case .preparing: return "Getting ready…"
         case .listening:
-            if handsFreeSpeaking { return "Speaking · listening" }
-            return continuousScrolling ? "Scrolling · listening" : "Listening hands-free"
-        case .paused: return "Hands-free paused"
-        case .unavailable: return "Hands-free unavailable"
+            if handsFreeSpeaking { return "Talking, still listening" }
+            return continuousScrolling ? "Scrolling, still listening" : "Listening"
+        case .paused: return "Paused"
+        case .unavailable: return "Can't listen right now"
         }
     }
     var handsFreeDetail: String {
@@ -838,7 +841,7 @@ final class VoiceController: ObservableObject {
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
         lane.conversation.interpret = { [weak self] text, context, memory in
             guard let self, !self.diagnosticTraceOnly, !self.config.apiKey.isEmpty else {
-                throw VoiceError("Jev is unavailable. Check the connection and try again.")
+                throw VoiceError("I can't connect right now. Check your internet and try again.")
             }
             return try await VoiceSemanticRouter.live(apiKey: self.config.apiKey)
                 .interpretConversation(text, context: context, memory: memory)
@@ -901,6 +904,7 @@ final class VoiceController: ObservableObject {
         handsFreeState = state
         continuousScrolling = false
         handsFreeSpeaking = false
+        conversationTurnOpen = false
         cua.endListeningHint()
     }
 
@@ -917,7 +921,7 @@ final class VoiceController: ObservableObject {
             do {
                 let granted = await self.authorizeUnlessCancelled()
                 guard granted, self.handsFreeRequest == request, !Task.isCancelled else {
-                    throw VoiceError("Microphone access is needed for hands-free voice.")
+                    throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.")
                 }
                 try await lane.startConversation(inputUID: self.config.microphoneUID, since: since)
             } catch {
@@ -978,7 +982,9 @@ final class VoiceController: ObservableObject {
             automaticTimes[id] = (at, 0)
             adoptAutomaticTurn(id)
             cua.beginListeningHint()
+            conversationTurnOpen = true
         case .sealed(let id, let at):
+            conversationTurnOpen = false
             cua.endListeningHint()
             automaticTimes[id]?.released = at
         case .final(let id, let text):
@@ -1330,7 +1336,7 @@ final class VoiceController: ObservableObject {
             self.refreshPermissions()
             guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
             self.measurements["Permission check"] = (ProcessInfo.processInfo.systemUptime - permissionStart) * 1000
-            guard granted else { self.fail("Microphone access is needed. Open Voice settings."); return }
+            guard granted else { self.fail("Microphone access is needed. It's under Privacy & Security, then Microphone."); return }
             do {
                 let name = try await self.speech.start(session: id, inputUID: selectedUID, transcribe: true)
                 guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
@@ -1860,20 +1866,20 @@ final class VoiceController: ObservableObject {
         let m = message.lowercased()
         if m.contains("editable field") || m.contains("focused for dictation")
             || m.contains("insert") {
-            return "I couldn't insert that text."
+            return "I couldn't type that in. Click where you want it and try again."
         }
-        if m.contains("window server") { return "I couldn't reach the window server." }
+        if m.contains("window server") { return "Your Mac didn't let me do that. Try again in a moment." }
         if m.contains("microphone") || m.contains("permission") || m.contains("access is needed") {
-            return "I need microphone access — check Voice settings."
+            return "I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone."
         }
         if m.contains("speech") || m.contains("try again") || m.contains("catch") {
-            return "I didn't catch that."
+            return "Sorry, I didn't catch that."
         }
         if m.contains("session") || m.contains("server") || m.contains("connect")
             || m.contains("unavailable") || m.contains("api key") || m.contains("realtime") {
-            return "I couldn't reach the voice server."
+            return "I can't connect right now. Give it a second and try again."
         }
-        return "That didn't work."
+        return "That didn't work, sorry."
     }
 
     /// First finisher wins — the raced work's value, or `fallback` the

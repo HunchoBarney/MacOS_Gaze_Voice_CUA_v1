@@ -64,8 +64,26 @@ final class Config: ObservableObject {
     @Published var ttsEnabled: Bool {
         didSet { defaults.set(ttsEnabled, forKey: "ttsEnabled") }
     }
+    /// How a turn starts — the user's choice. `handsFreeEnabled` follows
+    /// it: a mode that streams between turns keeps hands-free on.
+    @Published var listeningMode: ListeningMode {
+        didSet {
+            defaults.set(listeningMode.rawValue, forKey: "listeningMode")
+            let streams = ListeningPolicy.current.streamsContinuously(listeningMode)
+            if handsFreeEnabled != streams { handsFreeEnabled = streams }
+        }
+    }
     @Published var handsFreeEnabled: Bool {
-        didSet { defaults.set(handsFreeEnabled, forKey: "handsFreeEnabled") }
+        didSet {
+            defaults.set(handsFreeEnabled, forKey: "handsFreeEnabled")
+            let streams = ListeningPolicy.current.streamsContinuously(listeningMode)
+            if handsFreeEnabled != streams { listeningMode = handsFreeEnabled ? .conversation : .pushToTalk }
+        }
+    }
+    /// The three-step first run finished (or was skipped). Settings can
+    /// start it again.
+    @Published var firstRunCompleted: Bool {
+        didSet { defaults.set(firstRunCompleted, forKey: "firstRunCompleted") }
     }
     @Published var handsFreePaused: Bool {
         didSet { defaults.set(handsFreePaused, forKey: "handsFreePaused") }
@@ -87,9 +105,10 @@ final class Config: ObservableObject {
         didSet { defaults.set(dictationHotkey, forKey: "dictationHotkey") }
     }
 
-    /// Launch the eye tracker with the app so gaze-referent verbs resolve:
-    /// "click", "scroll down", "open this", "what is this". Off leaves the
-    /// tracker alone — the verbs then refuse honestly instead of guessing.
+    /// Eye tracking — optional and off by default. On, the tracker launches
+    /// with the app so "click this" and "what is this" resolve and the
+    /// camera is requested. Off, those phrases answer with what to say
+    /// instead and the camera is never asked for.
     @Published var gazeTracking: Bool {
         didSet { defaults.set(gazeTracking, forKey: "gazeTracking") }
     }
@@ -145,13 +164,19 @@ final class Config: ObservableObject {
         self.sounds = defaults.object(forKey: "soundsEnabled") as? Bool ?? true
         self.persistentNumbers = defaults.object(forKey: "persistentNumbers") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
-        self.handsFreeEnabled = defaults.object(forKey: "handsFreeEnabled") as? Bool ?? true
+        let policy = ListeningPolicy.current
+        let storedMode = defaults.string(forKey: "listeningMode").flatMap(ListeningMode.init(rawValue:))
+        let legacyHandsFree = defaults.object(forKey: "handsFreeEnabled") as? Bool
+        let mode = storedMode ?? legacyHandsFree.map { $0 ? .conversation : .pushToTalk } ?? policy.defaultMode
+        self.listeningMode = mode
+        self.handsFreeEnabled = policy.streamsContinuously(mode)
+        self.firstRunCompleted = defaults.bool(forKey: "firstRunCompleted")
         self.handsFreePaused = defaults.object(forKey: "handsFreePaused") as? Bool ?? false
         self.semanticAppSuggestions = defaults.object(forKey: "semanticAppSuggestions") == nil
             ? true : defaults.bool(forKey: "semanticAppSuggestions")
         self.latchMode = defaults.object(forKey: "latchMode") as? Bool ?? false
         self.dictationHotkey = defaults.object(forKey: "dictationHotkey") as? Bool ?? true
-        self.gazeTracking = defaults.object(forKey: "gazeTracking") as? Bool ?? true
+        self.gazeTracking = defaults.object(forKey: "gazeTracking") as? Bool ?? false
         self.tapToGazeClick = defaults.object(forKey: "tapToGazeClick") as? Bool ?? true
         // ServiceManagement is the truth when it knows the app — a bare
         // `swift run` binary reports .notFound, where the persisted choice
