@@ -92,9 +92,20 @@ echo "sign-app: signing with '$SIGN'"
 # Embedded runtimes carry foreign signatures (cua-driver's is bound to the
 # CuaDriver.app Info.plist, which kills it on exec), and `codesign --deep`
 # does not reach loose binaries under Resources — sign each nested Mach-O
-# explicitly before sealing the app.
-find "$APP/Contents/Resources" -type f | while read -r file; do
-    case "$(file -b "$file")" in Mach-O*) codesign --force --sign "$SIGN" "$file" ;; esac
+# explicitly before sealing the app. codesign rewrites the file, which
+# splits hard links (the Codex entrypoint is one), so each inode is signed
+# once and its other names are re-linked to the signed copy.
+prev_inode=""
+prev_file=""
+find "$APP/Contents/Resources" -type f -exec stat -f '%i %N' {} + | sort -n | while read -r inode file; do
+    case "$(file -b "$file")" in Mach-O*) ;; *) continue ;; esac
+    if [ "$inode" = "$prev_inode" ]; then
+        ln -f "$prev_file" "$file"
+    else
+        codesign --force --sign "$SIGN" "$file"
+        prev_inode="$inode"
+        prev_file="$file"
+    fi
 done
 
 /usr/libexec/PlistBuddy -c "Delete :JevCuaDriverSHA256" "$APP/Contents/Info.plist" 2>/dev/null || true

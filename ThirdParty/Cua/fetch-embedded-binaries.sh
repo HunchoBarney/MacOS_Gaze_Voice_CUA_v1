@@ -60,10 +60,13 @@ chmod +x "$DRIVER_OUT"
 # keeps the native binary at <root>/bin/codex with codex-package.json,
 # codex-path/ and codex-resources/ resolved relative to that package root,
 # so the whole tree is staged and the bundle entrypoint is a second link to
-# the same binary.
+# the same binary. A cache counts as complete only when both names exist and
+# are one file; anything else is re-extracted.
 CODEX_SHA="$(field codex sha256)"
 CODEX_OUT="$DEST/CodexRuntime"
-if ! { [ -f "$CODEX_OUT/codex" ] && [ "$(sha256 "$CODEX_OUT/codex")" = "$CODEX_SHA" ]; }; then
+CODEX_BIN="$CODEX_OUT/$(field codex entrypoint)"
+if ! { [ -f "$CODEX_OUT/codex" ] && [ -f "$CODEX_BIN" ] && [ "$CODEX_OUT/codex" -ef "$CODEX_BIN" ] \
+       && [ "$(sha256 "$CODEX_OUT/codex")" = "$CODEX_SHA" ]; }; then
   TARBALL="$CACHE/$(basename "$(field codex url)")"
   fetch "$(field codex url)" "$TARBALL"
   verify "$TARBALL" "$(field codex tarball_sha256)" "codex tarball"
@@ -71,9 +74,9 @@ if ! { [ -f "$CODEX_OUT/codex" ] && [ "$(sha256 "$CODEX_OUT/codex")" = "$CODEX_S
   mkdir -p "$CACHE/codex" "$CODEX_OUT"
   tar -xzf "$TARBALL" -C "$CACHE/codex" "$(field codex vendor_root)"
   cp -R "$CACHE/codex/$(field codex vendor_root)/." "$CODEX_OUT/"
-  ln -f "$CODEX_OUT/$(field codex entrypoint)" "$CODEX_OUT/codex"
+  ln -f "$CODEX_BIN" "$CODEX_OUT/codex"
 fi
 verify "$CODEX_OUT/codex" "$CODEX_SHA" "codex"
-chmod +x "$CODEX_OUT/codex" "$CODEX_OUT/$(field codex entrypoint)"
+chmod +x "$CODEX_BIN"
 
 echo "vendored cua-driver $(field cua-driver version) + codex $(field codex version) → $DEST"
