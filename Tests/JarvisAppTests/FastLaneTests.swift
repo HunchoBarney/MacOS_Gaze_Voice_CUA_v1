@@ -1166,25 +1166,22 @@ final class FastLaneParseTests: XCTestCase {
 
     /// Overlay phrases and the numbered pick.
     func testOverlayRows() {
-        guard let show = FastAction.parse("show numbers"),
-              case .overlay(let verb) = show.action.body else {
-            return XCTFail("'show numbers' should parse to overlay")
-        }
-        XCTAssertEqual(verb, .showNumbers)
-        guard let bare = FastAction.parse("numbers"),
-              case .overlay(let bareVerb) = bare.action.body else {
-            return XCTFail("'numbers' should parse to overlay")
-        }
-        XCTAssertEqual(bareVerb, .showNumbers)
-        for phrase in ["show numbers everywhere", "numbers everywhere", "all numbers"] {
+        // Names replace the numbers grid; the old phrase shows names too.
+        for phrase in ["show names", "show labels", "what can i click", "show numbers"] {
             guard let parsed = FastAction.parse(phrase),
                   case .overlay(let v) = parsed.action.body else {
                 XCTFail("'\(phrase)' should parse to overlay"); continue
             }
-            XCTAssertEqual(v, .showNumbersAll, phrase)
+            XCTAssertEqual(v, .showNames, phrase)
+        }
+        // No phrase asks for numbers everywhere any more.
+        for phrase in ["show numbers everywhere", "numbers everywhere", "all numbers", "numbers"] {
+            if let parsed = FastAction.parse(phrase), case .overlay(let v) = parsed.action.body {
+                XCTAssertNotEqual(v, .showNumbers, phrase)
+            }
         }
         // "hide numbers" is the overlay phrase, never the Numbers app.
-        for phrase in ["hide numbers", "clear numbers"] {
+        for phrase in ["hide numbers", "clear numbers", "hide names"] {
             guard let parsed = FastAction.parse(phrase),
                   case .overlay(let v) = parsed.action.body else {
                 XCTFail("'\(phrase)' should parse to overlay"); continue

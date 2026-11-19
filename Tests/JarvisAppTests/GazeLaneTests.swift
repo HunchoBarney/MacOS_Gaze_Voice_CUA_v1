@@ -47,13 +47,16 @@ final class GazeLaneTests: XCTestCase {
         } else { XCTFail("expected gaze, got \(String(describing: resolved?.action?.body))") }
     }
 
-    /// A mid-sentence "click" is not a gaze referent — the loop owns it.
-    func testClickWithObjectStaysInTheLoop() {
+    /// A "click" with an object is not a gaze referent — it names a
+    /// control in the front window.
+    func testClickWithObjectNamesAControl() {
         let notes = appRow("Notes", "com.apple.Notes", pid: 42)
         let resolved = DriveLoop.resolveFastLane(goal: "click the save button",
                                                  apps: [notes],
                                                  frontmostBundle: "com.apple.Notes")
-        XCTAssertNil(resolved, "'click the save button' is element work, not a gaze verb")
+        guard case .clickNamed("save") = resolved?.action?.body else {
+            return XCTFail("'click the save button' names a control, got \(String(describing: resolved?.action?.body))")
+        }
     }
 
     // MARK: - Dispatch
