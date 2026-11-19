@@ -2,7 +2,7 @@
 
 The classifier's input is a drive_until result frame's text + isError —
 the complete vocabulary is pinned in .agent/phases/P1-bench.md Context
-("Result vocabulary"). isError always wins.
+("Result vocabulary") in the harness-archive-2026-11-19 tag. isError always wins.
 """
 
 import json

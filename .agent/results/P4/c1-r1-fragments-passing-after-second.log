@@ -1,5 +1,0 @@
-Building for production...
-[0/7] Write swift-version--58304C5D6DBC2206.txt
-[1/7] Write sources
-error: unable to load output file map '/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/release/JevVoice.build/output-file-map.json': FileSystemError(kind: TSCBasic.FileSystemError.Kind.noEntry, path: Optional(<AbsolutePath:"/Users/karanvirkang/Documents/code/jarvis-v1-agent/.build/arm64-apple-macosx/release/JevVoice.build/output-file-map.json">))
-error: fatalError

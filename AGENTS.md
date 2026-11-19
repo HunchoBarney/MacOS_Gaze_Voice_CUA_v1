@@ -1,100 +1,48 @@
 # Working in Jarvis
 
-This repo runs the `.agent/` harness. **`.agent/PROGRAM.md` is the source
-of truth for "done"** — goals, locked decisions, phase DAG, release bars.
-**`.agent/PLANS.md`** defines how every phase plans, gates, and hands off.
-**`.agent/PROGRESS.md`** is the append-only session log — read it before
-resuming anything, write it before stopping phase work (a Stop hook
-enforces the write).
-
-**`.agent/SHIP-PLAN.md`** is the current delivery sequence and next
-candidate scope. **`.agent/REUSE.md`** records the open-source-first
-decisions. Read both before starting new phase work.
-**`.agent/COMPETITIVE.md`** defines matched dictation/category comparisons.
-Latest routing: direct grounded actions, Jev as primary semantic chooser,
-Cua/native execution, Terra API only when needed. The user has authorized
-that API choice; no replacement-model tournament is part of the plan.
-
-Phase work lives in `.agent/phases/P<n>-*.md` (self-contained ExecPlans
-with explicit owned paths) and is judged against
-`.agent/acceptance/P<n>.json` — default-FAIL criteria only a
-fresh-context judge may flip, with evidence. Frozen cross-phase
-interfaces live in `.agent/CONTRACTS.md`; changing one needs a Decision
-Log entry plus re-review of every consumer.
-
-Verify before you claim. Every claim ties to evidence the user can check
-— a test run, a file:line, command output — proportional to the size of
-the claim. Assume you're wrong until the evidence says otherwise. You may
-search the web and papers for current truth; installed versions beat
-remembered ones.
-
-## Gates and worktrees (summary — PLANS.md owns the rules)
-
-- **Open source first:** reuse existing repository code and platform APIs,
-  then maintained free open-source projects before implementing a missing
-  subsystem from scratch. Record the license, exact required capability,
-  candidate/version and any concrete gap in the phase's G2 reuse decision.
-  Build only the minimum product adapter or necessary gap; no duplicate
-  SDK, driver, speech engine, runtime or harness when a suitable one exists.
-- The new speed goals in PROGRAM are unproven goals, not measured results.
-  Preserve final-utterance accuracy, exactly-once authority and independent
-  outcomes. Never count partial feedback as completed dictation.
-- No helper agents without the user's explicit request. A reviewer role
-  in a plan is not itself permission to spawn one.
-- Gate loop per phase: G1 user plan approval → G2 implementer/judge
-  contract → G3 serialized build+tests → G4 fresh-context `jarvis-judge`
-  PASS → G5 live bench + budgets → G6 human try (UX phases) → G7 handoff
-  + milestone commit.
-- ≤2 write tracks, in worktrees: `jarvis-v1-agent` owns
-  `Sources/** Tests/** development/**`; `jarvis-v1-eyes` owns
-  `EyeTracking/**`. Never two writers in one tree. User merges
-  `ship/v1-<phase>` branches.
-- All builds/tests go through the single serialized lane:
-  `scripts/verification-lane.sh` (swift test → EyeTracking typecheck →
-  vitest). Writers don't compile a half-frozen tree.
-- Owned-paths enforcement: `python3 scripts/check-owned-paths.py P<n>`.
-- Sign/review coherent candidates; reuse valid evidence and run checks for
-  changed dependencies. Final physical Fn/pill qualification stays on the
-  frozen artifact, rather than repeating it after every internal patch.
+Jev Voice is a macOS menu-bar app: hold Fn (or speak hands-free), OpenAI
+Realtime hears you, and Jev plus the embedded Cua driver act on the desktop.
+Eye tracking runs locally in a bundled Electron tracker. Read
+[ARCHITECTURE.md](ARCHITECTURE.md) for the map, [DECISIONS.md](DECISIONS.md)
+for what is settled, and [RELEASE.md](RELEASE.md) before shipping a build.
 
 ## Commands
 
-- `make local` — **the daily driver**: build → stage → sign → install to
-  `~/jarvis-local/Jev Voice.app` → relaunch → wait for the tracker API.
-  One command from clean checkout to running app; `make run` aliases it.
-- `make test` / `swift test --filter <Suite>` for focused checks
-- `make app` stages + signs `build/Jev Voice.app` in place — in this
-  synced checkout the final seal can hit the provenance detritus tripwire
-  below; `make local` is the reliable path.
-- The tracker checkout is symlinked into
-  `~/Library/Application Support/JevVoice/EyeTracking` by `make local` —
-  `TrackerHost` resolves it there, no env var needed. Tracker boot output
-  lands in `~/Library/Application Support/JevVoice/tracker.log`.
-- Tracker prerequisites: `node` plus `pnpm` via corepack (see the
-  `tracker-deps` target). EyeTracking tests run from the `EyeTracking/`
-  root (`npm test` / `npx vitest run` — `package.json` and
-  `vite.config.ts` live there; running vitest from `EyeTracking/web`
-  misconfigures collection).
+- `make test` — `swift test`, then the tracker typecheck and Vitest. This is
+  what CI runs.
+- `swift test --filter <Suite>` — a focused Swift check.
+- `make release` — one signed build from source: `build/Jev Voice.app`, a
+  zip and its SHA-256. It is the default goal.
+- `make install` — release, then copy to `~/jarvis-local/Jev Voice.app`
+  and verify the signature. It does not launch the app.
+- `make local` — install, then quit any running copy and open the new one.
+- `SIGN_IDENTITY=- make release` — ad-hoc signing, for CI or a machine
+  without the local identity.
 
-## Tripwires — each exists because it caused real damage
+Prerequisites: macOS 26 with the macOS 26 SDK, Node, and pnpm through
+Corepack. Run EyeTracking tests from `EyeTracking/`, where
+`package.json` and `vite.config.ts` live.
 
+## Rules
+
+- Secrets live in Keychain only. Never put a key in a repository file, a log
+  or a test fixture. Bundle id: `com.chriswozniczek.jevvoice`.
+- The Cua driver and Codex runtime are pinned and hash-verified against
+  `ThirdParty/Cua/source-manifest.json`. Upgrading is welcome: verify the
+  new version against `ThirdParty/Cua/README.md` and rerun `make test`. A
+  silent swap breaks the app.
+- Live and desktop tests sit behind `JARVIS_LIVE_*` / `JARVIS_P4_REAL_APPS`
+  flags and mutate macOS. Run them through `scripts/with-desktop-lock.py`,
+  one owner at a time. Simulated tests never prove physical Fn, microphone
+  or packaged-app behaviour.
+- `codesign --verify --deep --strict` fails spuriously inside a synced
+  `~/Documents` checkout (com.apple.provenance). Verify a copy outside it.
 - `development/` is local-only: `cua-source/` and the text layer
-  (`*.json`/`*.md`/`*.txt`/`*.log`) are tracked; everything else is
-  regenerable output and stays ignored.
-- The Cua Driver is pinned and hash-verified against
-  `ThirdParty/Cua/source-manifest.json`. Upgrading is welcome — verify the
-  new version's contracts against `ThirdParty/Cua/README.md` and rerun the
-  checks; a silent swap breaks the app.
-- Credentials live in Keychain; secrets never enter repo files. Bundle id:
-  `com.chriswozniczek.jevvoice`.
-- Live/desktop tests sit behind `JARVIS_*` flags and mutate macOS — run
-  them through `scripts/with-desktop-lock.py`, one owner at a time.
-  Simulated tests never prove physical Fn/microphone or packaged-app
-  behavior.
-- `codesign --verify --deep --strict` fails spuriously in this synced
-  Documents checkout — verify on a copy outside it.
-- Other agents share this folder: never stash/reset/clean; commit or push
-  only when asked. Stage milestone commits by file name — never
-  `git add -A`.
-- Parallel work: `git worktree add`, then
-  `python3 scripts/setup-workspace-development.py` inside the worktree.
+  (`*.json`/`*.md`/`*.txt`/`*.log`) are tracked; the rest is regenerable.
+- Other agents may share this folder: never stash, reset or clean someone
+  else's work, and stage commits by file name.
+- Reuse existing code, platform APIs and maintained open source before
+  writing a subsystem from scratch.
+
+The old `.agent/` phase harness (PROGRAM, phases, acceptance, results) is
+preserved in the `harness-archive-2026-11-19` tag.

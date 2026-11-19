@@ -1,5 +1,0 @@
-Waiting for the Jarvis desktop test lock…
-c1-owned-scroll-0 done verified=True wall_ms=759.7159579999992
-c1-owned-scroll-1 done verified=True wall_ms=155.03912499999828
-c1-owned-scroll-2 done verified=True wall_ms=153.06608399999888
-{"result": "/Users/karanvirkang/Documents/code/jarvis-v1-agent/.agent/results/P4/c1-scroll-r8-native3/comparison.json", "times_ms": [759.7159579999992, 155.03912499999828, 153.06608399999888]}

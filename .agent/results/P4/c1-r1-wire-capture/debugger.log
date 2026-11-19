@@ -1,2 +1,0 @@
-(lldb) settings set frame-format "frame ${frame.index}: ${frame.pc}\n"
-(lldb) process attach --pid 9548

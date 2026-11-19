@@ -1,8 +1,0 @@
-{
-  "reviewer": "3241c688",
-  "gate": "G2 PASS",
-  "source_sha256": {
-    "Sources/JevVoice/Drive/JevChooser.swift": "758c5b20acab8e9db52a3d9e147dc2aa5352d5fe07f2d8cd1fb1fcaf205eb6ac",
-    "Tests/JevVoiceAppTests/JevChooserTests.swift": "d744b75c2ab879937439fd6b0f3c21db1eb74f5835fb2eab6de9b70855fb75f9"
-  }
-}

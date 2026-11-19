@@ -28,7 +28,8 @@ Archive SHA-256:
 Use the app-bundle member, not the separate bare executable.
 The existing embedding/liveness/standard-permission flags and backward
 tool schemas pass isolated preflight; signed Jev runtime acceptance is
-recorded separately under `.agent/results/P3/closeout02/cua-upgrade/`.
+recorded under `.agent/results/P3/closeout02/cua-upgrade/` in the
+`harness-archive-2026-11-19` tag.
 
 Prior pins (recovery only):
 - `54e5d48128fb62323366c49b6be480ccef83cdee23bd7fc1f19431347a5df86b` — upstream
