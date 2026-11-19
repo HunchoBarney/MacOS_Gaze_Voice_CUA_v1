@@ -6,7 +6,7 @@ against SHA-256 `b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca
 `cua-driver-rs-v0.38.0` at commit `85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19`;
 archive digest verified against GitHub's published asset digest on 2026-10-25). The authoritative
 runtime constants are in
-[`CuaDependency.swift`](../../Sources/JevVoice/ComputerControl/CuaDependency.swift).
+[`CuaDependency.swift`](../../Sources/Jarvis/ComputerControl/CuaDependency.swift).
 Do not update the pin just to accept a different build.
 
 Historical note — v0.32.0 (a prior pin; the current pin is v0.38.0, above)
@@ -41,7 +41,7 @@ Prior pins (recovery only):
   combined watchdog + scroll-readback + menu-focus candidate (0.28.2-based),
   kept installed at `/Applications/CuaDriverLocal.app` as rollback.
 - `699d330bd1cd4e2255f0c99e889f1358952de246254fac7e4417b08dd6578d2a` — earlier
-  local build, preserved under `~/Library/Caches/JevVoice/rollback/`.
+  local build, preserved under `~/Library/Caches/Jarvis/rollback/`.
 
 ## Embedded driver (packaged app)
 
@@ -58,11 +58,11 @@ to the installed app for unpackaged runs. `CuaConnection` spawns the bundled
 binary as `serve --embedded` (env `CUA_DRIVER_EMBEDDED=1`,
 `CUA_DRIVER_HOST_BUNDLE_ID`, `CUA_DRIVER_EMBEDDED_HOST_PID`; args
 `--parent-liveness-stdio --no-permissions-gate --socket <private>
---host-bundle-id com.chriswozniczek.jevvoice --permission-mode standard
+--host-bundle-id com.karanvirkang.jarvis --permission-mode standard
 --grant existing-profile`) on a private socket, then speaks MCP through
 `mcp --embedded --socket <private>` on stdio — the driver's documented
 host contract (`Skills/cua-driver/EMBEDDING.md`), so Accessibility and
-Screen Recording attribute to `com.chriswozniczek.jevvoice`. The daemon's
+Screen Recording attribute to `com.karanvirkang.jarvis`. The daemon's
 stdin is a liveness pipe: host exit closes it and the daemon exits.
 
 The pinned binary is the signed app-bundle member
@@ -120,15 +120,15 @@ as private release assets. The collaborator handoff (`docs/HANDOFF.md`) was
 removed with the `docs/` tree (a93f7d1) — see git history before that commit.
 
 The source patch preserves local artifact tooling/lock metadata. The sparse source
-tree under `development/JevVoice/cua-source/` is now tracked by Git and includes
+tree under `development/Jarvis/cua-source/` is now tracked by Git and includes
 later unaccepted candidate edits, so it does not match the historical manifest
 byte for byte. Large downloaded model/runtime assets, export environments and
-sealed perception bundles remain in `development/JevVoice/`, where present. Those
+sealed perception bundles remain in `development/Jarvis/`, where present. Those
 assets are not part of this Git repository.
 Use the hash-verifying upstream tooling and recorded evidence to reconstruct them;
 do not claim a fresh source checkout is a fully configured runtime.
 
-The existing source still lives at `development/JevVoice/cua-source`; its `.git`
+The existing source still lives at `development/Jarvis/cua-source`; its `.git`
 points to a missing worktree database. Nothing in this cleanup rewrites that pointer
 or deletes its builds. Run the verifier above against it to compare the preserved
 snapshot. The storage-and-recovery doc (`docs/LOCAL-DEVELOPMENT-STORAGE.md`)
@@ -184,7 +184,7 @@ Focused checks, from the Rust workspace and Jarvis root respectively:
 
 ```sh
 cargo test --locked -p cua-driver-core --lib browser::
-node ThirdParty/Cua/scroll-readback-candidate.test.mjs development/JevVoice/cua-source/libs/cua-driver/rust/crates/cua-driver-core/src/browser/pointer.rs
+node ThirdParty/Cua/scroll-readback-candidate.test.mjs development/Jarvis/cua-source/libs/cua-driver/rust/crates/cua-driver-core/src/browser/pointer.rs
 ```
 
 The JavaScript check uses a DOM test double and the actual producer source. These
@@ -219,6 +219,6 @@ forward/reverse patch recovery pass. Isolated live checks observe a new document
 unchanged source content, and cross-app focus restoration. Full native agent
 acceptance still fails on payload/replay behavior; this is not an installed or
 promoted runtime. The previous combined binary and menu source are preserved in
-`development/JevVoice/staging/menu-focus-baseline/`. The earlier permission-blocked
+`development/Jarvis/staging/menu-focus-baseline/`. The earlier permission-blocked
 results above are historical: the user-enabled Codex executable now reports both
 grants true. See scoped evidence for the complete checkpoint.

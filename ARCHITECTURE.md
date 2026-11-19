@@ -1,7 +1,7 @@
 # Architecture
 
-One Swift app (`Sources/JevVoice`), a small core library
-(`Sources/JevVoiceCore`), and a bundled Electron eye tracker
+One Swift app (`Sources/Jarvis`), a small core library
+(`Sources/JarvisCore`), and a bundled Electron eye tracker
 (`EyeTracking/`). Everything ships inside one signed app bundle.
 
 ```mermaid
@@ -16,7 +16,7 @@ flowchart LR
   CP --> CD[CuaDaemonHost<br/>embedded cua-driver]
   Gaze[TrackerHost → Electron tracker] --> GC[GazeClient / GazeService]
   GC --> TL
-  Agents[AgentRuntime<br/>bundled Codex] -->|JevVoice --mcp-stdio| TL
+  Agents[AgentRuntime<br/>bundled Codex] -->|Jarvis --mcp-stdio| TL
 ```
 
 ## Voice (`Voice/`)
@@ -47,7 +47,7 @@ targets; selection is always a separate channel (voice, click or key).
 ## Agents (`Agents/`)
 
 Persistent agents run on the bundled `CodexRuntime/codex`. They reach the
-same task loop through `JevVoice --mcp-stdio --agent <slug>`, an MCP server
+same task loop through `Jarvis --mcp-stdio --agent <slug>`, an MCP server
 mode of the app binary.
 
 ## Diagnostics (`Support/`)

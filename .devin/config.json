@@ -1,5 +1,5 @@
 {
-  // Project-level Devin configuration for Jarvis (Jev Voice).
+  // Project-level Devin configuration for Jarvis (Jarvis).
   // Travels to every worktree via git. Personal overrides go in
   // .devin/config.local.json (gitignored). Secrets never belong here.
   "permissions": {

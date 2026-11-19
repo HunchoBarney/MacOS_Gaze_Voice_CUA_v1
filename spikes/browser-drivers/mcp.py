@@ -1,10 +1,10 @@
 """Newline-delimited JSON-RPC MCP stdio client.
 
-Adapted from bench/lib/mcp_stdio.py (client core only — the JevVoice
+Adapted from bench/lib/mcp_stdio.py (client core only — the Jarvis
 binary/keychain resolution is dropped; both spike children are spawned
 with explicit argv). One JSON object per line in each direction — the
 transport spoken by `cua-driver mcp --embedded` (MCPFrames,
-Sources/JevVoiceCore/Models/JSONValue.swift) and by
+Sources/JarvisCore/Models/JSONValue.swift) and by
 chrome-devtools-mcp on stdio. Stdlib only.
 """
 

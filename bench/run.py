@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """jev-bench runner — inject corpus prompts through
-`JevVoice --mcp-stdio --agent bench` (drive_until), verify end-state
+`Jarvis --mcp-stdio --agent bench` (drive_until), verify end-state
 independently, append result rows to a jsonl.
 
 Python 3 stdlib only. Sequential always. Task failures are data (rows),
@@ -147,7 +147,7 @@ def run_task(task, runs, writer, *, stub, binary, env, timeout,
             emit_row(make_row(
                 tid, n, 0.0, "", True, "error",
                 "TYPESAFE_API_KEY unavailable (env + Keychain item "
-                "com.chriswozniczek.jevvoice/typesafeAPIKey)",
+                "com.karanvirkang.jarvis/typesafeAPIKey)",
                 status="blocked:keychain"), writer, n, runs)
         return
     client = None

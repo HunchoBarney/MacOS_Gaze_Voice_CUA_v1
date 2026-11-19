@@ -9,9 +9,9 @@ checklist() {
 Post-create checklist (all inside the jevbench session):
   1. Log in on the console as jevbench once — creates the home dir and
      clears first-run dialogs.
-  2. Install the app there: `make install-tracker` / copy "Jev Voice.app"
+  2. Install the app there: `make install-tracker` / copy "Jarvis.app"
      over, or run `make local` from a checkout in that session.
-  3. Grant Jev Voice: Accessibility, Screen Recording, Microphone,
+  3. Grant Jarvis: Accessibility, Screen Recording, Microphone,
      Camera (System Settings -> Privacy & Security).
   4. Sign into Mail and Chrome — the corpus drives real accounts.
   5. Run the full suite inside that session:

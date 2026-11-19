@@ -1,8 +1,8 @@
 """Newline-delimited JSON-RPC MCP stdio client + binary/key resolution.
 
 One JSON object per line in each direction on the child's stdio — the
-transport `JevVoice --mcp-stdio --agent <slug>` speaks
-(Sources/JevVoice/Drive/CuaDriveServer.swift). Stdlib only.
+transport `Jarvis --mcp-stdio --agent <slug>` speaks
+(Sources/Jarvis/Drive/CuaDriveServer.swift). Stdlib only.
 """
 
 import json
@@ -13,8 +13,8 @@ import time
 
 PROTOCOL_VERSION = "2025-06-18"
 INSTALLED_BINARY = os.path.expanduser(
-    "~/jarvis-local/Jev Voice.app/Contents/MacOS/JevVoice")
-KEYCHAIN_SERVICE = "com.chriswozniczek.jevvoice"
+    "~/jarvis-local/Jarvis.app/Contents/MacOS/Jarvis")
+KEYCHAIN_SERVICE = "com.karanvirkang.jarvis"
 KEYCHAIN_ACCOUNT = "typesafeAPIKey"
 
 
@@ -163,12 +163,12 @@ def resolve_binary(repo_root, override=None):
         if os.path.isfile(override) and os.access(override, os.X_OK):
             return override
         raise MCPError("--binary %s is not an executable file" % override)
-    release = os.path.join(str(repo_root), ".build", "release", "JevVoice")
+    release = os.path.join(str(repo_root), ".build", "release", "Jarvis")
     for path in (INSTALLED_BINARY, release):
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     raise MCPError(
-        "no JevVoice binary: looked at %s and %s (or pass --binary)"
+        "no Jarvis binary: looked at %s and %s (or pass --binary)"
         % (INSTALLED_BINARY, release))
 
 

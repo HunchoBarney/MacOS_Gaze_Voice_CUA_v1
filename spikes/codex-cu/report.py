@@ -161,7 +161,7 @@ def main():
             "Deleted.",
             "",
             "Implementer recommendation: record **CONDITIONAL**. Conditions: "
-            "(a) JevVoice's client owns the per-app approval policy (answers "
+            "(a) Jarvis's client owns the per-app approval policy (answers "
             "`mcpServer/elicitation/request`); (b) the product ships or "
             "requires `Codex Computer Use.app`; (c) background-session "
             "behaviour gets verified on jevbench. The mechanical rule says "

@@ -134,7 +134,7 @@ public enum Bakeoff {
         doc.probe["date"] = ISO8601DateFormatter().string(from: Date())
         doc.probe["fluidaudio_pin"] = "0.17.5"
         let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/JevVoice/Models")
+            .appendingPathComponent("Library/Application Support/Jarvis/Models")
         doc.probe["parakeet_models_root"] = root.path
         doc.probe["parakeet_models_bytes"] = String(Run.dirBytes(root))
         if #available(macOS 26.0, *) {

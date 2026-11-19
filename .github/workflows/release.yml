@@ -40,11 +40,11 @@ jobs:
       - name: Verify the exact archive before publishing
         id: asset
         run: |
-          zip="build/Jev-Voice-${VERSION}.zip"
-          mv "build/Jev-Voice-${VERSION}-$(git rev-parse --short=12 HEAD).zip" "$zip"
+          zip="build/Jarvis-${VERSION}.zip"
+          mv "build/Jarvis-${VERSION}-$(git rev-parse --short=12 HEAD).zip" "$zip"
           unpacked="$(mktemp -d)"
           ditto -x -k "$zip" "$unpacked"
-          app="$unpacked/Jev Voice.app"
+          app="$unpacked/Jarvis.app"
           codesign --verify --deep --strict "$app"
           python3 scripts/check-packaged-tracker.py "$app"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -56,28 +56,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" "build/Jev-Voice-${VERSION}.zip" --verify-tag \
-            --title "Jev Voice ${VERSION}" \
+          gh release create "${GITHUB_REF_NAME}" "build/Jarvis-${VERSION}.zip" --verify-tag \
+            --title "Jarvis ${VERSION}" \
             --generate-notes
-
-  cask:
-    needs: release
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - name: Update cask version and checksum
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
-          SHA256: ${{ needs.release.outputs.sha256 }}
-        run: |
-          sed -i '' -E "s/^  version \".*\"$/  version \"${VERSION}\"/" Casks/jev-voice.rb
-          sed -i '' -E "s/^  sha256 .*$/  sha256 \"${SHA256}\"/" Casks/jev-voice.rb
-          sed -i '' -E "s|^  url .*|  url \"https://github.com/${GITHUB_REPOSITORY}/releases/download/v#{version}/Jev-Voice-#{version}.zip\"|" Casks/jev-voice.rb
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/jev-voice.rb
-          git diff --cached --quiet && exit 0
-          git commit -m "cask: jev-voice ${VERSION}"
-          git push origin HEAD:main

@@ -22,8 +22,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 APP="node_modules/electron/dist/Electron.app"
-USAGE="Jev Voice uses the camera for eye tracking."
-PRODUCT="Jev Voice Eye Tracking"
+USAGE="Jarvis uses the camera for eye tracking."
+PRODUCT="Jarvis Eye Tracking"
 
 if [[ ! -d "$APP" ]]; then
   echo "patch-electron-app: $APP not found — run \`pnpm install\` first." >&2

@@ -6,7 +6,7 @@ chrome-devtools-mcp@1.10.1 vs Cua `browser_*` (daemon 0.34.0). Generated 2026-10
 
 - run_started: 2026-10-19T00:19:40
 - ordering: single
-- cua_proxies_baseline: ['60436 /Users/karanvirkang/jarvis-local/Jev Voice.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.chriswozniczek.jevvoice', '60437 /Users/karanvirkang/jarvis-local/Jev Voice.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.chriswozniczek.jevvoice']
+- cua_proxies_baseline: ['60436 /Users/karanvirkang/jarvis-local/Jarvis.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.karanvirkang.jarvis', '60437 /Users/karanvirkang/jarvis-local/Jarvis.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.karanvirkang.jarvis']
 - cua_proxies_after: [72285]
 - cua_proxies_leaked: []
 - devtools_pages_before: 7

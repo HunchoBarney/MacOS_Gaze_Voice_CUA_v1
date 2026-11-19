@@ -461,7 +461,7 @@ run done: 540 rows, 12 cycles, leaked proxies: []
 cycle arm=A driver=cua iter=0 attach=7514.2ms teardown=10.2ms ok
 cycle arm=A driver=cua iter=1 attach=14287.5ms teardown=Nonems blocked_env
 session arm=A driver=cua attach=6905.4ms ok 
-leak-check: baseline=['60436 /Users/karanvirkang/jarvis-local/Jev Voice.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.chriswozniczek.jevvoice', '60437 /Users/karanvirkang/jarvis-local/Jev Voice.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.chriswozniczek.jevvoice'] after=[72285] leaked=[] (after pid->ppid: {'72285': 60409})
+leak-check: baseline=['60436 /Users/karanvirkang/jarvis-local/Jarvis.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.karanvirkang.jarvis', '60437 /Users/karanvirkang/jarvis-local/Jarvis.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.karanvirkang.jarvis'] after=[72285] leaked=[] (after pid->ppid: {'72285': 60409})
 run done: 0 rows, 7 cycles, leaked proxies: []
 cycle arm=A driver=cua iter=0 attach=6210.9ms teardown=6.5ms ok
 cycle arm=A driver=cua iter=1 attach=7983.7ms teardown=13.3ms ok
@@ -474,5 +474,5 @@ cycle arm=A driver=cua iter=7 attach=5593.4ms teardown=7.5ms ok
 cycle arm=A driver=cua iter=8 attach=5138.8ms teardown=9.5ms ok
 cycle arm=A driver=cua iter=9 attach=4845.1ms teardown=5.9ms ok
 session arm=A driver=cua attach=6332.3ms ok 
-leak-check: baseline=['60436 /Users/karanvirkang/jarvis-local/Jev Voice.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.chriswozniczek.jevvoice', '60437 /Users/karanvirkang/jarvis-local/Jev Voice.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.chriswozniczek.jevvoice'] after=[72285] leaked=[] (after pid->ppid: {'72285': 60409})
+leak-check: baseline=['60436 /Users/karanvirkang/jarvis-local/Jarvis.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.karanvirkang.jarvis', '60437 /Users/karanvirkang/jarvis-local/Jarvis.app/Contents/Resources/cua-driver mcp --embedded --socket /var/folders/cb/x7hj29gx2jv7yvtw03220xsm0000gn/T/jev-cua-60409-95688121.sock --host-bundle-id com.karanvirkang.jarvis'] after=[72285] leaked=[] (after pid->ppid: {'72285': 60409})
 run done: 0 rows, 11 cycles, leaked proxies: []

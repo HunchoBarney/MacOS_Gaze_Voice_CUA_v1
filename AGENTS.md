@@ -1,6 +1,6 @@
 # Working in Jarvis
 
-Jev Voice is a macOS menu-bar app: hold Fn (or speak hands-free), OpenAI
+Jarvis is a macOS menu-bar app: hold Fn (or speak hands-free), OpenAI
 Realtime hears you, and Jev plus the embedded Cua driver act on the desktop.
 Eye tracking runs locally in a bundled Electron tracker. Read
 [ARCHITECTURE.md](ARCHITECTURE.md) for the map, [DECISIONS.md](DECISIONS.md)
@@ -11,9 +11,9 @@ for what is settled, and [RELEASE.md](RELEASE.md) before shipping a build.
 - `make test` — `swift test`, then the tracker typecheck and Vitest. This is
   what CI runs.
 - `swift test --filter <Suite>` — a focused Swift check.
-- `make release` — one signed build from source: `build/Jev Voice.app`, a
+- `make release` — one signed build from source: `build/Jarvis.app`, a
   zip and its SHA-256. It is the default goal.
-- `make install` — release, then copy to `~/jarvis-local/Jev Voice.app`
+- `make install` — release, then copy to `~/jarvis-local/Jarvis.app`
   and verify the signature. It does not launch the app.
 - `make local` — install, then quit any running copy and open the new one.
 - `SIGN_IDENTITY=- make release` — ad-hoc signing, for CI or a machine
@@ -26,7 +26,7 @@ Corepack. Run EyeTracking tests from `EyeTracking/`, where
 ## Rules
 
 - Secrets live in Keychain only. Never put a key in a repository file, a log
-  or a test fixture. Bundle id: `com.chriswozniczek.jevvoice`.
+  or a test fixture. Bundle id: `com.karanvirkang.jarvis`.
 - The Cua driver and Codex runtime are pinned and hash-verified against
   `ThirdParty/Cua/source-manifest.json`. Upgrading is welcome: verify the
   new version against `ThirdParty/Cua/README.md` and rerun `make test`. A

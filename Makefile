@@ -1,12 +1,12 @@
 .DEFAULT_GOAL := release
 
-APP = build/Jev Voice.app
+APP = build/Jarvis.app
 VENDOR = build/vendor
 VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
 COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
-ZIP = build/Jev-Voice-$(VERSION)-$(COMMIT).zip
+ZIP = build/Jarvis-$(VERSION)-$(COMMIT).zip
 KEEP_ZIPS = 3
-LOCAL_APP = $(HOME)/jarvis-local/Jev Voice.app
+LOCAL_APP = $(HOME)/jarvis-local/Jarvis.app
 
 # PUBLIC=1 is the public-distribution path. It stays held until the app is
 # signed with Developer ID and notarized (RELEASE.md). The default private
@@ -44,14 +44,14 @@ release:
 	@exit 1
 else
 # One build from source: pinned runtimes, release Swift binary, tracker,
-# stage, sign, zip and checksum. build/Jev Voice.app is overwritten every
+# stage, sign, zip and checksum. build/Jarvis.app is overwritten every
 # time and only the newest $(KEEP_ZIPS) zips are kept.
 release: setup tracker
 	swift build -c release
 	ThirdParty/Cua/fetch-embedded-binaries.sh "$(VENDOR)"
 	rm -rf "$(APP)"
 	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources/ThirdParty/CuaDriver" "$(APP)/Contents/Resources/ThirdParty/FluidVoice"
-	cp .build/release/JevVoice "$(APP)/Contents/MacOS/JevVoice"
+	cp .build/release/Jarvis "$(APP)/Contents/MacOS/Jarvis"
 	cp Info.plist "$(APP)/Contents/Info.plist"
 	cp "$(VENDOR)/cua-driver" "$(APP)/Contents/Resources/cua-driver"
 	ditto "$(VENDOR)/CodexRuntime" "$(APP)/Contents/Resources/CodexRuntime"
@@ -63,7 +63,7 @@ release: setup tracker
 	rm -f "$(ZIP)" "$(ZIP).sha256"
 	ditto -c -k --keepParent "$(APP)" "$(ZIP)"
 	cd build && shasum -a 256 "$(notdir $(ZIP))" > "$(notdir $(ZIP)).sha256"
-	@ls -t build/Jev-Voice-*.zip | tail -n +$$(($(KEEP_ZIPS) + 1)) | while read -r old; do rm -f "$$old" "$$old.sha256"; done
+	@ls -t build/Jarvis-*.zip | tail -n +$$(($(KEEP_ZIPS) + 1)) | while read -r old; do rm -f "$$old" "$$old.sha256"; done
 	@du -sh "$(APP)" "$(ZIP)"
 	@cat "$(ZIP).sha256"
 endif
@@ -80,17 +80,17 @@ install: release
 # sends Apple Events, so probing does not launch the app; the [.] keeps
 # this recipe's own command line from matching.
 local: install
-	@if pgrep -f "Jev Voice[.]app/Contents/MacOS/JevVoice" >/dev/null 2>&1; then \
-	    osascript -e 'tell application id "com.chriswozniczek.jevvoice" to quit' >/dev/null 2>&1 || true; \
-	    for i in $$(seq 15); do pgrep -f "Jev Voice[.]app/Contents/MacOS/JevVoice" >/dev/null 2>&1 || break; sleep 1; done; \
+	@if pgrep -f "Jarvis[.]app/Contents/MacOS/Jarvis" >/dev/null 2>&1; then \
+	    osascript -e 'tell application id "com.karanvirkang.jarvis" to quit' >/dev/null 2>&1 || true; \
+	    for i in $$(seq 15); do pgrep -f "Jarvis[.]app/Contents/MacOS/Jarvis" >/dev/null 2>&1 || break; sleep 1; done; \
 	fi; \
-	if pgrep -f "Jev Voice[.]app/Contents/MacOS/JevVoice" >/dev/null 2>&1; then \
-	    echo "an old Jev Voice is still running — quit it and retry" >&2; exit 1; \
+	if pgrep -f "Jarvis[.]app/Contents/MacOS/Jarvis" >/dev/null 2>&1; then \
+	    echo "an old Jarvis is still running — quit it and retry" >&2; exit 1; \
 	fi
 	open "$(LOCAL_APP)"
-	@sleep 3; pgrep -f "Jev Voice[.]app/Contents/MacOS/JevVoice" >/dev/null 2>&1 || \
-	    (echo "Jev Voice exited right after launch — run \"$(LOCAL_APP)/Contents/MacOS/JevVoice\" to see why" >&2; exit 1)
-	@echo "Jev Voice is running"
+	@sleep 3; pgrep -f "Jarvis[.]app/Contents/MacOS/Jarvis" >/dev/null 2>&1 || \
+	    (echo "Jarvis exited right after launch — run \"$(LOCAL_APP)/Contents/MacOS/Jarvis\" to see why" >&2; exit 1)
+	@echo "Jarvis is running"
 
 run: local
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stage the pinned executables that `make app` embeds into Jev Voice.app.
+# Stage the pinned executables that `make app` embeds into Jarvis.app.
 # Versions and SHA-256 pins live in source-manifest.json under
 # "vendored_binaries"; every artifact is verified before staging and any
 # mismatch fails the build — the same posture as the runtime driver pin.
@@ -34,7 +34,7 @@ fetch() { # url dest
 }
 
 # --- cua-driver: the manifest-pinned release build, embedded so TCC grants
-# attribute to Jev Voice instead of the standalone CuaDriver app. The
+# attribute to Jarvis instead of the standalone CuaDriver app. The
 # installed app copy satisfies the pin offline; otherwise fetch the release
 # tarball and extract the signed app-bundle binary (the bare top-level
 # tarball member is a different build and does NOT match the pin).

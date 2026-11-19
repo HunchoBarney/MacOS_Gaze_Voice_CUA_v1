@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sign a staged Jev Voice.app in place — extracted from the Makefile so
+# Sign a staged Jarvis.app in place — extracted from the Makefile so
 # both `app` (in-checkout sign) and `local` (sign the ~/jarvis-local copy)
 # share one implementation. The synced Documents checkout stamps
 # com.apple.provenance on every file; codesign counts it as detritus, so
@@ -7,7 +7,7 @@
 set -euo pipefail
 
 APP="$1"
-IDENTITY_NAME="Jev Voice Local Dev"
+IDENTITY_NAME="Jarvis Local Dev"
 
 xattr -dr com.apple.FinderInfo "$APP" 2>/dev/null || true
 xattr -cr "$APP" 2>/dev/null || true

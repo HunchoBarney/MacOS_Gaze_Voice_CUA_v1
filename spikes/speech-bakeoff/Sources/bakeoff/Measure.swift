@@ -10,7 +10,7 @@ enum Measure {
     static func run(engine: String, iters: Int, clip: String?, output: URL) async throws {
         guard iters > 0 else { throw BakeoffError.usage("iterations must be positive") }
         let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/JevVoice/Models")
+            .appendingPathComponent("Library/Application Support/Jarvis/Models")
         if engine == "parakeet" {
             try await run(driver: ParakeetDriver(modelsRoot: root), engine: engine, iters: iters, clip: clip, output: output)
         } else if #available(macOS 26.0, *), ["speechanalyzer", "speechanalyzer-fast"].contains(engine) {
@@ -61,7 +61,7 @@ enum Measure {
             warm_reuse_ms: Clock.ms() - reuseStart)
         if engine == "parakeet" {
             let root = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/JevVoice/Models")
+                .appendingPathComponent("Library/Application Support/Jarvis/Models")
             resource.disk_bytes = Run.dirBytes(root.appendingPathComponent("parakeet-ultra"))
                 + Run.dirBytes(root.appendingPathComponent("parakeet-eou-streaming/160ms"))
         }

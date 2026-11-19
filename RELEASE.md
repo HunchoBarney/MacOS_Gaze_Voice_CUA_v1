@@ -6,9 +6,9 @@
 make release
 ```
 
-This produces `build/Jev Voice.app`, `build/Jev-Voice-<version>-<commit>.zip`
+This produces `build/Jarvis.app`, `build/Jarvis-<version>-<commit>.zip`
 and its `.sha256`, keeping the newest three zips. The app is signed with the
-self-signed "Jev Voice Local Dev" identity, minted on first use, so macOS
+self-signed "Jarvis Local Dev" identity, minted on first use, so macOS
 permission grants survive rebuilds. `make install` copies the app to
 `~/jarvis-local/` and verifies the signature.
 
@@ -34,6 +34,7 @@ download is signing: the app is self-signed, so Gatekeeper blocks a
 downloaded copy.
 
 Lifting the hold needs Developer ID signing and notarization, and a check
-that no legacy weights reach the bundle.
-When that lands, remove the `PUBLIC=1` branch in the Makefile and this
-section.
+that no legacy weights reach the bundle. When that lands, remove the
+`PUBLIC=1` branch in the Makefile and this section, and add a Homebrew cask
+for this repository's releases if you want one. The old cask pointed at the
+upstream jev-voice-control project and was removed.

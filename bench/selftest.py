@@ -381,14 +381,14 @@ class SafetyCase(unittest.TestCase):
             base = Path(directory)
             commands = base / "commands"
             commands.mkdir()
-            app = base / "Jev Voice.app"
+            app = base / "Jarvis.app"
             resources = app / "Contents/Resources"
             resources.mkdir(parents=True)
             (resources / "cua-driver").write_text("fixture, not executable code")
             with (app / "Contents/Info.plist").open("wb") as file:
                 plistlib.dump({"CFBundleIdentifier": "fixture.signing"}, file)
             scripts = {
-                "security": '#!/bin/sh\necho \'1) 123456 "Jev Voice Local Dev"\'\n',
+                "security": '#!/bin/sh\necho \'1) 123456 "Jarvis Local Dev"\'\n',
                 "xattr": "#!/bin/sh\nexit 0\n",
                 "codesign": '#!/bin/sh\ncase " $* " in *" --verify "*) exit 17;; esac\nexit 0\n',
             }

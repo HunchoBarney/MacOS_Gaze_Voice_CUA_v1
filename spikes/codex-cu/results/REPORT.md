@@ -21,7 +21,7 @@ Generated 2026-10-19 16:37 from `results/results.json` (run 20261019-162132, log
 4. `calc.compute` = ok_no_cu: Calculator restored its last display (`4+7 = 11` from the previous run) on relaunch, and the agent reported success after only reading state. The actuation requirement caught it (no false ok). The pre-snapshot could not see it because Calculator was not running.
 5. Side effects outside the sandbox: TextEdit autosaved 5 MARK documents into iCloud `com~apple~TextEdit/Documents` even with `close … saving no` (moved to iCloud Trash; each contained only a MARK); the Notes MARK note is in Notes' Recently Deleted.
 
-Implementer recommendation: record **CONDITIONAL**. Conditions: (a) JevVoice's client owns the per-app approval policy (answers `mcpServer/elicitation/request`); (b) the product ships or requires `Codex Computer Use.app`; (c) background-session behaviour gets verified on jevbench. The mechanical rule says PROMOTE; the orchestrator/user decides at G7.
+Implementer recommendation: record **CONDITIONAL**. Conditions: (a) Jarvis's client owns the per-app approval policy (answers `mcpServer/elicitation/request`); (b) the product ships or requires `Codex Computer Use.app`; (c) background-session behaviour gets verified on jevbench. The mechanical rule says PROMOTE; the orchestrator/user decides at G7.
 
 Surface: app-server only (`thread/start` -> `turn/start`). `codex exec` (discovery step 6) was not needed and not run — no exec-surface claim is made.
 
