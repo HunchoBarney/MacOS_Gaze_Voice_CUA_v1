@@ -16,9 +16,7 @@ import JevVoiceCore
 /// `response.cancel` + `conversation.item.truncate` + local playback stops.
 @MainActor
 final class RealtimeVoiceLane: SpeechCapturing {
-    enum SpeechSource { case realtime, localDiagnostic }
     private static let log = Logger(subsystem: "com.chriswozniczek.jevvoice.voice", category: "realtime")
-    let speechSource: SpeechSource
     private var presentationHandler: ((UUID, SpeechEvent) -> Void)?
     private lazy var eventRelay: (UUID, SpeechEvent) -> Void = { [weak self] id, event in
         guard let self else { return }
@@ -42,7 +40,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// normal use and never consulted for behavior.
     var onAdmission: ((UUID, String, VoiceRoute) -> Void)?
     var onDiagnostic: ((VoiceSpeechDiagnostic) -> Void)?
-    var onQualificationPreparation: ((String, Double) -> Void)?
 
     /// Runs a spoken instruction through the runtime. Wired by VoiceController
     /// — returns the moment the work is *accepted* ("STARTED — …"); the real
@@ -213,10 +210,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     /// The diagnostic channel carries numbers only — a category is a code,
     /// never a message, request, target identity or credential:
-    /// 1 deadline, 2 transport, 3 budget, 4 cancelled, 5 protocol/decode.
+    /// 1 deadline, 2 transport, 4 cancelled, 5 protocol/decode.
     private func semanticFailureCode(_ error: Error) -> Double {
         if error as? LocalSpeechError == .deadline { return 1 }
-        if error is SemanticRequestBudget.Failure { return 3 }
         if error is CancellationError { return 4 }
         if let failure = error as? VoiceSemanticRouter.Failure,
            failure == .invalidResponse || failure == .invalidContext { return 5 }
@@ -231,8 +227,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var remoteConversationOwner: LocalSpeechSession?
     private var speechSession: LocalSpeechSession { remoteConversationOwner ?? baseSpeechSession }
     private lazy var baseSpeechSession: LocalSpeechSession = {
-        let session = admissionOwner ?? LocalSpeechSession(
-            provider: speechSource == .localDiagnostic ? LocalTranscriber.shared : nil) { [weak self] admission in
+        let session = admissionOwner ?? LocalSpeechSession { [weak self] admission in
             await self?.executeLocal(admission)
         }
         if onDiagnostic != nil {
@@ -294,7 +289,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             outputGate.store(audioRepliesEnabled && !holding, ordering: .releasing)
             if !audioRepliesEnabled {
                 _ = player.interrupt(untilResponseDone: responseInFlight)
-                if speechSource == .realtime { retireFeedback() }
+                retireFeedback()
             }
         }
     }
@@ -304,27 +299,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// click ran and the gaze side owns the ack ring; false (cold
     /// referent, deny-blocked) or nil keeps the silent dismiss.
     var gazeTapHandler: (@Sendable () async -> Bool)?
-    /// Local speech tee — forwarded onto every capture feed the lane
-    /// builds so a LocalTranscriber (composition lane) sees the same
-    /// converted PCM chunks the socket hears. Fire-and-forget per chunk.
-    /// Write-through to a live/prepared feed: a sink wired after the
-    /// socket warmed still hears this capture's tail.
-    var localSpeechSink: (@Sendable (AVAudioPCMBuffer) -> Void)? {
-        didSet {
-            prepared?.feed.localSpeechSink = localSpeechSink
-            applyLocalSink()
-        }
-    }
-    /// The ACTIVE feed re-pins its tee from live state — a dictation
-    /// hold (`respondOnCommit == false`) streams literal text a command
-    /// parser must never hear, and a metering session (`sendsAudio ==
-    /// false`) carries hardware-test audio, not an utterance. The
-    /// prepared feed's eager assignment settles per-capture here.
-    private func applyLocalSink() {
-        guard let session = active?.session else { return }
-        session.feed.localSpeechSink =
-            session.sendsAudio && respondOnCommit ? localSpeechSink : nil
-    }
     /// Off-actor playback gate = replies enabled && !holding. The socket
     /// loop reads it directly: model audio enqueues without a MainActor
     /// hop, and a stray response that outraced response.cancel dies here
@@ -378,13 +352,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
         let session = ConversationSession()
         session.makeSpeechSession = { [weak self] context in
             guard let self else { throw CancellationError() }
-            let owner: LocalSpeechSession
-            if self.speechSource == .realtime {
-                owner = LocalSpeechSession { _ in }
-                owner.context = context
-            } else {
-                owner = self.speechSession.recordedSession(context: context)
-            }
+            let owner = LocalSpeechSession { _ in }
+            owner.context = context
             owner.onDiagnostic = { [weak self] diagnostic in
                 Task { @MainActor [weak self] in self?.onDiagnostic?(diagnostic) }
             }
@@ -397,12 +366,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
             self?.closeConversationFeed()
             self?.onConversationState?(.unavailable(reason))
         }
-        if speechSource == .realtime {
-            session.onBargeIn = { [weak self] in self?.interruptConversationPlayback() }
-            session.remote = { [weak self] admission, owner, execute in
-                guard let self else { throw CancellationError() }
-                try await self.respondToConversation(admission, owner: owner, execute: execute)
-            }
+        session.onBargeIn = { [weak self] in self?.interruptConversationPlayback() }
+        session.remote = { [weak self] admission, owner, execute in
+            guard let self else { throw CancellationError() }
+            try await self.respondToConversation(admission, owner: owner, execute: execute)
         }
         return session
     }()
@@ -546,10 +513,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
-         admissionOwner: LocalSpeechSession? = nil, speechSource: SpeechSource = .realtime) {
+         admissionOwner: LocalSpeechSession? = nil) {
         self.apiKey = apiKey
-        self.speechSource = speechSource
-        self.duplexRequested = speechSource == .realtime
+        self.duplexRequested = true
         self.admissionOwner = admissionOwner
         self.client = client ?? RealtimeVoiceClient()
         self.client.onEvent = nil
@@ -696,7 +662,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 responseAuthority.finish(connection: envelope.connectionID, responseID: response)
                 handle(event)
             case .closed, .failure:
-                if speechSource == .realtime, conversation.id != nil {
+                if conversation.id != nil {
                     let message: String
                     if case .failure(let reason) = event { message = reason }
                     else { message = "The OpenAI voice connection closed. Resume listening to reconnect." }
@@ -868,15 +834,14 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // A rebuilt session resets the call_id namespace — the dedupe set's
         // lifetime ends with the socket it belonged to.
         handledCalls = []
-        try await client.connect(apiKey: key, inputMode: inputMode
-            ?? (speechSource == .realtime ? .conversation : .localFinal))
+        try await client.connect(apiKey: key, inputMode: inputMode ?? .conversation)
         seenInputItems = []
         responseAuthority.connect(client.connectionID)
         replayOutcomes()
     }
 
     func prepareRealtimeTransport(_ mode: RealtimeVoiceClient.InputMode) async throws {
-        guard speechSource == .realtime, remoteReasoningPermitted else {
+        guard remoteReasoningPermitted else {
             throw VoiceError("OpenAI voice is disabled for this diagnostic.")
         }
         feedbackSuspended = false
@@ -884,7 +849,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     func beginRealtimeConversation(session: UUID) throws {
-        guard speechSource == .realtime, client.isReady, client.inputMode == .conversation else {
+        guard client.isReady, client.inputMode == .conversation else {
             throw VoiceError("OpenAI has not confirmed continuous voice input.")
         }
         feedbackSuspended = false
@@ -892,7 +857,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     private func handleRemoteInput(_ envelope: RealtimeVoiceClient.WireEnvelope) -> Bool {
-        guard speechSource == .realtime else { return false }
         let inputEvent = envelope.kind.hasPrefix("input_audio_buffer.")
             || envelope.kind.hasPrefix("conversation.item.input_audio_transcription.")
         guard inputEvent else { return false }
@@ -1024,7 +988,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     func beginRemoteManualInput(id: UUID, mode: VoiceCaptureMode, context: VoiceAdmissionContext,
                                 at now: TimeInterval) throws -> VoiceTurnToken {
-        guard speechSource == .realtime, client.isReady, client.inputMode == .manual,
+        guard client.isReady, client.inputMode == .manual,
               manualCaptureConnection != client.connectionID, manualInput == nil,
               mode == .command || mode == .dictation else {
             throw VoiceError("A fresh confirmed manual voice session is required.")
@@ -1216,7 +1180,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         try Task.checkCancellation()
         enabled = true; selectedUID = uid
-        if speechSource == .realtime { feedbackSuspended = false }
+        feedbackSuspended = false
         let token = UUID(); preparationID = token
         onReadiness?(.preparing)
         let task = Task { [weak self] () throws -> String in
@@ -1239,16 +1203,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 }
                 Self.log.notice("prepare stage=microphone_input elapsed_ms=\((ProcessInfo.processInfo.systemUptime - inputStarted) * 1000)")
                 try Task.checkCancellation()
-                if self.speechSource == .localDiagnostic {
-                    let localStarted = ProcessInfo.processInfo.systemUptime
-                    self.onQualificationPreparation?("models.begin", localStarted)
-                    try await self.speechSession.prewarm()
-                    self.onQualificationPreparation?("models.ready", ProcessInfo.processInfo.systemUptime)
-                } else {
-                    self.onQualificationPreparation?("realtime.connect.begin", ProcessInfo.processInfo.systemUptime)
-                    try await self.ensureConnected(inputMode: self.desiredInputMode)
-                    self.onQualificationPreparation?("realtime.connect.ready", ProcessInfo.processInfo.systemUptime)
-                }
+                try await self.ensureConnected(inputMode: self.desiredInputMode)
                 guard self.enabled, self.preparationID == token else { throw CancellationError() }
                 let oldOutput = self.hardware?.playback?.realtime.id
                 self.hardware = hardware
@@ -1285,7 +1240,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     var conversationAudioReady: Bool {
         guard conversation.id != nil, let outputs = hardware?.playback else { return false }
-        if speechSource == .realtime, !client.isReady { return false }
+        if !client.isReady { return false }
         return outputs.realtime.isReady() && outputs.system.isReady() && outputs.local.isReady()
             && playbackRoutingReady?() == true
     }
@@ -1301,7 +1256,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
             guard playbackRoutingReady?() == true else {
                 throw VoiceError("Hands-free playback is unavailable. Hold Fn to speak.")
             }
-            if speechSource == .localDiagnostic { try await conversation.prepare() }
             guard conversationStartID == request, !Task.isCancelled else { throw CancellationError() }
             if !duplexRequested {
                 await finishTask?.value
@@ -1311,42 +1265,36 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 duplexRequested = true
             }
             _ = try await prepare(inputUID: inputUID)
-            if speechSource == .realtime { try await prepareRealtimeTransport(.conversation) }
+            try await prepareRealtimeTransport(.conversation)
             guard conversationStartID == request, !Task.isCancelled,
                   let hardware, let outputs = hardware.playback,
                   outputs.realtime.isReady(), outputs.system.isReady(), outputs.local.isReady(),
                   playbackRoutingReady?() == true else {
                 throw VoiceError("Hands-free voice is unavailable with this audio device. Hold Fn to speak.")
             }
-            guard let format = AVAudioFormat(
-                commonFormat: speechSource == .realtime ? .pcmFormatInt16 : .pcmFormatFloat32,
-                sampleRate: speechSource == .realtime ? 24_000 : 16_000,
-                channels: 1, interleaved: speechSource == .realtime) else {
+            guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000,
+                                             channels: 1, interleaved: true) else {
                 throw LocalSpeechError.unavailable
             }
             let feed = try ConvertedAudioFeed(input: hardware.format, output: format)
             let session = UUID()
-            if speechSource == .realtime {
-                try beginRealtimeConversation(session: session)
-                let connection = client.connectionID
-                conversationSender = Task { [weak self] in
-                    guard let self else { return }
-                    do {
-                        for try await buffer in feed.stream {
-                            guard !Task.isCancelled, self.conversation.id == session else { return }
-                            guard let samples = buffer.int16ChannelData?[0] else {
-                                throw VoiceError("The microphone audio format changed.")
-                            }
-                            try await self.client.sendAudio(Data(bytes: samples, count: Int(buffer.frameLength) * 2),
-                                                            connection: connection)
+            try beginRealtimeConversation(session: session)
+            let connection = client.connectionID
+            conversationSender = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    for try await buffer in feed.stream {
+                        guard !Task.isCancelled, self.conversation.id == session else { return }
+                        guard let samples = buffer.int16ChannelData?[0] else {
+                            throw VoiceError("The microphone audio format changed.")
                         }
-                    } catch {
-                        guard self.conversation.id == session, !Task.isCancelled else { return }
-                        self.stopConversation(state: .unavailable(error.localizedDescription))
+                        try await self.client.sendAudio(Data(bytes: samples, count: Int(buffer.frameLength) * 2),
+                                                        connection: connection)
                     }
+                } catch {
+                    guard self.conversation.id == session, !Task.isCancelled else { return }
+                    self.stopConversation(state: .unavailable(error.localizedDescription))
                 }
-            } else {
-                try await conversation.start(feed: feed, session: session)
             }
             guard conversationStartID == request, !Task.isCancelled else {
                 conversation.stop()
@@ -1386,23 +1334,21 @@ final class RealtimeVoiceLane: SpeechCapturing {
         remoteInputs = [:]; remoteInputOrder = []; remoteSpeakingItem = nil
         finishRemoteReply(error: CancellationError())
         conversation.stop()
-        if speechSource == .realtime {
-            if case .unavailable = state {
-                for item in speakQueue { retryOutcomePush.push(item.text, attempts: item.attempts) }
-                speakQueue = []
-            } else {
-                feedbackSuspended = true
-                retireFeedback()
-            }
-            holding = false
-            responseAuthority.revoke()
-            client.teardown()
-            responseInFlight = false
-            turnID = nil
-            pendingReasoning = nil; pendingInput = nil
-            pendingOutcomeReady = false; wantResponse = false
-            _ = player.interrupt(untilResponseDone: false)
+        if case .unavailable = state {
+            for item in speakQueue { retryOutcomePush.push(item.text, attempts: item.attempts) }
+            speakQueue = []
+        } else {
+            feedbackSuspended = true
+            retireFeedback()
         }
+        holding = false
+        responseAuthority.revoke()
+        client.teardown()
+        responseInFlight = false
+        turnID = nil
+        pendingReasoning = nil; pendingInput = nil
+        pendingOutcomeReady = false; wantResponse = false
+        _ = player.interrupt(untilResponseDone: false)
         onConversationState?(state)
     }
 
@@ -1437,7 +1383,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     func start(session id: UUID, inputUID: String?, transcribe: Bool) async throws -> String {
         cancel()
-        if transcribe, speechSource == .realtime {
+        if transcribe {
             feedbackSuspended = false
             client.teardown()
             desiredInputMode = .manual
@@ -1456,40 +1402,22 @@ final class RealtimeVoiceLane: SpeechCapturing {
         holdStartedAt = nil
         var session: Session!
         if transcribe {
-            if speechSource == .localDiagnostic, !speechSession.preparedForCapture {
-                Task { [weak self] in try? await self?.speechSession.prewarm() }
-                throw VoiceError("Local speech is preparing. Wait for readiness before speaking.")
-            }
             // The previous hold's teardown sends must land before this one
             // streams — a late clearAudio wipes freshly streamed audio.
             await teardownTask?.value
             teardownTask = nil
-            do {
-                _ = try await prepare(inputUID: inputUID)
-            } catch {
-                guard speechSource == .localDiagnostic, duplexRequested,
-                      conversation.id == nil, !Task.isCancelled else { throw error }
-                duplexRequested = false
-                prepared = nil; hardware = nil
-                onConversationState?(.unavailable("Hands-free voice is unavailable with this audio device. Hold Fn to speak."))
-                _ = try await prepare(inputUID: inputUID)
-            }
+            _ = try await prepare(inputUID: inputUID)
             try Task.checkCancellation()
             guard turnID == id else { throw CancellationError() }
             let context = await admissionContextProvider?() ?? VoiceAdmissionContext()
             guard turnID == id, !Task.isCancelled else { throw CancellationError() }
             speechSession.context = context
             let localTurn: VoiceTurnToken
-            if speechSource == .realtime {
-                responseInFlight = false
-                try await prepareRealtimeTransport(.manual)
-                guard turnID == id, !Task.isCancelled else { throw CancellationError() }
-                localTurn = try beginRemoteManualInput(id: id, mode: respondOnCommit ? .command : .dictation,
-                    context: context, at: started)
-            } else {
-                localTurn = try await speechSession.beginCapture(
-                    id: id, mode: respondOnCommit ? .command : .dictation, now: started)
-            }
+            responseInFlight = false
+            try await prepareRealtimeTransport(.manual)
+            guard turnID == id, !Task.isCancelled else { throw CancellationError() }
+            localTurn = try beginRemoteManualInput(id: id, mode: respondOnCommit ? .command : .dictation,
+                context: context, at: started)
             guard turnID == id, !Task.isCancelled else {
                 await speechSession.cancelCapture(localTurn); throw CancellationError()
             }
@@ -1510,7 +1438,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // Pin the local tee for THIS capture's mode — the prepared
             // feed took the sink eagerly at prepare time, possibly under
             // a stale respondOnCommit from a prior dictation hold.
-            applyLocalSink()
             beginStreaming(session: session, id: id, pressUptime: started)
             onEvent?(id, .timing("Input admission", milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000))
             // Barge-in: a new hold interrupts the model mid-sentence — stop
@@ -1827,11 +1754,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// context; `speak` also queues a response once the model is free —
     /// never over a hold the user is mid-way through.
     func pushTaskEvent(_ text: String, speak: Bool) {
-        guard speechSource == .localDiagnostic || !feedbackSuspended else { return }
+        guard !feedbackSuspended else { return }
         let generation = feedbackGeneration
         Task { [weak self] in
             guard let self, generation == self.feedbackGeneration,
-                  self.speechSource == .localDiagnostic || !self.feedbackSuspended else { return }
+                  !self.feedbackSuspended else { return }
             await self.deliverPush(text, speak: speak)
         }
     }
@@ -1843,15 +1770,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     private func replayOutcomes() {
-        if speechSource == .realtime {
-            guard client.isReady, !feedbackSuspended else { return }
-        }
+        guard client.isReady, !feedbackSuspended else { return }
         let generation = feedbackGeneration
         let retries = retryOutcomePush.drain()
         Task { [weak self] in
             for retry in retries {
                 guard let self, generation == self.feedbackGeneration,
-                      self.speechSource == .localDiagnostic || !self.feedbackSuspended else { return }
+                      !self.feedbackSuspended else { return }
                 await self.deliverPush(retry.text, speak: true, attempts: retry.attempts)
             }
         }
@@ -1870,7 +1795,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// retried outcomes keep FIFO order. `attempts` counts prior failed
     /// sends for this text — the retry budget the OutcomeRetryQueue enforces.
     private func deliverPush(_ text: String, speak: Bool, attempts: Int = 0) async {
-        guard speechSource == .localDiagnostic || !feedbackSuspended else { return }
+        guard !feedbackSuspended else { return }
         let generation = feedbackGeneration
         guard client.isReady else {
             if speak, audioRepliesEnabled { retryOutcomePush.push(text, attempts: attempts) }
@@ -1888,7 +1813,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // to the attempt cap: a socket that keeps dying drops the
             // outcome honestly rather than replaying it forever.
             guard speak, audioRepliesEnabled, generation == feedbackGeneration,
-                  speechSource == .localDiagnostic || !feedbackSuspended else { return }
+                  !feedbackSuspended else { return }
             if attempts < OutcomeRetryQueue.maxAttempts {
                 retryOutcomePush.push(text, attempts: attempts + 1)
             } else {
@@ -1898,7 +1823,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         guard speak, audioRepliesEnabled, client.isReady, client.connectionID == connection else { return }
         guard generation == feedbackGeneration,
-              speechSource == .localDiagnostic || !feedbackSuspended else { return }
+              !feedbackSuspended else { return }
         guard speakQueue.count < 8 else {
             // The text reached the model as context; only its spoken
             // replay is dropped. Bounded, but no longer silent.
@@ -2118,15 +2043,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
                     guard sendsAudio else { continue }
                     guard let self, let turn = session.localTurn,
                           self.speechSession.gate.isCurrent(turn) else { return }
-                    if self.speechSource == .realtime {
-                        guard let samples = buffer.int16ChannelData?[0] else {
-                            throw VoiceError("The microphone audio format changed.")
-                        }
-                        try await self.client.sendAudio(Data(bytes: samples, count: Int(buffer.frameLength) * 2),
-                                                        connection: connection)
-                    } else {
-                        try await self.speechSession.consume(VoicePCMFrame(copying: buffer), sequence: sequence, turn: turn)
+                    guard let samples = buffer.int16ChannelData?[0] else {
+                        throw VoiceError("The microphone audio format changed.")
                     }
+                    try await self.client.sendAudio(Data(bytes: samples, count: Int(buffer.frameLength) * 2),
+                                                    connection: connection)
                     sequence += 1
                 }
             } catch {
@@ -2189,39 +2110,16 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 self.speechSession.context = fresh
                 self.holding = false
                 let sender = session.sender
-                if self.speechSource == .realtime {
-                    await sender?.value
-                    guard self.turnID == active.id, !Task.isCancelled else { return }
-                    let final = try await self.finalizeRemoteManualInput(turn)
-                    guard self.turnID == active.id, !Task.isCancelled else { return }
-                    guard let admission = final else {
-                        self.onEvent?(active.id, .final(""))
-                        return
-                    }
-                    await self.completeRemoteManualAdmission(admission)
-                    self.onEvent?(active.id, .timing("Release to realtime final",
-                        milliseconds: ((self.speechSession.finalizedAt ?? released) - released) * 1000))
+                await sender?.value
+                guard self.turnID == active.id, !Task.isCancelled else { return }
+                let final = try await self.finalizeRemoteManualInput(turn)
+                guard self.turnID == active.id, !Task.isCancelled else { return }
+                guard let admission = final else {
+                    self.onEvent?(active.id, .final(""))
                     return
                 }
-                let admission = try await self.speechSession.finishCapture(
-                    turn, acceptedFrames: session.feed.emittedFrameCount(), releasedAt: released,
-                    capturedSeconds: session.feed.audioDurations().converted,
-                    drain: { await sender?.value })
-                guard let admission, self.turnID == active.id, !Task.isCancelled else { return }
-                self.turnTranscript = admission.text
-                self.transcriptPending = false
-                if await self.handleSemanticIfNeeded(admission) { return }
-                guard self.turnID == active.id, !Task.isCancelled else { return }
-                if admission.route == .dictation {
-                    self.speechSession.discardRemoteAudio()
-                    self.onEvent?(active.id, .final(admission.text))
-                } else if admission.route == .remote {
-                    let audio = try self.speechSession.takeRemoteAudio(turn)
-                    try await self.submitRemote(admission, audio: audio)
-                } else {
-                    self.completeLocalDecision(admission)
-                }
-                self.onEvent?(active.id, .timing("Release to local final",
+                await self.completeRemoteManualAdmission(admission)
+                self.onEvent?(active.id, .timing("Release to realtime final",
                     milliseconds: ((self.speechSession.finalizedAt ?? released) - released) * 1000))
             } catch {
                 guard self.turnID == active.id else { return }
@@ -2235,7 +2133,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     func cancel() {
         failManualFinal(CancellationError())
         cancelSemanticInterpretation(); semanticTask = nil; semanticTurn = nil
-        if speechSource == .realtime, conversation.id != nil {
+        if conversation.id != nil {
             interruptConversationPlayback()
             remoteInputDrain?.cancel(); remoteInputDrain = nil
             for record in remoteInputs.values { record.deadline?.cancel() }
@@ -2251,19 +2149,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // "no active response" error that used to kill the next hold. Read
         // before the queued-want flag clears below.
         let needsCancel = responseInFlight || wantResponse
-        let remotePending = speechSource == .realtime || responseInFlight
-            || pendingInput != nil || pendingReasoning != nil
         if let turn = speechSession.gate.token {
             speechSession.cancel(turn)
             Task { [speechSession] in await speechSession.cancelCapture(turn) }
         }
         responseAuthority.revoke()
         pendingInput = nil; pendingReasoning = nil
-        if remotePending {
-            for item in speakQueue { retryOutcomePush.push(item.text, attempts: item.attempts) }
-            speakQueue = []
-            client.teardown()
-        }
+        for item in speakQueue { retryOutcomePush.push(item.text, attempts: item.attempts) }
+        speakQueue = []
+        client.teardown()
         responseInFlight = false; pendingOutcomeReady = false
         responseWatchdog?.cancel()
         active = nil

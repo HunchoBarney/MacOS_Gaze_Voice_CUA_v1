@@ -29,17 +29,6 @@ final class VoiceCommandTraceTests: XCTestCase {
         XCTAssertFalse(trace.events.contains { $0.stage == .driverBegin })
     }
 
-    func testPhysicalTrialFailureDistinguishesObservedForegroundFromTaskSuccess() {
-        let observed = VoiceLiveTrial.completionFailureMessage(
-            foregroundObserved: true, taskMessage: "No observable window")
-        XCTAssertTrue(observed.contains("seen in front"))
-        XCTAssertTrue(observed.contains("verification failed"))
-        let missing = VoiceLiveTrial.completionFailureMessage(
-            foregroundObserved: false, taskMessage: "No observable window")
-        XCTAssertTrue(missing.contains("did not complete successfully"))
-        XCTAssertFalse(missing.contains("seen in front"))
-    }
-
     func testTraceBoundAndPayloadAllowlist() throws {
         let trace = VoiceCommandTrace(), turn = UUID()
         for _ in 0..<80 { trace.record(.driverBegin, turn: turn, tool: .init("SECRET instruction/key/window title")) }
@@ -70,100 +59,10 @@ final class VoiceCommandTraceTests: XCTestCase {
         XCTAssertEqual(trace.events.last?.stage, .driverFailed)
     }
 
-    private struct EmptyKeys: APIKeyStore {
-        func read() throws -> String? { nil }
-        func save(_ apiKey: String) throws {}
-        func delete() throws {}
-    }
-
-    func testDiagnosticCredentialInteractionPolicy() {
-        XCTAssertFalse(Config.startupKeychainInteractionAllowed(
-            environment: ["JARVIS_P3_GUI_AUDIT": "1"], arguments: ["JevVoice", "--p3-user-audit"]))
-        XCTAssertTrue(Config.startupKeychainInteractionAllowed(environment: [:], arguments: ["JevVoice"]))
-        XCTAssertTrue(Config.startupKeychainInteractionAllowed(
-            environment: ["JARVIS_P3_GUI_AUDIT": "1"], arguments: ["JevVoice"]))
-        var policies: [(String, Bool)] = []
-        _ = VoiceUserAudit.diagnosticConfiguration(defaults: UserDefaults(suiteName: "trace-\(UUID())")!,
-            environment: [:], store: { name, allowed in policies.append((name, allowed)); return EmptyKeys() })
-        XCTAssertEqual(policies.map(\.0), ["typesafeAPIKey", "openAIAPIKey"])
-        XCTAssertTrue(policies.allSatisfy { !$0.1 })
-    }
-
     func testLegacyAndModernNoninteractiveKeychainPoliciesAreBothApplied() {
         let policy = KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: false)
         XCTAssertEqual(policy[kSecUseAuthenticationUI as String] as? String, kSecUseAuthenticationUIFail as String)
         XCTAssertTrue((policy[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
         XCTAssertTrue(KeychainAPIKeyStore.authenticationPolicy(allowUserInteraction: true).isEmpty)
-    }
-
-    func testNetworkFreeTraceRequiresEveryDiagnosticCondition() {
-        let env = ["JARVIS_P3_GUI_AUDIT": "1", "JARVIS_P3_GUI_AUDIT_TRACE_ONLY": "1"]
-        XCTAssertTrue(VoiceUserAudit.isNetworkFreeTrace(environment: env, arguments: ["--p3-user-audit"]))
-        XCTAssertFalse(VoiceUserAudit.isNetworkFreeTrace(environment: [:], arguments: ["--p3-user-audit"]))
-        XCTAssertFalse(VoiceUserAudit.isNetworkFreeTrace(environment: env, arguments: []))
-        XCTAssertFalse(VoiceUserAudit.isNetworkFreeTrace(
-            environment: ["JARVIS_P3_GUI_AUDIT": "1"], arguments: ["--p3-user-audit"]))
-        XCTAssertFalse(VoiceUserAudit.isNetworkFreeTrace(
-            environment: ["JARVIS_P3_GUI_AUDIT_TRACE_ONLY": "1"], arguments: ["--p3-user-audit"]))
-    }
-
-    func testTypingIsolationIsNetworkFreeOnlyInsideDiagnosticApp() {
-        let flag = "JARVIS_P3_GUI_AUDIT_TYPING_ONLY"
-        let env = ["JARVIS_P3_GUI_AUDIT": "1", flag: "1"]
-        XCTAssertTrue(VoiceUserAudit.isNetworkFreeTrace(environment: env, arguments: ["--p3-user-audit"]))
-        XCTAssertFalse(VoiceUserAudit.isNetworkFreeTrace(environment: env, arguments: []))
-        XCTAssertFalse(VoiceUserAudit.isNetworkFreeTrace(
-            environment: [flag: "1"], arguments: ["--p3-user-audit"]))
-        XCTAssertFalse(VoiceUserAudit.isNetworkFreeTrace(
-            environment: ["JARVIS_P3_GUI_AUDIT": "1", flag: "0"], arguments: ["--p3-user-audit"]))
-    }
-
-    func testNetworkFreeDiagnosticHasNoHostedKeysOrLegacyMigration() {
-        let suite = "diagnostic-no-keys-\(UUID())"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set("legacy-diagnostic-sentinel", forKey: "typesafeAPIKey")
-        let env = ["JARVIS_P3_GUI_AUDIT": "1", "JARVIS_P3_GUI_AUDIT_TYPING_ONLY": "1",
-                   "TYPESAFE_API_KEY": "typesafe-environment-sentinel",
-                   "OPENAI_API_KEY": "openai-environment-sentinel"]
-        let config = VoiceUserAudit.diagnosticConfiguration(defaults: defaults, environment: env,
-            arguments: ["--p3-user-audit"], store: { _, _ in
-                XCTFail("network-free diagnostic must not create a real credential store")
-                return DiagnosticStore()
-            })
-        XCTAssertTrue(config.apiKey.isEmpty)
-        XCTAssertTrue(config.openAIAPIKey.isEmpty)
-        XCTAssertEqual(defaults.string(forKey: "typesafeAPIKey"), "legacy-diagnostic-sentinel")
-    }
-
-    private struct DiagnosticStore: APIKeyStore {
-        func read() throws -> String? { nil }
-        func save(_ apiKey: String) throws {}
-        func delete() throws {}
-    }
-
-    func testAuditSettlementDoesNotPassOnFieldVisibilityAlone() {
-        XCTAssertFalse(VoiceUserAudit.auditWorkSucceeded([
-            (active: true, outcome: "pending", awaitingAnswer: false, awaitingApproval: false)
-        ]))
-        XCTAssertFalse(VoiceUserAudit.auditWorkSucceeded([
-            (active: true, outcome: "done", awaitingAnswer: false, awaitingApproval: false)
-        ]))
-    }
-
-    func testAuditSettlementRequiresOneSuccessfulUnaskedWork() {
-        let done = (active: false, outcome: "done", awaitingAnswer: false, awaitingApproval: false)
-        XCTAssertTrue(VoiceUserAudit.auditWorkSucceeded([done]))
-        XCTAssertFalse(VoiceUserAudit.auditWorkSucceeded([]))
-        XCTAssertFalse(VoiceUserAudit.auditWorkSucceeded([done, done]))
-        XCTAssertFalse(VoiceUserAudit.auditWorkSucceeded([
-            (active: false, outcome: "blocked", awaitingAnswer: false, awaitingApproval: false)
-        ]))
-        XCTAssertFalse(VoiceUserAudit.auditWorkSucceeded([
-            (active: false, outcome: "done", awaitingAnswer: true, awaitingApproval: false)
-        ]))
-        XCTAssertFalse(VoiceUserAudit.auditWorkSucceeded([
-            (active: false, outcome: "done", awaitingAnswer: false, awaitingApproval: true)
-        ]))
     }
 }

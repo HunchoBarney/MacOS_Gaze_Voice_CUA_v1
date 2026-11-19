@@ -6,18 +6,9 @@ import OSLog
 /// (gaze-referent verbs depend on it), so the app spawns it on launch,
 /// waits for its external API to serve, and stops it on quit.
 ///
-/// Launch resolution, in order:
-///   1. `Bundle.main.resourceURL/EyeTracker` — the bundled layout
-///      `make bundle-tracker` stages under Contents/Resources; it
-///      counts only with a scripts/ launcher inside, so a half-staged
-///      bundle can't shadow a working path.
-///   2. `JARVIS_EYE_TRACKER_DIR` — an explicit checkout or installed dir.
-///   3. `../EyeTracking` relative to the app bundle's parent — the dev
-///      layout (`build/Jev Voice.app` sits beside `EyeTracking/`).
-///   4. `~/Library/Application Support/JevVoice/EyeTracking` — the
-///      `make local` symlink into the live checkout.
-///   5. `Bundle.main.resourceURL/EyeTracking` — the shipped layout once the
-///      packaged Electron app is embedded.
+/// The tracker is the payload `make release` stages at
+/// Contents/Resources/EyeTracker; it counts only with a scripts/ launcher
+/// inside, so a half-staged bundle fails honestly.
 ///
 /// Anything missing or unhealthy surfaces through `state` — gaze verbs
 /// fail honestly from `GazeClient`, this host just owns the process.
@@ -29,6 +20,13 @@ import OSLog
 /// `/control` quit, then SIGTERM, then a dir-scoped pkill last resort.
 actor TrackerHost {
     static let shared = TrackerHost()
+    /// Tests turn spawning off so the respawn and stale-generation paths
+    /// run without forking a real tracker.
+    private let spawnEnabled: Bool
+
+    init(spawnEnabled: Bool = true) {
+        self.spawnEnabled = spawnEnabled
+    }
     /// The tracker's read-only API port (`--external-api-port` default).
     static let port = 47892
 
@@ -325,17 +323,14 @@ actor TrackerHost {
         // work. The off→on toggle inside a 90s boot window is exactly
         // how a stale start used to claim .running under a newer one.
         guard generation == startGeneration, state == .starting else { return }
-        // JARVIS_DISABLE_TRACKER_SPAWN is the tests' hatch — the respawn
-        // claim and the stale-generation path are exercised without ever
-        // forking a real child. Placed before the attempts guard so a
-        // stale-generation regression reads as .failed, never a quiet
-        // pass.
-        guard ProcessInfo.processInfo.environment["JARVIS_DISABLE_TRACKER_SPAWN"] == nil else {
-            state = .failed("tracker spawn disabled (JARVIS_DISABLE_TRACKER_SPAWN)")
+        // Placed before the attempts guard so a stale-generation regression
+        // reads as .failed, never a quiet pass.
+        guard spawnEnabled else {
+            state = .failed("tracker spawn disabled")
             return
         }
         guard let dir = Self.trackerDirectory() else {
-            Self.log.error("no EyeTracking checkout found (set JARVIS_EYE_TRACKER_DIR) — gaze verbs will refuse")
+            Self.log.error("no bundled eye tracker found — gaze verbs will refuse")
             state = .failed("The eye tracker isn't installed where I can find it.")
             return
         }
@@ -380,8 +375,7 @@ actor TrackerHost {
         proc.arguments = Self.trackerArguments(trackerDir: dir,
                                                useProdRenderer: useProdRenderer,
                                                forceWasm: forceWasm,
-                                               defaults: .standard,
-                                               environment: env)
+                                               defaults: .standard)
         proc.currentDirectoryURL = dir
         // The tracker's stderr is the only place a boot failure explains
         // itself (vite bind, Electron exit, EADDRINUSE) — nil stdio made
@@ -964,14 +958,11 @@ actor TrackerHost {
     /// Geometry comes from UserDefaults so Settings edits don't need a
     /// rebuild — `trackerDisplaySizeInch` (Double), `trackerCameraFovDeg`
     /// (Int), `trackerProjectionMode` (String), `trackerWasmThreads`
-    /// (Int), `trackerGazeMaxFps` (Int, default 15); `JARVIS_EYE_TRACKER_ARGS` is the raw escape hatch — the
-    /// bundled-calibration redirect goes after it, since the tracker
-    /// honors the first occurrence of a flag.
+    /// (Int), `trackerGazeMaxFps` (Int, default 15).
     nonisolated static func trackerArguments(trackerDir: URL,
                                              useProdRenderer: Bool,
                                              forceWasm: Bool,
                                              defaults: UserDefaults,
-                                             environment: [String: String],
                                              hostPid: Int32 = ProcessInfo.processInfo.processIdentifier) -> [String] {
         // --no-tray is the hosted-mode marker: the tracker's Electron
         // tray is for standalone dev runs — under the host, this app's
@@ -1027,19 +1018,12 @@ actor TrackerHost {
             let fps = defaults.integer(forKey: "trackerGazeMaxFps")
             arguments += ["--gaze-max-fps", "\(fps > 0 ? fps : 15)"]
         }
-        // Extra tracker flags (calibration overrides, experiment toggles)
-        // come from the environment so Settings doesn't need a relaunch
-        // to change them: JARVIS_EYE_TRACKER_ARGS="--display-size-inch 31.5".
-        if let extra = environment["JARVIS_EYE_TRACKER_ARGS"] {
-            arguments += extra.split(separator: " ").map(String.init)
-        }
         // A tracker staged inside the app bundle cannot write its default
         // calibration path — Contents/Resources is sealed once the bundle
         // is signed — so bundled runs redirect .gaze_calibration.json (and
         // settings.json, which resolves beside it) into Application
         // Support. Source-checkout trackers keep their repo-local files,
-        // which is what dev runs expect. Appended after the env override
-        // because the tracker reads the FIRST occurrence of a flag.
+        // which is what dev runs expect.
         let calibrationDir = calibrationDirectory(trackerDir: trackerDir)
         if calibrationDir != trackerDir {
             arguments += ["--calibration-file",
@@ -1113,42 +1097,11 @@ actor TrackerHost {
     }
 
     static func trackerDirectory() -> URL? {
-        let fm = FileManager.default
-        // Bundled layout first: `make bundle-tracker` stages the tracker
-        // at Contents/Resources/EyeTracker. The scripts/ launcher must
-        // exist — a partially-staged bundle (a dir with no entry point)
-        // must not shadow the working resolutions below.
-        if let bundled = Bundle.main.resourceURL?
-            .appendingPathComponent("EyeTracker"),
-           ["scripts/start-prod.cjs", "scripts/dev.cjs"].contains(where: {
-               fm.fileExists(atPath: bundled.appendingPathComponent($0).path)
-           }) {
-            return bundled
-        }
-        if let env = ProcessInfo.processInfo.environment["JARVIS_EYE_TRACKER_DIR"],
-           fm.fileExists(atPath: env + "/package.json") {
-            return URL(fileURLWithPath: env)
-        }
-        // Dev layout: <repo>/build/Jev Voice.app → <repo>/EyeTracking.
-        let sibling = Bundle.main.bundleURL
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("EyeTracking")
-        if fm.fileExists(atPath: sibling.appendingPathComponent("package.json").path) {
-            return sibling
-        }
-        // Installed layout: the launch script symlinks the checkout into
-        // app support, so a bundle living anywhere (~/jarvis-local etc.)
-        // finds it without an env var. fileExists follows the symlink.
-        let linked = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("JevVoice/EyeTracking")
-        if fm.fileExists(atPath: linked.appendingPathComponent("package.json").path) {
-            return linked
-        }
-        let bundled = Bundle.main.resourceURL?.appendingPathComponent("EyeTracking")
-        if let bundled, fm.fileExists(atPath: bundled.appendingPathComponent("package.json").path) {
-            return bundled
-        }
-        return nil
+        guard let bundled = Bundle.main.resourceURL?.appendingPathComponent("EyeTracker"),
+              ["scripts/start-prod.cjs", "scripts/dev.cjs"].contains(where: {
+                  FileManager.default.fileExists(atPath: bundled.appendingPathComponent($0).path)
+              }) else { return nil }
+        return bundled
     }
 
     // MARK: - Test seams

@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import XCTest
 import JevVoiceCore
 @testable import JevVoice
@@ -714,31 +713,5 @@ final class VoiceOneBrainTests: XCTestCase {
         XCTAssertTrue(ids.isEmpty, "stage telemetry spends no extra turn")
         XCTAssertFalse(frames.contains { $0["type"]?.string == "response.create" })
         lane.cancel(); client.teardown()
-    }
-
-    override func tearDown() async throws {
-        guard let run = ProcessInfo.processInfo.environment["JARVIS_P3_RUN_ID"],
-              let directory = ProcessInfo.processInfo.environment["JARVIS_P3_EVIDENCE_DIR"] else { return }
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let path = URL(fileURLWithPath: directory).appendingPathComponent("voice-integration.json")
-        guard path.deletingLastPathComponent().standardizedFileURL == root.appendingPathComponent(".agent/results/P3").standardizedFileURL else {
-            XCTFail("evidence destination must be phase-owned"); return
-        }
-        var rows: [JSONValue] = []
-        if let bytes = try? Data(contentsOf: path),
-           let old = try? JSONDecoder().decode(JSONValue.self, from: bytes), old["run_id"]?.string == run {
-            rows = old["cases"]?.array ?? []
-        }
-        rows.append(.object(["name": .string(name), "failures": .number(Double(testRun?.failureCount ?? 1))]))
-        let source = try Data(contentsOf: root.appendingPathComponent("Sources/JevVoice/Voice/RealtimeVoiceLane.swift"))
-        let hash = SHA256.hash(data: source).map { String(format: "%02x", $0) }.joined()
-        let evidence = JSONValue.object([
-            "schema_version": .number(1), "run_id": .string(run), "source": .string("protocol-fixtures-not-live-server"),
-            "production_decoder": .bool(true), "production_lane": .bool(true), "source_sha256": .string(hash),
-            "cases": .array(rows), "failures": .number(Double(rows.reduce(0) { $0 + ($1["failures"]?.integer ?? 1) }))
-        ])
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(evidence).write(to: path, options: .atomic)
     }
 }

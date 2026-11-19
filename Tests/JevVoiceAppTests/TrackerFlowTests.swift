@@ -572,7 +572,7 @@ final class EyesMenuFlowTests: XCTestCase {
 // MARK: - Voice commands through the drive loop
 
 /// Contract: the spoken tracker commands ride the whole drive loop to
-/// the tracker's socket — `JARVIS_GAZE_URL` points `TrackerControl()`'s
+/// the tracker's socket — `GazeClient.defaultBaseURL` points `TrackerControl()`'s
 /// default base URL at the stub, so `dispatchTrackerVerb` and the
 /// refusal path both run production code over a real wire. The media
 /// key seam stands in for the HID tap; the app's process-state seam
@@ -590,25 +590,24 @@ final class TrackerCommandFlowTests: XCTestCase {
     }
 
     private var stub: TrackerStub!
-    private var oldGazeURL: String?
+    private var oldGazeURL: URL!
     private var oldTrackerState: (() async -> TrackerHost.State)!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         stub = TrackerStub()
         try stub.start()
-        // The one env seam that moves every default TrackerControl()
+        // The one seam that moves every default TrackerControl()
         // (dispatch AND refusal status reads) onto the stub — the rest
         // of the path stays production code.
-        oldGazeURL = getenv("JARVIS_GAZE_URL").map { String(cString: $0) }
-        setenv("JARVIS_GAZE_URL", stub.baseURL.absoluteString, 1)
+        oldGazeURL = GazeClient.defaultBaseURL
+        GazeClient.defaultBaseURL = stub.baseURL
         oldTrackerState = DriveLoop.trackerState
     }
 
     override func tearDown() {
         DriveLoop.trackerState = oldTrackerState
-        if let oldGazeURL { setenv("JARVIS_GAZE_URL", oldGazeURL, 1) }
-        else { unsetenv("JARVIS_GAZE_URL") }
+        GazeClient.defaultBaseURL = oldGazeURL
         stub?.stop()
         stub = nil
         super.tearDown()
@@ -813,9 +812,7 @@ final class TrackerEnableFlowTests: XCTestCase {
     /// is checked before any Process exists, and no kill path runs:
     /// installForTest poses the spent budget directly.)
     func testUserRequestedStartRunsAFullAttempt() async throws {
-        setenv("JARVIS_DISABLE_TRACKER_SPAWN", "1", 1)
-        defer { unsetenv("JARVIS_DISABLE_TRACKER_SPAWN") }
-        let host = TrackerHost()
+        let host = TrackerHost(spawnEnabled: false)
         await host.installForTest(child: nil, attempts: TrackerHost.maxAttempts,
                                   state: .stopped)
         await host.ensureRunning()
@@ -832,7 +829,7 @@ final class TrackerEnableFlowTests: XCTestCase {
         XCTAssertNotEqual(state, .stopped,
                           "a user-requested start must clear the stop bound")
         if case .failed(let message) = state {
-            XCTAssertEqual(message, "tracker spawn disabled (JARVIS_DISABLE_TRACKER_SPAWN)",
+            XCTAssertEqual(message, "tracker spawn disabled",
                            "the reset attempt ran the real start path — it hit the fuse")
         }
         let generationAfter = await host.generationForTest
@@ -981,7 +978,7 @@ final class EyeSettingsFlowTests: XCTestCase {
         func argv() -> [String] {
             TrackerHost.trackerArguments(trackerDir: dir, useProdRenderer: true,
                                          forceWasm: false, defaults: suite,
-                                         environment: [:], hostPid: 4242)
+                                         hostPid: 4242)
         }
 
         // The card's exact write semantics: explicit picks set the keys.

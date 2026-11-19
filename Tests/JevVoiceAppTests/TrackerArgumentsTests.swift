@@ -4,9 +4,8 @@ import JevVoiceCore
 
 /// Contract: `TrackerHost.trackerArguments` builds the child argv without
 /// spawning — script selection keys off the checkout on disk, geometry
-/// comes from UserDefaults (Settings edits need no rebuild), the wasm
-/// session fallback and `JARVIS_EYE_TRACKER_ARGS` land last, in that
-/// order.
+/// comes from UserDefaults (Settings edits need no rebuild), and the
+/// wasm session fallback lands last.
 final class TrackerArgumentsTests: XCTestCase {
 
     private var suiteName: String!
@@ -32,13 +31,11 @@ final class TrackerArgumentsTests: XCTestCase {
 
     private func args(useProdRenderer: Bool = false,
                       forceWasm: Bool = false,
-                      environment: [String: String] = [:],
                       hostPid: Int32 = 4242) -> [String] {
         TrackerHost.trackerArguments(trackerDir: trackerDir,
                                      useProdRenderer: useProdRenderer,
                                      forceWasm: forceWasm,
                                      defaults: defaults,
-                                     environment: environment,
                                      hostPid: hostPid)
     }
 
@@ -180,7 +177,7 @@ final class TrackerArgumentsTests: XCTestCase {
         XCTAssertEqual(value(after: "--wasm-threads", in: args()), "4")
     }
 
-    // MARK: - Wasm fallback + env escape hatch
+    // MARK: - Wasm fallback
 
     /// The wedged-WebGPU session fallback appends the provider switch and
     /// the fps cap as a contiguous pair, after the geometry flags.
@@ -196,25 +193,6 @@ final class TrackerArgumentsTests: XCTestCase {
                              arguments.firstIndex(of: "--gaze-projection-mode")!)
         XCTAssertFalse(args().contains("--web-accelerator"),
                        "a healthy boot never pins wasm")
-    }
-
-    /// JARVIS_EYE_TRACKER_ARGS is the raw escape hatch — split on spaces
-    /// and appended LAST, after even the wasm fallback.
-    func testEnvArgsAppendLast() {
-        let arguments = args(
-            forceWasm: true,
-            environment: ["JARVIS_EYE_TRACKER_ARGS": "--cal-override 0.5 --extra"])
-        XCTAssertEqual(Array(arguments.suffix(3)),
-                       ["--cal-override", "0.5", "--extra"])
-        XCTAssertEqual(Array(arguments.suffix(5)),
-                       ["--gaze-max-fps", "10", "--cal-override", "0.5", "--extra"])
-    }
-
-    /// No env, or an empty one, appends nothing.
-    func testEnvAbsentAddsNothing() {
-        let baseline = args()
-        XCTAssertEqual(args(environment: ["JARVIS_EYE_TRACKER_ARGS": ""]), baseline)
-        XCTAssertEqual(args(environment: ["OTHER": "--bogus 1"]), baseline)
     }
 
     // MARK: - Bundled-tracker calibration redirect
@@ -238,21 +216,11 @@ final class TrackerArgumentsTests: XCTestCase {
                                                      useProdRenderer: true,
                                                      forceWasm: false,
                                                      defaults: defaults,
-                                                     environment: [:],
                                                      hostPid: 4242)
         let calibration = value(after: "--calibration-file", in: arguments)
         XCTAssertNotNil(calibration)
         XCTAssertTrue(calibration!.contains("Application Support/JevVoice"))
         XCTAssertTrue(calibration!.hasSuffix(".gaze_calibration.json"))
-        // The env escape hatch still wins — it parses before this flag.
-        let overridden = TrackerHost.trackerArguments(
-            trackerDir: bundled,
-            useProdRenderer: true,
-            forceWasm: false,
-            defaults: defaults,
-            environment: ["JARVIS_EYE_TRACKER_ARGS": "--calibration-file /tmp/dev.json"],
-            hostPid: 4242)
-        XCTAssertEqual(value(after: "--calibration-file", in: overridden), "/tmp/dev.json")
     }
 
     /// A bundled tracker prefers its own staged bin/node over every
@@ -287,15 +255,13 @@ final class TrackerArgumentsTests: XCTestCase {
         defaults.set(4, forKey: "trackerWasmThreads")
 
         XCTAssertEqual(
-            args(forceWasm: true,
-                 environment: ["JARVIS_EYE_TRACKER_ARGS": "--flag 1"]),
+            args(forceWasm: true),
             ["scripts/dev.cjs", "--external-api", "--no-tray",
              "--host-pid", "4242", "--calibrate-if-missing",
              "--display-size-inch", "31.5",
              "--camera-fov", "87",
              "--gaze-projection-mode", "monocular",
              "--wasm-threads", "4",
-             "--web-accelerator", "wasm", "--gaze-max-fps", "10",
-             "--flag", "1"])
+             "--web-accelerator", "wasm", "--gaze-max-fps", "10"])
     }
 }

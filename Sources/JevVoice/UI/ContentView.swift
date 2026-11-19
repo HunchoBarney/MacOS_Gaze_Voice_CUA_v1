@@ -223,7 +223,6 @@ struct ActivityView: View {
     @ObservedObject var controller: VoiceController
     @EnvironmentObject private var agentsModel: AgentsViewModel
     @Environment(\.openAgents) private var openAgents
-    @State private var showDiagnostics = false
     @State private var commandText = ""
 
     private var trimmedCommand: String {
@@ -335,25 +334,11 @@ struct ActivityView: View {
                     }
                     if controller.status == .done { Text(controller.resultMessage).foregroundStyle(.secondary) }
                     if controller.status == .idle && controller.transcript.isEmpty {
-                        Text("Hold Fn anywhere to give your Mac a command. Your recent activity will appear here.")
+                        Text("Speak, or hold Fn, to give your Mac a command. Your recent activity will appear here.")
                             .foregroundStyle(.secondary)
                     }
                 }
             }
-            DisclosureGroup("Diagnostics", isExpanded: $showDiagnostics) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Latest voice capture").fontWeight(.medium)
-                    ForEach(controller.measurements.keys.sorted(), id: \.self) { key in
-                        Text("\(key): \(Int(controller.measurements[key] ?? 0)) ms")
-                    }
-                    if let task = controller.diagnosticTask {
-                        Text("Selected task: \(task.label)").fontWeight(.medium)
-                        ForEach(controller.taskDiagnostics(task), id: \.self) { Text($0) }
-                        Text("Task elapsed: \(Int(task.elapsedMs)) ms")
-                    }
-                    Text("Dispatch results reflect OS/API responses, not independent verification inside every app.")
-                }.font(.caption).foregroundStyle(.secondary).padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)
-            }.font(.callout)
         }
     }
 }

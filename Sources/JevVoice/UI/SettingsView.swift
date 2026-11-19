@@ -25,7 +25,6 @@ struct SettingsView: View {
     @ObservedObject var input: FnInputMonitor
     @ObservedObject var navigation: SettingsNavigation
     var collapse: () -> Void
-    @StateObject private var cuaSetup = CuaSetup()
     @StateObject private var accuracyCheck = AccuracyCheck()
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = false
@@ -48,18 +47,6 @@ struct SettingsView: View {
     /// the write (`DwellPolicy.modeKey`, values are `DwellPolicy.Mode`
     /// raws). Defaults match `DwellPolicy.load()`.
     @State private var dwellMode = DwellPolicy.load().mode.rawValue
-    /// Tracker launch geometry — written straight to UserDefaults; the
-    /// spawn code maps the keys to the tracker's launch flags
-    /// (--display-size-inch, --gaze-projection-mode, --camera-fov), so
-    /// changes only take effect on the next tracker start. 0/"" = unset,
-    /// which leaves the tracker's own default in charge.
-    @State private var trackerDisplaySize = UserDefaults.standard.object(forKey: "trackerDisplaySizeInch") as? Double ?? 0
-    @State private var trackerProjectionMode = UserDefaults.standard.string(forKey: "trackerProjectionMode") ?? ""
-    @State private var trackerCameraFov = UserDefaults.standard.integer(forKey: "trackerCameraFovDeg")
-    /// The spend gauge — injected from the @MainActor shell (its shared
-    /// singleton is MainActor-isolated, so a property default can't
-    /// reach it from a nonisolated view init).
-    @ObservedObject var spend: SpendCounter
 
     var body: some View {
         HStack(spacing: 0) {
@@ -87,8 +74,10 @@ struct SettingsView: View {
                 }
                 Spacer()
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("HOLD fn TO SPEAK").font(.system(size: 10, weight: .semibold)).tracking(0.7)
-                    Text("Release to finish.\nEscape to cancel.").font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
+                    Text(config.handsFreeEnabled ? "JUST SPEAK" : "HOLD fn TO SPEAK")
+                        .font(.system(size: 10, weight: .semibold)).tracking(0.7)
+                    Text(config.handsFreeEnabled ? "Jev listens hands-free.\nHold fn for a manual turn." : "Release to finish.\nEscape to cancel.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
                 }.padding(.bottom, 12)
             }.padding(.horizontal, 18).frame(width: 170).background(.ultraThinMaterial)
             Divider()
@@ -237,8 +226,6 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    Text("If access looks enabled in macOS but unavailable here after a rebuild, remove the old app entry and add this build again.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             VoiceCard {
@@ -250,11 +237,6 @@ struct SettingsView: View {
                     if let error = config.launchAtLoginError {
                         Text(error).font(.caption).foregroundStyle(.orange)
                     }
-                    Divider()
-                    Text("Model calls today: \(spend.today)")
-                        .font(.callout)
-                    Text("Realtime turns, command calls, and chooser rounds — counted locally, never sent anywhere.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -296,14 +278,6 @@ struct SettingsView: View {
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Computer control", systemImage: "cursorarrow.motionlines").font(.headline)
-                    Text(cuaSetup.message).font(.caption).foregroundStyle(.secondary)
-                    Text("This check opens its own disposable TextEdit document and verifies a Jev-selected insertion.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Button("Test computer control") { cuaSetup.verify(apiKey: config.apiKey) }.disabled(cuaSetup.busy)
-                        Button("Test browser") { cuaSetup.verify(apiKey: config.apiKey, browser: true) }.disabled(cuaSetup.busy)
-                        if cuaSetup.busy { ProgressView().controlSize(.small); Button("Cancel") { cuaSetup.cancel() } }
-                    }
                     Toggle("Show agent cursor", isOn: $config.agentCursorEnabled)
                     Text(config.agentCursorEnabled
                          ? "The agent cursor glides to each action it can place. Accessibility-only actions still act directly — the driver cannot draw a pointer for a call that has no on-screen point."
@@ -373,56 +347,6 @@ struct SettingsView: View {
                         if accuracyCheck.running { ProgressView().controlSize(.small) }
                     }
                     Text(accuracyCheck.message).font(.caption).foregroundStyle(.secondary)
-                    DisclosureGroup("Tracker geometry") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("Display size", selection: Binding(
-                                get: { trackerDisplaySize },
-                                set: { value in
-                                    trackerDisplaySize = value
-                                    if value > 0 {
-                                        UserDefaults.standard.set(value, forKey: "trackerDisplaySizeInch")
-                                    } else {
-                                        UserDefaults.standard.removeObject(forKey: "trackerDisplaySizeInch")
-                                    }
-                                })) {
-                                Text("Auto").tag(0.0)
-                                Text("24″").tag(24.0)
-                                Text("27″").tag(27.0)
-                                Text("32″").tag(32.0)
-                            }
-                            Picker("Projection", selection: Binding(
-                                get: { trackerProjectionMode },
-                                set: { value in
-                                    trackerProjectionMode = value
-                                    if value.isEmpty {
-                                        UserDefaults.standard.removeObject(forKey: "trackerProjectionMode")
-                                    } else {
-                                        UserDefaults.standard.set(value, forKey: "trackerProjectionMode")
-                                    }
-                                })) {
-                                Text("Auto").tag("")
-                                Text("Binocular (screen)").tag("binocular-screen")
-                                Text("Legacy").tag("legacy")
-                            }
-                            Picker("Camera FOV", selection: Binding(
-                                get: { trackerCameraFov },
-                                set: { value in
-                                    trackerCameraFov = value
-                                    if value > 0 {
-                                        UserDefaults.standard.set(value, forKey: "trackerCameraFovDeg")
-                                    } else {
-                                        UserDefaults.standard.removeObject(forKey: "trackerCameraFovDeg")
-                                    }
-                                })) {
-                                Text("Auto").tag(0)
-                                Text("60°").tag(60)
-                                Text("90°").tag(90)
-                                Text("120°").tag(120)
-                            }
-                            Text("Launch flags for the tracker — Auto leaves the key unset. Changes apply on the next tracker start.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }.padding(.top, 6)
-                    }.font(.callout)
                 }
                 .task {
                     guard let status = try? await TrackerControl().status() else { return }
@@ -448,7 +372,7 @@ struct SettingsView: View {
                          ? "Input actions run without asking — every task and delegated agent included. Deny lists and focus rules still apply."
                          : "Actions that change something ask first. Turn this on to approve all computer use up front.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("Model confidence is available in Activity diagnostics. It does not interrupt ordinary commands. Deletion and purchasing are not supported by this app.")
+                    Text("Deletion and purchasing are not supported by this app.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Reset remembered permissions") { CuaStandingGrants.reset() }.controlSize(.small)
                     Text("Capabilities you approve — like browser page access or menu focus per app — are remembered so they are never re-asked. Reset to be asked again.")
@@ -458,9 +382,9 @@ struct SettingsView: View {
             VoiceCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("On-device", systemImage: "cpu").font(.headline)
-                    Text("Local recognition supplies the transcript for every voice turn. Commands are admitted only after the whole hold is finalized.")
+                    Text("Eye tracking runs entirely on this Mac; camera frames never leave it. Speech is not recognized on-device: while you speak, audio goes to OpenAI, which returns the transcript and spoken replies.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("If speech is unavailable or a target is uncertain, Jev asks or refuses rather than running a second transcription path.")
+                    Text("A command runs only after your whole request is final. If speech or a target is uncertain, Jev asks or refuses instead of guessing.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

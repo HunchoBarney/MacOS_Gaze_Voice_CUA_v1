@@ -61,24 +61,10 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertEqual(controller.handsFreeState, .paused)
     }
 
-    func testManualSpeechWindowClosesExactlyOnceOnReleaseThenCancellation() async {
-        let config = testConfig(), capture = StubCapture()
-        let controller = VoiceController(config: config, speech: capture, authorize: { true },
-            cuaRuntime: testCoordinator(config))
-        var windows: [Bool] = []
-        controller.localSpeechWindow = { windows.append($0) }
-        controller.begin()
-        await poll { controller.status == .listening }
-        XCTAssertEqual(controller.status, .listening)
-        controller.finish()
-        controller.cancelCaptureAttempt()
-        XCTAssertEqual(windows, [true, false])
-    }
-
     // MARK: - shared scaffolding
 
     private func lane() -> RealtimeVoiceLane {
-        RealtimeVoiceLane(apiKey: { "test-key" }, speechSource: .localDiagnostic)
+        RealtimeVoiceLane(apiKey: { "test-key" })
     }
 
     private func makeFeed() throws -> ConvertedAudioFeed {
@@ -221,17 +207,11 @@ final class VoiceLaneAuditTests: XCTestCase {
         }
     }
 
-    func testC1OldWorkSettlementPreservesNewCaptureAndRecordsItsOwnOutcome() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
-                                                attributes: [.posixPermissions: 0o700])
-        addTeardownBlock { try FileManager.default.removeItem(at: root) }
-        let evidence = try XCTUnwrap(VoiceTurnEvidence(environment: ["JARVIS_VOICE_EVIDENCE_DIR": root.path]))
+    func testC1OldWorkSettlementPreservesNewCapture() async throws {
         let config = testConfig(), capture = StubCapture()
         let coordinator = testCoordinator(config)
         let controller = VoiceController(config: config, speech: capture,
-            authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker(),
-            turnEvidence: evidence)
+            authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker())
         addTeardownBlock { await controller.shutdown() }
         controller.begin()
         await poll(until: { capture.startedID != nil && controller.isListening })
@@ -254,13 +234,6 @@ final class VoiceLaneAuditTests: XCTestCase {
         coordinator.onChange()
         XCTAssertEqual(controller.status, .listening)
         XCTAssertEqual(capture.cancelCalls, cancellations)
-        let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: root,
-            includingPropertiesForKeys: nil).first { $0.lastPathComponent.hasPrefix("turns-") })
-        let rows = try String(contentsOf: file, encoding: .utf8).split(separator: "\n").map {
-            try XCTUnwrap(JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])
-        }
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows.first?["status"] as? String, "Something needs attention")
     }
 
     func testC1SuccessfulWorkCompletesAfterReplyButClarificationDoesNotClaimSuccess() async throws {
@@ -302,7 +275,7 @@ final class VoiceLaneAuditTests: XCTestCase {
     func testSpeechlessTapDispatchesGazeHandler() async throws {
         for handled in [true, false] {
             let owner = LocalSpeechSession { _ in XCTFail("a speechless gesture is not a voice command") }
-            let lane = RealtimeVoiceLane(apiKey: { "test-key" }, admissionOwner: owner, speechSource: .localDiagnostic)
+            let lane = RealtimeVoiceLane(apiKey: { "test-key" }, admissionOwner: owner)
             var events: [SpeechEvent] = []
             let flags = Flags()
             lane.onEvent = { _, event in events.append(event) }
@@ -512,24 +485,6 @@ final class VoiceLaneAuditTests: XCTestCase {
     }
 
     // MARK: - Cross-lane seam: local speech tee
-
-    /// The converted feed hands every output chunk to the sink — the
-    /// LocalTranscriber hears the same PCM the socket does.
-    func testConvertedFeedTeesChunksToLocalSpeechSink() throws {
-        let feed = try makeFeed()
-        let flags = Flags()
-        feed.localSpeechSink = { buffer in
-            flags.value += 1
-            flags.bools["rate24k"] = buffer.format.sampleRate == 24000
-        }
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                   sampleRate: 48000, channels: 1, interleaved: false)!
-        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480)!
-        buffer.frameLength = 480
-        feed.append(buffer)
-        XCTAssertEqual(flags.value, 1)
-        XCTAssertEqual(flags.bools["rate24k"], true)
-    }
 
     // MARK: - Task 7: dictation editing vocabulary
 

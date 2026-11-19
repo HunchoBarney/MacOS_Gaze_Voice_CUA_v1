@@ -132,24 +132,11 @@ final class VoiceController: ObservableObject {
         let elapsed = max(0, ProcessInfo.processInfo.systemUptime - beganAt) * 1000
         let words = transcript.split(whereSeparator: \.isWhitespace).count
         Self.voiceLog.notice("capture=\(id, privacy: .private) event=\(event, privacy: .public) held=\(self.held) words=\(words) elapsed_ms=\(elapsed) status=\(self.status.title, privacy: .public)")
-        if let turn = sessionID {
-            turnEvidence?.event(turn: turn, name: String(event.prefix(while: { !$0.isWhitespace })))
-            if event.hasPrefix("capture_failed ") {
-                turnEvidence?.failure(turn: turn, message: String(event.dropFirst("capture_failed ".count)))
-            }
-        }
     }
 
     let config: Config
     private let diagnosticTraceOnly: Bool
     let commandTrace = VoiceCommandTrace()
-    /// Opt-in physical real-use evidence — nil unless JARVIS_VOICE_EVIDENCE_DIR
-    /// is set; behaviour is identical either way, only the row dump changes.
-    let turnEvidence: VoiceTurnEvidence?
-    private var normalQualification: VoiceNormalQualification?
-    var semanticAuditBudget: SemanticRequestBudget?
-    var semanticAuditSubject: String?
-    var auditDocumentBinding: (file: URL, windowID: Int)?
     let cua: VoiceTaskCoordinator
     var cuaTasks: [VoiceTaskCoordinator.Work] { cua.tasks }
     var diagnosticTask: VoiceTaskCoordinator.Work? { cuaTasks.first { $0.id == cua.selectedID } }
@@ -297,23 +284,10 @@ final class VoiceController: ObservableObject {
         get { (speech as? RealtimeVoiceLane)?.gazeTapHandler }
         set { (speech as? RealtimeVoiceLane)?.gazeTapHandler = newValue }
     }
-    /// Local speech tee — forwarded to the lane's capture feeds so the
-    /// LocalTranscriber (composition lane) hears converted PCM chunks.
-    /// nil = no tap.
-    var localSpeechSink: (@Sendable (AVAudioPCMBuffer) -> Void)? {
-        get { (speech as? RealtimeVoiceLane)?.localSpeechSink }
-        set { (speech as? RealtimeVoiceLane)?.localSpeechSink = newValue }
-    }
     /// Universal stop seam — wired by composition to the coordinator's
     /// `cancelAllRunning()` once it exists; Escape/stop calls it
     /// fire-and-forget. nil = interaction-scoped cancel only.
     var cancelAllTasks: (() async -> Void)?
-    /// Local-STT turn bracket — composition opens the transcriber's
-    /// listening turn here so `localSpeechSink` audio lands inside it.
-    /// True = a command capture's audio window opened; false = it closed
-    /// (release, cancel, or failure). Dictation holds never fire `true`:
-    /// literal text is not command-lane input.
-    var localSpeechWindow: ((Bool) -> Void)?
 
     /// Agent-side speakable events (consent asks, replies) join the realtime
     /// voice whenever that lane exists — a dead socket queues for replay
@@ -328,7 +302,7 @@ final class VoiceController: ObservableObject {
     }
 
     var usesRealtimeVoice: Bool {
-        (speech as? RealtimeVoiceLane)?.speechSource == .realtime
+        speech is RealtimeVoiceLane
     }
 
     /// A runtime outcome pushed to the voice. A deterministic payload — one
@@ -462,7 +436,6 @@ final class VoiceController: ObservableObject {
     private var manualResumeWanted = false
     private var repeatingCapture: UUID?
     private var repeatingWork: UUID?
-    private var localSpeechWindowOwner: UUID?
     private var deliveryOwner: UUID?
     private var latestAutomaticTurn: UUID?
     private var latestAutomaticText = ""
@@ -494,9 +467,6 @@ final class VoiceController: ObservableObject {
     private var microphoneTask: Task<Void, Never>?
     /// The typed/reviewed turn's in-flight lane send — cancel() kills it.
     private var routeTask: Task<Void, Never>?
-    /// Sessions created by submitTypedCommand — the admission callback labels
-    /// these turns "typed" in evidence so physical rows stay honest.
-    private var typedSessions: Set<UUID> = []
     private var microphoneEnabled = true
     private var configuredDevice: MicrophoneDevice?
     private var startupTask: Task<Void, Never>?
@@ -631,14 +601,13 @@ final class VoiceController: ObservableObject {
          cuaRuntime: VoiceTaskCoordinator? = nil,
          dictation: DictationDelivering = DictationDelivery(),
          speaker: SpeechSynthesizing? = nil,
-         diagnosticTraceOnly: Bool? = nil, turnEvidence: VoiceTurnEvidence? = nil,
+         diagnosticTraceOnly: Bool = false,
          permissionStatusReader: @escaping @Sendable () -> [Permission] = { Permission.missing }) {
         let config = config ?? Config.shared
         self.config = config
         self.handsFreePaused = config.handsFreePaused
         self.permissionMonitor = PermissionStatusMonitor(read: permissionStatusReader)
-        self.turnEvidence = turnEvidence ?? VoiceTurnEvidence()
-        self.diagnosticTraceOnly = diagnosticTraceOnly ?? VoiceUserAudit.networkFreeTrace
+        self.diagnosticTraceOnly = diagnosticTraceOnly
         self.dictation = dictation
         self.speaker = speaker
         self.authorize = authorize ?? { await RealtimeVoiceLane.requestAuthorization() }
@@ -661,7 +630,6 @@ final class VoiceController: ObservableObject {
         self.cua.onCommandStage = { [weak self] turn, task, stage, tool in
             guard let turn else { return }
             self?.commandTrace.record(stage, turn: turn, task: task, tool: tool)
-            self?.turnEvidence?.event(turn: turn, name: "command.\(stage.rawValue)", tool: tool, task: task)
         }
         self.cua.onNativeTextInsertion = { [weak self] turn, task, receipt in
             guard let self, let turn else { return }
@@ -669,56 +637,20 @@ final class VoiceController: ObservableObject {
             for (stage, time) in [(VoiceCommandTrace.Stage.nativeTextInsertionBegin, receipt.issuedAt),
                                   (ended, receipt.returnedAt)] {
                 self.commandTrace.record(stage, turn: turn, task: task, tool: .typeText, at: time)
-                self.turnEvidence?.event(turn: turn, name: "command.\(stage.rawValue)", at: time, tool: .typeText, task: task)
             }
-        }
-        self.turnEvidence?.onGrace = { [weak self] turn in
-            self?.flushEvidence(turn: turn, terminal: "grace_timeout")
         }
         // The realtime lane's tools reach the runtime spine — the model picks
         // the tool; fast lane / drive loop / consent decide how. computer_
         // command returns at spawn and the verified outcome pushes back
         // through taskEventSink as a spoken `[task outcome]`.
-        normalQualification = VoiceNormalQualification.install(evidence: self.turnEvidence,
-            lane: String(describing: type(of: self.speech)))
         if let lane = self.speech as? RealtimeVoiceLane {
-            lane.onQualificationPreparation = { [weak self] stage, at in
-                self?.normalQualification?.preparation(stage, at: at)
-            }
-            if let evidence = self.turnEvidence {
-                lane.onDiagnostic = { [weak evidence] event in
-                    evidence?.event(turn: event.turn, name: event.stage,
-                                    at: event.monotonic, metrics: event.metrics)
-                }
-            }
             lane.onCommandStage = { [weak self] turn, stage in
                 self?.commandTrace.record(stage, turn: turn)
-                self?.turnEvidence?.event(turn: turn, name: "command.\(stage.rawValue)")
-            }
-            lane.onAdmission = { [weak self, weak lane] turn, heard, route in
-                guard let self else { return }
-                let input = self.typedSessions.remove(turn) != nil ? "typed"
-                    : route == .dictation ? "dictation" : "voice"
-                self.turnEvidence?.begin(turn: turn, heard: heard, input: input,
-                    submittedAt: ProcessInfo.processInfo.systemUptime,
-                    releasedAt: input == "typed" ? 0 : self.releasedAt)
-                if let source = lane?.realtimeInput(for: turn) {
-                    self.turnEvidence?.event(turn: turn, name: "voice.source.openai_realtime")
-                    self.turnEvidence?.event(turn: turn, name: "voice.connection.\(source.connectionID)")
-                    self.turnEvidence?.event(turn: turn, name: "voice.input.\(source.itemID)")
-                }
             }
             lane.audioRepliesEnabled = config.ttsEnabled
             lane.commandHandler = { [weak self, weak lane] instruction, app, literalText, transcript, steps, captureID in
                 guard let self else { return #"{"status":"refused","say":"Jev is not available right now."}"# }
                 let capturedWindow = lane?.capturedLocalWindowID(for: captureID)
-                if let binding = self.auditDocumentBinding {
-                    guard VoiceUserAudit.enabled,
-                          capturedWindow == nil || capturedWindow == binding.windowID,
-                          VoiceUserAudit.focusedOwnedDocument(binding.file, windowID: binding.windowID) else {
-                        return #"{"status":"refused","say":"The owned test document lost focus. No action taken."}"#
-                    }
-                }
                 // transcript is the turn's completed speech transcript —
                 // the lane held dispatch until it landed (typed turns pass
                 // nil), so the runtime's heard-vs-called check compares
@@ -729,7 +661,7 @@ final class VoiceController: ObservableObject {
                     frontmostHint: self.commandFrontmostApp ?? self.lastExternalApp,
                     literalText: literalText,
                     transcriptHint: transcript, steps: steps, captureID: captureID,
-                    pinnedWindowID: self.auditDocumentBinding?.windowID ?? capturedWindow)
+                    pinnedWindowID: capturedWindow)
                 // Every contract `say` (including "started"'s provenance
                 // echo) is voiced verbatim by the lane's `.toolSay` event
                 // — the second model turn is suppressed for all of them,
@@ -791,8 +723,7 @@ final class VoiceController: ObservableObject {
             lane.semanticEnabled = { [weak self] in
                 self?.config.semanticAppSuggestions == true && self?.diagnosticTraceOnly == false
             }
-            lane.remoteReasoningPermitted = !VoiceUserAudit.enabled && !self.diagnosticTraceOnly
-                && self.normalQualification == nil
+            lane.remoteReasoningPermitted = !self.diagnosticTraceOnly
             lane.semanticContextProvider = { [weak self] in
                 guard let self else { return VoiceAdmissionContext() }
                 self.voiceEntityRefresh = .distantPast
@@ -804,11 +735,7 @@ final class VoiceController: ObservableObject {
                 }
                 let key = self.config.apiKey
                 guard !key.isEmpty else { throw VoiceSemanticRouter.Failure.unavailable }
-                let qualificationBudget = self.normalQualification?.configuration.budget
-                return try await VoiceSemanticRouter.live(apiKey: key,
-                    budget: qualificationBudget ?? self.semanticAuditBudget,
-                    subject: qualificationBudget == nil ? self.semanticAuditSubject : admission.turn.id.uuidString)
-                    .interpret(admission, context: context)
+                return try await VoiceSemanticRouter.live(apiKey: key).interpret(admission, context: context)
             }
             lane.semanticConfirmationHandler = { [weak self] proposal in
                 guard let self, self.config.semanticAppSuggestions else { return false }
@@ -1051,20 +978,10 @@ final class VoiceController: ObservableObject {
             automaticTimes[id] = (at, 0)
             adoptAutomaticTurn(id)
             cua.beginListeningHint()
-            turnEvidence?.open(turn: id, input: "conversation", beganAt: at)
-            if let owner = (speech as? RealtimeVoiceLane)?.conversation.id {
-                turnEvidence?.event(turn: id, name: "conversation.session.\(owner)")
-            }
-        case .source(let id, let input):
-            turnEvidence?.event(turn: id, name: "conversation.source.openai_realtime")
-            turnEvidence?.event(turn: id, name: "conversation.connection.\(input.connectionID)")
-            turnEvidence?.event(turn: id, name: "conversation.input.\(input.itemID)")
         case .sealed(let id, let at):
             cua.endListeningHint()
             automaticTimes[id]?.released = at
-            turnEvidence?.release(turn: id, at: at)
         case .final(let id, let text):
-            turnEvidence?.final(turn: id, text: text)
             if latestAutomaticTurn == id {
                 latestAutomaticText = text
                 adoptAutomaticTurn(id)
@@ -1077,7 +994,6 @@ final class VoiceController: ObservableObject {
                 (.conversationRoutingEnd, ended),
             ] {
                 commandTrace.record(stage, turn: id, at: at)
-                turnEvidence?.event(turn: id, name: "command.\(stage.rawValue)", at: at)
             }
         case .feedback(let id, let message):
             guard latestAutomaticTurn == id else { return }
@@ -1109,9 +1025,6 @@ final class VoiceController: ObservableObject {
         let capture = command.admission.turn.id
         automaticCaptures.insert(capture)
         adoptAutomaticTurn(capture)
-        turnEvidence?.begin(turn: capture, heard: command.admission.text, input: "conversation",
-            submittedAt: ProcessInfo.processInfo.systemUptime, releasedAt: automaticTimes[capture]?.released ?? 0)
-        turnEvidence?.event(turn: capture, name: "conversation.epoch.\(command.epoch)")
         defer { automaticTimes.removeValue(forKey: capture) }
         let work: VoiceTaskCoordinator.Work
         var answerMessage: String?
@@ -1181,30 +1094,9 @@ final class VoiceController: ObservableObject {
                      scroll: verified && work.dispatchedEffect ? work.verifiedScroll : nil)
     }
 
-    private func openLocalSpeechWindow(_ id: UUID) {
-        guard localSpeechWindowOwner != id else { return }
-        closeLocalSpeechWindow()
-        localSpeechWindowOwner = id
-        localSpeechWindow?(true)
-    }
-
-    private func closeLocalSpeechWindow() {
-        guard localSpeechWindowOwner != nil else { return }
-        localSpeechWindowOwner = nil
-        localSpeechWindow?(false)
-    }
-
     private func wire(_ capture: SpeechCapturing) {
         capture.onReadiness = { [weak self] readiness in
             guard let self else { return }
-            let evidenceStage: String
-            switch readiness {
-            case .preparing: evidenceStage = "microphone.preparing"
-            case .ready: evidenceStage = "microphone.ready"
-            case .unavailable: evidenceStage = "microphone.unavailable"
-            case .interrupted: evidenceStage = "microphone.interrupted"
-            }
-            self.normalQualification?.preparation(evidenceStage, at: ProcessInfo.processInfo.systemUptime)
             switch readiness {
             case .preparing: self.microphoneReady = false; self.microphoneReadiness = "Preparing microphone…"
             case .ready(let name): self.microphoneReady = true; self.microphoneReadiness = "Ready — " + name
@@ -1375,8 +1267,6 @@ final class VoiceController: ObservableObject {
         guard config.dictationHotkey, !dictating else { return }
         guard status == .starting || status == .listening else { return }
         dictating = true
-        closeLocalSpeechWindow()
-        if let id = sessionID { turnEvidence?.setInput(turn: id, input: "dictation") }
         (speech as? RealtimeVoiceLane)?.respondOnCommit = false
         // Partials already handed to the planner may have dispatched work —
         // conversion withdraws this interaction's intents and attempts along
@@ -1413,7 +1303,6 @@ final class VoiceController: ObservableObject {
         (speech as? RealtimeVoiceLane)?.respondOnCommit = !dictating
         held = true
         let id = newSession()
-        turnEvidence?.open(turn: id, input: dictating ? "dictation" : "voice", beganAt: beganAt)
         if let inputHandlingMs { measurements["Fn handler"] = inputHandlingMs }
         commandFrontmostApp = lastExternalApp
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
@@ -1430,7 +1319,6 @@ final class VoiceController: ObservableObject {
         cua.beginListeningHint()
         // The local transcriber's turn opens with the capture — dictation
         // holds skip it (their literal text never reaches a command lane).
-        if !dictating { openLocalSpeechWindow(id) }
         let selectedUID = config.microphoneUID
         startupTask = Task { [weak self] in
             await Self.awaitUnlessCancelled(priorStart)
@@ -1464,11 +1352,9 @@ final class VoiceController: ObservableObject {
         // A latch release keeps the capture listening; the next Fn tap
         // arrives as a plain `.finish` and ends it below.
         guard !latchRelease else { latchRelease = false; return }
-        closeLocalSpeechWindow()
         defer { resumeAfterManualInput() }
         if let id = sessionID {
             releasedAt = ProcessInfo.processInfo.systemUptime
-            turnEvidence?.release(turn: id, at: releasedAt)
         }
         latched = false
         durationTask?.cancel(); durationTask = nil
@@ -1520,14 +1406,11 @@ final class VoiceController: ObservableObject {
         dictating = false
         held = false
         let id = newSession()
-        turnEvidence?.open(turn: id, input: "typed", beganAt: beganAt)
-        turnEvidence?.final(turn: id, text: trimmed)
         commandFrontmostApp = lastExternalApp
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
             commandFrontmostApp = frontmost() ?? lastExternalApp
         }
         trace("typed_command")
-        typedSessions.insert(id)
         submit(trimmed, session: id)
     }
 
@@ -1568,7 +1451,6 @@ final class VoiceController: ObservableObject {
         guard status != .stopping else { return }
         held = false; dictating = false; latched = false; voiceLatched = false
         trace("capture_cancelled")
-        if let id = sessionID { flushEvidence(turn: id, terminal: "cancelled", finalStatus: terminalStatus) }
         sessionID = nil
         deadlineTask?.cancel(); deadlineTask = nil
         durationTask?.cancel(); durationTask = nil
@@ -1583,7 +1465,6 @@ final class VoiceController: ObservableObject {
         // The Fn-down pre-observe's gaze pump lives on the coordinator —
         // a cancelled hold must end it, not wait out its 30s watchdog.
         cua.endListeningHint()
-        closeLocalSpeechWindow()
         speech.cancel()
         audioLevel = 0
         isMicrophoneTest = false
@@ -1602,11 +1483,6 @@ final class VoiceController: ObservableObject {
         status = terminalStatus
     }
 
-    func recordQualificationInputReady(_ ready: Bool) {
-        normalQualification?.preparation(ready ? "fn.ready" : "fn.unavailable",
-                                          at: ProcessInfo.processInfo.systemUptime)
-    }
-
     func shutdown() async {
         permissionMonitor.stop()
         microphoneEnabled = false
@@ -1617,14 +1493,11 @@ final class VoiceController: ObservableObject {
         await microphone?.value
         cua.shutdown()
         await cleanupTask?.value
-        normalQualification?.stop()
     }
 
     func interruptCapture(_ reason: String) {
         guard captureActive else { return }
         if let id = sessionID {
-            turnEvidence?.event(turn: id, name: "interrupted")
-            turnEvidence?.failure(turn: id, message: reason)
         }
         cancel(endingWith: .error(reason), cancelTask: false)
         detail = reason
@@ -1660,11 +1533,8 @@ final class VoiceController: ObservableObject {
     }
 
     func recordRecoveredFnRelease(observed: TimeInterval, confirmed: TimeInterval, latch: Bool) {
-        guard let id = sessionID else { return }
-        let elapsed = max(0, (confirmed - observed) * 1000)
-        measurements["Fn release recovery"] = elapsed
-        turnEvidence?.event(turn: id, name: latch ? "fn_latch_recovered" : "fn_release_recovered",
-                            at: observed, metrics: ["confirmation_ms": elapsed])
+        guard sessionID != nil else { return }
+        measurements["Fn release recovery"] = max(0, (confirmed - observed) * 1000)
     }
 
     private func newSession() -> UUID {
@@ -1687,15 +1557,6 @@ final class VoiceController: ObservableObject {
 
     private func receive(_ event: SpeechEvent, session id: UUID) {
         guard sessionID == id else { return }
-        switch event {
-        case .partial(let text): turnEvidence?.partial(turn: id, text: text)
-        case .final(let text), .heardFinal(let text): turnEvidence?.final(turn: id, text: text)
-        case .failure(let message): turnEvidence?.failure(turn: id, message: message)
-        case .level(let value): turnEvidence?.level(turn: id, value: value)
-        case .timing(let name, let milliseconds):
-            turnEvidence?.event(turn: id, name: "measurement", metrics: [name: milliseconds])
-        default: break
-        }
         // Assistant-side events outlive the capture: the turn keeps streaming
         // after Fn released and the status moved on to .executing.
         switch event {
@@ -1741,7 +1602,6 @@ final class VoiceController: ObservableObject {
             guard replyReceived, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 detail = "No action was completed."
                 status = .error(detail)
-                settleEvidence(terminal: "no_action")
                 return
             }
             complete(reply, session: id, voiced: false, terminalStatus: .replied)
@@ -1837,10 +1697,7 @@ final class VoiceController: ObservableObject {
             // vanishing. The non-dictation tap stays a silent dismiss:
             // committing no audio was never a turn (lane's own contract).
             if dictating { fail("No speech was captured — hold Fn and dictate again.") }
-            else {
-                flushEvidence(turn: id, terminal: "no_speech", finalStatus: .idle)
-                cancelCaptureAttempt()
-            }
+            else { cancelCaptureAttempt() }
             return
         }
         if dictating {
@@ -1899,8 +1756,6 @@ final class VoiceController: ObservableObject {
         if voiced, !dictating { speak(message) }
         dictating = false
         status = terminalStatus
-        settleEvidence(terminal: terminalStatus == .done ? "done"
-                       : terminalStatus == .stopped ? "cancelled" : "replied")
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             guard let self else { return }
@@ -1909,45 +1764,8 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// Evidence rows close on the first terminal signal: spawned work all
-    /// settled, the turn parked on an ask, a terminal status with nothing
-    /// outstanding, or the recorder's 30s grace.
-    func maybeFlushEvidence(works suppliedWorks: [VoiceTaskCoordinator.Work]? = nil) {
-        guard let evidence = turnEvidence else { return }
-        let allWorks = suppliedWorks ?? cua.tasks
-        for id in evidence.pendingTurns {
-            let works = allWorks.filter { $0.captureID == id }
-            if works.contains(where: \.awaitingAnswer) {
-                flushEvidence(turn: id, terminal: "awaiting_user", finalStatus: Self.workStatus(works))
-            } else if !works.isEmpty, works.allSatisfy({ !$0.active }) {
-                flushEvidence(turn: id, terminal: "settled", finalStatus: Self.workStatus(works))
-            }
-        }
-    }
-
-    private func settleEvidence(terminal: String) {
-        guard let id = sessionID, turnEvidence?.isPending(id) == true else { return }
-        let works = interactionWorks
-        if works.isEmpty || works.allSatisfy({ !$0.active }) {
-            flushEvidence(turn: id, terminal: terminal)
-        }
-    }
-
-    private func flushEvidence(turn: UUID, terminal: String, finalStatus: Status? = nil) {
-        guard let evidence = turnEvidence, evidence.isPending(turn) else { return }
-        evidence.flush(turn: turn, terminal: terminal,
-                       status: finalStatus?.title ?? (turn == sessionID ? status.title : "not_current"),
-                       uptime: ProcessInfo.processInfo.systemUptime,
-                       trace: commandTrace.events.filter { $0.turn == turn },
-                       works: cua.tasks.filter { $0.captureID == turn }, traceDropped: commandTrace.dropped)
-    }
-
     private func cuaChanged() {
-        normalQualification?.worksChanged(cua.tasks)
         objectWillChange.send()
-        // Evidence first — the early returns below must not starve a row
-        // whose work just settled or parked on an ask.
-        maybeFlushEvidence()
         guard !isMicrophoneTest else { return }
         if held {
             // Capture owns the status while held; the detail line keeps this
@@ -2028,9 +1846,7 @@ final class VoiceController: ObservableObject {
         // capture must not paste anyway.
         deliveryTask?.cancel(); deliveryTask = nil
         cua.endListeningHint()
-        closeLocalSpeechWindow()
         status = .error(message)
-        settleEvidence(terminal: "failed")
         // Failures used to be a silent pill — voice a short,
         // non-punitive phrase through the same TTS seam. The error text
         // itself is never spoken: it can carry paths or account details.
@@ -2143,6 +1959,4 @@ final class VoiceController: ObservableObject {
             } catch { }
         }
     }
-
-
 }

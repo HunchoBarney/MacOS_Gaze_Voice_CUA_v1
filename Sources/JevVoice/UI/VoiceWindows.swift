@@ -74,8 +74,7 @@ final class VoiceWindows: NSObject, NSWindowDelegate {
             window.minSize = NSSize(width: 740, height: 520)
             window.contentView = NSHostingView(rootView: SettingsView(controller: controller, config: controller.config,
                 microphones: microphones, input: input, navigation: navigation,
-                collapse: { [weak self] in self?.settingsWindow?.close() },
-                spend: SpendCounter.shared)
+                collapse: { [weak self] in self?.settingsWindow?.close() })
                 .environmentObject(agents)
                 .environment(\.openAgents) { [weak self] in self?.showAgents() })
             window.delegate = self

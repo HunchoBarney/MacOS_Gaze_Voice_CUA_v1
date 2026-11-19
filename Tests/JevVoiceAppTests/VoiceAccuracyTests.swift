@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import XCTest
 import JevVoiceCore
@@ -308,7 +307,6 @@ final class VoiceAccuracyTests: XCTestCase {
         XCTAssertEqual(doc["clear"]?.array?.count, 50)
         XCTAssertEqual(doc["negative"]?.array?.count, 14)
         XCTAssertEqual(doc["boundary"]?.array?.count, 4)
-        var rows: [JSONValue] = []
         for group in groups {
             for row in try XCTUnwrap(doc[group]?.array) {
                 let id = try XCTUnwrap(row["id"]?.string)
@@ -335,32 +333,7 @@ final class VoiceAccuracyTests: XCTestCase {
                         XCTAssertEqual(result.slots[key]?.lowercased(), expected?.lowercased(), "\(id):\(key)")
                     }
                 }
-                rows.append(.object([
-                    "schema_version": .number(1), "case_id": .string(id), "source": .string("text"),
-                    "population": .string(group), "context": .string(contextID),
-                    "turn_id": .string(result.turn.id.uuidString), "generation": .number(Double(result.turn.generation)),
-                    "expected_route": .string(expectedRoute), "actual_route": .string(result.route.rawValue),
-                    "expected_dispatches": .number(Double(expectedCount)), "actual_dispatches": .number(Double(actualExecutions.count)),
-                    "intent": .string(result.intent), "reason": .string(result.reason),
-                    "slots": .object(result.slots.mapValues(JSONValue.string)),
-                    "verification": .string("production-session-executor-boundary")
-                ]))
             }
-        }
-        if let directory = ProcessInfo.processInfo.environment["JARVIS_P3_EVIDENCE_DIR"] {
-            let destination = URL(fileURLWithPath: directory).standardizedFileURL
-            guard destination == root.appendingPathComponent(".agent/results/P3").standardizedFileURL else {
-                XCTFail("evidence directory must be phase-owned"); return
-            }
-            let data = try Data(contentsOf: root.appendingPathComponent("Tests/Fixtures/P3/manifest.json"))
-            let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-            let evidence = JSONValue.object([
-                "schema_version": .number(1), "manifest_sha256": .string(hash),
-                "run_id": .string(ProcessInfo.processInfo.environment["JARVIS_P3_RUN_ID"] ?? "unrecorded"),
-                "source": .string("typed-integration-not-acoustic"), "rows": .array(rows)
-            ])
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(evidence).write(to: destination.appendingPathComponent("unit-evidence.json"), options: .atomic)
         }
     }
 

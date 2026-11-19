@@ -302,142 +302,6 @@ final class VoiceSemanticTests: XCTestCase {
         }
     }
 
-    func testR7LiveSemanticBoundaryProbe() async throws {
-        let environment = ProcessInfo.processInfo.environment
-        guard environment["JARVIS_C1_REAL_JEV"] == "approved",
-              let path = environment["JARVIS_C1_SEMANTIC_PROBE_DIR"] else {
-            throw XCTSkip("Opt-in real Jev semantic probe")
-        }
-        let directory = URL(fileURLWithPath: path).standardizedFileURL
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        XCTAssertEqual(directory.deletingLastPathComponent().path,
-                       root.appendingPathComponent(".agent/results/P4").path)
-        XCTAssertTrue(directory.lastPathComponent.hasPrefix("c1-r7-semantic-"))
-        let attributes = try FileManager.default.attributesOfItem(atPath: directory.path)
-        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
-        let output = directory.appendingPathComponent("results.json")
-        guard !FileManager.default.fileExists(atPath: output.path) else {
-            throw VoiceSemanticRouter.Failure.invalidContext
-        }
-        let key = try XCTUnwrap(environment["TYPESAFE_API_KEY"]
-            ?? KeychainAPIKeyStore(allowUserInteraction: false).read())
-        var scope = context()
-        scope.targetAppID = "com.apple.TextEdit"
-        scope.windowID = 41
-        scope.entities = [.init(name: "TextEdit", id: "com.apple.TextEdit", canOpenLocally: true)]
-        scope.appRoles = [:]
-        struct ProbeCase {
-            let text: String
-            var expected: ConversationDecision.Kind?
-            var direction: String?
-            var small = false
-            var anchored = false
-            var window = 41
-        }
-        let cases: [ProbeCase] = [
-            .init(text: "Scroll down.", expected: .scroll, direction: "down"),
-            .init(text: "Could you nudge this down a bit?"),
-            .init(text: "Move the page a little farther down, please.", expected: .scroll, direction: "down", small: true),
-            .init(text: "A tiny scroll upward, please.", expected: .scroll, direction: "up", small: true),
-            .init(text: "Scroll the current window to the right a little.", expected: .scroll, direction: "right", small: true),
-            .init(text: "Please scroll this window left.", expected: .scroll, direction: "left"),
-            .init(text: "Scroll down until Cedar is visible."),
-            .init(text: "Scroll the sidebar down a little."),
-            .init(text: "Scroll down exactly three pages."),
-            .init(text: "Scroll down and click Save."),
-            .init(text: "Don't scroll down."),
-            .init(text: "She said, 'scroll down a little'."),
-            .init(text: "Did you scroll down?"),
-            .init(text: "Scroll until the saved confirmation is visible."),
-            .init(text: "Okay, keep scrolling.", expected: .continueScroll, direction: "down", small: true, anchored: true),
-            .init(text: "Keep going.", expected: .continueScroll, direction: "down", small: true, anchored: true),
-            .init(text: "A little more.", expected: .scroll, direction: "down", small: true, anchored: true),
-            .init(text: "A bit more, please.", expected: .scroll, direction: "down", small: true, anchored: true),
-            .init(text: "The other way a little.", expected: .scroll, direction: "up", small: true, anchored: true),
-            .init(text: "Keep scrolling until Cedar is visible.", anchored: true),
-            .init(text: "Keep scrolling the sidebar.", anchored: true),
-            .init(text: "Keep scrolling in Safari.", anchored: true),
-            .init(text: "A little more.", anchored: true, window: 42),
-            .init(text: "Scroll the other window down a bit."),
-            .init(text: "If Cedar is already visible, scroll down."),
-            .init(text: "Can you scroll upwards just a touch?", expected: .scroll, direction: "up", small: true),
-            .init(text: "Scroll the background document down."),
-            .init(text: "Scroll it down, actually don't."),
-            .init(text: "Move that window down a little."),
-        ]
-        struct Payload: Encodable {
-            let model: String
-            let state: JSONValue
-            let questions: [String: Question]
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        var rows: [[String: Any]] = []
-        for (index, item) in cases.enumerated() {
-            var current = scope
-            current.windowID = item.window
-            var memory = ConversationContext()
-            if item.anchored {
-                let previous = try XCTUnwrap(verifiedScrollMemory().scroll)
-                let previousScope = ConversationScope.window(app: "com.apple.TextEdit", id: 41)
-                memory.remember("Scroll down a little.", scope: previousScope)
-                memory.recordVerification(true)
-                memory.scroll = .init(scope: previousScope, direction: "down", small: true, viewport: previous.viewport)
-            }
-            let request = try VoiceSemanticRouter.conversationRequest(item.text, context: current, memory: memory)
-            let body = try encoder.encode(Payload(model: "jev-latest",
-                state: request.state, questions: request.questions))
-            try body.write(to: directory.appendingPathComponent("case-\(index).request.json"), options: .withoutOverwriting)
-            var wire = URLRequest(url: URL(string: "https://api.typesafe.ai/v1/systemone")!)
-            wire.httpMethod = "POST"
-            wire.timeoutInterval = 8
-            wire.httpBody = body
-            wire.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            wire.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-            let started = ProcessInfo.processInfo.systemUptime
-            let (data, response) = try await URLSession.shared.data(for: wire)
-            let elapsed = (ProcessInfo.processInfo.systemUptime - started) * 1000
-            try data.write(to: directory.appendingPathComponent("case-\(index).response.json"), options: .withoutOverwriting)
-            let status = try XCTUnwrap(response as? HTTPURLResponse).statusCode
-            guard (200..<300).contains(status) else { throw VoiceSemanticRouter.Failure.unavailable }
-            let answer = try JSONDecoder().decode(SystemOneResponse.self, from: data)
-            let decision = try VoiceSemanticRouter.decodeConversation(answer, request: request,
-                context: current, memory: memory)
-            rows.append(["text": item.text, "expected_bounded_scroll": item.expected == .scroll,
-                "expected_kind": item.expected?.rawValue as Any? ?? NSNull(),
-                "kind": decision.kind.rawValue, "direction": decision.direction as Any? ?? NSNull(),
-                "small": decision.small, "model": answer.model, "elapsed_ms": elapsed,
-                "questions": request.questions.count,
-                "has_native_intent": decision.windowScroll != nil,
-                "has_native_anchor": decision.windowScroll?.continuation != nil])
-            try JSONSerialization.data(withJSONObject: [
-                "semantic_only": true, "microphone_proven": false, "native_actions": 0,
-                "context": "controlled semantic fixture; no live window authority",
-                "expectation_correction": "Original before-case 1 incorrectly required a scroll for 'nudge this' without a referent. The original before evidence is retained; ambiguity must not force action.",
-                "rows": rows,
-            ], options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)
-            if environment["JARVIS_C1_SEMANTIC_EXPECT_NATIVE_GATES"] == "1" {
-                if let expected = item.expected {
-                    XCTAssertEqual(decision.kind, expected, item.text)
-                    XCTAssertEqual(decision.direction, item.direction, item.text)
-                    XCTAssertEqual(decision.small, item.small, item.text)
-                    if expected == .scroll {
-                        XCTAssertEqual(decision.windowScroll?.goal, item.text)
-                        XCTAssertEqual(decision.windowScroll?.application, "com.apple.TextEdit")
-                        XCTAssertEqual(decision.windowScroll?.windowID, item.window)
-                        XCTAssertEqual(decision.windowScroll?.lines, item.small ? 1 : 3)
-                        XCTAssertEqual(decision.windowScroll?.continuation != nil, item.anchored)
-                    }
-                } else {
-                    XCTAssertNotEqual(decision.kind, .scroll, item.text)
-                    XCTAssertNotEqual(decision.kind, .continueScroll, item.text)
-                    XCTAssertNil(decision.windowScroll, item.text)
-                }
-            }
-        }
-    }
-
     func testConversationSelectionCannotOverrideWeakRequestSupport() throws {
         var scope = context()
         scope.windowID = 41
@@ -940,7 +804,6 @@ final class VoiceSemanticTests: XCTestCase {
     func testNormalLocalControllerPreservesCapturedWindowWithoutAuditBinding() async throws {
         for command in ["type \"P3 owned text\"", "undo", "scroll down", "show Google Chrome"] {
             let (controller, coordinator) = tracedComposition(capturedWindow: 732)
-            XCTAssertNil(controller.auditDocumentBinding)
             controller.submitTypedCommand(command)
             await waitFor { coordinator.tasks.count == 1 }
             let work = try XCTUnwrap(coordinator.tasks.first)
@@ -952,7 +815,6 @@ final class VoiceSemanticTests: XCTestCase {
     func testNormalLocalControllerUsesOneLiteralForGoalAndPayload() async throws {
         for command in ["type hello Jarvis.", "type \" \tCase, punctuation!\t \""] {
             let (controller, coordinator) = tracedComposition(capturedWindow: 732)
-            XCTAssertNil(controller.auditDocumentBinding)
             controller.submitTypedCommand(command)
             await waitFor { coordinator.tasks.count == 1 }
             let work = try XCTUnwrap(coordinator.tasks.first)
@@ -992,42 +854,6 @@ final class VoiceSemanticTests: XCTestCase {
         XCTAssertNil(speech.capturedLocalWindowID(for: id))
         speech.cancel()
         XCTAssertNil(speech.capturedLocalWindowID(for: id))
-    }
-
-    func testNormalSemanticRouteDoesNotTurnLocalAcousticMissIntoPass() async throws {
-        // Model/OS protocol fixtures only; no calibration, microphone or desktop proof.
-        let input = try await admission()
-        XCTAssertNotEqual(input.route, .local)
-        var localReport = VoiceTrialReport(runID: "local", source: "protocol",
-                                           artifactSHA: "fixture", executedSHA: "fixture")
-        localReport.append(["status": .string("failed"), "dispatch_count": .number(0),
-            "actual_route": .string(input.route.rawValue),
-            "verification": .object(["kind": .string("frontmost_pid"), "passed": .bool(false)])])
-        let (c, config) = coordinator()
-        let speech = lane(context())
-        let controller = VoiceController(config: config, speech: speech, authorize: { false },
-                                         frontmost: { nil }, cuaRuntime: c)
-        speech.admissionContextProvider = { self.context() }
-        speech.semanticContextProvider = { self.context() }
-        var interpretations = 0
-        speech.semanticInterpretation = { admission, captured in
-            interpretations += 1
-            return .proposal(.init(turn: admission.turn, target: captured.entities[0],
-                model: "protocol-fixture-not-calibrated", actionConfidence: 1, targetConfidence: 1))
-        }
-        speech.semanticConfirmationHandler = { proposal in
-            c.offerSemanticFocus(proposal, validate: { true }, runConfirmed: { work in
-                work.outcome = .done; work.active = false
-            })
-        }
-        controller.submitTypedCommand(input.text)
-        await waitFor { c.tasks.count == 1 && c.tasks[0].active == false }
-        XCTAssertEqual(interpretations, 1)
-        XCTAssertNotNil(c.tasks.first?.semanticFocus)
-        let local = localReport.snapshot(status: "stopped_on_failure", attemptsFile: "fixture", attemptsSHA: "fixture")
-        XCTAssertEqual(local["local_acoustic_gate"], .string("failed"))
-        XCTAssertEqual(local["normal_app_routing_gate"], .string("not_exercised"))
-        speech.cancel()
     }
 
     func testLocalHandoffAndWorkShareTurnIdentity() async throws {
@@ -1221,21 +1047,6 @@ final class VoiceSemanticTests: XCTestCase {
         return try XCTUnwrap(ended.last, file: file, line: line)
     }
 
-    /// Real production budget on a temporary directory — one authorized
-    /// request, so a second reservation exhausts it exactly as in production.
-    private func budgetFixture() throws -> SemanticRequestBudget {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("semantic-budget-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let authorization: [String: Any] = [
-            "id": "fixture-authorization", "scope": "typesafe-text-only", "maximumRequests": 1,
-            "corpusSHA256": "fixture-corpus", "expiresAt": Date().timeIntervalSince1970 + 3600
-        ]
-        try JSONSerialization.data(withJSONObject: authorization, options: [.sortedKeys])
-            .write(to: directory.appendingPathComponent("authorization.json"), options: .atomic)
-        return try SemanticRequestBudget(directory: directory, corpusSHA256: "fixture-corpus")
-    }
-
     func testExpiredSemanticHopReportsDeadlineCategoryAndMeasuredWall() async throws {
         let lane = lane(context())
         lane.semanticEnabled = { true }
@@ -1280,28 +1091,6 @@ final class VoiceSemanticTests: XCTestCase {
             XCTAssertNil(failed.metrics["fresh_context_ms"])
             lane.cancel()
         }
-    }
-
-    func testExhaustedReservationReportsBudgetCategoryDistinctFromTransport() async throws {
-        let budget = try budgetFixture()
-        _ = try await budget.reserve(subject: "fixture-first", requestSHA256: "fixture", allocation: "gui")
-        let lane = lane(context())
-        lane.semanticEnabled = { true }
-        var events: [VoiceSpeechDiagnostic] = []
-        lane.onDiagnostic = { if $0.stage.hasPrefix("semantic.") { events.append($0) } }
-        lane.semanticInterpretation = { _, _ in
-            _ = try await budget.reserve(subject: "fixture-second", requestSHA256: "fixture", allocation: "gui")
-            XCTFail("an exhausted authorization must not reach inference")
-            return .noMatch
-        }
-        lane.semanticConfirmationHandler = { _ in XCTFail("unreserved interpretation"); return true }
-        try await lane.submitTyped("I need my web browser over here", sessionID: UUID())
-        let failed = try terminal(events)
-        XCTAssertEqual(failed.stage, "semantic.failed")
-        XCTAssertEqual(failed.metrics["failure"], SemanticFailure.budget,
-                       "a refused reservation is not a transport failure")
-        XCTAssertNotNil(failed.metrics["interpret_ms"])
-        lane.cancel()
     }
 
     func testCancelledInterpretationReportsCancellationNotDeadlineAndCreatesNoWork() async throws {

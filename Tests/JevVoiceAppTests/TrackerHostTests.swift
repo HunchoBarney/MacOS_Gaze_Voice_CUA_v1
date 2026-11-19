@@ -98,9 +98,7 @@ final class TrackerHostTests: XCTestCase {
     /// tracker; a live foreign tracker may adopt the claim, which is
     /// still a claim.
     func testOwnedRunningExitClaimsRespawn() async throws {
-        setenv("JARVIS_DISABLE_TRACKER_SPAWN", "1", 1)
-        defer { unsetenv("JARVIS_DISABLE_TRACKER_SPAWN") }
-        let host = TrackerHost()
+        let host = TrackerHost(spawnEnabled: false)
         let proc = try makeChild()
         defer { proc.terminate() }
         let pid = proc.processIdentifier
@@ -166,9 +164,7 @@ final class TrackerHostTests: XCTestCase {
     /// through would land .failed instead of leaving .stopped.
     func testStaleStartLeavesStoppedStanding() async throws {
         try await skipIfTrackerServing()
-        setenv("JARVIS_DISABLE_TRACKER_SPAWN", "1", 1)
-        defer { unsetenv("JARVIS_DISABLE_TRACKER_SPAWN") }
-        let host = TrackerHost()
+        let host = TrackerHost(spawnEnabled: false)
         // Pin the sweep's blast radius to a temp dir — stop() runs the
         // pkill last resort against it.
         await host.installForTest(child: nil, attempts: 0, state: .stopped,
