@@ -10,10 +10,12 @@ import JarvisCore
 /// drive loop → consent → verification) still decides *how* via the
 /// `computer_command` function tool.
 ///
-/// Push-to-talk maps onto the documented recipe: `turn_detection: null`, Fn
-/// down streams `input_audio_buffer.append`, release sends `commit` +
-/// `response.create`. Fn down while the model speaks is a barge-in:
-/// `response.cancel` + `conversation.item.truncate` + local playback stops.
+/// A manual capture (dictation, the microphone test, typed review) maps
+/// onto the documented recipe: `turn_detection: null`, the capture streams
+/// `input_audio_buffer.append`, its finish sends `commit` +
+/// `response.create`. A capture that starts while the model speaks is a
+/// barge-in: `response.cancel` + `conversation.item.truncate` + local
+/// playback stops.
 @MainActor
 final class RealtimeVoiceLane: SpeechCapturing {
     private static let log = Logger(subsystem: "com.karanvirkang.jarvis.voice", category: "realtime")
@@ -276,11 +278,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
     var respondOnCommit = true {
         didSet { if !respondOnCommit { speechSession.enterDictation() } }
     }
-    /// systemUptime at Fn-down, set by VoiceController before start() —
-    /// the mic gate's press marker. The gate rings ~1s of pre-open tap
-    /// audio and flushes only what follows this marker, so a slow
-    /// `.starting` recovers the hold's head without replaying room noise.
-    var holdStartedAt: TimeInterval?
     /// Replies stay silent when the user muted spoken output in settings.
     var audioRepliesEnabled = true {
         didSet {
@@ -291,12 +288,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
             }
         }
     }
-    /// A speechless Fn tap is the instant gaze click when the gaze lane
-    /// holds a committed referent — wired by the coordinator lane
-    /// (`GazeService.commitTarget` + `actuateCommitted`). True = the
-    /// click ran and the gaze side owns the ack ring; false (cold
-    /// referent, deny-blocked) or nil keeps the silent dismiss.
-    var gazeTapHandler: (@Sendable () async -> Bool)?
     /// Off-actor playback gate = replies enabled && !holding. The socket
     /// loop reads it directly: model audio enqueues without a MainActor
     /// hop, and a stray response that outraced response.cancel dies here
@@ -434,8 +425,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// The committed audio item's id — a completion carrying a different
     /// item_id belongs to a dead turn. Internal for tests.
     var turnAudioItemID: String?
-    /// True while the user holds Fn — pushed outcomes wait as context until
-    /// release rather than talking over them.
+    /// True while a manual capture is open — pushed outcomes wait as context
+    /// until it finishes rather than talking over it.
     private var holding = false {
         didSet { outputGate.store(audioRepliesEnabled && !holding, ordering: .releasing) }
     }
@@ -1356,7 +1347,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         onConversationState?(.preparing)
         do {
             guard playbackRoutingReady?() == true else {
-                throw VoiceError("I can't listen all the time with this audio setup. Hold fn to talk instead.")
+                throw VoiceError("I can't listen all the time with this audio setup. Choose another microphone or speaker in Settings.")
             }
             guard conversationStartID == request, !Task.isCancelled else { throw CancellationError() }
             if !duplexRequested {
@@ -1372,7 +1363,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                   let hardware, let outputs = hardware.playback,
                   outputs.realtime.isReady(), outputs.system.isReady(), outputs.local.isReady(),
                   playbackRoutingReady?() == true else {
-                throw VoiceError("I can't listen all the time with this audio device. Hold fn to talk instead.")
+                throw VoiceError("I can't listen all the time with this audio device. Choose another microphone or speaker in Settings.")
             }
             guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000,
                                              channels: 1, interleaved: true) else {
@@ -1513,12 +1504,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // its flushSpeech() would fire a queued outcome's response.create
         // into the start of this hold.
         holding = true
-        // The controller's Fn-down timestamp scopes the gate's pre-roll
-        // flush; lane-entry is the fallback for callers that don't set it.
-        // Consumed once — a mic test or later hold must not inherit a
-        // stale press marker.
-        let started = holdStartedAt ?? ProcessInfo.processInfo.systemUptime
-        holdStartedAt = nil
+        // Lane entry scopes the gate's pre-roll flush: audio from before
+        // this capture is never replayed.
+        let started = ProcessInfo.processInfo.systemUptime
         var session: Session!
         if transcribe {
             // The previous hold's teardown sends must land before this one
@@ -2101,7 +2089,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             self.turnResponseOutstanding = false
             self.cancelledResponsePending = false
             self.onEvent?(self.active?.id ?? self.turnID ?? UUID(),
-                          .failure("The voice server stopped responding. Press Fn to reconnect."))
+                          .failure("The voice server stopped responding. Try again in a moment."))
             // teardown() cancels the receiver first — no .closed event
             // ever arrives, so the reprepare must run here directly or
             // `prepared` stays stale and every later hold wedges on a
@@ -2137,9 +2125,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// caller binds `active`/`turnID` first so chunks never send anonymously.
     /// The pump is detached: a MainActor-bound sender let any UI stall
     /// carve silent gaps into the audio the model hears. `pressUptime`
-    /// (Fn-down, systemUptime seconds) marks the pre-roll cut: the gate
-    /// replays only audio the user meant for this hold, never pre-press
-    /// room noise.
+    /// (capture start, systemUptime seconds) marks the pre-roll cut: the
+    /// gate replays only audio meant for this capture, never earlier room
+    /// noise.
     private func beginStreaming(session: Session, id: UUID, pressUptime: TimeInterval) {
         let feed = session.feed, sendsAudio = session.sendsAudio
         let connection = client.connectionID
@@ -2189,19 +2177,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             guard session.sendsAudio,
                   session.feed.audioSummary().converted >= 0.1 else {
                 guard !Task.isCancelled, self.turnID == active.id, self.active?.id == active.id else { return }
-                let commandTap = session.sendsAudio && self.respondOnCommit
-                    && self.speechSession.gate.mode == .command
-                    && self.speechSession.gate.state == .capturing
-                    && session.localTurn.map { self.speechSession.gate.isCurrent($0) } == true
                 if let turn = session.localTurn { await self.speechSession.cancelCapture(turn) }
-                guard !Task.isCancelled, self.turnID == active.id, self.active?.id == active.id else { return }
-                if commandTap, self.respondOnCommit, self.speechSession.gate.mode == .command,
-                   self.speechSession.gate.state == .cancelled,
-                   self.speechSession.gate.failureReason == nil {
-                    let handled = await self.gazeTapHandler?()
-                    self.onDiagnostic?(.init(turn: active.id, stage: "gaze_tap",
-                                              metrics: ["handled": handled == true ? 1 : 0]))
-                }
                 guard !Task.isCancelled, self.turnID == active.id, self.active?.id == active.id else { return }
                 self.holding = false
                 self.turnID = nil

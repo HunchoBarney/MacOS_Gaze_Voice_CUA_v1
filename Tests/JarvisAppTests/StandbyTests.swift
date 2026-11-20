@@ -59,11 +59,10 @@ final class StandbyTests: XCTestCase {
     func testStandbyListensForTheWakeWordWithoutStreaming() {
         let (controller, wake) = standby()
         XCTAssertFalse(controller.handsFreeEnabled, "nothing streams in Standby")
-        XCTAssertTrue(controller.listensWithoutFn)
         controller.armStandby()
         XCTAssertEqual(wake.starts, 1)
         XCTAssertEqual(controller.handsFreeState, .standby)
-        XCTAssertTrue(controller.listeningWithoutFn)
+        XCTAssertTrue(controller.listeningHandsFree)
         controller.armStandby()
         XCTAssertEqual(wake.starts, 1, "arming twice starts the engine once")
     }
@@ -96,7 +95,7 @@ final class StandbyTests: XCTestCase {
         controller.pauseHandsFree()
         XCTAssertEqual(wake.stops, 1)
         XCTAssertEqual(controller.handsFreeState, .paused)
-        XCTAssertFalse(controller.listeningWithoutFn)
+        XCTAssertFalse(controller.listeningHandsFree)
         controller.armStandby()
         XCTAssertEqual(wake.starts, 1, "a paused Standby doesn't rearm on its own")
     }
@@ -106,7 +105,7 @@ final class StandbyTests: XCTestCase {
         controller.armStandby()
         wake.heard?(ProcessInfo.processInfo.systemUptime)
         XCTAssertEqual(wake.stops, 1, "the engine rests during the session")
-        XCTAssertTrue(controller.listeningWithoutFn)
+        XCTAssertTrue(controller.listeningHandsFree)
         await poll(seconds: 5) { wake.starts == 2 }
         XCTAssertEqual(wake.starts, 2, "Standby rearms after the quiet session")
         XCTAssertEqual(controller.handsFreeState, .standby)
@@ -115,11 +114,10 @@ final class StandbyTests: XCTestCase {
     func testLeavingStandbyStopsTheWakeWord() async {
         let (controller, wake) = standby()
         controller.armStandby()
-        controller.config.listeningMode = .pushToTalk
+        controller.config.listeningMode = .conversation
         await poll(seconds: 2) { wake.stops == 1 }
         XCTAssertEqual(wake.stops, 1)
         XCTAssertNotEqual(controller.handsFreeState, .standby)
-        XCTAssertFalse(controller.listensWithoutFn)
     }
 
     func testTheTapFeedsTheWakeWordAndKeepsFiveSecondsForTheSession() throws {

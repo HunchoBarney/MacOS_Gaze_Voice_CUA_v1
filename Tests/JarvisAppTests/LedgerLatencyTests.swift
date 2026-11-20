@@ -32,8 +32,8 @@ final class LedgerLatencyTests: XCTestCase {
         ledger.record(DecisionFeed.Entry(at: ledger.wall(), kind: kind, text: text))
     }
 
-    /// The coordinator's hand-off span lands without an Fn hold: it opens
-    /// a task record, keeps the first value, and ignores other spans.
+    /// The coordinator's hand-off span opens a task record on its own,
+    /// keeps the first value, and ignores other spans.
     func testFirstDesktopCallSpanOpensATaskRecord() {
         ledger.coordinatorSpan("driver.list_windows", 100, 100.5)
         ledger.coordinatorSpan("task.first_desktop_call", 100, 100.25)
@@ -46,70 +46,23 @@ final class LedgerLatencyTests: XCTestCase {
         XCTAssertNil(records.first?.spans["driver.list_windows"])
     }
 
-    /// The canonical hold→commit→transcript→dispatch→effect interaction
-    /// fills every primary span plus one round's decide/dispatch pair.
-    func testFullHoldPipelineProducesSpans() {
-        ledger.mark(.fnDown)                            // t = 100.00
-        fakeNow += 1.5
-        ledger.mark(.fnRelease)                         // t = 101.50
-        fakeNow += 0.05
-        ledger.captureStateChanged(.finishing, transcript: "")
+    /// A cancelled interaction still writes — with only the spans it reached.
+    func testCancelledInteractionWritesPartialRecord() {
+        feed(.heard, "\"open notes\"")
         fakeNow += 0.4
-        ledger.captureStateChanged(.idle, transcript: "open notes")
-        fakeNow += 0.3
-        feed(.heard, "\"open notes\"")                  // t = 102.25
-        fakeNow += 0.2
-        feed(.route, "Opening notes → drive loop")      // t = 102.45
-        fakeNow += 1.1
-        feed(.dispatch, "round 1: el_4 — New note")     // t = 103.55
-        fakeNow += 0.6
-        feed(.dispatch, "click → confirmed")            // t = 104.15
-        fakeNow += 0.2
-        feed(.outcome, "Done.")                         // t = 104.35
-
-        let interactions = ledger.completedInteractions
-        XCTAssertEqual(interactions.count, 1)
-        let record = interactions[0]
-        XCTAssertEqual(record.origin, .hold)
-        XCTAssertEqual(record.result, "settled")
-
-        let s = record.spans
-        XCTAssertEqual(s["fn_hold_ms"] ?? -1, 1500, accuracy: 2)
-        XCTAssertEqual(s["release_to_commit_ms"] ?? -1, 50, accuracy: 2)
-        XCTAssertEqual(s["commit_to_transcript_ms"] ?? -1, 400, accuracy: 2)
-        // heard arrives after the transcript mark — dispatch is the
-        // "→ drive loop" line, so the span covers heard→route too.
-        XCTAssertEqual(s["transcript_to_dispatch_ms"] ?? -1, 500, accuracy: 2)
-        XCTAssertEqual(s["dispatch_to_effect_ms"] ?? -1, 1700, accuracy: 2)
-        XCTAssertEqual(s["fn_to_effect_ms"] ?? -1, 4150, accuracy: 2)
-
-        XCTAssertEqual(record.rounds.count, 1)
-        XCTAssertEqual(record.rounds[0].n, 1)
-        XCTAssertEqual(record.rounds[0].decideMs ?? -1, 1100, accuracy: 2)
-        XCTAssertEqual(record.rounds[0].dispatchMs ?? -1, 600, accuracy: 2)
-    }
-
-    /// A cancelled hold still writes — with only the spans it reached.
-    func testCancelledHoldWritesPartialRecord() {
-        ledger.mark(.fnDown)
-        fakeNow += 0.8
-        ledger.mark(.fnRelease)
-        fakeNow += 0.02
-        ledger.captureStateChanged(.finishing, transcript: "")
+        feed(.route, "Opening notes → drive loop")
         ledger.closeCurrent(reason: "cancelled")
 
         let interactions = ledger.completedInteractions
         XCTAssertEqual(interactions.count, 1)
         let s = interactions[0].spans
-        XCTAssertEqual(s["fn_hold_ms"] ?? -1, 800, accuracy: 2)
-        XCTAssertEqual(s["release_to_commit_ms"] ?? -1, 20, accuracy: 2)
-        XCTAssertNil(s["commit_to_transcript_ms"])
+        XCTAssertEqual(s["transcript_to_dispatch_ms"] ?? -1, 400, accuracy: 2)
         XCTAssertNil(s["dispatch_to_effect_ms"])
         XCTAssertEqual(interactions[0].result, "cancelled")
     }
 
-    /// A typed turn has no fn edges — the heard line opens the record and
-    /// transcript→dispatch→effect still measure.
+    /// The heard line opens the record, transcript→dispatch→effect measure,
+    /// and the round splits into its decide and dispatch spans.
     func testTypedTurnOpensOnHeard() {
         feed(.heard, "\"open notes\"")
         fakeNow += 0.4
@@ -126,7 +79,9 @@ final class LedgerLatencyTests: XCTestCase {
         let s = interactions[0].spans
         XCTAssertEqual(s["transcript_to_dispatch_ms"] ?? -1, 400, accuracy: 2)
         XCTAssertEqual(s["dispatch_to_effect_ms"] ?? -1, 1200, accuracy: 2)
-        XCTAssertNil(s["fn_hold_ms"])
+        XCTAssertEqual(interactions[0].rounds.count, 1)
+        XCTAssertEqual(interactions[0].rounds[0].decideMs ?? -1, 900, accuracy: 2)
+        XCTAssertEqual(interactions[0].rounds[0].dispatchMs ?? -1, 300, accuracy: 2)
     }
 
     /// eyes_land→effect consumes the land once: dwell commit inside the
@@ -155,9 +110,8 @@ final class LedgerLatencyTests: XCTestCase {
     /// Each closed interaction appends one parseable JSON object per line
     /// with the documented record keys.
     func testJSONLRecordShape() throws {
-        ledger.mark(.fnDown)
+        feed(.heard, "\"open notes\"")
         fakeNow += 1.0
-        ledger.mark(.fnRelease)
         ledger.closeCurrent(reason: "cancelled")
 
         let text = try String(contentsOf: fileURL, encoding: .utf8)
@@ -170,7 +124,7 @@ final class LedgerLatencyTests: XCTestCase {
                     "marks", "spans", "rounds", "measurements"] {
             XCTAssertNotNil(object?[key], "missing key \(key)")
         }
-        XCTAssertEqual(object?["origin"] as? String, "hold")
+        XCTAssertEqual(object?["origin"] as? String, "typed")
         XCTAssertEqual(object?["result"] as? String, "cancelled")
         XCTAssertNotNil(object?["spans"] as? [String: Double])
     }
@@ -182,7 +136,7 @@ final class LedgerLatencyTests: XCTestCase {
         var t: TimeInterval = 0
         small.now = { t }
         for _ in 0..<8 {
-            small.mark(.fnDown)
+            small.record(DecisionFeed.Entry(at: small.wall(), kind: .heard, text: "\"open notes\""))
             t += 0.1
             small.closeCurrent(reason: "done")
         }
@@ -194,9 +148,9 @@ final class LedgerLatencyTests: XCTestCase {
         XCTAssertEqual(LatencyLedger.percentile([100, 200, 300, 400], 0.5), 200)
         XCTAssertEqual(LatencyLedger.percentile([100, 200, 300, 400], 0.95), 400)
 
-        ledger.mark(.fnDown)
+        feed(.heard, "\"open notes\"")
         fakeNow += 1.0
-        ledger.mark(.fnRelease)
+        feed(.route, "Opening notes → drive loop")
         ledger.closeCurrent(reason: "done")
 
         let report = ledger.report()
@@ -204,6 +158,6 @@ final class LedgerLatencyTests: XCTestCase {
             XCTAssertTrue(report.contains(key), "report missing \(key)")
         }
         XCTAssertTrue(report.contains("p50"))
-        XCTAssertTrue(report.contains("1500") || report.contains("1000"))
+        XCTAssertTrue(report.contains("1000"))
     }
 }

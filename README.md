@@ -1,7 +1,7 @@
 # Jarvis
 
-A macOS menu-bar app you talk to. Hold Fn (or turn on hands-free), say what
-you want, and Jarvis types, clicks and runs tasks on your Mac. Eye tracking
+A macOS menu-bar app you talk to. Say “Hey Jarvis” (or turn on hands-free),
+say what you want, and Jarvis types, clicks and runs tasks on your Mac. Eye tracking
 picks the target you are looking at; voice or a click does the selecting.
 The app bundle is currently named **Jarvis.app**.
 
@@ -33,8 +33,7 @@ Checkout and logs live in `~/.capy/work/local-ci`. Stop it with
 Open the menu-bar icon → Settings. Voice needs an OpenAI API key; Jev
 decisions need a TypeSafe key. Both are stored in Keychain. Grant the
 microphone, camera (eye tracking), screen recording and accessibility
-prompts once. If Fn opens emoji or system Dictation, set the Globe-key action
-to Do Nothing.
+prompts once.
 
 Eye tracking runs on-device. Speech goes to OpenAI Realtime, and task
 content and app context can go to the configured model providers.

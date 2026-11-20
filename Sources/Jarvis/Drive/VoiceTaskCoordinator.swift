@@ -281,7 +281,7 @@ final class VoiceTaskCoordinator {
     /// The candidate enumerator the service drives — built over `call`
     /// by `configureGazeService`; nil means the feed reports empty.
     private var gazeFeed: GazeCandidateFeed?
-    /// Fn-down pre-observe and its gaze pump — cancelled by
+    /// Speech-start pre-observe and its gaze pump — cancelled by
     /// `endListeningHint` or a watchdog so a non-computer utterance
     /// leaves nothing running.
     private var listenHintTask: Task<Void, Never>?
@@ -289,12 +289,12 @@ final class VoiceTaskCoordinator {
     /// Which gaze pump is live — a superseded pump's teardown must not
     /// stop the stream its replacement just opened.
     private var gazePumpGeneration = 0
-    /// Which Fn-down hint owns the gaze feed — a pending
+    /// Which speech-start hint owns the gaze feed — a pending
     /// `endListeningHint` teardown must not stop the stream a NEWER
     /// hold just opened.
     private var listenHintGeneration = 0
 
-    /// Live Fn/dictation capture probe — true while the user is mid-
+    /// Live capture probe — true while the user is mid-
     /// sentence, so a dwell fire can't double-actuate on "click this".
     /// `configureGazeService` points it at L5's `VoiceController.shared`;
     /// the default-off seam keeps tests (and a missing wire) from
@@ -2130,7 +2130,7 @@ final class VoiceTaskCoordinator {
     /// Point the service's seams at this coordinator. The candidate feed
     /// enumerates through `call` (the resurrecting transport wrapper —
     /// a dead session label rotates, never fails the feed); every UI
-    /// seam lands on TargetOverlay through the same paths the Fn pump
+    /// seam lands on TargetOverlay through the same paths the pre-observe pump
     /// already used, so hold-time behavior is unchanged — the stream
     /// just outlives the hold now.
     func configureGazeService() {
@@ -2425,9 +2425,10 @@ final class VoiceTaskCoordinator {
         return await gazedChipSlug()
     }
 
-    // MARK: - Fn-down pre-observe
+    // MARK: - Speech-start pre-observe
 
-    /// Called on Fn-down: everything here is speculative and bounded —
+    /// Called when a hands-free turn starts: everything here is
+    /// speculative and bounded —
     /// warm the transport, the resolver's roster cache, and the gaze
     /// stream, then arm one best-effort halo where the user is already
     /// looking. Nothing may block capture, so every step is try?-quiet
@@ -2482,7 +2483,7 @@ final class VoiceTaskCoordinator {
         let generation = listenHintGeneration
         Task {
             await hint?.value
-            // A Fn-down that arrived during the drain owns the stream
+            // A turn that started during the drain owns the stream
             // now — leave its socket and pump alone.
             guard listenHintGeneration == generation else { return }
             gazePump?.cancel(); gazePump = nil
@@ -2546,7 +2547,7 @@ final class VoiceTaskCoordinator {
                 self?.retireStaleGazeHalo(stale: staleFor)
                 try? await Task.sleep(for: .milliseconds(66))
             }
-            // Whoever ends the pump — Fn-up, watchdog, cancel — the
+            // Whoever ends the pump — turn end, watchdog, cancel — the
             // dim must not outlive the feed that drove it, and the
             // stream must not outlive the pump: it has no other reader,
             // so a missed endListeningHint still bounds the socket.

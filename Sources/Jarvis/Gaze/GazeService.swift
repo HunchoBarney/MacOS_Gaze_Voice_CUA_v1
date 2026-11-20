@@ -9,9 +9,9 @@ import JarvisCore
 /// commit-time implicit labels. VoiceTaskCoordinator wires the seams in
 /// `configureGazeService`; tests inject them wholesale.
 ///
-/// Lifecycle deliberately coexists with the Fn hold's pump: the service
-/// owns `GazeStream.shared` while `running`, and the coordinator's
-/// hold-scoped pump reads the same `latest()` — its teardown checks
+/// Lifecycle deliberately coexists with the speech-start pre-observe's
+/// pump: the service owns `GazeStream.shared` while `running`, and the
+/// coordinator's turn-scoped pump reads the same `latest()` — its teardown checks
 /// `running` before stopping the socket.
 @MainActor
 final class GazeService {
@@ -175,7 +175,7 @@ final class GazeService {
         }
     }
 
-    /// The service, not its callers, owns teardown — the Fn pump and
+    /// The service, not its callers, owns teardown — the pre-observe pump and
     /// voice tasks read `latest()`, they never hold the socket.
     func stop() {
         running = false

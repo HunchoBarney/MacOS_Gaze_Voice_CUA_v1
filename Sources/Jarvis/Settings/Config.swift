@@ -88,7 +88,7 @@ final class Config: ObservableObject {
         didSet {
             defaults.set(handsFreeEnabled, forKey: "handsFreeEnabled")
             let streams = ListeningPolicy.current.streamsContinuously(listeningMode)
-            if handsFreeEnabled != streams { listeningMode = handsFreeEnabled ? .conversation : .pushToTalk }
+            if handsFreeEnabled != streams { listeningMode = handsFreeEnabled ? .conversation : .standby }
         }
     }
     /// The three-step first run finished (or was skipped). Settings can
@@ -104,30 +104,12 @@ final class Config: ObservableObject {
         didSet { defaults.set(semanticAppSuggestions, forKey: "semanticAppSuggestions") }
     }
 
-    /// Tap Fn to start capture, tap again to stop — hold-to-talk stays the
-    /// default when off.
-    @Published var latchMode: Bool {
-        didSet { defaults.set(latchMode, forKey: "latchMode") }
-    }
-
-    /// Fn+Ctrl hold dictates literal text into the focused field instead of
-    /// running an intent.
-    @Published var dictationHotkey: Bool {
-        didSet { defaults.set(dictationHotkey, forKey: "dictationHotkey") }
-    }
-
     /// Eye tracking — optional and off by default. On, the tracker launches
     /// with the app so "click this" and "what is this" resolve and the
     /// camera is requested. Off, those phrases answer with what to say
     /// instead and the camera is never asked for.
     @Published var gazeTracking: Bool {
         didSet { defaults.set(gazeTracking, forKey: "gazeTracking") }
-    }
-
-    /// Tap-to-click with the eyes: a Fn tap while looking at a target
-    /// clicks it directly instead of opening a voice turn. On by default.
-    @Published var tapToGazeClick: Bool {
-        didSet { defaults.set(tapToGazeClick, forKey: "tapToGazeClick") }
     }
 
     /// Launch at login — the persisted value is the user's choice; the real
@@ -177,19 +159,19 @@ final class Config: ObservableObject {
         self.persistentNumbers = defaults.object(forKey: "persistentNumbers") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
         let policy = ListeningPolicy.current
-        let storedMode = defaults.string(forKey: "listeningMode").flatMap(ListeningMode.init(rawValue:))
+        let storedRaw = defaults.string(forKey: "listeningMode")
         let legacyHandsFree = defaults.object(forKey: "handsFreeEnabled") as? Bool
-        let mode = storedMode ?? legacyHandsFree.map { $0 ? .conversation : .pushToTalk } ?? policy.defaultMode
+        // A stored mode that no longer exists (Fn's hold-to-talk) moves to the wake word.
+        let storedMode = storedRaw.map { ListeningMode(rawValue: $0) ?? .standby }
+        let mode = storedMode ?? legacyHandsFree.map { $0 ? .conversation : .standby } ?? policy.defaultMode
         self.listeningMode = mode
+        if let storedRaw, storedRaw != mode.rawValue { defaults.set(mode.rawValue, forKey: "listeningMode") }
         self.handsFreeEnabled = policy.streamsContinuously(mode)
         self.firstRunCompleted = defaults.bool(forKey: "firstRunCompleted")
         self.handsFreePaused = defaults.object(forKey: "handsFreePaused") as? Bool ?? false
         self.semanticAppSuggestions = defaults.object(forKey: "semanticAppSuggestions") == nil
             ? true : defaults.bool(forKey: "semanticAppSuggestions")
-        self.latchMode = defaults.object(forKey: "latchMode") as? Bool ?? false
-        self.dictationHotkey = defaults.object(forKey: "dictationHotkey") as? Bool ?? true
         self.gazeTracking = defaults.object(forKey: "gazeTracking") as? Bool ?? false
-        self.tapToGazeClick = defaults.object(forKey: "tapToGazeClick") as? Bool ?? true
         // ServiceManagement is the truth when it knows the app — a bare
         // `swift run` binary reports .notFound, where the persisted choice
         // is all there is to go on.
