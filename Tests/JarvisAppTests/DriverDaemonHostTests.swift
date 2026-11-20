@@ -90,6 +90,54 @@ final class DriverDaemonHostTests: XCTestCase {
                        "\(ProcessInfo.processInfo.processIdentifier)")
     }
 
+    // MARK: - Private socket directory
+
+    /// The daemon's socket directory is created per run with mkdtemp:
+    /// owner-only (0700) and an unguessable name, never a fixed path.
+    func testSocketDirectoryIsPrivateAndRandom() throws {
+        let base = FileManager.default.temporaryDirectory.path
+        let first = try XCTUnwrap(CuaSocketDirectory.create(in: base))
+        let second = try XCTUnwrap(CuaSocketDirectory.create(in: base))
+        defer {
+            try? FileManager.default.removeItem(atPath: first)
+            try? FileManager.default.removeItem(atPath: second)
+        }
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue((first as NSString).lastPathComponent.hasPrefix("jarvis-cua-"))
+        let mode = try FileManager.default.attributesOfItem(atPath: first)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.intValue, 0o700)
+    }
+
+    /// A long temp folder falls back to /tmp so the socket path stays under
+    /// the ~104-byte Unix socket limit.
+    func testSocketPathFitsTheUnixSocketLimit() throws {
+        let long = "/private/var/folders/" + String(repeating: "x", count: 80) + "/T/"
+        let directory = try XCTUnwrap(CuaSocketDirectory.create(in: long))
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        XCTAssertTrue(directory.hasPrefix("/tmp/jarvis-cua-"))
+        let socket = EmbeddedDaemon.socketPath(in: directory)
+        XCTAssertLessThan(socket.utf8.count, 104)
+        XCTAssertNotEqual(socket, EmbeddedDaemon.socketPath(in: directory),
+                          "each mint gets a fresh name so stale faults can't match a successor")
+    }
+
+    /// Agent MCP children find the live socket inside the directory they
+    /// were handed — the newest `.sock`, ignoring anything else.
+    func testLiveSocketPicksTheNewestSocketInTheDirectory() throws {
+        let directory = try XCTUnwrap(CuaSocketDirectory.create(in: FileManager.default.temporaryDirectory.path))
+        defer { try? FileManager.default.removeItem(atPath: directory) }
+        XCTAssertNil(CuaSocketDirectory.liveSocket(in: directory))
+        let fm = FileManager.default
+        let old = (directory as NSString).appendingPathComponent("d-old.sock")
+        let new = (directory as NSString).appendingPathComponent("d-new.sock")
+        XCTAssertTrue(fm.createFile(atPath: old, contents: nil))
+        XCTAssertTrue(fm.createFile(atPath: new, contents: nil))
+        XCTAssertTrue(fm.createFile(atPath: (directory as NSString).appendingPathComponent("notes.txt"), contents: nil))
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: old)
+        XCTAssertEqual(CuaSocketDirectory.liveSocket(in: directory), new)
+        XCTAssertNil(CuaSocketDirectory.liveSocket(in: "/nonexistent-\(UUID())"))
+    }
+
     // MARK: - Sick-daemon invalidation (the onSickDaemon wiring target)
 
     private actor MintCounter {

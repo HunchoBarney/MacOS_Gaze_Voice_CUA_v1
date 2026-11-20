@@ -383,7 +383,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         // Each agent's codex gets a stdio MCP server entry — the same
-        // binary re-execed as `Jarvis --mcp-stdio --agent <slug>` — plus
+        // binary re-execed as `Jarvis --mcp-stdio --agent <slug>`, told
+        // where the private daemon socket directory is — plus
         // TYPESAFE_API_KEY in its environment so codex's `env_vars`
         // pass-through hands it to the MCP child without touching disk.
         // The key is read live at spawn so a mid-session key set works.
@@ -392,7 +393,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 [CodexMCPServer(name: "jev-drive",
                                 command: Bundle.main.executablePath
                                     ?? ProcessInfo.processInfo.arguments[0],
-                                args: ["--mcp-stdio", "--agent", agent.slug],
+                                args: ["--mcp-stdio", "--agent", agent.slug]
+                                    + (CuaSocketDirectory.current.map { ["--cua-dir", $0] } ?? []),
                                 envVars: ["TYPESAFE_API_KEY"],
                                 cwd: agent.workspacePath)]
             },

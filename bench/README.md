@@ -51,7 +51,7 @@ The report also rejects an input with no rows; diagnostic rows from a
 nonempty dry run remain reportable.
 
 - The app installed and running so the Cua daemon socket exists
-  (`~/Library/Application Support/Jarvis/cua.socket`) — `make local`.
+  (a `*.sock` in a `$TMPDIR/jarvis-cua-*` directory) — `make local`.
 - `TYPESAFE_API_KEY`: taken from the environment, else fetched from the
   Keychain item `com.karanvirkang.jarvis` / `typesafeAPIKey`. The
   value is never logged or written. Unavailable → every run's row is

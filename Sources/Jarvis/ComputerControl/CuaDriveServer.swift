@@ -17,7 +17,7 @@ import JarvisCore
 /// - `TYPESAFE_API_KEY` reaches this process through codex's `env_vars`
 ///   pass-through — never written into config.toml.
 enum CuaDriveServer {
-    /// The app's support root — the socket-path and policy files live here,
+    /// The app's support root — the policy file and agent asks live here,
     /// shared with AgentWorkspace's parent directory.
     static var supportDir: URL {
         FileManager.default.urls(for: .applicationSupportDirectory,
@@ -34,9 +34,6 @@ enum CuaDriveServer {
         session.rebind()
     }
 
-    /// One line: the live daemon socket path. The app rewrites it on every
-    /// daemon re-mint so children never bind a stale socket.
-    static var socketHintFile: URL { supportDir.appendingPathComponent("cua.socket") }
     /// {"standingGrant": Bool} — rewritten by the app when the setting moves.
     static var policyFile: URL { supportDir.appendingPathComponent("policy.json") }
 
@@ -78,14 +75,14 @@ enum CuaDriveServer {
         return args[i + 1]
     }
 
-    /// The daemon socket: `JEV_CUA_SOCKET` wins (tests), else the hint file.
+    /// The live daemon socket, looked up in the private directory the app
+    /// passed as `--cua-dir` each time, since every re-mint moves it.
     private static func socketPath() throws -> String {
-        if let env = ProcessInfo.processInfo.environment["JEV_CUA_SOCKET"],
-           !env.isEmpty { return env }
-        let path = try String(contentsOf: socketHintFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty else { throw DriverConnectionError.unavailable }
-        return path
+        guard let directory = argument("--cua-dir"),
+              let socket = CuaSocketDirectory.liveSocket(in: directory) else {
+            throw DriverConnectionError.unavailable
+        }
+        return socket
     }
 
     private static func standingGrant() -> Bool {

@@ -18,6 +18,7 @@ missing binary on a real run, unknown --task id).
 """
 
 import argparse
+import glob
 import json
 import os
 import subprocess
@@ -118,8 +119,12 @@ def spawn_client(stub, binary, env):
     # killed transport (P1 finding — see phases/P1-bench.md Surprises).
     _spawn_seq[0] += 1
     slug = "bench-%d-%d" % (os.getpid(), _spawn_seq[0])
+    socks = glob.glob(os.path.join(
+        os.environ.get("TMPDIR", "/tmp"), "jarvis-cua-*", "*.sock"))
+    cua_dir = ["--cua-dir", os.path.dirname(max(socks, key=os.path.getmtime))] \
+        if socks else []
     argv = [sys.executable, str(STUB_SERVER)] if stub else \
-        [binary, "--mcp-stdio", "--agent", slug]
+        [binary, "--mcp-stdio", "--agent", slug] + cua_dir
     client = MCPStdio(argv, env=env, cwd=str(REPO_ROOT))
     try:
         client.start()

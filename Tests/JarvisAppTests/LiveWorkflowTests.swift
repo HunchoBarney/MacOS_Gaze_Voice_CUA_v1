@@ -7,8 +7,8 @@ import JarvisCore
 /// an explicit flag and must run through `scripts/with-desktop-lock.py`:
 ///
 ///   JARVIS_APP_CUA_SOCKET — path to the RUNNING APP's daemon socket
-///       (`~/Library/Application Support/Jarvis/cua.socket`, or the
-///       `jev-cua-*.sock` the app publishes in $TMPDIR). Driver calls then
+///       (the `*.sock` in the app's `jarvis-cua-*` directory in $TMPDIR).
+///       Driver calls then
 ///       execute under the app's TCC identity — real launches, real windows,
 ///       real raises.
 ///
@@ -51,19 +51,12 @@ final class LiveWorkflowTests: XCTestCase {
         if let explicit = env["JARVIS_APP_CUA_SOCKET"], !explicit.isEmpty {
             return explicit
         }
-        // The running app publishes its minted socket here.
-        let hint = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Jarvis/cua.socket")
-        if let path = try? String(contentsOf: hint, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !path.isEmpty, FileManager.default.fileExists(atPath: path) {
-            return path
-        }
-        // Fall back to the newest live socket in $TMPDIR.
+        // The running app keeps its live socket in a jarvis-cua-* directory
+        // in $TMPDIR; take the newest.
         let tmp = NSTemporaryDirectory()
         if let found = try? FileManager.default.contentsOfDirectory(atPath: tmp)
-            .filter({ $0.hasPrefix("jev-cua-") && $0.hasSuffix(".sock") })
-            .map({ tmp + $0 }).sorted().last {
+            .filter({ $0.hasPrefix("jarvis-cua-") })
+            .compactMap({ CuaSocketDirectory.liveSocket(in: tmp + $0) }).sorted().last {
             return found
         }
         // Nothing running — mint a daemon in this process. Driver calls then
