@@ -403,6 +403,21 @@ describe("reservations", () => {
     expect(usage.globalCents).toBe(0);
   });
 
+  it("settles a call that runs past midnight UTC on the day it was admitted", async () => {
+    const h = harness({ RESPONSES_RESERVE_CENTS: "5" });
+    const { installID, token } = await h.register();
+    h.advance(12 * 3_600_000 - 1_000);
+    h.setReply(() => {
+      h.advance(2_000);
+      return Response.json({ output: [], usage: { input_tokens: 1_000, output_tokens: 1_000 } });
+    });
+    expect((await h.request("/v1/responses", { token, body: terra })).status).toBe(200);
+    expect(h.db.prepare("SELECT scope, day, cents FROM spend ORDER BY scope = 'global'").all()).toEqual([
+      { scope: installID, day: "2026-11-20", cents: 1 },
+      { scope: "global", day: "2026-11-20", cents: 1 },
+    ]);
+  });
+
   it("refuses a call whose reservation would pass the cap", async () => {
     const h = harness({ INSTALL_DAILY_CENTS: "30", REALTIME_SESSION_CENTS: "25" });
     const { token } = await h.register();

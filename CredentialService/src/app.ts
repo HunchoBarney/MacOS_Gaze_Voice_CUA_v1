@@ -146,8 +146,9 @@ export function createApp(deps: Deps) {
   const admitted = (route: Route, reserveCents: number): MiddlewareHandler<Env> => async (c, next) => {
     const token = bearer(c);
     if (!TOKEN.test(token)) return fail(c, UNKNOWN_INSTALL);
+    const admittedAt = now();
     const result = await ledger.admit({
-      tokenHash: await sha256Hex(token), route, reserveCents, limits: config.limits, now: now(),
+      tokenHash: await sha256Hex(token), route, reserveCents, limits: config.limits, now: admittedAt,
     });
     if ("status" in result) return fail(c, result);
     c.set("installID", result.installID);
@@ -155,7 +156,7 @@ export function createApp(deps: Deps) {
     try {
       await next();
     } finally {
-      await ledger.charge({ installID: result.installID, cents: c.get("spentCents") - reserveCents, now: now() });
+      await ledger.charge({ installID: result.installID, cents: c.get("spentCents") - reserveCents, now: admittedAt });
     }
   };
 
