@@ -519,7 +519,12 @@ actor GuideSession {
             completed.append(step)
             return .act
         }
-        mailbox.removeAll { if case .tick = $0 { return true }; return false }
+        mailbox.removeAll {
+            switch $0 {
+            case .tick, .transition: return true
+            case .action, .cancelled: return false
+            }
+        }
         let fresh = GuideMachine(step: step, at: clock.now())
         machine = fresh
         baseline = scene; latest = scene

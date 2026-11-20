@@ -272,6 +272,24 @@ final class GuideModeTests: XCTestCase {
         XCTAssertEqual(done.map(\.name), ["the Attach button"])
     }
 
+    func testASpokenControlLeftOverFromAFinishedStepDoesNotActOnTheNext() async {
+        let session = GuideSession(goal: "attach a photo", clock: Self.clock, present: { _ in })
+        let screen = SceneBox(scene())
+        let first = Task { await session.perform(.element(Self.attach), observe: { screen.scene }) }
+        await pointed(session)
+        screen.set(scene([Self.attach, Self.format, Self.body, GuideElement(role: "AXSheet", label: "Choose")]))
+        await session.send(.action(click(Self.attach, at: 100)))
+        let firstReply = await first.value
+        XCTAssertEqual(firstReply, .done)
+        await session.send(.transition(.act))
+        let second = Task { await session.perform(.element(Self.format), observe: { screen.scene }) }
+        await pointed(session)
+        screen.set(scene([Self.attach, Self.format, Self.body]))
+        await session.send(.action(click(Self.format, at: 100)))
+        let secondReply = await second.value
+        XCTAssertEqual(secondReply, .done, "a do-this-one meant for step 1 must not do step 2")
+    }
+
     func testJustDoItFlipsToActAndShowMeTheRestFlipsBack() async {
         let session = GuideSession(goal: "attach a photo", clock: Self.clock, present: { _ in })
         let screen = scene()
