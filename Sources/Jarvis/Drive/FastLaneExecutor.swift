@@ -498,8 +498,8 @@ extension DriveLoop {
                 pid = await observeLaunchedPID(bundle)
             }
             guard let observed = pid, observed > 0 else {
-                return settle(.blocked("The foreground launch could not be observed. Nothing was retried."),
-                              task, history, blockedReason: "native launch unverifiable")
+                return settle(.blocked(Self.unconfirmedLaunch(name)), task, history,
+                              blockedReason: Self.launchUnverifiedReason)
             }
             launchedPID = observed
             foregroundLaunched = true
@@ -520,10 +520,10 @@ extension DriveLoop {
                 // can honestly report "effect unknown". Never replay the
                 // mutation — verify by observation instead: AppKit knows
                 // whether the process is running without any driver grant.
-                pid = await Self.observedPID(bundle: bundle)
+                pid = await observeLaunchedPID(bundle)
                 guard pid != nil else {
-                    return settle(.blocked("The launch was dispatched but its result is unknown, and \(name) is not running. Nothing was retried."),
-                                  task, history, blockedReason: "launch unverifiable")
+                    return settle(.blocked(Self.unconfirmedLaunch(name)), task, history,
+                                  blockedReason: Self.launchUnverifiedReason)
                 }
                 launchedPID = pid
             } catch let error as DriverConnectionError {
@@ -1026,6 +1026,15 @@ extension DriveLoop {
     // MARK: - Gaze referents
 
     static let scrollUnverifiedReason = "scroll_outcome_unverified"
+
+    /// A launch request reached macOS but no process for the app was seen
+    /// afterwards. The app may still be on its way, so this is reported as
+    /// unconfirmed, never as a failure, and the launch is never sent again.
+    static let launchUnverifiedReason = "launch_outcome_unverified"
+
+    static func unconfirmedLaunch(_ name: String) -> String {
+        "I asked \(name) to open but couldn't confirm it did."
+    }
 
     private func runVerifiedScroll(direction: String, pages: Int, task: DriveTask,
                                    window: WindowRef, name: String, bundle: String,
