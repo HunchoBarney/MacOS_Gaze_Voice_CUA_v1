@@ -57,6 +57,20 @@ final class GazeServiceTests: XCTestCase {
         role: "AXButton", label: "Save", pid: 42, windowID: 7,
         appName: "Test", windowTitle: "Doc")
 
+    /// Polls until `condition` holds or about two seconds pass. A fixed
+    /// sleep misses the first tick's acquire when the suite runs under
+    /// --parallel load; a deadline only waits as long as it must.
+    private func eventually(_ condition: () async -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !(await condition()), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private static func acquired(_ events: [IntentEvent]) -> Bool {
+        events.contains { if case .acquire = $0 { return true }; return false }
+    }
+
     /// A started service with a fresh sample scores the batch, emits
     /// the acquire, and answers commits through the scorer.
     func testServiceScoresAndCommits() async throws {
@@ -71,10 +85,11 @@ final class GazeServiceTests: XCTestCase {
         service.windowIDUnder = { _ in 7 }
         service.eventSink = { events.append($0) }
         service.gazePointSink = { points.append($0) }
+        service.cursorPoint = { nil }
         service.dwellPolicy = DwellPolicy(mode: .off, deniedApps: [], userMultiplier: 1)
         service.start()
         defer { service.stop() }
-        try await Task.sleep(for: .milliseconds(300))
+        try await eventually { Self.acquired(events) }
         XCTAssertGreaterThanOrEqual(enumerations, 1)
         XCTAssertFalse(points.isEmpty)
         XCTAssertTrue(events.contains {
@@ -132,6 +147,7 @@ final class GazeServiceTests: XCTestCase {
             if case .hold(_, let progress) = $0 { furthestHold = max(furthestHold, progress) }
         }
         service.gazePointSink = { _ in }
+        service.cursorPoint = { nil }
         var fired: [String] = []
         let landed = expectation(description: "explicit dwell actuation")
         landed.assertForOverFulfill = true
@@ -162,6 +178,7 @@ final class GazeServiceTests: XCTestCase {
         service.windowIDUnder = { _ in 7 }
         service.eventSink = { _ in }
         service.gazePointSink = { _ in }
+        service.cursorPoint = { nil }
         var fired: [String] = []
         service.actuate = { fired.append($0.id); return true }
         service.dwellSuppressed = { true }
@@ -183,11 +200,12 @@ final class GazeServiceTests: XCTestCase {
         service.windowIDUnder = { _ in 7 }
         service.eventSink = { _ in }
         service.gazePointSink = { _ in }
+        service.cursorPoint = { nil }
         service.dwellPolicy = DwellPolicy(mode: .off, deniedApps: [], userMultiplier: 1)
         service.start()
         defer { service.stop() }
         // Past the focal gate (~180ms of argmax) — the referent exists.
-        try await Task.sleep(for: .milliseconds(500))
+        try await eventually { await service.referentContext() != nil }
         let context = await service.referentContext()
         XCTAssertNotNil(context)
         XCTAssertTrue(context?.contains("Looking at:") == true)
@@ -215,12 +233,15 @@ final class GazeServiceTests: XCTestCase {
             .init(candidates: [self.saveButton], windowID: 7)
         }
         service.windowIDUnder = { _ in 7 }
-        service.eventSink = { _ in }
+        var events: [IntentEvent] = []
+        service.eventSink = { events.append($0) }
         service.gazePointSink = { _ in }
+        service.cursorPoint = { nil }
         service.start()
-        try await Task.sleep(for: .milliseconds(300))
+        try await eventually { Self.acquired(events) }
+        XCTAssertTrue(Self.acquired(events), "need a scored winner to clear — got \(events)")
         service.stop()
-        try await Task.sleep(for: .milliseconds(80))
+        try await eventually { !(await stream.streaming) }
         let streaming = await stream.streaming
         XCTAssertFalse(streaming)
         let hit = await service.commitTarget()
@@ -239,14 +260,13 @@ final class GazeServiceTests: XCTestCase {
         var events: [IntentEvent] = []
         service.eventSink = { events.append($0) }
         service.gazePointSink = { _ in }
+        service.cursorPoint = { nil }
         var teardowns = 0
         service.overlayTeardown = { teardowns += 1 }
         service.start()
         defer { service.stop() }
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertTrue(events.contains {
-            if case .acquire = $0 { return true }; return false
-        }, "need a live ring to retire — got \(events)")
+        try await eventually { Self.acquired(events) }
+        XCTAssertTrue(Self.acquired(events), "need a live ring to retire — got \(events)")
         service.stop()
         XCTAssertEqual(teardowns, 1)
         XCTAssertTrue(events.contains {
@@ -278,16 +298,16 @@ final class GazeServiceTests: XCTestCase {
         service.start()
         defer { service.stop() }
         // No frames yet — every tick is a stale tick at t=100.
-        try await Task.sleep(for: .milliseconds(160))
+        try await eventually { !reports.isEmpty }
         fakeT = 103.5
-        try await Task.sleep(for: .milliseconds(160))
+        try await eventually { reports.contains { $0 > 2 } }
         XCTAssertTrue(reports.contains { $0 < GazeSample.freshnessWindow },
                       "early reports are sub-threshold — got \(reports)")
         XCTAssertTrue(reports.contains { $0 > 2 },
                       "the outage duration must grow continuously — got \(reports)")
         // Recovery reports a single 0 — no more stale reports after it.
         source.yield(gazeFrame(100, 100))
-        try await Task.sleep(for: .milliseconds(200))
+        try await eventually { reports.last == 0 }
         XCTAssertEqual(reports.last, 0)
         let mark = reports.count
         try await Task.sleep(for: .milliseconds(200))

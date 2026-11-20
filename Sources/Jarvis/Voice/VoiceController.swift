@@ -457,6 +457,9 @@ final class VoiceController: ObservableObject {
     private var wakeSession: Task<Void, Never>?
     private var otherMicrophoneWatch: Task<Void, Never>?
     private var otherAppListening = false
+    /// Whether another app is capturing audio: Core Audio in the app, a
+    /// fake in tests.
+    private let otherAppUsesMicrophone: @Sendable () -> Bool
     private var manualOverride = false
     private var physicalFnDown = false
     private var manualResumeWanted = false
@@ -628,11 +631,13 @@ final class VoiceController: ObservableObject {
          cuaRuntime: VoiceTaskCoordinator? = nil,
          dictation: DictationDelivering = DictationDelivery(),
          speaker: SpeechSynthesizing? = nil,
-         permissionStatusReader: @escaping @Sendable () -> [Permission] = { Permission.missing }) {
+         permissionStatusReader: @escaping @Sendable () -> [Permission] = { Permission.missing },
+         otherAppUsesMicrophone: @escaping @Sendable () -> Bool = { OtherMicrophoneUse.active() }) {
         let config = config ?? Config.shared
         self.config = config
         self.handsFreePaused = config.handsFreePaused
         self.permissionMonitor = PermissionStatusMonitor(read: permissionStatusReader)
+        self.otherAppUsesMicrophone = otherAppUsesMicrophone
         self.dictation = dictation
         self.speaker = speaker
         self.authorize = authorize ?? { await RealtimeVoiceLane.requestAuthorization() }
@@ -1106,7 +1111,8 @@ final class VoiceController: ObservableObject {
                     self?.otherMicrophoneWatch = nil
                     return
                 }
-                let busy = await Task.detached { OtherMicrophoneUse.active() }.value
+                let probe = self.otherAppUsesMicrophone
+                let busy = await Task.detached { probe() }.value
                 if busy != self.otherAppListening {
                     self.otherAppListening = busy
                     if busy, self.standbyArmed || self.wakeSession != nil {
