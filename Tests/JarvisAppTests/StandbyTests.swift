@@ -31,7 +31,16 @@ final class StandbyTests: XCTestCase {
         super.tearDown()
     }
 
-    private func standby() -> (VoiceController, FakeWakeWord) {
+    private final class MicrophoneUsers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var busy = false
+        var otherApp: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return busy }
+            set { lock.lock(); busy = newValue; lock.unlock() }
+        }
+    }
+
+    private func standby(microphoneUsers: MicrophoneUsers = MicrophoneUsers()) -> (VoiceController, FakeWakeWord) {
         let wake = FakeWakeWord()
         ListeningPolicy.wakeWord = wake
         let config = Config(defaults: UserDefaults(suiteName: "standby-\(UUID().uuidString)")!,
@@ -41,7 +50,8 @@ final class StandbyTests: XCTestCase {
         var timings = VoiceTimings()
         timings.wakeSessionQuiet = 0.5
         let controller = VoiceController(config: config, speech: RealtimeVoiceLane(apiKey: { "test-key" }),
-                                         authorize: { true }, timings: timings, cuaRuntime: testCoordinator(config))
+                                         authorize: { true }, timings: timings, cuaRuntime: testCoordinator(config),
+                                         otherAppUsesMicrophone: { microphoneUsers.otherApp })
         addTeardownBlock { await controller.shutdown() }
         return (controller, wake)
     }
@@ -56,6 +66,28 @@ final class StandbyTests: XCTestCase {
         XCTAssertTrue(controller.listeningWithoutFn)
         controller.armStandby()
         XCTAssertEqual(wake.starts, 1, "arming twice starts the engine once")
+    }
+
+    func testAnotherAppOnTheMicrophonePausesStandbyUntilItsDone() async {
+        let users = MicrophoneUsers()
+        users.otherApp = true
+        let (controller, wake) = standby(microphoneUsers: users)
+        controller.armStandby()
+        await poll(seconds: 3) { controller.handsFreeState != .standby }
+        XCTAssertEqual(controller.handsFreeState, .unavailable("Paused while another app is using the microphone."))
+        XCTAssertEqual(wake.stops, 1)
+        users.otherApp = false
+        await poll(seconds: 5) { controller.handsFreeState == .standby }
+        XCTAssertEqual(controller.handsFreeState, .standby, "Standby comes back when the other app lets go")
+        XCTAssertEqual(wake.starts, 2)
+    }
+
+    /// Reads the Mac's real audio clients; set JARVIS_LIVE_MIC_USERS=1 to run.
+    func testCoreAudioReportsMicrophoneUsersLive() throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_LIVE_MIC_USERS"] != nil else {
+            throw XCTSkip("Set JARVIS_LIVE_MIC_USERS=1 to read the Mac's real microphone users")
+        }
+        print("another app is using the microphone:", OtherMicrophoneUse.active())
     }
 
     func testPauseStandsStandbyDown() {
