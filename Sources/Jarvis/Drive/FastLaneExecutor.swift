@@ -167,7 +167,7 @@ extension DriveLoop {
         // dictation verbs steer the capture lane. Peeled qualifiers are
         // emphasis, the same as the gaze referents above.
         switch parsed.action.body {
-        case .systemHotkey, .overlay, .repeatLast, .locate, .dictation:
+        case .systemHotkey, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
             guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
             else { return .vetoed }
             return .resolved(FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: ""))
@@ -396,12 +396,20 @@ extension DriveLoop {
                 // still lands here has nothing behind it to repeat.
                 return settle(.blocked("Nothing to repeat."), task, history,
                               blockedReason: "no action to replay")
+            case .locatePointer:
+                feed(action.description)
+                return await runLocatePointer(task: task, history: history)
             case .locate(let query):
                 feed(action.description)
                 try await gateExplicit("locate window", corpus: "\(action.description) \(query)",
                                        denied: task.deny, confirmed: &confirmed)
                 return try await runLocate(query, task: task, session: session,
                                            history: &history)
+            case .desktop(let verb):
+                feed(action.description)
+                try await gateExplicit("desktop switch", corpus: action.description,
+                                       denied: task.deny, confirmed: &confirmed)
+                return try await runDesktop(verb, task: task, session: session, history: &history)
             default:
                 break
             }
@@ -689,7 +697,7 @@ extension DriveLoop {
                                                task: task, session: session, history: &history,
                                                confirmed: &confirmed)
         case .mediaKey, .systemHotkey, .navigateURL, .webSearch, .appControl,
-             .gaze, .tracker, .overlay, .repeatLast, .locate, .dictation:
+             .gaze, .tracker, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
             return nil // handled above
         }
     }
@@ -1880,15 +1888,27 @@ extension DriveLoop {
                 let app = row["app_name"]?.string ?? ""
                 if !app.isEmpty, !names.contains(app) { names.append(app) }
             }
-            if matches.isEmpty {
-                // No window answers to the name: the app is running with its
-                // windows closed, or it quit. Only an app we can identify
-                // gets either answer.
-                let resolved = await resolver.resolveDetailed(query)
+            // No window answers to the name: the app is running with its
+            // windows closed, or it quit. Only an app we can identify gets
+            // either answer.
+            let resolved = matches.isEmpty ? await resolver.resolveDetailed(query) : nil
+            if let resolved {
                 names = resolved.matches.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+            }
+            guard names.count <= 1 else {
+                return settle(.blocked("“\(query)” could be a few things — \(names.joined(separator: ", ")). Which one?"),
+                              task, history, blockedReason: "locate ambiguous")
+            }
+            if let resolved {
                 guard let app = resolved.app, app.bundle != nil || (app.pid ?? 0) > 0 else {
                     return settle(.blocked("I can't find anything called \(query) — say 'what can I say' to see what I understand."),
                                   task, history, blockedReason: "locate found nothing")
+                }
+                // Reopening or launching needs one of the app's own names: a
+                // near match never opens anything.
+                guard Self.names(of: app).contains(where: { Self.namesApp(query, $0) }) else {
+                    return settle(.blocked("I can't find a window called \u{201C}\(query)\u{201D}. The closest app I know is \(app.name). Say \u{201C}open \(app.name)\u{201D} if that's the one."),
+                                  task, history, blockedReason: "locate near match")
                 }
                 pid = app.pid.flatMap { $0 > 0 ? $0 : nil }
                 bundle = app.bundle
@@ -1903,10 +1923,6 @@ extension DriveLoop {
                 bundle = try await bundleID(forPID: found, session: session)
                 name = names.first ?? query
                 appRows = matches.filter { $0["pid"]?.integer == found }
-            }
-            guard names.count <= 1 else {
-                return settle(.blocked("“\(query)” could be a few things — \(names.joined(separator: ", ")). Which one?"),
-                              task, history, blockedReason: "locate ambiguous")
             }
         }
         let displays = Self.displayFrames().map(\.frame)
@@ -2082,6 +2098,61 @@ extension DriveLoop {
         }
     }
 
+    /// Whether a spoken name is exactly the app's name, ignoring case,
+    /// accents, a leading "the" and a trailing "app".
+    static func namesApp(_ spoken: String, _ app: String) -> Bool {
+        func bare(_ text: String) -> String {
+            var folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            if folded.hasSuffix(".app") { folded.removeLast(4) }
+            var words = folded.split(whereSeparator: \.isWhitespace).map(String.init)
+            if words.first == "the" { words.removeFirst() }
+            if words.last == "app" { words.removeLast() }
+            return words.joined(separator: " ")
+        }
+        return !bare(spoken).isEmpty && bare(spoken) == bare(app)
+    }
+
+    /// The bundle's own CFBundleDisplayName and CFBundleName, localized
+    /// first. Tests swap in fixed names.
+    nonisolated(unsafe) static var bundleNames: (String) -> [String] = { bundleID in
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+              let bundle = Bundle(url: url) else { return [] }
+        let keys = ["CFBundleDisplayName", "CFBundleName"]
+        return keys.compactMap { bundle.localizedInfoDictionary?[$0] as? String }
+            + keys.compactMap { bundle.infoDictionary?[$0] as? String }
+    }
+
+    private static let vendorPrefixes: Set<String> = ["google", "microsoft", "adobe"]
+
+    /// Every name a person might call an app by: its name, its bundle's
+    /// names, and each without a vendor ("Google Chrome" → "Chrome",
+    /// "Microsoft Word" → "Word").
+    static func names(of app: AppResolver.App) -> [String] {
+        let own = [app.name] + (app.bundle.map(bundleNames) ?? [])
+        return own + own.compactMap { name in
+            let words = name.split(whereSeparator: \.isWhitespace)
+            guard words.count > 1, vendorPrefixes.contains(words[0].lowercased()) else { return nil }
+            return words.dropFirst().joined(separator: " ")
+        }
+    }
+
+    /// "Where's my mouse?": a ring around the pointer where it is. Never an
+    /// app hunt, though "cursor" is also Cursor.app's exact name.
+    nonisolated(unsafe) static var pointerLocation: () -> CGPoint = {
+        ScreenGeometry.appKitToTopLeft(NSEvent.mouseLocation)
+    }
+
+    private func runLocatePointer(task: DriveTask, history: [String]) async -> DriveResult {
+        let point = Self.pointerLocation()
+        let ring = CGRect(x: point.x - 40, y: point.y - 40, width: 80, height: 80)
+        guard let overlayDispatch, let shown = await overlayDispatch(.highlight, [(ring, "Your pointer")], nil),
+              case .done = shown.status else {
+            return done("I can't circle it right now. Move the mouse quickly back and forth, and the pointer grows bigger for a moment so you can spot it.",
+                        task, history)
+        }
+        return done("There's your pointer. I've circled it.", task, history)
+    }
+
     /// A row's `bounds` as a rect, or nil when any edge is missing.
     static func rowFrame(_ row: JSONValue) -> CGRect? {
         guard let bounds = row["bounds"], let x = num(bounds["x"]), let y = num(bounds["y"]),
@@ -2105,6 +2176,19 @@ extension DriveLoop {
             guard let row = try await windowRow(pid: pid, windowID: windowID, session: session),
                   let frame = Self.rowFrame(row) else { return nil }
             return LostWindow.isDisplaySized(frame, on: displays)
+        }
+        /// The state once it has stopped changing: four reads in a row
+        /// agree, so a rung that lands after its own poll gave up is seen
+        /// before the next rung toggles it back.
+        func settledFullScreen() async throws -> Bool? {
+            var last = try await isFullScreen(), streak = 1
+            for _ in 0..<16 where streak < 4 {
+                try await Task.sleep(for: .milliseconds(150))
+                let now = try await isFullScreen()
+                streak = now == last ? streak + 1 : 1
+                last = now
+            }
+            return streak >= 4 ? last : nil
         }
         guard try await isFullScreen() == true else {
             return done("\(name) isn't full screen right now.", task, history,
@@ -2131,8 +2215,8 @@ extension DriveLoop {
                 return true
             }),
         ]
-        for rung in rungs {
-            if try await isFullScreen() != true { break }
+        for (index, rung) in rungs.enumerated() {
+            if try await (index == 0 ? isFullScreen() : settledFullScreen()) != true { break }
             guard try await rung.attempt() else {
                 history.append("Exit full screen: \(rung.label) unavailable.")
                 continue
@@ -2144,12 +2228,197 @@ extension DriveLoop {
             }
             history.append("Exit full screen: \(rung.label) didn't take.")
         }
-        if try await isFullScreen() == false {
+        if try await settledFullScreen() == false {
             return done("\(name) is a normal window again.", task, history,
                         pid: pid, windowID: windowID, bundleID: bundle, effect: true)
         }
         return settle(.blocked("I couldn't take \(name) out of full screen. Move the pointer to the very top of the screen, then click the green button at the top left of the window."),
                       task, history, pid: pid, windowID: windowID, blockedReason: "full screen exit unverified")
+    }
+
+    // MARK: - Desktops
+
+    /// "go to Desktop 2", "my other desktop", "next desktop", "my full-screen
+    /// Safari", "which desktop am I on", "show me my desktops", and the
+    /// guide-only window move and desktop removal. A switch is one AXPress in
+    /// Mission Control or the system ⌃←/⌃→, and is only called done once the
+    /// arrival reads back.
+    private func runDesktop(_ verb: FastAction.DesktopVerb, task: DriveTask, session: String,
+                            history: inout [String]) async throws -> DriveResult {
+        let spaces = desktopSpaces
+        switch verb {
+        case .show:
+            guard await openMissionControl(spaces) else {
+                return settle(.blocked(DesktopSpaceSwitch.cantOpenLine), task, history,
+                              blockedReason: "mission control unavailable")
+            }
+            return done(DesktopSpaceSwitch.showLine, task, history, effect: true)
+        case .which:
+            if let layout = spaces.layout() {
+                return done(DesktopSpaceSwitch.whereLine(layout), task, history)
+            }
+            guard await openMissionControl(spaces) else {
+                return settle(.blocked(DesktopSpaceSwitch.cantOpenLine), task, history,
+                              blockedReason: "mission control unavailable")
+            }
+            return done(DesktopSpaceSwitch.whiteOutlineLine, task, history, effect: true)
+        case .moveWindow(let number):
+            let opened = await openMissionControl(spaces)
+            return done(DesktopSpaceSwitch.moveLine(to: number, opened: opened), task, history)
+        case .removeExtra:
+            let opened = await openMissionControl(spaces)
+            return done(DesktopSpaceSwitch.removeLine(opened: opened), task, history)
+        case .go(.number(let number)):
+            let layout = spaces.layout()
+            if let layout {
+                if layout.currentNumber == number {
+                    return done("You're already on Desktop \(number).", task, history)
+                }
+                guard number <= layout.desktops.count else {
+                    let count = layout.desktops.count
+                    return settle(.blocked("You have \(count) desktop\(count == 1 ? "" : "s"), so there's no Desktop \(number)."),
+                                  task, history, blockedReason: "no such desktop")
+                }
+            }
+            return try await switchInMissionControl(.desktop(number), expected: layout?.desktops[number - 1],
+                                                    spaces: spaces, task: task, history: &history)
+        case .go(.other):
+            guard let layout = spaces.layout() else {
+                _ = await openMissionControl(spaces)
+                return settle(.blocked(DesktopSpaceSwitch.sayNumberLine), task, history,
+                              blockedReason: "which desktop")
+            }
+            let others = layout.desktops.indices.map { $0 + 1 }.filter { $0 != layout.currentNumber }
+            if others.isEmpty { return done("You only have one desktop.", task, history) }
+            guard others.count == 1 else {
+                _ = await openMissionControl(spaces)
+                return settle(.blocked(DesktopSpaceSwitch.whichOneLine(others)), task, history,
+                              blockedReason: "which desktop")
+            }
+            return try await switchInMissionControl(.desktop(others[0]), expected: layout.desktops[others[0] - 1],
+                                                    spaces: spaces, task: task, history: &history)
+        case .go(.fullScreen(let app)):
+            return try await switchInMissionControl(.fullScreen(app), expected: nil,
+                                                    spaces: spaces, task: task, history: &history)
+        case .go(.step(let direction)):
+            return try await stepDesktop(direction, spaces: spaces, task: task, session: session,
+                                         history: &history)
+        }
+    }
+
+    private func openMissionControl(_ spaces: DesktopSpaceSwitch.System) async -> Bool {
+        do {
+            try await spaces.openMissionControl()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Mission Control's button for the space, pressed once, then the
+    /// arrival: the desktop-change notification within 1.5 s, Mission
+    /// Control closed, and — when SkyLight can be read — the active space
+    /// being the one asked for.
+    private func switchInMissionControl(_ space: DesktopSpaceSwitch.Space, expected: UInt64?,
+                                        spaces: DesktopSpaceSwitch.System, task: DriveTask,
+                                        history: inout [String]) async throws -> DriveResult {
+        guard let display = spaces.displayID() else {
+            _ = await openMissionControl(spaces)
+            return settle(.blocked(DesktopSpaceSwitch.severalScreensLine), task, history,
+                          blockedReason: "several displays")
+        }
+        guard let labels = spaces.labels() else {
+            return settle(.blocked("I couldn't read Mission Control's desktop names, so I didn't switch."),
+                          task, history, blockedReason: "desktop labels unavailable")
+        }
+        let inspect = { spaces.inspect(displayID: display, target: space, labels: labels) }
+        var arrival: ((Duration) async -> Bool)?
+        var pressed: AnyHashable?
+        var notes: [String] = []
+        let outcome = await DesktopSpaceSwitch.perform(
+            name: DesktopSpaceSwitch.name(of: space),
+            invalidation: { spaces.displayID() == display ? nil : .displayChanged },
+            inspect: inspect, open: spaces.openMissionControl, pause: spaces.pause,
+            press: { button in
+                arrival = spaces.watchSpaceChange()
+                pressed = button
+                return spaces.press(button)
+            },
+            note: { notes.append($0) })
+        history += notes
+        history.append(outcome.message)
+        guard outcome.code == .pressAcceptedUnverified, let arrival else {
+            if let arrival { _ = await arrival(.zero) }
+            return settle(.blocked(DesktopSpaceSwitch.notSwitchedLine(outcome, space)), task, history,
+                          blockedReason: "desktop switch \(outcome.code.rawValue)")
+        }
+        let arrived = await arrival(.milliseconds(1500))
+        let closed = try await pollDriver({ inspect() }, until: {
+            if case .closed = $0 { return true }
+            return false
+        }) != nil
+        var exact = true
+        if let expected, let after = spaces.layout() {
+            exact = after.active == expected
+        } else if case .fullScreen = space, let after = spaces.layout() {
+            exact = after.currentNumber == nil
+        }
+        history.append("Desktop switch: changed \(arrived), Mission Control closed \(closed), active space matches \(exact).")
+        guard arrived, closed, exact else {
+            return settle(.blocked(DesktopSpaceSwitch.unsureLine), task, history,
+                          confirmedAny: true, blockedReason: "desktop switch unverified")
+        }
+        let shown = pressed.flatMap { spaces.attr($0, kAXDescriptionAttribute) as? String }
+            .flatMap { DesktopSpaceSwitch.space($0, labels: labels) } ?? space
+        return done(DesktopSpaceSwitch.arrivedLine(shown), task, history, effect: true)
+    }
+
+    /// ⌃→ / ⌃← while System Settings still has them on, read back with the
+    /// same notification; otherwise Mission Control.
+    private func stepDesktop(_ direction: DesktopSpaceSwitch.Direction, spaces: DesktopSpaceSwitch.System,
+                             task: DriveTask, session: String,
+                             history: inout [String]) async throws -> DriveResult {
+        let layout = spaces.layout()
+        var expected: UInt64?
+        if let layout, let index = layout.currentIndex {
+            let target = direction == .next ? index + 1 : index - 1
+            guard layout.spaces.indices.contains(target) else {
+                return done(DesktopSpaceSwitch.edgeLine(direction), task, history)
+            }
+            expected = layout.spaces[target].id
+        }
+        guard spaces.shortcutEnabled(direction) else {
+            history.append("Desktop step: the ⌃ arrow shortcut is off.")
+            if let layout, let expected, let number = layout.number(of: expected) {
+                return try await switchInMissionControl(.desktop(number), expected: expected,
+                                                        spaces: spaces, task: task, history: &history)
+            }
+            guard await openMissionControl(spaces) else {
+                return settle(.blocked(DesktopSpaceSwitch.cantOpenLine), task, history,
+                              blockedReason: "mission control unavailable")
+            }
+            return settle(.blocked(DesktopSpaceSwitch.pickOneLine), task, history,
+                          blockedReason: "desktop step needs a pick")
+        }
+        let arrival = spaces.watchSpaceChange()
+        do {
+            _ = try await call("hotkey", ["keys": .array(["ctrl", direction == .next ? "right" : "left"].map { .string($0) }),
+                                          "scope": .string("desktop"),
+                                          "session": .string(session)])
+        } catch let error as DriverConnectionError {
+            _ = await arrival(.zero)
+            if case .toolRefused(_, _, let detail) = error { return settle(.blocked(detail), task, history) }
+            throw error
+        }
+        let arrived = await arrival(.milliseconds(1500))
+        let landed = layout == nil ? nil : spaces.layout()
+        let exact = expected == nil || landed?.active == expected
+        history.append("Desktop step: changed \(arrived), active space matches \(exact).")
+        guard arrived, exact else {
+            return settle(.blocked(DesktopSpaceSwitch.unsureLine), task, history,
+                          confirmedAny: true, blockedReason: "desktop step unverified")
+        }
+        return done(DesktopSpaceSwitch.stepLine(direction, landed: landed), task, history, effect: true)
     }
 
     /// Bounded patience for a just-launched app's first window, then the
@@ -3229,6 +3498,8 @@ extension DriveLoop {
         case .overlay, .clickNamed, .showNamed: return "click"
         case .repeatLast: return "repeat last action"
         case .locate: return "list_windows"
+        case .desktop: return "desktop switch"
+        case .locatePointer: return "highlight pointer"
         case .dictation: return "dictation"
         }
     }
@@ -3280,20 +3551,12 @@ extension DriveLoop {
     }
 
     /// Whether the window's bounds cover an attached screen — the observable
-    /// state of macOS full screen. A couple of points of tolerance absorbs
-    /// fractional Retina geometry.
+    /// state of macOS full screen, by the same rule the lost-window
+    /// diagnosis uses (`LostWindow.isDisplaySized`) against the top-left
+    /// display frames.
     static func boundsCoverAScreen(_ bounds: JSONValue?) -> Bool {
-        func number(_ value: JSONValue?) -> Double? {
-            guard case let .number(v)? = value, v.isFinite else { return nil }
-            return v
-        }
-        guard let x = number(bounds?["x"]), let y = number(bounds?["y"]),
-              let w = number(bounds?["width"]), let h = number(bounds?["height"]) else { return false }
-        return NSScreen.screens.contains { screen in
-            let f = screen.frame
-            return abs(x - f.origin.x) < 3 && abs(y - f.origin.y) < 3
-                && abs(w - f.width) < 3 && abs(h - f.height) < 3
-        }
+        guard let bounds, let frame = rowFrame(.object(["bounds": bounds])) else { return false }
+        return LostWindow.isDisplaySized(frame, on: displayFrames().map(\.frame))
     }
 
     /// Host equality with a subdomain allowance: "www.apple.com" satisfies

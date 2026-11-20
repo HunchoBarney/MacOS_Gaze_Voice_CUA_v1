@@ -151,13 +151,8 @@ actor VoiceActivityGate {
         case .speaking, .hangover:
             upload.append(pcm)
             usage.sentSpeech += seconds
-        case .closed:
+        case .closed, .tail:
             remember(pcm)
-        case .tail(let left):
-            remember(pcm)
-            upload.append(Data(count: pcm.count))
-            usage.sentSilence += seconds
-            phase = left > seconds ? .tail(left - seconds) : .closed
         }
         pending += try resampled(pcm)
         while pending.count >= SileroVoiceActivity.chunkSamples {
@@ -165,7 +160,7 @@ actor VoiceActivityGate {
             pending.removeFirst(SileroVoiceActivity.chunkSamples)
             upload += decide(speech)
         }
-        return upload
+        return upload + releaseScoredTail()
     }
 
     /// The speech service closed its turn, so no more silence is needed.
@@ -200,6 +195,25 @@ actor VoiceActivityGate {
             }
         }
         return []
+    }
+
+    /// In the tail a buffer goes out as silence only once it has been scored,
+    /// so speech that resumes there is sent once, as itself.
+    private func releaseScoredTail() -> [Data] {
+        guard case .tail(var left) = phase else { return [] }
+        let unscored = Int(Double(pending.count) / SileroVoiceActivity.sampleRate * bytesPerSecond)
+        var silence: [Data] = []
+        while let oldest = preRoll.first, preRollBytes - oldest.count >= unscored {
+            preRoll.removeFirst()
+            preRollBytes -= oldest.count
+            let seconds = Double(oldest.count) / bytesPerSecond
+            silence.append(Data(count: oldest.count))
+            usage.sentSilence += seconds
+            left -= seconds
+            if left <= 0 { phase = .closed; return silence }
+        }
+        phase = .tail(left)
+        return silence
     }
 
     /// Speech is scored up to two chunks after it starts, so the ring holds

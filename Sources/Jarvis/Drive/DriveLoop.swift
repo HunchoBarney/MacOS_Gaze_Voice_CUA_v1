@@ -212,6 +212,9 @@ actor DriveLoop {
     /// Minimized, full-screen, raise and Stage Manager reads and writes for
     /// the lost-window and exit-full-screen lanes — same seam posture.
     let windowAttributes: WindowControls.Attributes
+    /// Mission Control's tree, the desktop-change notification, SkyLight's
+    /// read-only Spaces layout and the ⌃←/⌃→ preference — same seam posture.
+    let desktopSpaces: DesktopSpaceSwitch.System
     private let nativeReadOnly: NativeWindowObservation.Read
     let nativeScrollRead: NativeWindowObservation.ScrollRead
     let nativeScrollControl: NativeWindowObservation.ScrollControl
@@ -320,6 +323,7 @@ actor DriveLoop {
          windowControlButtonsInWindow: ((pid_t, Int) -> [WindowControls.Button])? = nil,
          windowControlPressInWindow: ((WindowControls.Kind, pid_t, Int) -> Bool)? = nil,
          windowAttributes: WindowControls.Attributes = .live,
+         desktopSpaces: DesktopSpaceSwitch.System = .live,
          overlayDispatch: ((FastAction.OverlayVerb,
                             [(frame: CGRect, label: String)],
                             CGPoint?) async -> DriveResult?)? = nil,
@@ -468,6 +472,7 @@ actor DriveLoop {
             windowControlPress?(kind, pid) ?? WindowControls.press(kind, pid: pid, windowID: windowID)
         }
         self.windowAttributes = windowAttributes
+        self.desktopSpaces = desktopSpaces
         self.overlayDispatch = overlayDispatch
         self.frontmostBundleID = frontmostBundleID
         self.frontmostPID = frontmostPID
@@ -1177,7 +1182,7 @@ actor DriveLoop {
         if let parsed = FastAction.parse(goal) {
             switch parsed.action.body {
             case .gaze, .tracker, .mediaKey, .systemHotkey, .overlay,
-                 .repeatLast, .locate, .dictation, .webSearch, .navigateURL:
+                 .repeatLast, .locate, .locatePointer, .dictation, .webSearch, .navigateURL, .desktop:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,
                  .menu, .windowFrame, .clickNamed, .showNamed, .exitFullScreen:

@@ -31,7 +31,8 @@ build:
 	swift build -c release
 
 test:
-	swift test
+	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
+	swift test --parallel
 	cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts
 	cd EyeTracking && corepack pnpm run typecheck
 	cd EyeTracking && corepack pnpm test
@@ -56,8 +57,9 @@ else
 release: setup tracker
 	swift build -c release
 	ThirdParty/Cua/fetch-embedded-binaries.sh "$(VENDOR)"
+	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
 	rm -rf "$(APP)"
-	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources/ThirdParty/CuaDriver" "$(APP)/Contents/Resources/ThirdParty/SileroVAD"
+	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources/ThirdParty/CuaDriver" "$(APP)/Contents/Resources/ThirdParty/SileroVAD" "$(APP)/Contents/Resources/ThirdParty/Vosk"
 	cp .build/release/Jarvis "$(APP)/Contents/MacOS/Jarvis"
 	cp Info.plist "$(APP)/Contents/Info.plist"
 	cp "$(VENDOR)/cua-driver" "$(APP)/Contents/Resources/cua-driver"
@@ -65,6 +67,10 @@ release: setup tracker
 	cp ThirdParty/Cua/LICENSE.md ThirdParty/Cua/THIRD_PARTY_NOTICES.md "$(APP)/Contents/Resources/ThirdParty/CuaDriver/"
 	ditto ThirdParty/SileroVAD/silero-vad-unified-256ms-v6.2.1.mlmodelc "$(APP)/Contents/Resources/SileroVAD/silero-vad-unified-256ms-v6.2.1.mlmodelc"
 	cp ThirdParty/SileroVAD/LICENSE ThirdParty/SileroVAD/README.md "$(APP)/Contents/Resources/ThirdParty/SileroVAD/"
+	mkdir -p "$(APP)/Contents/Resources/Vosk"
+	cp "$(VENDOR)/Vosk/libvosk.dylib" "$(APP)/Contents/Resources/Vosk/libvosk.dylib"
+	ditto "$(VENDOR)/Vosk/model" "$(APP)/Contents/Resources/Vosk/model"
+	cp ThirdParty/Vosk/LICENSE ThirdParty/Vosk/README.md "$(APP)/Contents/Resources/ThirdParty/Vosk/"
 	scripts/bundle-tracker.sh "$(APP)"
 	python3 scripts/check-packaged-tracker.py "$(APP)"
 	scripts/sign-app.sh "$(APP)"

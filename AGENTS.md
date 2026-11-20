@@ -8,9 +8,11 @@ for what is settled, and [RELEASE.md](RELEASE.md) before shipping a build.
 
 ## Commands
 
-- `make test` — `swift test`, then the tracker typecheck and Vitest. This is
-  what CI runs.
+- `make test` — `swift test --parallel`, then the tracker typecheck and
+  Vitest. This is what CI runs.
 - `swift test --filter <Suite>` — a focused Swift check.
+- `scripts/lane-test.sh [command]` — run `make test`, or any command, in the
+  crew's shared warm build checkout. See [TESTING.md](TESTING.md).
 - `make release` — one signed build from source: `build/Jarvis.app`, a
   zip and its SHA-256. It is the default goal.
 - `make install` — release, then copy to `~/jarvis-local/Jarvis.app`
@@ -37,6 +39,10 @@ Corepack. Run EyeTracking tests from `EyeTracking/`, where
   or packaged-app behaviour.
 - `codesign --verify --deep --strict` fails spuriously inside a synced
   `~/Documents` checkout (com.apple.provenance). Verify a copy outside it.
+- `make test` runs each XCTest case in its own process, one per CPU core, and
+  other worktrees test on the same Mac. Keep test state private: inject a
+  `UserDefaults(suiteName:)` suite, temporary directory or port 0 rather
+  than writing `UserDefaults.standard` or a fixed path.
 - `development/` is local-only: `cua-source/` and the text layer
   (`*.json`/`*.md`/`*.txt`/`*.log`) are tracked; the rest is regenerable.
 - Other agents may share this folder: never stash, reset or clean someone

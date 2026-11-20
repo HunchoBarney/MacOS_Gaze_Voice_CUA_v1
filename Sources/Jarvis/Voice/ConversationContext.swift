@@ -195,7 +195,7 @@ struct ConversationContext: Sendable {
 }
 
 enum ConversationListeningState: Equatable {
-    case off, preparing, listening, paused, unavailable(String)
+    case off, preparing, listening, standby, paused, unavailable(String)
 }
 
 enum ConversationPresentation {

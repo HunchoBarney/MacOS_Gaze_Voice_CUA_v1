@@ -6,6 +6,9 @@ import JarvisCore
 @testable import Jarvis
 
 final class JevChooserTests: XCTestCase {
+    override func setUp() {
+        usePrivateStandingGrants()
+    }
     private enum RequestCaptured: Error { case stop, invalidReference }
 
     private func captureC1Request(_ payload: JSONValue, extra: [String: JSONValue] = [:],

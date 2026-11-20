@@ -9,6 +9,9 @@ import JarvisCore
 /// `values` or a parked ask answer; the model chooses fields, it never
 /// authors text.
 final class JevDeciderTests: XCTestCase {
+    override func setUp() {
+        usePrivateStandingGrants()
+    }
 
     /// A pick queue behind the existing `DriveLoop.Choose` shape — the
     /// same factory `JevChooser.make` produces in production.
