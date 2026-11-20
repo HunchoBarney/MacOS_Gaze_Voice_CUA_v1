@@ -43,6 +43,13 @@ Don't build in your own worktree as well: that adds a second cold `.build`
 checkout under `~/.capy/work/local-ci`. Never point either at the owner's
 checkout.
 
+## End-to-end flows
+
+`make e2e` runs five flows on a signed Jarvis through e2e's macOS engine
+(`e2e/README.md`). They launch Jarvis, speak aloud and use the owner's
+Realtime key, so they run only on the owner's go, under the desktop lock.
+They are not part of `make test` or local CI.
+
 ## Keeping tests parallel-safe
 
 `make test` runs `swift test --parallel`: every XCTest case runs in its own
