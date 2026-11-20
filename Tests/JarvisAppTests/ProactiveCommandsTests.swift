@@ -89,6 +89,13 @@ final class ProactiveCommandsTests: XCTestCase {
         XCTAssertNil(engine.awaiting)
     }
 
+    func testSafetyCardIsSizedFromThePublishedCard() {
+        let card = alert(.security, "Careful: this page is a fake virus warning", action: nil)
+        let content = ProactiveCardPanel.content(for: card) {}
+        XCTAssertEqual(content.frame.width, 480)
+        XCTAssertGreaterThan(content.frame.height, 80, "the panel is measured with the card's text, not empty")
+    }
+
     func testScreenSharingIsReadFromIndicatorWindowNames() {
         XCTAssertTrue(ProactiveContextProbe.sharing([[kCGWindowName as String: "meet.google.com is sharing your screen."]]))
         XCTAssertFalse(ProactiveContextProbe.sharing([[kCGWindowName as String: "Inbox"], [:]]))
