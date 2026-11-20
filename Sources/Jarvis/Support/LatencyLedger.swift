@@ -68,6 +68,7 @@ final class LatencyLedger {
         "release_to_commit_ms",
         "commit_to_transcript_ms",
         "transcript_to_dispatch_ms",
+        "handoff_to_desktop_call_ms",
         "dispatch_to_effect_ms",
         "eyes_land_to_effect_ms",
         "fn_to_effect_ms",
@@ -182,6 +183,10 @@ final class LatencyLedger {
             }
             .store(in: &cancellables)
 
+        controller.cua.onLatencySpan = { [weak self] name, start, end in
+            self?.coordinatorSpan(name, start, end)
+        }
+
         let priorSink = gaze.eventSink
         gaze.eventSink = { [weak self] event in
             priorSink(event)
@@ -216,6 +221,18 @@ final class LatencyLedger {
             return
         }
         current?.marks[mark.rawValue] = at
+    }
+
+    /// The coordinator's hand-off to its first desktop call. It opens a
+    /// task record when no hold is open, so typed, hands-free and
+    /// delegated commands are timed the same way.
+    func coordinatorSpan(_ name: String, _ start: TimeInterval, _ end: TimeInterval) {
+        guard name == "task.first_desktop_call" else { return }
+        lock.lock(); defer { lock.unlock() }
+        ensureInteraction(origin: .task, at: start)
+        if current?.spans["handoff_to_desktop_call_ms"] == nil {
+            current?.spans["handoff_to_desktop_call_ms"] = max(0, (end - start) * 1000)
+        }
     }
 
     /// Eyes landed on a scored candidate — recorded outside interactions
