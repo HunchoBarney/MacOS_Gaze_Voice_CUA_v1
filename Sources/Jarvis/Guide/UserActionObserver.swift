@@ -34,8 +34,8 @@ protocol UserActionSource: AnyObject {
 /// permission Jarvis already holds. A global mouse-down monitor plus
 /// `AXUIElementCopyElementAtPosition` names what they clicked; AXObserver
 /// notifications on the app (focus, new window, menu open and close, value
-/// change) count keyboard progress. Nothing is consumed, no typed text is
-/// read, and secure fields' values are skipped. Synthetic clicks (the
+/// change) count keyboard progress. Nothing is consumed and no field's value is
+/// read: the judge needs only role, label and frame. Synthetic clicks (the
 /// driver's own, when Jarvis does a step) are ignored.
 @MainActor
 final class UserActionObserver: UserActionSource {
@@ -170,8 +170,6 @@ final class UserActionObserver: UserActionSource {
             return ref as? String
         }
         guard let role = string(kAXRoleAttribute) else { return nil }
-        let secure = role == "AXSecureTextField"
-            || string(kAXSubroleAttribute) == kAXSecureTextFieldSubrole as String
         let label = [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute]
             .lazy.compactMap { string($0) }.first { !$0.isEmpty } ?? ""
         var frame: CGRect?
@@ -186,7 +184,6 @@ final class UserActionObserver: UserActionSource {
                 frame = CGRect(origin: position, size: size)
             }
         }
-        return GuideElement(role: role, label: label,
-                            value: secure ? nil : string(kAXValueAttribute), frame: frame)
+        return GuideElement(role: role, label: label, frame: frame)
     }
 }
