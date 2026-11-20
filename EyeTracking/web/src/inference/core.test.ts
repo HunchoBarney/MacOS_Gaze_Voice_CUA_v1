@@ -1909,7 +1909,14 @@ describe("daily-use robustness", () => {
   });
 });
 
-describe("inference worker", () => {
+// The worker tests drive real frames through the inference pipeline, so
+// under a loaded Mac each frame can take far longer than vi.waitFor's 1 s
+// default and the whole test longer than vitest's 5 s (#571: set_paused took
+// 5.1 s). Generous waits keep them event-driven rather than clock-bound.
+const WORKER_WAIT = { timeout: 10_000, interval: 5 };
+const WORKER_TEST_TIMEOUT_MS = 30_000;
+
+describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
   function workerConfig(accelerator: "auto" | "webgpu" | "wasm" = "wasm"): WebInferenceConfig {
     return {
       runtime: "onnxweb",
@@ -2017,10 +2024,10 @@ describe("inference worker", () => {
     // init now parks on it (model build overlaps camera acquisition), so
     // the harness must deliver it or init never reaches calibration_read.
     send({ type: "camera_geometry", width: 640, height: 480, resolutionName: "640x480" });
-    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "calibration_read")).toBe(true));
+    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "calibration_read")).toBe(true), WORKER_WAIT);
     const readRequest = workerMessages.find((m) => m.type === "calibration_read") as { id: number };
     send({ type: "calibration_read_result", id: readRequest.id, response: { ok: true, text: null } });
-    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "backend")).toBe(true));
+    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "backend")).toBe(true), WORKER_WAIT);
     workerMessages.length = 0;
     return send;
   }
@@ -2037,7 +2044,7 @@ describe("inference worker", () => {
       droppedFrames: 0,
       mainThreadLongTasks: 0
     });
-    await vi.waitFor(() => expect(workerMessages.filter((m) => m.type === "frame_done").length).toBeGreaterThan(done));
+    await vi.waitFor(() => expect(workerMessages.filter((m) => m.type === "frame_done").length).toBeGreaterThan(done), WORKER_WAIT);
   }
 
   function gazePayloads(): Array<Record<string, unknown>> {
