@@ -63,6 +63,8 @@ final class ScreenAgentLiveTests: XCTestCase {
         var name: String
         var app: String
         var goal: String
+        /// The `success_contains` a Terra agent must declare.
+        var success: [String]
         var setUp: (_ folder: URL) throws -> Void = { _ in }
         /// Answer for a consequential press Jarvis chose; nil declines.
         var askAnswer: String? = nil
@@ -70,28 +72,35 @@ final class ScreenAgentLiveTests: XCTestCase {
     }
 
     static let flows: [Flow] = [
-        Flow(name: "finder-open-inbox", app: "com.apple.finder", goal: "Open the Inbox folder",
+        Flow(name: "finder-open-inbox", app: "com.apple.finder", goal: "Open the Inbox folder", success: ["Notes"],
              setUp: { try FileManager.default.createDirectory(at: $0.appendingPathComponent("Inbox/Notes"),
                                                              withIntermediateDirectories: true) },
              check: { _, windows in windows.contains("Inbox") }),
         Flow(name: "finder-new-folder", app: "com.apple.finder", goal: "Make a new folder in this window",
+             success: ["untitled folder"],
              check: { folder, _ in
                  ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
                      .contains { $0.lowercased().hasPrefix("untitled folder") }
              }),
         Flow(name: "finder-open-file-folder-path", app: "com.apple.finder",
-             goal: "Open the Archive folder, then open the 2025 folder inside it",
-             setUp: { try FileManager.default.createDirectory(at: $0.appendingPathComponent("Archive/2025"),
-                                                             withIntermediateDirectories: true) },
+             goal: "Open the Archive folder, then open the 2025 folder inside it", success: ["q1-notes.txt"],
+             setUp: {
+                 try FileManager.default.createDirectory(at: $0.appendingPathComponent("Archive/2025"),
+                                                         withIntermediateDirectories: true)
+                 try Data("eval".utf8).write(to: $0.appendingPathComponent("Archive/2025/q1-notes.txt"))
+             },
              check: { _, windows in windows.contains("2025") }),
         Flow(name: "finder-trash-asks", app: "com.apple.finder", goal: "Move report.txt to the Trash",
+             success: ["report.txt was moved to the Trash"],
              setUp: { try Data("eval".utf8).write(to: $0.appendingPathComponent("report.txt")) },
              check: { folder, _ in
                  FileManager.default.fileExists(atPath: folder.appendingPathComponent("report.txt").path)
              }),
         Flow(name: "textedit-new-document", app: "com.apple.TextEdit", goal: "Open a new blank document",
+             success: ["Untitled"],
              check: { _, windows in windows.contains { $0.hasPrefix("Untitled") } }),
         Flow(name: "textedit-close-document", app: "com.apple.TextEdit", goal: "Close this document",
+             success: ["eval-note.txt is closed"],
              check: { _, windows in !windows.contains { $0.hasPrefix("eval-note") } }),
     ]
 
@@ -182,10 +191,11 @@ final class ScreenAgentLiveTests: XCTestCase {
                                            ask: { _, _ in flow.askAnswer })
         let started = Date()
         let result = await drives.run(agent: "eval", tool: "drive_until", arguments: .object([
-            "goal": .string(flow.goal), "app": .string(flow.app), "window_id": .number(Double(bound))]))
+            "goal": .string(flow.goal), "app": .string(flow.app), "window_id": .number(Double(bound)),
+            "success_contains": .array(flow.success.map(JSONValue.string))]))
         let seconds = Date().timeIntervalSince(started)
         try await Task.sleep(for: .milliseconds(500))
-        let titles = try await windowTitles(pid: pid)
+        let titles = try await windowTitles(pid: pid, excluding: before)
         let passed = flow.check(folder, titles)
 
         for id in Self.windowIDs(pid: pid) where !before.contains(id) {
@@ -194,7 +204,9 @@ final class ScreenAgentLiveTests: XCTestCase {
         let spent = usage.value
         return .object([
             "flow": .string(flow.name), "run": .number(Double(run)), "uncached": .bool(uncached),
-            "passed": .bool(passed), "calls": .number(Double(spent.count)),
+            "passed": .bool(passed),
+            "claimed_done": .bool((result["content"]?.array?.first?["text"]?.string ?? "").hasPrefix("Done.")),
+            "calls": .number(Double(spent.count)),
             "dollars": .number(spent.map(\.dollars).reduce(0, +)),
             "input": .number(Double(spent.map(\.input).reduce(0, +))),
             "cached": .number(Double(spent.map(\.cached).reduce(0, +))),
@@ -211,13 +223,15 @@ final class ScreenAgentLiveTests: XCTestCase {
             .compactMap { $0[kCGWindowNumber as String] as? Int }
     }
 
-    /// The app's window titles from the harness's own driver read.
-    private func windowTitles(pid: Int) async throws -> [String] {
+    /// Titles of the app's windows the flow opened, from the harness's own
+    /// driver read: a window the person already had never counts.
+    private func windowTitles(pid: Int, excluding before: Set<Int>) async throws -> [String] {
         let driver = CuaConnection()
         defer { Task { await driver.close() } }
         try await driver.connect(socket: try await CuaDaemonHost.shared.socket())
         let list = try await driver.call("list_windows", arguments: ["pid": .number(Double(pid))])
         let windows = list["structuredContent"]?["windows"]?.array ?? list["windows"]?.array ?? []
-        return windows.compactMap { $0["title"]?.string ?? $0["name"]?.string }
+        return windows.filter { !before.contains($0["window_id"]?.integer ?? -1) }
+            .compactMap { $0["title"]?.string ?? $0["name"]?.string }
     }
 }
