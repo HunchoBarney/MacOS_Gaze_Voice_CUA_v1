@@ -245,7 +245,7 @@ final class StandbyTests: XCTestCase {
     }
 
     private func testCoordinator(_ config: Config) -> VoiceTaskCoordinator {
-        VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })))
     }
 
