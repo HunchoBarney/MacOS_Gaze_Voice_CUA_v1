@@ -1,0 +1,90 @@
+# KAR-18 design phrase set. Written before the grammar; tune against this one only.
+# id	family	phrase	expect
+# expect "=X": the phrase must admit and parse exactly like the canonical command X.
+# expect "!X": the phrase must NOT admit as X (over-generalisation guard).
+DO01	open	open Safari	=open Safari
+DO02	open	launch Safari	=open Safari
+DO03	open	bring up Safari	=open Safari
+DO04	open	start Safari	=open Safari
+DO05	open	get Safari open	=open Safari
+DO06	open	fire up Safari	=open Safari
+DO07	open	pull up Notes	=open Notes
+DO08	open	open up Notes	=open Notes
+DO09	open	start up Calculator	=open Calculator
+DO10	open	get Calculator going	=open Calculator
+DO11	open	bring Notes up	=open Notes
+DO12	open	I want to open Mail	=open Mail
+DO13	open	let's open Messages	=open Messages
+DO14	open	load up Spotify	=open Spotify
+DO15	open	get Mail up	=open Mail
+DO16	open	boot up Safari	=open Safari
+DO17	open	can you get Safari open for me	=open Safari
+DO18	open	run Calculator	=open Calculator
+DO19	open	get me Notes	=open Notes
+DC01	click	press Save	=click Save
+DC02	click	tap Save	=click Save
+DC03	click	hit Save	=click Save
+DC04	click	click on Save	=click Save
+DC05	click	click the Save button	=click Save
+DC06	click	press the Save button	=click Save
+DC07	click	hit the Save button	=click Save
+DC08	click	tap on the Send button	=click Send
+DC09	click	push the Send button	=click Send
+DC10	click	select the OK button	=click OK
+DC11	click	go ahead and click Save	=click Save
+DC12	click	click the button that says Save	=click Save
+DC13	click	press the button labeled Send	=click Send
+DN01	names	show labels	=show names
+DN02	names	show me the names	=show names
+DN03	names	display the names	=show names
+DN04	names	turn on names	=show names
+DN05	names	label everything	=show names
+DN06	names	show me what I can click	=show names
+DN07	names	put the numbers up	=show names
+DN08	names	show the labels on screen	=show names
+DN09	names	hide the labels	=hide names
+DN10	names	turn off the names	=hide names
+DN11	names	get rid of the numbers	=hide names
+DF01	find	where's Notes	=where is Notes
+DF02	find	find my Notes window	=where is Notes
+DF03	find	where did Notes go	=where is Notes
+DF04	find	I can't find Notes	=where is Notes
+DF05	find	help me find Safari	=where is Safari
+DF06	find	locate Calculator	=where is Calculator
+DF07	find	find Notes	=where is Notes
+DF08	find	what happened to Mail	=where is Mail
+DD01	desktop	switch to desktop 2	=go to desktop 2
+DD02	desktop	take me to desktop two	=go to desktop 2
+DD03	desktop	switch me to desktop 2	=go to desktop 2
+DD04	desktop	move me over to desktop 2	=go to desktop 2
+DD05	desktop	hop over to desktop 2	=go to desktop 2
+DD06	desktop	I want to go to desktop 2	=go to desktop 2
+DD07	desktop	jump over to the second desktop	=go to desktop 2
+DD08	desktop	put me on desktop 2	=go to desktop 2
+DD09	desktop	head over to desktop 3	=go to desktop 3
+DD10	desktop	let's go to space 2	=go to desktop 2
+DS01	screen	what is on my screen	=what's on my screen
+DS02	screen	describe my screen	=what's on my screen
+DS03	screen	tell me what's on my screen	=what's on my screen
+DS04	screen	read my screen	=what's on my screen
+DS05	screen	what does my screen say	=what's on my screen
+DS06	screen	can you see my screen	=what's on my screen
+DS07	screen	what's on the display	=what's on my screen
+DS08	screen	summarize this page	=what's on my screen
+DS09	screen	look at my screen and tell me what you see	=what's on my screen
+DS10	screen	what's showing on my monitor	=what's on my screen
+DX01	open	don't open Safari	!open Safari
+DX02	open	is Safari open?	!open Safari
+DX03	open	get Safari closed	!open Safari
+DX04	open	I want to close Safari	!open Safari
+DX05	open	should I open Safari?	!open Safari
+DX06	open	don't bring up Safari	!open Safari
+DX07	click	don't hit Save	!click Save
+DX08	click	did you press Save?	!click Save
+DX09	click	what does the Save button do?	!click Save
+DX10	names	don't label everything	!show names
+DX11	find	I found Notes	!where is Notes
+DX12	desktop	don't take me to desktop 2	!go to desktop 2
+DX13	desktop	what's on desktop 2?	!go to desktop 2
+DX14	screen	turn off my screen	!what's on my screen
+DX15	screen	share my screen	!what's on my screen

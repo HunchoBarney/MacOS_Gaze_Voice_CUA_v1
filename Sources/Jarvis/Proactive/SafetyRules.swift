@@ -24,6 +24,7 @@ enum SafetyRules {
     ]
     /// Redirect hosts on sites that also host pages anyone can make
     /// (Google Sites and Forms), so only the exact redirect host is skipped.
+    /// Outlook's regional Safe Links hosts are matched by suffix below.
     private static let redirectorHosts: Set<String> = [
         "www.google.com", "google.com", "l.facebook.com", "lm.facebook.com", "www.linkedin.com",
         "safelinks.protection.outlook.com",
@@ -63,7 +64,8 @@ enum SafetyRules {
             for item in digest.items where item.kind == "link" {
                 guard let mismatch = ScamSignals.linkMismatch(text: item.text, url: item.url),
                       !redirectorSites.contains(ScamSignals.site(mismatch.actual)),
-                      !redirectorHosts.contains(mismatch.actual) else { continue }
+                      !redirectorHosts.contains(mismatch.actual),
+                      !mismatch.actual.hasSuffix(".safelinks.protection.outlook.com") else { continue }
                 alerts.append(ProactiveAlert(
                     key: "safety.link.\(page).\(mismatch.actual)", source: .safety, category: .security,
                     headline: "Careful: a link here says \(mismatch.shown) but goes to \(mismatch.actual)",

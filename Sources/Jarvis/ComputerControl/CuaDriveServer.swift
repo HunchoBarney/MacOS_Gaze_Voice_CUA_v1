@@ -14,8 +14,9 @@ import JarvisCore
 /// - Consent is the app's policy file: the standing grant and nothing
 ///   else. No grant → mutation calls refuse with guidance; the deny list
 ///   is code-compiled and identical for voice and agents.
-/// - `TYPESAFE_API_KEY` reaches this process through codex's `env_vars`
-///   pass-through — never written into config.toml.
+/// - `TYPESAFE_API_KEY` (and `TYPESAFE_BASE_URL` when it is this Mac's
+///   token for Jarvis's credential service) reaches this process through
+///   codex's `env_vars` pass-through — never written into config.toml.
 enum CuaDriveServer {
     /// The app's support root — the policy file and agent asks live here,
     /// shared with AgentWorkspace's parent directory.
@@ -314,7 +315,9 @@ enum CuaDriveServer {
             // command — `explicitConsent: false` puts every fast-lane and
             // bind-phase dispatch on the standing grant / per-task
             // confirm like the model-picked loop candidates.
-            let loop = DriveLoop(call: call, choose: JevChooser.make(apiKey: apiKey),
+            let baseURL = ProcessInfo.processInfo.environment["TYPESAFE_BASE_URL"].flatMap(URL.init(string:))
+            let loop = DriveLoop(call: call, choose: JevChooser.make(apiKey: apiKey,
+                                                                     baseURL: baseURL ?? JevClient.systemOneURL),
                                  ask: { await AgentAskChannel.request($0, agent: session.slug) },
                                  granted: { standingGrant() },
                                  explicitConsent: false,
