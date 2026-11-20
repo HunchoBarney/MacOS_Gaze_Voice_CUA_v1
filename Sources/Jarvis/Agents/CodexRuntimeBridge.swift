@@ -334,12 +334,9 @@ public actor CodexRuntimeBridge {
     /// jev-drive child needs no key: the app runs its loop.
     private func liveCredentials() -> [String: String] {
         var live: [String: String] = [:]
-        for key in [configuration.provider.envKey] where !key.isEmpty {
-            let value: String?
-            switch key {
-            case "OPENAI_API_KEY": value = Config.shared.openAIAPIKey
-            default: value = ProcessInfo.processInfo.environment[key]
-            }
+        let key = configuration.provider.envKey
+        if !key.isEmpty {
+            let value = key == "OPENAI_API_KEY" ? Config.shared.openAIAPIKey : ProcessInfo.processInfo.environment[key]
             if let value, !value.isEmpty { live[key] = value }
         }
         return live

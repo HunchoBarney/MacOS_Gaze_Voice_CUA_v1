@@ -1,0 +1,8 @@
+# The macOS engine Jarvis's flows run on: @e2e-dev/desktop from
+# e2e-inc/e2e#1953, which is open and unreleased. install.sh builds it from
+# this exact commit against the published @e2e-dev/core. When a release ships
+# it, depend on that version in package.json and delete this file.
+E2E_REPO=https://github.com/e2e-inc/e2e.git
+E2E_PR=1953
+E2E_ENGINE_COMMIT=7e0b7d224090178c2161ad12d27b79b61ff87f00
+E2E_CORE_VERSION=0.24.0

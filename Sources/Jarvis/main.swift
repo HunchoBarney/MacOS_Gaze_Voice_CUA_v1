@@ -139,6 +139,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Composition seams: gaze-tap commit and the universal stop.
         wireLocalIntelligence()
 
+        // Register with Jarvis's credential service on first launch, so the
+        // first command doesn't wait on it and agents find a token.
+        if let hosted = controller.config.hosted {
+            Task { _ = try? await hosted.installToken() }
+        }
+
         agentRuntime = Self.makeAgentRuntime()
         // The agents runtime boots after the controller exists — the voice
         // delegation seam is wired late, never guessed at init time. A user
@@ -237,6 +243,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.refreshPermissions()
         if ProcessInfo.processInfo.arguments.contains("--settings") {
             windows.show(.voice)
+        } else if ProcessInfo.processInfo.arguments.contains("--first-run") {
+            windows.showFirstRun()
         } else if !controller.config.firstRunCompleted {
             if Permission.microphone.isGranted && Permission.accessibility.isGranted {
                 controller.config.firstRunCompleted = true
@@ -375,7 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // thing. Push as a task_outcome so the lane voices `say` verbatim
             // instead of answering bare text as if it were a question.
             let lead = String((text.split(separator: ".").first.map(String.init) ?? text).prefix(200))
-            let say = VoiceToolResult.spoken(lead, words: 30)
+            let say = OutcomeWording.headline(lead)
             let payload = VoiceToolResult(
                 kind: VoiceToolResult.Kind.taskOutcome,
                 status: VoiceToolResult.Status.ok,
@@ -391,7 +399,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // the MCP child without touching disk. The child forwards every
         // call here, and the app runs the loop with its own keys and grant.
         let drives = CuaDriveServer.Drives(
-            chooser: { JevChooser.make(apiKey: Config.shared.apiKey) },
+            chooser: {
+                { state, candidates in
+                    let route = try await Config.shared.jevRoute()
+                    let choose = route.map { JevChooser.make(apiKey: $0.bearer, baseURL: $0.url) }
+                        ?? JevChooser.make(apiKey: "")
+                    return try await choose(state, candidates)
+                }
+            },
             granted: { Config.shared.alwaysAllowComputerUse })
         let host = agentDriveHost ?? AgentDriveHost { agent, tool, arguments in
             await drives.run(agent: agent, tool: tool, arguments: arguments)
