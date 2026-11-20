@@ -1367,9 +1367,14 @@ final class FastLaneExecutorTests: XCTestCase {
 
     // MARK: - locate
 
-    /// An off-screen row activates its app and a verified return to screen
-    /// is the honest "brought it back" — never a claim without the readback.
+    /// An off-screen row nothing else explains (not minimized, hidden or
+    /// full screen) is on another desktop: activation takes the person there
+    /// and only a verified return to screen says so — never a claim without
+    /// the readback.
     func testLocateRestoresOffscreenWindow() async {
+        let old = DriveLoop.displayFrames
+        defer { DriveLoop.displayFrames = old }
+        DriveLoop.displayFrames = { [(frame: CGRect(x: 0, y: 0, width: 1440, height: 900), scale: 2)] }
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Notes", "com.apple.Notes", pid: 42)])]
         driver.responses["list_windows"] = [
@@ -1381,13 +1386,19 @@ final class FastLaneExecutorTests: XCTestCase {
         var activated: [Int] = []
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
-                             activateApp: { activated.append($0) })
+                             activateApp: { activated.append($0) },
+                             appIsHidden: { _ in false },
+                             windowAttributes: .init(minimized: { _, _ in false },
+                                                     setMinimized: { _, _, _ in false },
+                                                     fullScreen: { _, _ in false },
+                                                     setFullScreen: { _, _, _ in false },
+                                                     raise: { _, _ in false },
+                                                     stageManager: { false }))
         let result = await loop.run(DriveTask(goal: "where did my notes go"),
                                     session: "t")
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(activated, [42])
-        XCTAssertTrue((result.history.last ?? "").contains("brought it back"),
-                      result.history.last ?? "")
+        XCTAssertEqual(result.history.last, "It was on your other desktop. You're there now.")
     }
 
     /// No matching row is an honest "I can't find it" — the refusal names

@@ -172,7 +172,7 @@ actor DriveLoop {
     /// autonomous effects and ride `CuaPolicy.decide`'s grant/confirm
     /// path like every other model-picked mutation.
     let explicitConsent: Bool
-    private let resolver: AppResolver
+    let resolver: AppResolver
     private let config: Config
     /// Serializes activation-prone calls (raise, host-side activate, menu
     /// focus) so parallel tasks can't interleave a raise with another
@@ -212,6 +212,9 @@ actor DriveLoop {
     let windowControlPress: (WindowControls.Kind, pid_t) -> Bool
     let windowControlButtonsInWindow: (pid_t, Int) -> [WindowControls.Button]
     let windowControlPressInWindow: (WindowControls.Kind, pid_t, Int) -> Bool
+    /// Minimized, full-screen, raise and Stage Manager reads and writes for
+    /// the lost-window and exit-full-screen lanes — same seam posture.
+    let windowAttributes: WindowControls.Attributes
     private let nativeReadOnly: NativeWindowObservation.Read
     let nativeScrollRead: NativeWindowObservation.ScrollRead
     let nativeScrollControl: NativeWindowObservation.ScrollControl
@@ -322,6 +325,7 @@ actor DriveLoop {
          windowControlPress: ((WindowControls.Kind, pid_t) -> Bool)? = nil,
          windowControlButtonsInWindow: ((pid_t, Int) -> [WindowControls.Button])? = nil,
          windowControlPressInWindow: ((WindowControls.Kind, pid_t, Int) -> Bool)? = nil,
+         windowAttributes: WindowControls.Attributes = .live,
          overlayDispatch: ((FastAction.OverlayVerb,
                             [(frame: CGRect, label: String)],
                             CGPoint?) async -> DriveResult?)? = nil,
@@ -472,6 +476,7 @@ actor DriveLoop {
         self.windowControlPressInWindow = windowControlPressInWindow ?? { kind, pid, windowID in
             windowControlPress?(kind, pid) ?? WindowControls.press(kind, pid: pid, windowID: windowID)
         }
+        self.windowAttributes = windowAttributes
         self.overlayDispatch = overlayDispatch
         self.frontmostBundleID = frontmostBundleID
         self.frontmostPID = frontmostPID
@@ -1244,7 +1249,7 @@ actor DriveLoop {
                  .repeatLast, .locate, .dictation, .webSearch, .navigateURL:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,
-                 .menu, .windowFrame, .clickNamed, .showNamed:
+                 .menu, .windowFrame, .clickNamed, .showNamed, .exitFullScreen:
                 return true
             }
         }
