@@ -1,6 +1,6 @@
 # End-to-end flows
 
-Five flows that run the signed Jarvis the way a person uses it, through
+Flows that run the signed Jarvis the way a person uses it, through
 [e2e](https://github.com/e2e-inc/e2e) and its macOS engine
 (`@e2e-dev/desktop`, built on
 [agent-desktop](https://github.com/vercel-labs/agent-desktop)). They cover only
@@ -19,6 +19,17 @@ turns on the owner's key, so they run **only when the owner says go**
 | `screen-question` | "Hey Jarvis, what is the code word in this window?" | microphone, Realtime | Activity shows an answer with "pelican", read from the board |
 | `wake-word` | Standby ignores "open Calculator", then runs "Hey Jarvis, open Calculator" | microphone, Realtime | no Calculator after the first line, one after the second |
 | `stop-scroll` | "Hey Jarvis, scroll down", "keep scrolling", then "stop" mid-scroll on the fixture list; all three are decided on the Mac, with no model call | microphone, Realtime transcription | the list's own record of its scroll offset: it moves on its own, stops after "stop" short of the end, and stays put for 5 s |
+| `hardened-runtime` | #548: launch, the wake word (libvosk loads), the eye tracker's API and a Cua action under the hardened runtime | Jarvis's camera grant (`tracker` target) | the runtime flag in the signature, a live Jarvis, `/health` on the tracker port, no library-validation lines in `tracker.log`, one Calculator, no permission prompt in the system log |
+| `daemon-host-only` | #560 items 25–28: open Calculator and "type 2 plus 2"; a new Safari tab on apple.com, a bigger window, File > New Window; another process refused at the daemon socket | microphone, Realtime, network | Calculator's process, the field fixture's record, Safari's window sizes, count and page URL through Accessibility, the daemon closing a handshake from the test process on Jarvis's socket without an answer |
+| `agent-handoff` | #562 item 24: "have an agent open a new blank document in TextEdit" goes through Jarvis's agent socket | **paid**: one Codex turn and a Jev call; TextEdit closed beforehand | an Untitled TextEdit window, through Accessibility |
+| `sleep-wake` | #560 item 29: voice still works after the Mac sleeps and wakes | **the owner** closes and opens the lid | the kernel's wake time changes, then one Calculator |
+| `stop-controls` | #583: a held Fn opens nothing; Stop shows in the menu-bar menu only while a task runs and stops it; a posted Escape doesn't stop a task; a keyboard Escape does. The Fn check runs only when "Press 🌐 key to" is set to Do Nothing (`AppleFnUsageType` 0), because a posted Fn would otherwise open the emoji picker or switch the input source | **the owner** presses Escape for the last check | Calculator's process, Jarvis's menu-bar menu through Accessibility, the list fixture's scroll record |
+| `writing` | L7 (#595): "type this: meet Dana at 5:45" lands verbatim in the focused field; "come up with a reply for this" puts a draft in Reply and doesn't send it | `voice.live` (`live` target); Jarvis's Speech Recognition grant for typing at once; the reply is **paid** | the field fixture's record, and the message fixture's record of Reply and of any Send press |
+
+The flows for #548, #560, #562 and #583 need a build that contains those
+pull requests; on main without them they fail, which is what they're for.
+Flows marked paid run only with `JARVIS_E2E_PAID=1`, and owner steps only with
+`JARVIS_E2E_OWNER=1`: the run prints `>>> e2e needs you:` with the one thing to do.
 
 The checks read the Mac (processes, the board's own record, saved settings)
 or Jarvis's ordinary windows (Set up Jarvis, Settings → Activity), never the
@@ -54,6 +65,8 @@ which takes about 5–6 minutes:
 | `JARVIS_E2E_APP` | `~/jarvis-local/Jarvis.app` | the signed build to test |
 | `JARVIS_E2E_AUDIO` | `speakers` | `blackhole` sends the lines through BlackHole 2ch, silently |
 | `JARVIS_E2E_ONLY` | all | one flow by name |
+| `JARVIS_E2E_PAID` | off | `1` adds the agent turn and the reply draft |
+| `JARVIS_E2E_OWNER` | off | `1` adds the steps that need the owner: Escape and sleep |
 
 ## What the first run has to prove
 
@@ -66,8 +79,13 @@ which takes about 5–6 minutes:
 ## Permissions
 
 The app that starts `make e2e` (Terminal, or Capy) needs Accessibility, to
-read and press Jarvis's windows, and Screen Recording, for the
-failure screenshots. Jarvis needs its usual Microphone and Accessibility.
+read and press Jarvis's windows and other apps' controls and to post the Fn
+and Escape keys, and Screen Recording, for the failure screenshots.
+`scripts/run.sh` only checks these and stops with what to grant; it never
+asks. Jarvis needs its own Microphone, Accessibility and Screen Recording,
+Camera for `hardened-runtime`, and Speech Recognition for `writing` to type
+at once instead of asking "Type this?" first. Every prompt a flow sees for
+Jarvis in the system log fails the flows that check for one.
 
 ## The engine pin
 
