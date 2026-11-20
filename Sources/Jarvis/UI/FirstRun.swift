@@ -86,6 +86,7 @@ final class FirstRunModel: ObservableObject {
     }
 
     nonisolated static func systemMicrophoneGrant() -> Grant {
+        if MicrophoneTestGuard.blocksRealMicrophone { return .refused }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: return .granted
         case .denied, .restricted: return .refused

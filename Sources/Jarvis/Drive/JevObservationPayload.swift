@@ -136,8 +136,6 @@ struct JevObservationPayload: Encodable {
                 return .choice(instructions: guide + instructions, criteria: criteria)
             case .score(let instructions, let levels):
                 return .score(instructions: guide + instructions, levels: levels)
-            case .box(let instructions):
-                return .box(instructions: guide + instructions)
             }
         }
         let result = Self(state: .object(shared), questions: annotated)
