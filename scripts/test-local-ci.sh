@@ -168,6 +168,7 @@ poll_setup fresh
 printf '%s\n' \
     "2026-11-20T09:00:00Z dddd pr#3" \
     "2026-11-20T08:00:00Z eeee pr#2" >"$dir/poll-fresh/heads"
+for s in dddd eeee mmmm; do echo 3000 >"$dir/poll-fresh/seen/$s"; done
 pick_is fresh "main"
 echo mmmm >"$dir/poll-fresh/done"
 pick_is fresh "pr#2"
