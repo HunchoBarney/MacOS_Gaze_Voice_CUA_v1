@@ -64,3 +64,5 @@ Crash and hang reports from MetricKit are kept in
 
 This project started from
 [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).
+
+All rights reserved, no licence granted: see [LICENSE](LICENSE). ThirdParty/ keeps its own licences.
