@@ -48,7 +48,6 @@ actor DriveLoop {
         var model: String? = nil
         var latencyMs: Double? = nil
         var requestCount = 1
-        var proposedActionID: String? = nil
         var actionSupport: [String: Double] = [:]
         var actionRejection: ActionRejection? = nil
         var goalFactID: String? = nil
