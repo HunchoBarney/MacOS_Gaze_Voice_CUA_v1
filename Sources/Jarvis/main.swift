@@ -395,7 +395,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard Config.shared.terraScreenAgents else { return JevChooser.make(apiKey: Config.shared.apiKey) }
                 return TerraChooser.make(client: TerraClient(apiKey: { Config.shared.openAIAPIKey }))
             },
-            granted: { Config.shared.alwaysAllowComputerUse })
+            granted: { Config.shared.alwaysAllowComputerUse },
+            requiresSuccessEvidence: { Config.shared.terraScreenAgents })
         let host = agentDriveHost ?? AgentDriveHost { agent, tool, arguments in
             await drives.run(agent: agent, tool: tool, arguments: arguments)
         }
