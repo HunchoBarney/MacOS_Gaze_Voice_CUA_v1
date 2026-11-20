@@ -1562,17 +1562,13 @@ final class FastLaneExecutorTests: XCTestCase {
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Mail", title: "Inbox",
                       x: 100, y: 100, w: 800, h: 600)])]
-        driver.responses["get_window_state"] = [.object([
-            "window_bounds": .object(["x": .number(100), "y": .number(100),
-                                      "width": .number(800), "height": .number(600)]),
-            "screenshot_scale": .number(2),
-            "elements": .array([
-                .object(["element_index": .number(1), "role": .string("AXTextField"),
-                         "value": .string("Your order ships Friday"),
-                         "frame": .object(["x": .number(100), "y": .number(100),
-                                           "w": .number(600), "h": .number(200)]),
-                         "actions": .array([.string("AXSetValue")])]),
-            ])])]
+        let old = DriveLoop.screenReader
+        defer { DriveLoop.screenReader = old }
+        DriveLoop.screenReader = { _ in
+            ScreenContext.digest(app: "Mail", bundleID: "com.apple.mail", windowTitle: "Inbox", root: ScreenNode(
+                role: "AXWindow", children: [ScreenNode(role: "AXTextField", value: "Your order ships Friday",
+                                                        frame: CGRect(x: 100, y: 100, width: 600, height: 200))]))
+        }
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200)) // window-local (100,100)pt → (200,200)px, inside the field
@@ -1590,12 +1586,13 @@ final class FastLaneExecutorTests: XCTestCase {
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Fixture", title: "Owned",
                       x: 634, y: 160, w: 656, h: 422)])]
-        driver.responses["get_window_state"] = [.object(["elements": .array([
-            .object(["element_index": .number(1), "role": .string("AXTextField"),
-                     "value": .string("Coordinate fixture"),
-                     "frame": .object(["x": .number(634), "y": .number(192),
-                                       "w": .number(656), "h": .number(384)])])
-        ])])]
+        let old = DriveLoop.screenReader
+        defer { DriveLoop.screenReader = old }
+        DriveLoop.screenReader = { _ in
+            ScreenContext.digest(app: "Fixture", bundleID: nil, windowTitle: "Owned", root: ScreenNode(
+                role: "AXWindow", children: [ScreenNode(role: "AXTextField", value: "Coordinate fixture",
+                                                        frame: CGRect(x: 634, y: 192, width: 656, height: 384))]))
+        }
         let loop = DriveLoop(call: { try driver.call($0, $1) }, choose: { _, _ in nil },
                              ask: nil, granted: { true }, gaze: gaze(700, 220))
         let result = await loop.run(DriveTask(goal: "what is this"), session: "native-frame")

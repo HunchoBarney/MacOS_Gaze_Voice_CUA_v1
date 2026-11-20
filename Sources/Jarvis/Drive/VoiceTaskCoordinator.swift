@@ -2534,6 +2534,20 @@ final class VoiceTaskCoordinator {
         return CGPoint(x: sample.x, y: sample.y)
     }
 
+    private var answerGlowRetire: Task<Void, Never>?
+
+    /// The glow on the control a screen answer names. It stays 8 s so a
+    /// slow reader can find it; the next glow replaces it.
+    func glowAnswer(frame: CGRect) {
+        overlay.showHalo(frame: frame)
+        answerGlowRetire?.cancel()
+        answerGlowRetire = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            self?.overlay.hideHalo()
+        }
+    }
+
     /// One halo arm: window under the gaze point, then the deepest element
     /// containing it — silent on every miss, this is a hint not a claim.
     /// Native AX frames and gaze share global top-left screen points.

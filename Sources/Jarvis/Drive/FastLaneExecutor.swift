@@ -1638,49 +1638,26 @@ extension DriveLoop {
         }
     }
 
-    /// "What is this" — read back the window under the gaze point, plus the
-    /// deepest element containing it when the window's AX tree exposes one.
-    /// Native AX frames already use the gaze point's global screen space.
+    /// The screen reader the gaze "what is this" goes through. Tests swap
+    /// in a fixed digest; the live read walks the window's AX tree.
+    nonisolated(unsafe) static var screenReader: @Sendable (WindowRef) async -> ScreenDigest? = {
+        await ScreenContext.read($0)
+    }
+
+    /// "What is this" — the window under the gaze point, read through the
+    /// screen reader so secret fields and password managers stay unread,
+    /// then the smallest element containing the point. Native AX frames
+    /// already use the gaze point's global screen space.
     private func describeGaze(at point: CGPoint, task: DriveTask, session: String,
                               history: inout [String]) async throws -> DriveResult {
         guard let target = try await windowAtPoint(point, session: session) else {
             return done("You're looking at the desktop — no window is under that point.",
                         task, history, effect: true)
         }
-        let snap = try await observe("get_window_state",
-            ["pid": .number(Double(target.pid)),
-             "window_id": .number(Double(target.windowID)),
-             // Native AX screen rectangles need no screenshot transform.
-             "include_screenshot": .bool(false),
-             "session": .string(session)])
-        let content = snap["structuredContent"] ?? snap
-        var say = target.title.isEmpty
-            ? "That's \(target.app)'s window."
-            : "That's \(target.app)'s “\(target.title)” window."
-        let hit = Self.elements(from: content)
-            .filter { Self.nativeAXScreenRect($0)?.contains(point) == true }
-            .min(by: { $0.frame.w * $0.frame.h < $1.frame.w * $1.frame.h })
-        if let hit {
-            // A label is the element's name; a value is its content —
-            // an unlabeled field still has something to say ("a text
-            // field that says '…'"), and a labeled one can carry both.
-            // The role goes through speakableRole so an AXTextField
-            // arrives as "a text field", not a constant name.
-            let role = Self.speakableRole(hit.role)
-            if !hit.label.isEmpty {
-                say = "That's a \(role), “\(hit.label)”"
-                if let value = hit.value, !value.isEmpty, value != hit.label {
-                    say += " that says “\(value)”"
-                }
-                say += " in \(target.app)."
-            } else if let value = hit.value, !value.isEmpty {
-                say = "That's a \(role) that says “\(value)” in \(target.app)."
-            } else {
-                say = "That's a \(role) in \(target.app)."
-            }
-        }
-        return done(say, task, history, pid: target.pid, windowID: target.windowID,
-                    effect: true)
+        let digest = await Self.screenReader(WindowRef(pid: target.pid, windowID: target.windowID))
+            ?? ScreenDigest(app: target.app, windowTitle: target.title)
+        return done(ScreenQuestion.describe(at: point, in: digest), task, history,
+                    pid: target.pid, windowID: target.windowID, effect: true)
     }
 
     /// An AX role as spoken words — "AXTextField" and "textField" both
