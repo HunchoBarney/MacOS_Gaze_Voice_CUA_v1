@@ -133,7 +133,7 @@ final class RealtimeTurnBenchTests: XCTestCase {
         let store = KeychainAPIKeyStore(service: env["JARVIS_BENCH_KEY_SERVICE"] ?? "com.karanvirkang.jarvis",
                                         account: "openAIAPIKey", allowUserInteraction: false)
         let key = try XCTUnwrap(env["OPENAI_API_KEY"].flatMap { $0.isEmpty ? nil : $0 } ?? (try store.read()),
-                                "no OpenAI key in OPENAI_API_KEY or the Keychain")
+                                "no OpenAI key in OPENAI_API_KEY or the Keychain (the Keychain needs JARVIS_LIVE_KEYCHAIN=1)")
         var ledger = Ledger(ledgerURL)
 
         let wireBox = LockedBox<RecordingWire?>(nil)
