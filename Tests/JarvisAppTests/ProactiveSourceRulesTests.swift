@@ -28,9 +28,18 @@ final class ProactiveSourceRulesTests: XCTestCase {
         XCTAssertEqual(alerts.count, 1)
         let alert = try XCTUnwrap(alerts.first)
         XCTAssertEqual(alert.category, .meetingNow)
-        XCTAssertEqual(alert.spoken, "Standup starts in 2 minutes. Want me to open the meeting link?")
+        XCTAssertTrue(alert.spoken.hasPrefix("Standup starts at 8:02"), alert.spoken)
+        XCTAssertTrue(alert.spoken.hasSuffix("M. Want me to open the meeting link?"), alert.spoken)
         XCTAssertEqual(alert.action, .openURL(link))
-        XCTAssertEqual(alert.expires, now.addingTimeInterval(420))
+        XCTAssertEqual(alert.expires, now.addingTimeInterval(240))
+    }
+
+    func testAMeetingHeadlineStaysTrueWhileTheAlertIsHeld() throws {
+        let alert = try XCTUnwrap(CalendarRules.alerts([event("a", "Standup", in: 1.5)], now: now, calendar: calendar).first)
+        XCTAssertFalse(alert.headline.contains("minute"), "a countdown goes stale while the engine holds or bundles it")
+        XCTAssertTrue(alert.headline.hasPrefix("Standup starts at 8:01"), alert.headline)
+        let soon = try XCTUnwrap(CalendarRules.alerts([event("b", "Sync", in: 0.75)], now: now, calendar: calendar).first)
+        XCTAssertEqual(soon.headline, "Sync starts now")
     }
 
     func testAllDayDeclinedAndPastMeetingsAreSkipped() {

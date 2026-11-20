@@ -13,7 +13,9 @@ struct CalendarEventSnapshot: Equatable, Sendable {
 }
 
 /// Speak-now calendar alerts: a meeting starting within two minutes, and
-/// two meetings in the next hour that overlap.
+/// two meetings in the next hour that overlap. A meeting's headline names
+/// its start time rather than a countdown, because the engine may hold or
+/// bundle an alert for up to two minutes before it is spoken.
 enum CalendarRules {
     static let lead: TimeInterval = 120
     static let clashHorizon: TimeInterval = 3_600
@@ -25,15 +27,14 @@ enum CalendarRules {
         for event in timed {
             let until = event.start.timeIntervalSince(now)
             guard until <= lead, until > -60 else { continue }
-            let minutes = Int((until / 60).rounded(.up))
-            let when = minutes <= 0 ? "starts now" : minutes == 1 ? "starts in 1 minute" : "starts in \(minutes) minutes"
+            let when = until <= 60 ? "starts now" : "starts at \(time(event.start, calendar))"
             alerts.append(ProactiveAlert(
                 key: "calendar.now.\(event.id).\(Int(event.start.timeIntervalSince1970))",
                 source: .calendar, category: .meetingNow,
                 headline: "\(name(event)) \(when)",
                 offer: event.meetingLink == nil ? nil : "Want me to open the meeting link?",
                 action: event.meetingLink.map { .openURL($0) },
-                at: now, expires: event.start.addingTimeInterval(300)))
+                at: now, expires: event.start.addingTimeInterval(lead)))
         }
         let soon = timed.filter { $0.start > now && $0.start.timeIntervalSince(now) <= clashHorizon }
         for (index, first) in soon.enumerated() {
