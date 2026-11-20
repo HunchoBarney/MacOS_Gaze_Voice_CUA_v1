@@ -11,6 +11,7 @@ private actor ComfortWire: RealtimeVoiceWire {
     private var closed = false
     private var written: [JSONValue] = []
     var rejectStyle = false
+    var rejectionCode = "invalid_value"
 
     func send(_ text: String) throws {
         guard !closed else { throw CancellationError() }
@@ -20,6 +21,7 @@ private actor ComfortWire: RealtimeVoiceWire {
         if rejectStyle, let id = frame["event_id"]?.string {
             try push(["type": .string("error"),
                       "error": .object(["type": .string("invalid_request_error"),
+                                        "code": .string(rejectionCode),
                                         "message": .string("fixture rejection"),
                                         "event_id": .string(id)])])
             return
@@ -45,7 +47,7 @@ private actor ComfortWire: RealtimeVoiceWire {
         else { incoming.append(text) }
     }
 
-    func setRejectStyle(_ value: Bool) { rejectStyle = value }
+    func setRejectStyle(_ value: Bool, code: String = "invalid_value") { rejectStyle = value; rejectionCode = code }
     func updates() -> [JSONValue] { written.filter { $0["type"]?.string == "session.update" } }
 }
 
@@ -254,6 +256,25 @@ final class ComfortPreferencesTests: XCTestCase {
         await waitFor { await wire.updates().count == 2 }
         await wire.setRejectStyle(false)
         try await client.configureInput(.manual)
+        XCTAssertEqual(client.inputMode, .manual)
+        XCTAssertTrue(client.isReady)
+    }
+
+    func testRejectedStyleChangeNeverReachesTheLaneAsAFailure() async throws {
+        let wire = ComfortWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        defer { client.teardown() }
+        let failures = LockedBox(0)
+        client.onEvent = { events in
+            for case .failure(_) = events { failures.set(failures.value + 1) }
+        }
+        try await client.connect(apiKey: "fixture-not-a-real-key")
+        await wire.setRejectStyle(true, code: "session_update_rejected")
+        try await client.setReplyStyle(.init(speed: 0.7, length: .standard))
+        await waitFor { await wire.updates().count == 2 }
+        await wire.setRejectStyle(false)
+        try await client.configureInput(.manual)
+        XCTAssertEqual(failures.value, 0, "a refused style change is the client's own business")
         XCTAssertEqual(client.inputMode, .manual)
         XCTAssertTrue(client.isReady)
     }

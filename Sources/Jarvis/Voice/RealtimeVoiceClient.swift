@@ -751,8 +751,9 @@ final class RealtimeVoiceClient {
         }
         if envelope.kind == "error",
            let frame = try? JSONDecoder().decode(JSONValue.self, from: Data(payload.utf8)),
-           let eventID = frame["error"]?["event_id"]?.string {
-            _ = await acknowledgeReplyStyle(connection: identity, rejected: eventID)
+           let eventID = frame["error"]?["event_id"]?.string,
+           await acknowledgeReplyStyle(connection: identity, rejected: eventID) {
+            return
         }
         for event in envelope.events {
             if case .sessionUpdated = event {
