@@ -138,7 +138,7 @@ private struct ProblemCard: View {
             Text(message).font(.system(size: 15)).foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
             if !controller.detail.isEmpty, controller.detail != message {
-                Text(controller.detail).font(.system(size: 13)).foregroundStyle(.white.opacity(0.75))
+                Text(OutcomeWording.readable(controller.detail)).font(.system(size: 13)).foregroundStyle(.white.opacity(0.75))
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {

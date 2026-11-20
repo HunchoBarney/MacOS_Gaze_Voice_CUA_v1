@@ -1832,18 +1832,11 @@ final class VoiceTaskCoordinator {
         case .alreadySatisfied:
             return (.alreadyDone, "That's already done.")
         case .blocked(let why), .blockedByConsent(let why):
-            if result.blockedReason == DriveLoop.scrollUnverifiedReason { return (.uncertain(why), why) }
-            return (.blocked(why), why)
+            let say = OutcomeWording.blocked(why, reason: result.blockedReason)
+            if result.blockedReason == DriveLoop.scrollUnverifiedReason { return (.uncertain(why), say) }
+            return (.blocked(why), say)
         case .handedBack(let reason):
-            // Low confidence means "I won't guess" — the honest remedy is
-            // the numbered overlay, not another drive round. Other
-            // reasons keep the generic line.
-            if reason == .lowConfidence {
-                return (.blocked(reason.rawValue),
-                        "I'm not sure which one you mean. Say “show names”, then “click” and the name.")
-            }
-            return (.blocked(reason.rawValue),
-                    "I couldn't pick a confident next step.")
+            return (.blocked(reason.rawValue), OutcomeWording.handedBack(reason))
         case .needsText(let field):
             return (.blocked("needs text for \(field)"),
                     "I need the text for \(field).")
@@ -2624,15 +2617,12 @@ final class VoiceTaskCoordinator {
         "show commands"
     ]
 
-    /// "What did you do" answered from the task's own ledger — the history
-    /// tail plus the outcome line, never a model paraphrase.
-    private static func recap(of work: Work) -> String {
-        let tail = work.history.suffix(3).map {
-            $0.replacingOccurrences(of: "\"", with: "")
-        }
-        let outcome = work.message.isEmpty ? "Finished." : work.message
-        guard !tail.isEmpty else { return "Last task: \(work.label) — \(outcome)" }
-        return "I \(tail.joined(separator: "; then ")). \(outcome)"
+    /// "What did you do" — what you asked and how it ended, in the same
+    /// words Jarvis used at the time. The history ledger is for Activity
+    /// and logs, not for reading aloud.
+    static func recap(of work: Work) -> String {
+        let outcome = work.message.isEmpty ? "Done." : OutcomeWording.readable(work.message)
+        return "You asked me to \(work.request). \(outcome)"
     }
 
     /// The spoken answer to "what can I say" — voice first, with the

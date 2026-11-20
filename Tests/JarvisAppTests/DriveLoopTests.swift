@@ -886,7 +886,7 @@ final class DriveLoopTests: XCTestCase {
         XCTAssertEqual(result.consentBlock, .declined)
         // Consent is one radial-shaped choice ask — Yes/No here because no
         // app is bound (a bound app adds "Always for <name>").
-        XCTAssertEqual(asked, [.choice(prompt: "Allow computer control: click on 'Save'?",
+        XCTAssertEqual(asked, [.choice(prompt: "Can I click “Save”?",
                                       options: ["Yes", "No"])])
         XCTAssertFalse(driver.calls.contains { $0.tool == "click" })
     }

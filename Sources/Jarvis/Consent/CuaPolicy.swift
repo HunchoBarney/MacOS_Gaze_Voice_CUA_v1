@@ -191,10 +191,7 @@ enum CuaPolicy {
         if standingGrant || scopedGrant { return .allow }
         let target = elementText?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let prompt = target.isEmpty
-            ? "Allow computer control: \(tool)?"
-            : "Allow computer control: \(tool) on '\(String(target.prefix(48)))'?"
-        return .needsConfirm(prompt)
+        return .needsConfirm(OutcomeWording.consentQuestion(tool: tool, target: target))
     }
 
     /// Every string payload an arg carries — `.string` itself, or the

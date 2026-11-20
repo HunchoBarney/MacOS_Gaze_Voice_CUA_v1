@@ -108,12 +108,14 @@ final class CuaPolicyTests: XCTestCase {
         XCTAssertTrue(prompt.contains("Open Folder"), prompt)
     }
 
-    /// An element-less mutation still names the tool it would run.
-    func testConfirmPromptWithoutTargetNamesTool() {
+    /// An element-less mutation still says what it would do — in words,
+    /// never the tool id.
+    func testConfirmPromptWithoutTargetNamesTheAction() {
         guard case .needsConfirm(let prompt) = decide("press_key") else {
             return XCTFail("expected a confirm prompt")
         }
-        XCTAssertTrue(prompt.contains("press_key"), prompt)
+        XCTAssertEqual(prompt, "Can I press those keys for you?")
+        XCTAssertFalse(prompt.contains("press_key"), prompt)
     }
 
     func testEffectToolAllowedWithGrant() {
