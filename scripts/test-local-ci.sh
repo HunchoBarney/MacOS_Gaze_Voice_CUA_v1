@@ -100,7 +100,8 @@ check() {
 
 home=$(ci_run passes 0)
 check "$home" lane.log "priority=high no_mirror=1 pwd=$home/checkout args=make test"
-check "$home" gh.log "state=success -f context=local-ci -f description=swift 2/0 fail · vitest 292/292"
+main=$(git -C "$dir/origin-passes" rev-parse --short=7 HEAD)
+check "$home" gh.log "state=success -f context=local-ci -f description=success on main $main · swift 2/0 fail · vitest 292/292"
 
 home=$(ci_run lane-busy 1)
 check "$home" gh.log "state=error -f context=local-ci -f description=build lane busy"
@@ -109,7 +110,7 @@ if grep -q state=failure "$home/gh.log"; then
 fi
 
 home=$(ci_run no-guard 0 none)
-check "$home" gh.log "state=error -f context=local-ci -f description=merge main first"
+check "$home" gh.log "state=error -f context=local-ci -f description=the merge with main $(git -C "$dir/origin-no-guard" rev-parse --short=7 HEAD) lacks the #598 Keychain test guard"
 if [ -e "$home/lane.log" ]; then
     echo "FAIL a head without the Keychain test guard must never reach the lane"; failures=$((failures + 1))
 fi
@@ -122,6 +123,66 @@ done
 check "$home" gh.log "state=error -f context=local-ci -f description=no build lane at"
 if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a missing lane must not post failure"; failures=$((failures + 1))
+fi
+
+# A PR head is tested merged into current main: main moved on after the PR
+# branched, and only main has the Keychain guard. The merge is never
+# committed, and the status on the head names the main it was tested on.
+# A head that conflicts with main posts error and never reaches the lane.
+merge_origin() {
+    local o=$dir/origin-$1
+    git init -q -b main "$o"
+    gitc() { git -C "$o" -c user.name=ci -c user.email=ci@example.invalid "$@"; }
+    echo base >"$o/a.txt" && gitc add a.txt && gitc commit -q -m base
+    gitc switch -q -c pr
+    echo "$2" >"$o/$3" && gitc add "$3" && gitc commit -q -m pr
+    git -C "$o" rev-parse HEAD >"$o.head"
+    gitc switch -q main
+    mkdir -p "$o/Sources" && echo 'let optIn = "JARVIS_LIVE_KEYCHAIN"' >"$o/Sources/Guard.swift"
+    echo main >"$o/a.txt" && gitc add -A && gitc commit -q -m "main moves on"
+}
+
+merge_run() {
+    local home=$dir/ci-$1 sha; sha=$(cat "$dir/origin-$1.head")
+    mkdir -p "$home"
+    git clone -q "$dir/origin-$1" "$home/checkout"
+    cat >"$dir/gh-$1" <<EOF
+#!/bin/bash
+echo "\$*" >>"$home/gh.log"
+case "\$*" in *"commits/$sha --jq .sha"*) echo $sha ;; esac
+EOF
+    cat >"$dir/lane-$1" <<EOF
+#!/bin/bash
+{ echo "head=\$(git rev-parse HEAD)"; for f in \$(git ls-files) b.txt; do [ -f "\$f" ] && echo "\$f=\$(cat "\$f")"; done; } >"$home/lane.log"
+cat "$dir/passing.log"
+EOF
+    chmod +x "$dir/gh-$1" "$dir/lane-$1"
+    for mode in "$sha" poll; do
+        LOCAL_CI_HOME=$home GH=$dir/gh-$1 LOCAL_CI_LANE=$dir/lane-$1 LOCAL_CI_LANE_TIMEOUT=1 \
+            "$here/local-ci.sh" "$mode" >/dev/null 2>&1
+    done
+    echo "$home"
+}
+
+merge_origin merge "pr change" b.txt
+home=$(merge_run merge)
+main=$(git -C "$dir/origin-merge" rev-parse main)
+check "$home" lane.log "head=$main"
+check "$home" lane.log "a.txt=main"
+check "$home" lane.log "b.txt=pr change"
+check "$home" lane.log "Sources/Guard.swift=let optIn"
+check "$home" gh.log "statuses/$(cat "$dir/origin-merge.head") -f state=success -f context=local-ci -f description=success on main ${main:0:7} · swift 2/0 fail"
+if [ "$(git -C "$dir/origin-merge" rev-list --all --count)" = 3 ] && [ "$(git -C "$home/checkout" rev-parse HEAD)" = "$main" ]; then
+    echo "ok   ci-merge commits the merge nowhere"
+else
+    echo "FAIL ci-merge left a merge commit"; failures=$((failures + 1))
+fi
+
+merge_origin conflict "pr edit" a.txt
+home=$(merge_run conflict)
+check "$home" gh.log "state=error -f context=local-ci -f description=conflicts with main $(git -C "$dir/origin-conflict" rev-parse --short=7 main)"
+if [ -e "$home/lane.log" ]; then
+    echo "FAIL a head that conflicts with main must never reach the lane"; failures=$((failures + 1))
 fi
 
 # poll tests the head it first listed longest ago, not the most recently
