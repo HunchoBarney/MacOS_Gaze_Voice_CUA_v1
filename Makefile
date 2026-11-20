@@ -31,11 +31,15 @@ build:
 	swift build -c release
 
 test:
+	scripts/test-local-ci.sh
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
 	swift test --parallel
 	cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts
 	cd EyeTracking && corepack pnpm run typecheck
 	cd EyeTracking && corepack pnpm test
+	cd CredentialService && corepack pnpm install --frozen-lockfile --ignore-scripts
+	cd CredentialService && corepack pnpm run typecheck
+	cd CredentialService && corepack pnpm test
 
 # Build the eye tracker from source: dependencies, Electron, pinned models,
 # the renderer bundle, and the camera usage strings Electron needs.

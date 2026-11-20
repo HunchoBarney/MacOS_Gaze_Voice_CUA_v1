@@ -62,8 +62,12 @@ enum JevChooser {
         max(0.7, confidenceFloor + (1 - confidenceFloor) / Double(max(1, optionCount)))
     }
 
+    /// The pinned Jev version every Jarvis caller asks for. The moving
+    /// `jev-latest` alias would change behaviour whenever TypeSafe moves it.
+    static let model = "jev-1.14.0"
+
     static func make(apiKey: String, baseURL: URL = JevClient.systemOneURL) -> DriveLoop.Choose {
-        make(client: JevClient(apiKey: apiKey, baseURL: baseURL, model: "jev-1.14.0"))
+        make(client: JevClient(apiKey: apiKey, baseURL: baseURL, model: model))
     }
 
     static func make(client: JevClient) -> DriveLoop.Choose {
