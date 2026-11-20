@@ -2100,7 +2100,6 @@ extension DriveLoop {
         }
     }
 
-    /// A row's `bounds` as a rect, or nil when any edge is missing.
     /// Whether a spoken name is exactly the app's name, ignoring case,
     /// accents, a leading "the" and a trailing "app".
     static func namesApp(_ spoken: String, _ app: String) -> Bool {
@@ -2115,6 +2114,7 @@ extension DriveLoop {
         return !bare(spoken).isEmpty && bare(spoken) == bare(app)
     }
 
+    /// A row's `bounds` as a rect, or nil when any edge is missing.
     static func rowFrame(_ row: JSONValue) -> CGRect? {
         guard let bounds = row["bounds"], let x = num(bounds["x"]), let y = num(bounds["y"]),
               let w = num(bounds["width"]), let h = num(bounds["height"]) else { return nil }
