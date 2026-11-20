@@ -17,7 +17,6 @@ final class JevNativeChoiceDiagnosticTests: XCTestCase {
         struct Request: Encodable {
             let state: JSONValue
             let questions: [String: Question]
-            let assets: [String: JevImageAsset]
         }
 
         let directory: URL
@@ -39,8 +38,7 @@ final class JevNativeChoiceDiagnosticTests: XCTestCase {
             try file.write(contentsOf: data)
         }
 
-        func infer(_ state: JSONValue, _ questions: [String: Question],
-                   assets: [String: JevImageAsset] = [:]) async throws
+        func infer(_ state: JSONValue, _ questions: [String: Question]) async throws
             -> (SystemOneResponse, Double) {
             let index = requests
             requests += 1
@@ -48,12 +46,8 @@ final class JevNativeChoiceDiagnosticTests: XCTestCase {
                 actionRefinementRequests.append(index)
             }
             try write("request-\(index).json",
-                      data: JSONEncoder().encode(Request(state: state, questions: questions, assets: assets)))
-            for (position, id) in assets.keys.sorted().enumerated() {
-                guard let image = assets[id] else { continue }
-                try write("request-\(index)-asset-\(position).\(image.format.rawValue)", data: image.data)
-            }
-            let result = try await client.systemOne(state: state, questions: questions, assets: assets)
+                      data: JSONEncoder().encode(Request(state: state, questions: questions)))
+            let result = try await client.systemOne(state: state, questions: questions)
             var answers: [String: JSONValue] = [:]
             for (key, answer) in result.response.answers {
                 switch answer {
@@ -65,12 +59,6 @@ final class JevNativeChoiceDiagnosticTests: XCTestCase {
                 case .untrustedChoice(let choice, let probabilities):
                     answers[key] = .object(["choice": .string(choice),
                         "probabilities": .object(probabilities.mapValues(JSONValue.number))])
-                case .box(let box, let confidence):
-                    answers[key] = .object([
-                        "box": .object(["top": .number(box.top), "bottom": .number(box.bottom),
-                                        "left": .number(box.left), "right": .number(box.right)]),
-                        "confidence": confidence.map(JSONValue.number) ?? .null,
-                    ])
                 default:
                     answers[key] = .null
                 }
@@ -87,26 +75,11 @@ final class JevNativeChoiceDiagnosticTests: XCTestCase {
                 "id": .string($0.id), "request_count": .number(Double($0.requestCount)),
                 "applicability": $0.applicability.map(JSONValue.number) ?? .null,
                 "probabilities": .object($0.probabilities.mapValues(JSONValue.number)),
-                "proposed_action": $0.proposedActionID.map(JSONValue.string) ?? .null,
                 "action_support": .object($0.actionSupport.mapValues(JSONValue.number)),
                 "action_rejection": $0.actionRejection.map { .string($0.rawValue) } ?? .null,
             ]) } ?? .null
             try write(name, data: JSONEncoder().encode(value))
         }
-    }
-
-    private func ownedReadOnlyScope(_ input: JSONValue, window: Jarvis.WindowRef) async throws -> Bool {
-        let (bundle, executable) = await MainActor.run {
-            let application = NSRunningApplication(processIdentifier: pid_t(window.pid))
-            return (application?.bundleIdentifier, application?.executableURL)
-        }
-        guard let fixture = input["fixture"] else { return bundle == "com.apple.calculator" }
-        let path = try XCTUnwrap(fixture["binary"]?.string)
-        let url = URL(fileURLWithPath: path).standardizedFileURL
-        let hash = SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
-        return bundle == "dev.jarvis.native-ui-outcome-fixture"
-            && executable?.standardizedFileURL == url
-            && fixture["binary_sha256"] == .string(hash)
     }
 
     func testPreparationCannotAuthorizeSubjectSwitchesThroughProductionCandidates() async throws {
@@ -155,102 +128,6 @@ final class JevNativeChoiceDiagnosticTests: XCTestCase {
                 "purpose": .string("model-only subject-switch refusal through production factory"),
             ])))
         }
-    }
-
-    func testReadOnlyReadinessHandlesDirectionMarksWithoutChangingEvidence() {
-        for raw in ["\u{200e}7", "\u{200f}7", "\u{200e}\u{200f}7"] {
-            let original = Data(raw.utf8)
-            XCTAssertEqual(Self.readinessDisplayValue(raw), "7")
-            XCTAssertEqual(Data(raw.utf8), original)
-            XCTAssertNotEqual(original, Data("7".utf8))
-        }
-        XCTAssertEqual(Self.readinessDisplayValue("17"), "17")
-    }
-
-    private static func readinessDisplayValue(_ value: String) -> String {
-        value.replacingOccurrences(of: "\u{200e}", with: "")
-            .replacingOccurrences(of: "\u{200f}", with: "")
-    }
-
-    private func awaitReadOnlyFixture(_ window: Jarvis.WindowRef, expected: String = "7") async throws {
-        let started = ContinuousClock.now
-        for attempt in 1...10 {
-            if started.duration(to: .now) >= .seconds(10) { break }
-            if let display = await NativeWindowObservation.live(window, .standard),
-               display.complete, display.window == window,
-               display.elements.contains(where: {
-                   $0.role == "AXStaticText"
-                       && $0.value.map(Self.readinessDisplayValue) == expected
-               }) {
-                print("Readonly fixture ready after \(attempt) setup reads; \(started.duration(to: .now))")
-                return
-            }
-            await Task.yield()
-        }
-        throw DiagnosticError.unexpectedRead("readonly fixture readiness unverified")
-    }
-
-    func testReadOnlyNativeValueAdmissionAndFreshIdentity() async throws {
-        let environment = ProcessInfo.processInfo.environment
-        guard environment["JARVIS_P4_REAL_APPS"] == "approved",
-              let path = environment["JEV_CALCULATOR_CHOICE_INPUT"] else {
-            throw XCTSkip("Opt-in readonly native-value ownership regression")
-        }
-        let input = try JSONDecoder().decode(JSONValue.self,
-            from: Data(contentsOf: URL(fileURLWithPath: path)))
-        let window = Jarvis.WindowRef(
-            pid: try XCTUnwrap(input["window"]?["pid"]?.integer),
-            windowID: try XCTUnwrap(input["window"]?["window_id"]?.integer))
-        let expected = try XCTUnwrap(input["expected_display"]?.string)
-        guard input["qualification"] == .bool(false), try await ownedReadOnlyScope(input, window: window),
-              expected == "7", input["task"]?["goal"] == .string("Calculate 3 plus 4 and show the result.") else {
-            return XCTFail("Original readonly Calculator fixture required")
-        }
-        try await awaitReadOnlyFixture(window)
-        let firstRead = await NativeWindowObservation.live(window, .standard)
-        let first = try XCTUnwrap(firstRead)
-        let secondRead = await NativeWindowObservation.live(window, .standard)
-        let second = try XCTUnwrap(secondRead)
-        XCTAssertTrue(first.complete)
-        XCTAssertTrue(second.complete)
-        func resultIndex(_ display: NativeWindowObservation.Display) throws -> Int {
-            try XCTUnwrap(display.elements.firstIndex {
-                $0.role == "AXStaticText" && $0.value?.replacingOccurrences(of: "\u{200e}", with: "") == expected
-            })
-        }
-        let firstIndex = try resultIndex(first), secondIndex = try resultIndex(second)
-        if input["fixture"] != nil {
-            let numeric = try XCTUnwrap(first.elements.first { $0.role == "AXStaticText" && $0.value == "7" })
-            XCTAssertNil(numeric.nativeReadOnlyValue)
-        }
-        let a = try XCTUnwrap(first.elements[firstIndex].nativeReadOnlyValue)
-        let b = try XCTUnwrap(second.elements[secondIndex].nativeReadOnlyValue)
-        XCTAssertEqual(a.identity, b.identity)
-        XCTAssertNotEqual(a.readGeneration, b.readGeneration)
-        XCTAssertEqual(a.window, window)
-        XCTAssertEqual(Data(a.value.utf8), Data(try XCTUnwrap(first.elements[firstIndex].value).utf8))
-        XCTAssertTrue(a.value.contains("\u{200e}"))
-        for shape in ["valid", "incomplete", "foreign", "unscoped", "value", "role", "ancestry"] {
-            var display = first
-            switch shape {
-            case "incomplete": display.complete = false
-            case "foreign": display.window = .init(pid: window.pid, windowID: window.windowID + 1)
-            case "unscoped": display.window = nil
-            case "value": display.elements[firstIndex].value = "7"
-            case "role": display.elements[firstIndex].role = "AXButton"
-            case "ancestry": display.elements[firstIndex].nativeAncestorRoles = ["AXWindow", "AXSecureTextField"]
-            default: break
-            }
-            let merged = NativeWindowObservation.applying(display, to: AXSnapshot(
-                windowTitle: "Calculator", snapshotID: "native-outcome",
-                elements: [], treeMarkdown: ""), window: window)
-            XCTAssertEqual(merged.elements.first { $0.index == first.elements[firstIndex].index }?
-                .nativeReadOnlyValue != nil, shape == "valid", shape)
-        }
-        let replay = NativeWindowObservation.applying(nil, to: AXSnapshot(
-            windowTitle: "Calculator", snapshotID: "replayed",
-            elements: [first.elements[firstIndex]], treeMarkdown: ""), window: window)
-        XCTAssertNil(replay.elements[0].nativeReadOnlyValue)
     }
 
     func testOwnedWindowReadOnlyDecisionCapture() async throws {

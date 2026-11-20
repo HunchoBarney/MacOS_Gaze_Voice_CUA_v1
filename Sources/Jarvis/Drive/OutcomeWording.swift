@@ -67,6 +67,18 @@ enum OutcomeWording {
         return generic
     }
 
+    /// The spoken headline of a line: its first sentence, which every line
+    /// here is worded to carry alone. The whole line stays in the feed and
+    /// on the card, so the remedy after it is shown rather than read out.
+    /// A line that asks something is spoken whole: the person has to hear
+    /// the question to answer it.
+    static func headline(_ text: String) -> String {
+        guard !text.contains("?") else { return VoiceToolResult.spoken(text, words: 30) }
+        let first = text.range(of: #"^.*?[.?!](?=\s|$)"#, options: .regularExpression)
+            .map { String(text[$0]) } ?? text
+        return VoiceToolResult.spoken(first, words: 30)
+    }
+
     /// Text that names the machinery instead of the task: driver and
     /// session words, raw error domains, code-shaped tokens.
     static func isInternal(_ text: String) -> Bool {

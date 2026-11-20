@@ -63,6 +63,36 @@ final class OutcomeWordingTests: XCTestCase {
         XCTAssertEqual(driverSay, "Your Mac didn't let me do that.")
     }
 
+    /// Say less, show more (JARA-41): the first sentence is spoken, the
+    /// remedy after it is shown; a question is spoken whole.
+    func testHeadlineSpeaksTheFirstSentence() {
+        XCTAssertEqual(OutcomeWording.headline("I couldn't find that on screen. Say “show names” to see what's there."),
+                       "I couldn't find that on screen.")
+        XCTAssertEqual(OutcomeWording.headline("I lost touch with your Mac's controls for a moment. Try that again."),
+                       "I lost touch with your Mac's controls for a moment.")
+        XCTAssertEqual(OutcomeWording.headline("I can see two things called Save. One or two?"),
+                       "I can see two things called Save. One or two?")
+        XCTAssertEqual(OutcomeWording.headline("Opened Calculator"), "Opened Calculator.")
+    }
+
+    /// A clean success is the chime and the glow, not a spoken "Done";
+    /// a caveat or a failure is still heard, as a headline.
+    func testCleanSuccessIsSilent() {
+        let (done, doneSay) = VoiceTaskCoordinator.describe(
+            DriveResult(status: .done, history: ["pressed Reply"], dispatchedEffect: true), request: "click Reply")
+        XCTAssertNil(VoiceTaskCoordinator.spokenOutcome(done, say: doneSay))
+
+        let caveat = "Clicked Reply, but it was not independently confirmed."
+        let (qualified, qualifiedSay) = VoiceTaskCoordinator.describe(
+            DriveResult(status: .done, history: [caveat], dispatchedEffect: true), request: "click Reply")
+        XCTAssertEqual(VoiceTaskCoordinator.spokenOutcome(qualified, say: qualifiedSay), caveat)
+
+        let (failed, failedSay) = VoiceTaskCoordinator.describe(
+            DriveResult(status: .handedBack(.noCandidate)), request: "click Reply")
+        XCTAssertEqual(VoiceTaskCoordinator.spokenOutcome(failed, say: failedSay), "I couldn't find that on screen.")
+        XCTAssertTrue(failedSay.contains("show names"), "the remedy stays in the shown line")
+    }
+
     func testConsentQuestionsUseWords() {
         XCTAssertEqual(OutcomeWording.consentQuestion(tool: "click", target: "Save"), "Can I click “Save”?")
         XCTAssertEqual(OutcomeWording.consentQuestion(tool: "type_text", target: "Subject"), "Can I type in “Subject”?")
