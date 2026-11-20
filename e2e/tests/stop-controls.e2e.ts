@@ -2,7 +2,7 @@ import { test } from '@e2e-dev/desktop';
 import { expect } from 'e2e';
 import {
   BOARD, CALCULATOR, OWNER_PRESENT, count, expectStopped, holdFn, menuItems, openActivity, openList, ownerStep,
-  postEscape, pressMenuItem, quit, say, sleep, startScrolling,
+  postEscape, pressMenuItem, quit, say, sh, sleep, startScrolling,
 } from '../support/jarvis.ts';
 
 // #583 deletes Fn and keeps two ways to stop: Escape, which answers only a
@@ -16,6 +16,10 @@ test.afterEach(async () => {
 });
 
 test('Fn does nothing: holding it while speaking opens nothing', { timeout: 90_000 }, async ({ app, screen, desktop }) => {
+  // A posted Fn also reaches macOS's own Globe-key action (emoji picker,
+  // dictation or input source), which would break the flows after this one.
+  const globeAction = await sh('defaults', ['read', 'com.apple.HIToolbox', 'AppleFnUsageType']).catch(() => '');
+  test.skip(globeAction !== '0', 'set System Settings → Keyboard → "Press 🌐 key to" → Do Nothing to run this check');
   await app.open();
   await openActivity(desktop, screen);
   expect(await count(CALCULATOR), 'Calculator was already open').toBe(0);
