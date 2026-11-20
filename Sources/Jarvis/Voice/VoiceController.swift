@@ -208,13 +208,16 @@ final class VoiceController: ObservableObject {
         for work in works.reversed() {
             switch work.outcome {
             case .failed(let reason), .blocked(let reason), .uncertain(let reason):
-                return .error(reason)
+                // The outcome carries the machine reason; the person reads
+                // the sentence Jarvis said.
+                return .error(work.message.isEmpty ? OutcomeWording.blocked(reason)
+                                                   : OutcomeWording.readable(work.message))
             default: break
             }
         }
         if works.contains(where: { $0.outcome == .cancelled }) { return .stopped }
         guard works.allSatisfy({ $0.outcome == .done || $0.outcome == .alreadyDone }) else {
-            return .error("The task ended without a verified result.")
+            return .error("I couldn't check that it worked.")
         }
         return .done
     }
@@ -1852,34 +1855,11 @@ final class VoiceController: ObservableObject {
         // capture must not paste anyway.
         deliveryTask?.cancel(); deliveryTask = nil
         cua.endListeningHint()
-        status = .error(message)
+        status = .error(OutcomeWording.readable(message))
         // Failures used to be a silent pill — voice a short,
         // non-punitive phrase through the same TTS seam. The error text
         // itself is never spoken: it can carry paths or account details.
-        speak(Self.spokenFailure(for: message))
-    }
-
-    /// The spoken half of a failure, keyed by category — brief and
-    /// non-punitive; the message itself never reaches the synthesizer so
-    /// paths and secrets stay off the speaker. Internal for tests.
-    static func spokenFailure(for message: String) -> String {
-        let m = message.lowercased()
-        if m.contains("editable field") || m.contains("focused for dictation")
-            || m.contains("insert") {
-            return "I couldn't type that in. Click where you want it and try again."
-        }
-        if m.contains("window server") { return "Your Mac didn't let me do that. Try again in a moment." }
-        if m.contains("microphone") || m.contains("permission") || m.contains("access is needed") {
-            return "I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone."
-        }
-        if m.contains("speech") || m.contains("try again") || m.contains("catch") {
-            return "Sorry, I didn't catch that."
-        }
-        if m.contains("session") || m.contains("server") || m.contains("connect")
-            || m.contains("unavailable") || m.contains("api key") || m.contains("realtime") {
-            return "I can't connect right now. Give it a second and try again."
-        }
-        return "That didn't work, sorry."
+        speak(OutcomeWording.spokenFailure(message))
     }
 
     /// First finisher wins — the raced work's value, or `fallback` the

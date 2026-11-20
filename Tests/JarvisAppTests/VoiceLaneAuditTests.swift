@@ -179,6 +179,35 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertNotEqual(controller.status.title, "Finished")
     }
 
+    /// A machine reason on the outcome never reaches the indicator: the
+    /// status carries the sentence from the wording map.
+    func testBlockedReasonCodeShowsASentence() async throws {
+        let config = testConfig(), capture = StubCapture()
+        let coordinator = testCoordinator(config)
+        let controller = VoiceController(config: config, speech: capture,
+            authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker())
+        addTeardownBlock { await controller.shutdown() }
+        controller.begin()
+        await poll(until: { capture.startedID != nil && controller.isListening })
+        let id = try XCTUnwrap(capture.startedID)
+        controller.finish()
+        capture.onEvent?(id, .heardFinal("Click it."))
+        let work = VoiceTaskCoordinator.Work(label: "Click", request: "Click it.",
+            spec: DriveTask(goal: "Click it."))
+        work.captureID = id
+        coordinator.tasks = [work]
+        capture.onEvent?(id, .turnEnded)
+        work.outcome = .blocked("low_confidence")
+        work.message = ""
+        work.active = false
+        coordinator.onChange()
+        guard case .error(let shown) = controller.status else {
+            return XCTFail("expected an error status, got \(controller.status)")
+        }
+        XCTAssertFalse(shown.contains("low_confidence"), shown)
+        XCTAssertEqual(shown, OutcomeWording.blocked("low_confidence"))
+    }
+
     func testC1UnsuccessfulOwnedWorkNeverCompletesOnTurnEnd() async throws {
         let outcomes: [VoiceTaskCoordinator.Work.Outcome] = [
             .blocked("Wrong window"), .failed("Driver disconnected"),
@@ -698,23 +727,23 @@ final class VoiceLaneAuditTests: XCTestCase {
     /// The phrase mapper stays generic — categories resolve to short
     /// canned lines and never echo the error text.
     func testSpokenFailurePhrasing() {
-        XCTAssertEqual(VoiceController.spokenFailure(
-            for: "No editable field is focused for dictation."),
+        XCTAssertEqual(OutcomeWording.spokenFailure(
+            "No editable field is focused for dictation."),
             "I couldn't type that in. Click where you want it and try again.")
-        XCTAssertEqual(VoiceController.spokenFailure(
-            for: "The window server rejected the click."),
+        XCTAssertEqual(OutcomeWording.spokenFailure(
+            "The window server rejected the click."),
             "Your Mac didn't let me do that. Try again in a moment.")
-        XCTAssertEqual(VoiceController.spokenFailure(
-            for: "Microphone access is needed. It's under Privacy & Security, then Microphone."),
+        XCTAssertEqual(OutcomeWording.spokenFailure(
+            "Microphone access is needed. It's under Privacy & Security, then Microphone."),
             "I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone.")
-        XCTAssertEqual(VoiceController.spokenFailure(
-            for: "No speech was captured — hold Fn and dictate again."),
+        XCTAssertEqual(OutcomeWording.spokenFailure(
+            "No speech was captured — hold Fn and dictate again."),
             "Sorry, I didn't catch that.")
-        XCTAssertEqual(VoiceController.spokenFailure(
-            for: "The voice model is unavailable: connection dropped"),
+        XCTAssertEqual(OutcomeWording.spokenFailure(
+            "The voice model is unavailable: connection dropped"),
             "I can't connect right now. Give it a second and try again.")
-        XCTAssertEqual(VoiceController.spokenFailure(
-            for: "Something weird happened at /Users/x/secret"),
+        XCTAssertEqual(OutcomeWording.spokenFailure(
+            "Something weird happened at /Users/x/secret"),
             "That didn't work, sorry.")
     }
 }

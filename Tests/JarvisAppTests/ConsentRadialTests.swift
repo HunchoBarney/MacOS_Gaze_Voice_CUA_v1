@@ -59,7 +59,7 @@ final class ConsentRadialTests: XCTestCase {
         try await loop.consentGate(tool: "click", args: [:],
                                    elementText: "Save", denied: [],
                                    confirmed: &confirmed)
-        XCTAssertEqual(asked, [.choice(prompt: "Allow computer control: click on 'Save'?",
+        XCTAssertEqual(asked, [.choice(prompt: "Can I click “Save”?",
                                       options: ["Yes", "No"])])
         XCTAssertTrue(confirmed)
     }
@@ -75,7 +75,7 @@ final class ConsentRadialTests: XCTestCase {
         try await loop.consentGate(tool: "click", args: [:],
                                    elementText: "Save", denied: [],
                                    confirmed: &confirmed)
-        XCTAssertEqual(asked, [.choice(prompt: "Allow computer control: click on 'Save'?",
+        XCTAssertEqual(asked, [.choice(prompt: "Can I click “Save”?",
                                       options: ["Yes", "No", "Always for Notes"])])
         XCTAssertTrue(confirmed)
     }
