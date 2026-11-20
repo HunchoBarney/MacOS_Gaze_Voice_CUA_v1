@@ -425,7 +425,7 @@ enum DesktopSpaceSwitch {
                     _ = try await NSWorkspace.shared.openApplication(at: launcher, configuration: .init())
                 },
                 pause: { try await Task.sleep(for: .milliseconds(100)) },
-                watchSpaceChange: SpaceChangeWatch.start,
+                watchSpaceChange: { SpaceChangeWatch.start() },
                 layout: { SkyLight.loaded?.layout() },
                 shortcutEnabled: { direction in
                     DesktopSpaceSwitch.shortcutEnabled(direction, hotkeys: CFPreferencesCopyAppValue(
@@ -466,22 +466,30 @@ enum DesktopSpaceSwitch {
     }
 
     /// Notices `activeSpaceDidChangeNotification` from the moment it starts.
-    private final class SpaceChangeWatch: @unchecked Sendable {
+    /// The observer lives exactly as long as the wait closure, so a step
+    /// cancelled before it waits still lets go of it.
+    final class SpaceChangeWatch: @unchecked Sendable {
         private let lock = NSLock()
         private var changed = false
+        private let center: NotificationCenter
+        private var token: NSObjectProtocol?
+
+        private init(center: NotificationCenter) { self.center = center }
+        deinit { if let token { center.removeObserver(token) } }
 
         private var seen: Bool { lock.withLock { changed } }
         private func mark() { lock.withLock { changed = true } }
 
-        static func start() -> (Duration) async -> Bool {
-            let watch = SpaceChangeWatch()
-            let center = NSWorkspace.shared.notificationCenter
-            let token = center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
-                                           object: nil, queue: nil) { [weak watch] _ in watch?.mark() }
+        static func start(center: NotificationCenter = NSWorkspace.shared.notificationCenter)
+            -> (Duration) async -> Bool {
+            let watch = SpaceChangeWatch(center: center)
+            watch.token = center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
+                                             object: nil, queue: nil) { [weak watch] _ in watch?.mark() }
             return { window in
-                defer { center.removeObserver(token) }
                 let end = ContinuousClock.now + window
-                while !watch.seen, ContinuousClock.now < end { try? await Task.sleep(for: .milliseconds(50)) }
+                while !watch.seen, !Task.isCancelled, ContinuousClock.now < end {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
                 return watch.seen
             }
         }

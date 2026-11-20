@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Jarvis
 import JarvisCore
@@ -336,6 +337,43 @@ private func said(_ result: DriveResult) -> String {
 
 /// The whole lane: phrase in, Mission Control or ⌃ arrow through the seam,
 /// and words only after the arrival reads back.
+/// A cancelled step must not leave its desktop-change observer behind.
+final class SpaceChangeWatchTests: XCTestCase {
+    private final class CountingCenter: NotificationCenter, @unchecked Sendable {
+        private(set) var removed = 0
+        override func removeObserver(_ observer: Any) {
+            removed += 1
+            super.removeObserver(observer)
+        }
+    }
+
+    func testAWatchNeverWaitedOnLetsGoOfItsObserver() {
+        let center = CountingCenter()
+        do { _ = DesktopSpaceSwitch.SpaceChangeWatch.start(center: center) }
+        XCTAssertEqual(center.removed, 1)
+    }
+
+    func testAWaitedWatchSeesTheChangeAndLetsGo() async {
+        let center = CountingCenter()
+        var wait: ((Duration) async -> Bool)? = DesktopSpaceSwitch.SpaceChangeWatch.start(center: center)
+        center.post(name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+        let seen = await wait?(.seconds(1))
+        XCTAssertEqual(seen, true)
+        wait = nil
+        XCTAssertEqual(center.removed, 1)
+    }
+
+    func testACancelledWaitReturnsAtOnce() async {
+        let wait = DesktopSpaceSwitch.SpaceChangeWatch.start(center: CountingCenter())
+        let started = ContinuousClock.now
+        let task = Task { await wait(.seconds(5)) }
+        task.cancel()
+        let seen = await task.value
+        XCTAssertFalse(seen)
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(1))
+    }
+}
+
 final class DesktopSwitchLaneTests: XCTestCase {
     func testSwitchOpensMissionControlPressesOnceAndConfirmsArrival() async {
         let desk = FakeSpaces()
