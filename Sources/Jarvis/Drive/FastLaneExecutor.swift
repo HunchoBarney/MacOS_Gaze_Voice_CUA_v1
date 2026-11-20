@@ -1722,7 +1722,7 @@ extension DriveLoop {
         let gaze = Self.gazeEnabled()
             ? (try? await gazeSample()).map { CGPoint(x: $0.x, y: $0.y) } : nil
         switch verb {
-        case .showNames, .showNumbers, .highlight:
+        case .showNames, .showNumbers, .highlight, .pressGlow:
             // Show verbs need real targets — an unreadable window or an
             // empty tree is an honest "nothing to name", not a silent
             // overlay.
@@ -1796,6 +1796,7 @@ extension DriveLoop {
             let (element, frame) = elements[hit]
             try await gateExplicit("click", corpus: "\(label) \(windowTitle)",
                                    denied: task.deny, confirmed: &confirmed)
+            if Consequence.of(control: label) != nil { await glowPress(frame, label: label) }
             var args: [String: JSONValue] = ["session": .string(session)]
             if let token = element.token, !token.isEmpty {
                 args["pid"] = .number(Double(pid))

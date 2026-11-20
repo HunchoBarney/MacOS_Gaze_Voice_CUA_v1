@@ -65,6 +65,10 @@ struct DwellPolicy: Sendable, Equatable {
         "close account", "remove device", "allow remote access",
         "share my screen", "turn off filevault", "disable sip",
         "enter recovery", "rm -rf", "mkfs", ":(){",
+        "anydesk", "teamviewer", "screenconnect", "connectwise control",
+        "quick assist", "logmein", "gotoassist", "ultraviewer", "rustdesk",
+        "request remote control", "give control", "gift card", "bitcoin atm",
+        "crypto atm", "western union",
     ]
 
     /// Whether a committed dwell may actuate this candidate. Mode, kind,

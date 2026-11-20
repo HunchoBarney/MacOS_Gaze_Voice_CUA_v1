@@ -129,6 +129,9 @@ struct FastAction: Sendable {
         case showNames
         /// A halo around the one control a "show me <name>" matched.
         case highlight
+        /// The glow on a consequential control as Jarvis presses it for
+        /// the person ("click Send"). Never parsed from speech.
+        case pressGlow
         case hideNumbers
         /// Pick chip N — resolves through the pending overlay state, so a
         /// spoken number only acts while chips are up.

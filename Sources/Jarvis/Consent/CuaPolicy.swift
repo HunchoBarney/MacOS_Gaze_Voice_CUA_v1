@@ -26,26 +26,36 @@ import os
 ///      driver state — allow-list, installs — which is a consent bypass
 ///      vector. Nothing calls them today; the table stands so the
 ///      contract is honest, not aspirational.
-///   3. **The deny-list scan** runs twice, once per shape: the phrase
-///      corpus over element label/value + url-ish args, then the
-///      command-shaped corpus (`deniedInTypedPayload`) over every string
-///      arg — `type_text`'s payload included. Both refuse before the
-///      grant, so a standing "always allow" never rubber-stamps
-///      "empty trash" or a typed `rm -rf`.
-///   4. **Everything else needs the standing grant, a scoped
+///   3. **The never list** (`neverReason`) refuses first: wipes, remote-access
+///      tools, gift cards, scam links and popup phone numbers, over
+///      element label/value + url-ish args. Typing into a password box
+///      refuses next, then the command-shaped scan
+///      (`deniedInTypedPayload`) over every string arg — `type_text`'s
+///      payload included. All refuse before the grant, so a standing
+///      "always allow" never rubber-stamps "empty trash" or a typed `rm -rf`.
+///   4. **A consequential press asks first** (`askFirst`): Send, Delete,
+///      Pay, Call, Sign out or Allow, a keyboard send, or a press with no
+///      name (`consequentialPress`), unless the caller passes
+///      `consequenceConfirmed`: the person's words named that control, or
+///      they said yes to it.
+///   5. **Everything else needs the standing grant, a scoped
 ///      "Always for this app" grant (`scopedGrant:`), or a per-task
 ///      approval.** A request that is none of the above lands here too —
 ///      unknown tool names fail safe.
 /// Raw desktop scope is handled by the (a)/(b) split rather than a rule
 /// here: spoken deictic clicks carry their own consent and are
-/// deny-scanned, while no autonomous candidate addresses bare pixels —
-/// so a scoped dispatch in the model loop would still need the grant.
+/// deny-scanned, while an autonomous vision-model click at a point is
+/// judged by the labels under that point, and asks when there are none.
 enum CuaPolicy {
 
     enum Decision: Equatable {
         case allow
         case deny(String)
         case needsConfirm(String)
+        /// A consequential press the person's words didn't name: ask the
+        /// `Consequence` question for this one control, then decide again
+        /// with `consequenceConfirmed: true`.
+        case askFirst(Consequence)
     }
 
     /// Read-only by contract — they return state without a side effect.
@@ -69,34 +79,88 @@ enum CuaPolicy {
         "execute_script", "run_applescript", "shell_command",
     ]
 
-    /// Phrase-level denies: a model can always pick a *labelled* element
-    /// whose action is consequential (the tool is just "click"), so the
-    /// deny list lives in the visible vocabulary — the thing the user can
-    /// verify on the card. Matching is normalized-substring, so the bare
-    /// entries deliberately catch their inflections: "delete" also
-    /// refuses "Delete Draft"/"deleted", "send" catches "resend", and an
-    /// "Allow" button on a consent dialog denies like every other
-    /// privilege prompt — consequential effects require the user's hands.
-    /// More-specific phrases sit above the bare words so the reported
-    /// hit names the fuller intent ("send payment" over "send").
+    /// The never list: what no grant, spoken command or yes unlocks.
+    /// Wiping the Mac or its data, closing accounts, money moved where it
+    /// can't come back, and the tools and payment shapes tech-support
+    /// scams use. Matching is normalized-substring over the element label
+    /// and value, the URL, the menu path and the window or dialog title.
     ///
-    /// This list is the canonical copy — `DwellPolicy.deniedTokens`
-    /// (Gaze/DwellClick.swift) mirrors a broader word-level variant for
-    /// the always-on dwell lane. Keep them in sync when the protected
-    /// vocabulary changes.
+    /// Ordinary consequential controls (Send, Delete, Pay, Sign out,
+    /// Allow) are not here: the person's own words press them, and a
+    /// press Jarvis chose itself asks first (`Consequence`).
+    ///
+    /// This list is the canonical copy. `DwellPolicy.deniedTokens`
+    /// (Gaze/DwellClick.swift) carries it plus a broader word list, since
+    /// a dwell click has no words behind it. Keep them in sync.
     static let deniedPatterns: [String] = [
-        "empty trash", "move to trash", "erase all content", "erase disk",
-        "erase this mac", "delete permanently", "permanently delete",
-        "format disk", "factory reset", "reset all settings",
-        "transfer money", "wire transfer", "send payment",
-        "purchase now", "buy now", "place order", "place your order",
-        "confirm purchase", "pay now", "reply all", "delete account",
-        "close account", "remove device", "allow remote access",
-        "share my screen", "sign out", "log out", "turn off filevault",
-        "disable sip", "enter recovery", "checkout", "submit",
-        "delete", "send", "reply", "allow", "erase", "format", "reset",
-        "rm -rf", "mkfs", ":(){",
+        "empty trash", "erase all content", "erase disk", "erase this mac",
+        "delete permanently", "permanently delete", "format disk", "factory reset",
+        "reset all settings", "transfer money", "wire transfer", "delete account",
+        "close account", "allow remote access", "share my screen", "turn off filevault",
+        "disable sip", "enter recovery", "anydesk", "teamviewer", "screenconnect",
+        "connectwise control", "quick assist", "logmein", "gotoassist", "ultraviewer",
+        "rustdesk", "request remote control", "give control", "gift card", "bitcoin atm",
+        "crypto atm", "western union", "rm -rf", "mkfs", ":(){",
     ]
+
+    /// Why a dispatch is refused no matter who agreed, or nil: a never-list
+    /// phrase, a link whose words name a different site than it opens, or
+    /// a call to a number shown on a scare popup. `text` is what the
+    /// control shows; `url` is where it goes, when the caller knows.
+    static func neverReason(text: String, url: String? = nil) -> String? {
+        let corpus = text + " " + (url ?? "")
+        if let hit = deniedPhrase(in: corpus) {
+            return "Refused: '\(hit)' is never done for you, even with a yes"
+        }
+        if let link = ScamSignals.linkMismatch(text: text, url: url) {
+            return "Refused: this link says \(link.shown) but opens \(link.actual). That's a common trick, so I won't open it."
+        }
+        let dials = Consequence.classify(text) == .call
+            || ["tel:", "facetime:", "facetime-audio:"].contains { url?.lowercased().hasPrefix($0) == true }
+        if dials, let number = ScamSignals.alarmPhoneNumber(in: corpus) {
+            return "Refused: \(number) is on a warning popup. Real companies don't ask you to call from a popup. I can close it instead."
+        }
+        return nil
+    }
+
+    /// Tools that press a control.
+    static let pressTools: Set<String> = ["click", "double_click", "browser_click", "invoke_menu"]
+
+    private static let composeWords = ["message", "reply", "compose", "chat", "comment", "post",
+                                       "email", "mail", "subject", "imessage", "tweet"]
+
+    /// The consequential press a dispatch makes, or nil: a labelled
+    /// consequential control; a press with no label (`.unnamed`); or a
+    /// keyboard send, which is ⌘Return anywhere and Return in a compose or
+    /// reply field. A click at a spot on screen is judged by the labels
+    /// of what sits under it, never by a model's guess at the control: a
+    /// vision-model click passes only the labels at its point
+    /// (`ActuationRequest.pressText`), so a point with no label asks as
+    /// `.unnamed`, and the no-op ladder's pixel retry re-presses an element
+    /// that was already identified. `coverage` is the control name the
+    /// person's words must use to cover it.
+    static func consequentialPress(tool: String, args: [String: JSONValue], elementText: String?)
+        -> (consequence: Consequence, label: String, coverage: String)? {
+        let label = elementText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if pressTools.contains(tool) {
+            if let consequence = Consequence.of(control: label) { return (consequence, label, label) }
+            return label.isEmpty ? (.unnamed, label, "") : nil
+        }
+        guard tool == "press_key" || tool == "hotkey" else { return nil }
+        let raw = [args["key"]?.string].compactMap { $0 } + (args["keys"]?.array ?? []).compactMap(\.string)
+        let keys = raw.flatMap { $0.lowercased().split(whereSeparator: { $0 == "+" || $0 == " " }).map(String.init) }
+        let returns: Set<String> = ["return", "enter", "kp_enter"]
+        guard keys.contains(where: returns.contains) else { return nil }
+        let modifiers = Set(keys).subtracting(returns)
+        let command = !modifiers.isDisjoint(with: ["cmd", "command", "meta"])
+        let field = " " + normalize(label.lowercased()) + " "
+        guard command || (modifiers.isEmpty && composeWords.contains { field.contains(" \($0) ") }) else { return nil }
+        return (.send, command ? "\u{2318}Return" : "Return", "send")
+    }
+
+    /// Typing tools never touch a password box: Jarvis doesn't type,
+    /// read or remember passwords, and says so instead.
+    static let typingTools: Set<String> = ["type_text", "set_value", "browser_type"]
 
     /// Separator-normalized text matching: "force-quit" and "force quit"
     /// are the same word. Non-alphanumeric becomes a single space.
@@ -160,19 +224,20 @@ enum CuaPolicy {
     /// first, so no grant rubber-stamps a protected phrase.
     static func decide(tool: String, args: [String: JSONValue],
                        elementText: String?, standingGrant: Bool,
-                       scopedGrant: Bool = false) -> Decision {
+                       scopedGrant: Bool = false, consequenceConfirmed: Bool = false) -> Decision {
         if observationTools.contains(tool) { return .allow }
         if deniedTools.contains(tool) {
             return .deny("'\(tool)' changes driver or session state — it is never dispatched through the policy path")
         }
         // Deny-list before the grant: consent answers "may the model
         // act", the deny list answers "may anyone do this".
-        var corpus = elementText?.lowercased() ?? ""
-        for key in ["url", "urls", "button"] {
-            if case .string(let v)? = args[key] { corpus += " \(v.lowercased())" }
+        let corpus = scanCorpus(args: args, elementText: elementText)
+        if let why = neverReason(text: elementText ?? "", url: args["url"]?.string) ?? neverReason(text: corpus) {
+            return .deny(why)
         }
-        if let hit = deniedPhrase(in: corpus) {
-            return .deny("Refused: '\(hit)' is on the protected list — it requires the user's hands, not ours")
+        if typingTools.contains(tool), let elementText,
+           DriveCandidates.isSecure(role: "", label: elementText) {
+            return .deny("Refused: I never type passwords. Type it yourself; I don't read what goes in that box.")
         }
         // Typed payloads were the audit's worst hole: `type_text` +
         // `press_key: return` ran a shell line under the standing grant
@@ -188,10 +253,25 @@ enum CuaPolicy {
                 }
             }
         }
+        if !consequenceConfirmed,
+           let press = consequentialPress(tool: tool, args: args, elementText: elementText) {
+            return .askFirst(press.consequence)
+        }
         if standingGrant || scopedGrant { return .allow }
         let target = elementText?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return .needsConfirm(OutcomeWording.consentQuestion(tool: tool, target: target))
+    }
+
+    /// The text the deny scans read: the element's label and value plus
+    /// the url-ish args. Typed text stays out; the typed-payload scan
+    /// reads it separately.
+    static func scanCorpus(args: [String: JSONValue], elementText: String?) -> String {
+        var corpus = elementText?.lowercased() ?? ""
+        for key in ["url", "urls", "button"] {
+            if case .string(let v)? = args[key] { corpus += " \(v.lowercased())" }
+        }
+        return corpus
     }
 
     /// Every string payload an arg carries — `.string` itself, or the

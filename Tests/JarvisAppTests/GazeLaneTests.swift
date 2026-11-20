@@ -222,8 +222,8 @@ final class GazeLaneTests: XCTestCase {
         XCTAssertTrue(driver.calls.filter { $0.tool == "click" }.isEmpty)
     }
 
-    /// A committed referent's own words ride the deny scan: "Buy now" is
-    /// protected vocabulary, so the gaze click refuses before ANY
+    /// A committed referent's own words ride the deny scan: "Buy gift
+    /// card" is on the never list, so the gaze click refuses before ANY
     /// actuation form — element-token, traffic-light, or pixel.
     func testGazeClickOnDeniedCandidateRefuses() async {
         let driver = FakeDriver()
@@ -231,7 +231,7 @@ final class GazeLaneTests: XCTestCase {
         let rect = CGRect(x: 190, y: 190, width: 120, height: 30)
         let candidate = IntentCandidate(id: "ax:42:tok", kind: .axElement,
                                         frame: rect, motorRect: rect,
-                                        role: "AXButton", label: "Buy now",
+                                        role: "AXButton", label: "Buy gift card",
                                         pid: 42, windowID: 7,
                                         appName: "Store",
                                         windowTitle: "Checkout")

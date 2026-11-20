@@ -1645,7 +1645,7 @@ final class VoiceTaskCoordinator {
         work.ask = ask
         let prompt: String
         switch ask {
-        case .confirm(let p): prompt = p + " Say yes or no."
+        case .confirm(let p): prompt = p.contains("Say ") ? p : p + " Say yes or no."
         case .question(let p): prompt = p
         case .choice(let p, let options):
             // Spoken choices carry their numbering so a voice "two" and a
@@ -1877,6 +1877,13 @@ final class VoiceTaskCoordinator {
             overlay.showHalo(frame: target.frame)
             return DriveResult(status: .done, history: ["highlighted \(target.label)"],
                                dispatchedEffect: true)
+        case .pressGlow:
+            guard let target = targets.first else {
+                return DriveResult(status: .blocked("Nothing to point at."),
+                                   blockedReason: "no overlay targets")
+            }
+            overlay.glowPress(frame: target.frame)
+            return DriveResult(status: .done, history: ["glowed \(target.label)"])
         case .showNumbers:
             // The executor hands exactly the matches of an ambiguous
             // name. A pick clicks the chip's frame center — same path
