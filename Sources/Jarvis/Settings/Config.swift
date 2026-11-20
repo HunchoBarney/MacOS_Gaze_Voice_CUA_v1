@@ -81,6 +81,12 @@ final class Config: ObservableObject {
     @Published var assistantName: String {
         didSet { defaults.set(assistantName, forKey: "assistantName") }
     }
+    /// The hands-free GPT-Live work (JARA-49 L1–L10) runs only while this
+    /// is on. Off by default until L11; there is no Settings toggle, so it
+    /// is turned on with `defaults write com.karanvirkang.jarvis voice.live -bool true`.
+    @Published var voiceLive: Bool {
+        didSet { defaults.set(voiceLive, forKey: "voice.live") }
+    }
 
     @Published var autoExecute: Bool {
         didSet { defaults.set(autoExecute, forKey: "autoExecute") }
@@ -238,6 +244,7 @@ final class Config: ObservableObject {
         self.openAIAPIKey = environment["OPENAI_API_KEY"] ?? ""
         self.microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
         self.assistantName = defaults.string(forKey: "assistantName") ?? AssistantName.standard
+        self.voiceLive = defaults.bool(forKey: "voice.live")
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.alwaysAllowComputerUse = defaults.object(forKey: "cuaStandingGrant.computerUseInput") as? Bool ?? false
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? true
