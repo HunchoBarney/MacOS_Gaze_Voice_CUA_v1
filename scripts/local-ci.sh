@@ -2,7 +2,7 @@
 # Local CI for Jarvis on the owner's Mac. GitHub Actions is off, so this runs
 # the CI test job (make test) and posts the result as a "local-ci" commit status.
 #
-#   scripts/local-ci.sh <pr-number|sha|branch>   test one head now
+#   scripts/local-ci.sh <pr-number|sha|branch>   queue one head; poll tests it in first-seen order
 #   scripts/local-ci.sh poll                     test the untested head that has waited longest (launchd)
 #   scripts/local-ci.sh summary <log>            print the counts it would post for a log
 set -uo pipefail
@@ -131,6 +131,14 @@ run_sha() {
         post "$sha" error "checkout failed · log $short.log"; return 1
     fi
 
+    # Captain gate (2026-11-20): a head without #598's Keychain test guard
+    # would raise Keychain dialogs on the owner's screen. Refuse to test it.
+    if ! git -C "$CHECKOUT" grep -q JARVIS_LIVE_KEYCHAIN HEAD -- Sources; then
+        say "no Keychain test guard at $sha" | tee -a "$log"
+        post "$sha" error "merge main first: head lacks the #598 Keychain test guard"
+        return 1
+    fi
+
     if [ ! -x "$LANE_SH" ]; then
         say "no build lane at $LANE_SH" | tee -a "$log"
         post "$sha" error "no build lane at $LANE_SH; will retry"
@@ -189,6 +197,14 @@ candidates() {
     "$GH" api "repos/$REPO/commits/main" --jq '"\(.commit.committer.date) \(.sha) main"'
 }
 
+# Heads queued by hand: "<timestamp> <sha> requested".
+requested() {
+    local f
+    for f in "$CI_HOME"/requested/*; do
+        [ -f "$f" ] && echo "$(cat "$f") ${f##*/} requested"
+    done
+}
+
 needs_run() {
     local state when
     read -r state when <<<"$(latest_status "$1")"
@@ -212,14 +228,17 @@ poll() {
     trap release_lock EXIT
     local list seen ts sha label
     list=$(candidates) || { say "could not list heads"; return 1; }
-    find "$CI_HOME/seen" -type f -mtime +30 -delete 2>/dev/null
+    list+=$'\n'$(requested)
+    find "$CI_HOME/seen" "$CI_HOME/requested" -type f -mtime +30 -delete 2>/dev/null
     while read -r seen ts sha label; do
         [ -n "$sha" ] || continue
         if needs_run "$sha"; then
             say "testing $label $sha"
+            rm -f "$CI_HOME/requested/$sha"
             run_sha "$sha"
             return
         fi
+        rm -f "$CI_HOME/requested/$sha"
     done <<<"$(while read -r ts sha label; do
                    [ -n "$sha" ] && echo "$(first_seen "$sha") $ts $sha $label"
                done <<<"$list" | sort -k1,1n -k2,2)"
@@ -235,13 +254,19 @@ case ${1:-} in
     *)
         target=$(resolve "$1") && [ -n "$target" ] || { echo "cannot resolve $1" >&2; exit 2; }
         [ "$target" = fork ] && { echo "refusing PR #$1: its head is in a fork" >&2; exit 2; }
-        waited=0
-        until take_lock; do
-            [ "$waited" -ge "$LANE_TIMEOUT" ] && { echo "another local-ci job held the lock for $LANE_TIMEOUT s" >&2; exit 1; }
-            sleep 30; waited=$((waited + 30))
-        done
-        trap release_lock EXIT
-        say "testing $1 ($target); log $LOGS/$target.log"
-        run_sha "$target"
+        # Queue it for poll rather than racing other callers for the lock. A
+        # head that already has a result waits from now, not from when it was
+        # first seen, and its pending status makes poll test it again. The
+        # status goes up before the request is recorded, so a poll that lists
+        # the request never sees the old result and drops it untested.
+        read -r state _ <<<"$(latest_status "$target")"
+        post "$target" pending "queued for local CI" || { echo "could not post a status for $target" >&2; exit 1; }
+        case $state in
+            "" | pending) first_seen "$target" >/dev/null ;;
+            *) mkdir -p "$CI_HOME/seen" && date +%s >"$CI_HOME/seen/$target" ;;
+        esac
+        mkdir -p "$CI_HOME/requested"
+        date -u +%Y-%m-%dT%H:%M:%SZ >"$CI_HOME/requested/$target"
+        say "queued $1 ($target); poll tests heads oldest first, so watch its $CONTEXT status"
         ;;
 esac
