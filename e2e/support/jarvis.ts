@@ -80,6 +80,11 @@ export async function savedSetting(key: string): Promise<string | undefined> {
   );
 }
 
+/** Removes one key from Jarvis's saved settings, so a later read proves this run wrote it. */
+export async function clearSetting(key: string): Promise<void> {
+  await run('defaults', ['delete', 'com.karanvirkang.jarvis', key]).catch(() => undefined);
+}
+
 /** Points screen at one of Jarvis's windows by title, once it is open. */
 export async function useWindow(desktop: Desktop, title: string): Promise<void> {
   await expect

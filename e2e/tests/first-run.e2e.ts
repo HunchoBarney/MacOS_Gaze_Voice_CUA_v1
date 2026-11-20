@@ -1,11 +1,16 @@
 import { test } from '@e2e-dev/desktop';
 import { expect } from 'e2e';
-import { savedSetting, useWindow } from '../support/jarvis.ts';
+import { clearSetting, savedSetting, useWindow } from '../support/jarvis.ts';
 
 // Runs on the first-run target: Jarvis opens with --first-run on a Mac where
 // it already has the microphone and Accessibility. No voice, no model.
 
 test('first run: pick Hold fn, the granted permissions step past, Try it, Skip', { timeout: 60_000 }, async ({ app, screen, desktop }) => {
+  // The owner's saved settings already hold both keys; clear them so the checks
+  // below see what this first run saved. run.sh restores the domain afterwards.
+  await clearSetting('firstRunCompleted');
+  await clearSetting('listeningMode');
+  expect(await savedSetting('firstRunCompleted')).toBeUndefined();
   await app.open();
   await useWindow(desktop, 'Set up Jarvis');
   await expect(screen.getByText('How should Jarvis listen?')).toBeVisible({ timeout: 15_000 });
