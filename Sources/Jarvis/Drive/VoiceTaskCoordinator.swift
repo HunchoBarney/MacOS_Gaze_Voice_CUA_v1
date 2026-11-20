@@ -1840,7 +1840,9 @@ final class VoiceTaskCoordinator {
             return (.alreadyDone, "That's already done.")
         case .blocked(let why), .blockedByConsent(let why):
             let say = OutcomeWording.blocked(why, reason: result.blockedReason)
-            if result.blockedReason == DriveLoop.scrollUnverifiedReason { return (.uncertain(why), say) }
+            if [DriveLoop.scrollUnverifiedReason, DriveLoop.launchUnverifiedReason].contains(result.blockedReason) {
+                return (.uncertain(why), say)
+            }
             return (.blocked(why), say)
         case .handedBack(let reason):
             return (.blocked(reason.rawValue), OutcomeWording.handedBack(reason))

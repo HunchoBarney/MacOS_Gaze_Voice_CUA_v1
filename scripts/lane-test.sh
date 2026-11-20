@@ -12,6 +12,14 @@
 # lane's timestamp and the build stays incremental against whatever ran last.
 set -uo pipefail
 
+# When the crew's shared queue is installed, hand over to it: it serves
+# waiters in ticket order, with the same interface and the same lock.
+# JARVIS_LANE_LEGACY=1 keeps the old first-to-poll behaviour below.
+SHARED=${JARVIS_LANE_TOOL:-$HOME/.capy/work/lane/lane.sh}
+if [ -x "$SHARED" ] && [ "${JARVIS_LANE_LEGACY:-0}" != 1 ]; then
+    exec "$SHARED" "$@"
+fi
+
 LANE_HOME=${JARVIS_LANE_HOME:-$HOME/.capy/work/build-lane}
 LANE=$LANE_HOME/checkout
 LOCK=$LANE_HOME/lock
