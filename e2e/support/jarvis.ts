@@ -7,6 +7,7 @@
 
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { expect } from 'e2e';
@@ -95,12 +96,30 @@ export async function closeFront(bundleId: string, windowCount: number): Promise
   if (windowCount > 0 && (await count(bundleId)) > 0) await helper('close-front', bundleId, String(windowCount)).catch(() => undefined);
 }
 
-/** Runs a program to see whether it succeeds, with what it printed either way. */
-export async function attempt(file: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; output: string }> {
-  return run(file, args, { timeout: timeoutMs }).then(
-    ({ stdout, stderr }) => ({ ok: true, output: stdout + stderr }),
-    (error: { stdout?: string; stderr?: string }) => ({ ok: false, output: (error.stdout ?? '') + (error.stderr ?? '') }),
-  );
+/**
+ * Connects to a Unix socket from this process, which is not Jarvis, sends one
+ * line and reports what came back and whether the other end closed the
+ * connection before the timeout. Rejects when nothing listens there.
+ */
+export function knock(socketPath: string, line: string, timeoutMs: number): Promise<{ reply: string; closedByPeer: boolean }> {
+  return new Promise((resolve, reject) => {
+    let reply = '';
+    let connected = false;
+    const socket = net.createConnection(socketPath);
+    socket.setTimeout(timeoutMs, () => {
+      socket.destroy();
+      resolve({ reply, closedByPeer: false });
+    });
+    socket.on('connect', () => {
+      connected = true;
+      socket.write(line + '\n');
+    });
+    socket.on('data', (chunk) => {
+      reply += chunk.toString('utf8');
+    });
+    socket.on('close', () => resolve({ reply, closedByPeer: true }));
+    socket.on('error', (error) => (connected ? resolve({ reply, closedByPeer: true }) : reject(error)));
+  });
 }
 
 /** Set when the owner sits at the Mac for the steps only a person can do. */

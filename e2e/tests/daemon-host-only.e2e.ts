@@ -1,8 +1,7 @@
-import path from 'node:path';
 import { test } from '@e2e-dev/desktop';
 import { expect } from 'e2e';
 import {
-  BOARD, CALCULATOR, SAFARI, attempt, closeFront, command, count, goAheadIfAsked, openActivity, openField,
+  BOARD, CALCULATOR, SAFARI, closeFront, command, count, goAheadIfAsked, knock, openActivity, openField,
   pressMenu, promptsSince, quit, sh, sleep, webURL, windows,
 } from '../support/jarvis.ts';
 
@@ -102,13 +101,14 @@ test('28: a process that is not Jarvis is refused at the daemon socket, and Jarv
   await expect.poll(() => count(CALCULATOR), { timeout: 30_000 }).toBe(1);
   await quit(CALCULATOR);
 
-  const sockets = await sh('/bin/sh', ['-c', 'ls "${TMPDIR:-/tmp}"/jarvis-cua-*/d-*.sock 2>/dev/null || true']);
+  const sockets = await sh('/bin/sh', ['-c', 'ls -t "${TMPDIR:-/tmp}"/jarvis-cua-*/d-*.sock 2>/dev/null || true']);
   const socket = sockets.split('\n')[0] ?? '';
   expect(socket, 'Jarvis has no daemon socket').not.toBe('');
-  const driver = path.join(process.env.JARVIS_E2E_APP ?? '', 'Contents/Resources/cua-driver');
-  const outcome = await attempt(driver, ['list-tools', '--socket', socket], 15_000);
-  expect(outcome.ok, 'the daemon answered a process that is not Jarvis: ' + outcome.output.slice(0, 200)).toBe(false);
-  expect(outcome.output).not.toMatch(/screenshot|list_apps|click/i);
+  // The handshake Jarvis itself opens with. An admitted peer gets an answer;
+  // a refused one is closed before the daemon reads it.
+  const outcome = await knock(socket, '{"method":"mcp_envelope_stream"}', 10_000);
+  expect(outcome.reply, 'the daemon answered a process that is not Jarvis').toBe('');
+  expect(outcome.closedByPeer, 'the daemon neither answered nor closed the connection').toBe(true);
 
   await command('Open Calculator.');
   await expect.poll(() => count(CALCULATOR), { timeout: 30_000 }).toBe(1);
