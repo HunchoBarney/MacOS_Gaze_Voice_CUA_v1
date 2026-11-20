@@ -1364,6 +1364,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 self.onReadiness?(.ready(hardware.name))
                 return hardware.name
             } catch {
+                Self.log.error("prepare stage=microphone_input failed error=\(error.localizedDescription, privacy: .public)")
                 if self.preparationID == token {
                     self.hardware = nil
                     await self.input.stop()
