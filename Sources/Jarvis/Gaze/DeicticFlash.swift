@@ -82,7 +82,10 @@ final class DeicticFlash {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.settleSeconds + Self.holdSeconds))
             guard let self, self.generation == current else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             self.ring.opacity = 0
+            CATransaction.commit()
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = 1 as NSNumber
             fade.toValue = 0 as NSNumber
