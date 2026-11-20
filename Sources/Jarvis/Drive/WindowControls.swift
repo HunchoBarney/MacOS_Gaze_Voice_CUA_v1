@@ -133,6 +133,53 @@ enum WindowControls {
         return window
     }
 
+    /// The window-state reads and writes the lost-window and full-screen
+    /// lanes need, addressed by window number. One injectable bundle so
+    /// tests never open a real AX session or read real preferences.
+    struct Attributes {
+        var minimized: (pid_t, Int) -> Bool?
+        var setMinimized: (pid_t, Int, Bool) -> Bool
+        /// `AXFullScreen`: AppKit windows report and accept it, but it isn't
+        /// in Apple's headers, so a nil read is normal and callers fall back.
+        var fullScreen: (pid_t, Int) -> Bool?
+        var setFullScreen: (pid_t, Int, Bool) -> Bool
+        var raise: (pid_t, Int) -> Bool
+        /// Stage Manager's switch, `GloballyEnabled` in WindowManager's
+        /// preferences.
+        var stageManager: () -> Bool
+
+        static var live: Attributes {
+            Attributes(
+                minimized: { WindowControls.bool(kAXMinimizedAttribute, pid: $0, windowID: $1) },
+                setMinimized: { WindowControls.set(kAXMinimizedAttribute, $2, pid: $0, windowID: $1) },
+                fullScreen: { WindowControls.bool(fullScreenAttribute, pid: $0, windowID: $1) },
+                setFullScreen: { WindowControls.set(fullScreenAttribute, $2, pid: $0, windowID: $1) },
+                raise: { pid, windowID in
+                    guard let window = windowElement(pid: pid, windowID: windowID) else { return false }
+                    return AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success
+                },
+                stageManager: {
+                    CFPreferencesCopyAppValue("GloballyEnabled" as CFString,
+                                              "com.apple.WindowManager" as CFString) as? Bool ?? false
+                })
+        }
+    }
+
+    private static let fullScreenAttribute = "AXFullScreen"
+
+    private static func bool(_ attribute: String, pid: pid_t, windowID: Int) -> Bool? {
+        guard let window = windowElement(pid: pid, windowID: windowID) else { return nil }
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, attribute as CFString, &ref) == .success else { return nil }
+        return ref as? Bool
+    }
+
+    private static func set(_ attribute: String, _ value: Bool, pid: pid_t, windowID: Int) -> Bool {
+        guard let window = windowElement(pid: pid, windowID: windowID) else { return false }
+        return AXUIElementSetAttributeValue(window, attribute as CFString,
+                                            (value ? kCFBooleanTrue : kCFBooleanFalse) as CFTypeRef) == .success
+    }
+
     private static func frontWindow(pid: pid_t) -> AXUIElement? {
         let app = bounded(AXUIElementCreateApplication(pid))
         var ref: CFTypeRef?
