@@ -221,7 +221,7 @@ final class RealtimeVoiceLaneTests: XCTestCase {
     /// dwell suppressor sees it.
     func testCaptureActiveTracksBoundTurn() {
         let config = testConfig()
-        let coordinator = VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: {
                 AsyncThrowingStream { _ in }
             })))
@@ -245,7 +245,7 @@ final class RealtimeVoiceLaneTests: XCTestCase {
     /// seam — Lane 4 reads `VoiceController.shared?.captureActive`.
     func testSharedSeamExposesTheController() {
         let config = testConfig()
-        let coordinator = VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: {
                 AsyncThrowingStream { _ in }
             })))

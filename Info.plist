@@ -26,6 +26,9 @@
 	<string>Jarvis uses on-device speech recognition to double-check the exact words before it types them.</string>
 	<key>JarvisInputProvider</key>
 	<string>openai-realtime</string>
+	<!-- Jarvis's credential service (CredentialService/). Empty: people type their own keys in Settings. -->
+	<key>JarvisCredentialsURL</key>
+	<string></string>
 	<key>NSCameraUsageDescription</key>
 	<string>Jarvis uses the camera for eye tracking, so you can aim at things with your eyes. Video stays on this Mac.</string>
 </dict>
