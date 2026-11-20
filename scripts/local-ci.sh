@@ -53,19 +53,19 @@ resolve() {
 }
 
 summary() {
-    local log=$1 part out=""
+    local log=$1 part total=0 failed=0 skipped="" out=""
+    part=$(grep -aoE 'Executed [0-9]+ tests?, with .*[0-9]+ failures?' "$log" | tail -1)
+    if [ -n "$part" ]; then
+        total=$(echo "$part" | sed -E 's/Executed ([0-9]+).*/\1/')
+        failed=$(echo "$part" | grep -oE '[0-9]+ failures?' | grep -oE '^[0-9]+')
+        skipped=$(echo "$part" | grep -oE '[0-9]+ tests? skipped' | grep -oE '^[0-9]+' || true)
+    fi
     part=$(grep -aoE 'Test run with [0-9]+ tests? .*' "$log" | tail -1)
     if [ -n "$part" ]; then
-        local total issues
-        total=$(echo "$part" | sed -E 's/Test run with ([0-9]+).*/\1/')
-        issues=$(echo "$part" | grep -oE '[0-9]+ issues?' | grep -oE '[0-9]+' || true)
-        out="swift $total/${issues:-0} fail"
-        [ -n "$issues" ] && out="swift $total tests, $issues issues"
+        total=$((total + $(echo "$part" | sed -E 's/Test run with ([0-9]+).*/\1/')))
+        failed=$((failed + $(echo "$part" | grep -oE '[0-9]+ issues?' | grep -oE '^[0-9]+' || echo 0)))
     fi
-    part=$(grep -aoE 'Executed [0-9]+ tests?, with [0-9]+ failures?' "$log" | tail -1)
-    if [ -n "$part" ] && ! echo "$part" | grep -q '^Executed 0 '; then
-        out="${out:+$out · }xctest $(echo "$part" | sed -E 's/Executed ([0-9]+) tests?, with ([0-9]+).*/\1\/\2 fail/')"
-    fi
+    [ "$total" -gt 0 ] && out="swift $total/$failed fail${skipped:+ ($skipped skipped)}"
     part=$(grep -aE '^ *Tests +.*\([0-9]+\)' "$log" | tail -1)
     if [ -n "$part" ]; then
         local passed all
