@@ -35,6 +35,10 @@ def summed(a, b):
     return [x + y for x, y in itertools.product(a, b)]
 
 
+def cut_mid_pause(row):
+    return row.get("speech_end_to_commit_ms", 0) < 0 or row.get("commits", 1) > 1
+
+
 def fmt(ms):
     return "–" if ms is None else f"{ms / 1000:.2f}"
 
@@ -101,11 +105,17 @@ def main(argv):
         print()
     hands = [r for r in realtime if r.get("mode") == "handsfree"]
     if hands:
-        print("## Hands-free turn end (Realtime, semantic VAD)\n")
-        for key in ["speech_end_to_stopped_ms", "speech_end_to_commit_ms", "speech_end_to_transcript_ms"]:
-            for label in dict.fromkeys(r["label"] for r in hands):
-                values = [r[key] for r in hands if r["label"] == label and key in r]
-                print(f"- {label} {key}: p50 {fmt(pct(values, .5))} s, p90 {fmt(pct(values, .9))} s, n={len(values)}")
+        print("## Hands-free turn end (Realtime)\n")
+        print("A turn committed before its speech ended was cut mid-pause; it is counted on its own and left out of the percentiles.\n")
+        for label in dict.fromkeys(r["label"] for r in hands):
+            turns = [r for r in hands if r["label"] == label]
+            whole = [r for r in turns if not cut_mid_pause(r)]
+            print(f"- {label} mid-pause cut-offs: {len(turns) - len(whole)} of {len(turns)} turns")
+            for key in ["speech_end_to_stopped_ms", "speech_end_to_gate_end_ms", "speech_end_to_commit_ms",
+                        "speech_end_to_transcript_ms"]:
+                values = [r[key] for r in whole if key in r]
+                if values:
+                    print(f"- {label} {key}: p50 {fmt(pct(values, .5))} s, p90 {fmt(pct(values, .9))} s, n={len(values)}")
         print()
     if realtime:
         spent = sum(r.get("usd", 0) for r in realtime)

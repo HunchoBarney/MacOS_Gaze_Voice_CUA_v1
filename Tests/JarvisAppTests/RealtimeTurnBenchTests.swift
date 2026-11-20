@@ -12,10 +12,14 @@ import JarvisCore
 /// - `fn`: manual input mode. Speech streams at real time, then the buffer
 ///   is committed the way a Fn release commits it; the clock runs from the
 ///   commit to the completed input transcript.
-/// - `handsfree`: conversation mode with semantic VAD, fed the way the
-///   VoiceActivityGate feeds it (speech, 0.8 s of real trailing audio, then
-///   digital silence). The clock runs from the end of speech to the server's
-///   commit and to the completed transcript.
+/// - `handsfree`: conversation mode, where the Mac ends the turn. The same
+///   audio (speech, then quiet room noise) runs through the production
+///   VoiceActivityGate with the Silero model; what it uploads is sent, and
+///   the buffer is committed when it ends the turn. The clock runs from the
+///   end of speech to the gate's end of turn, the server's `committed` and
+///   the completed transcript. A commit before the speech ended is a
+///   mid-pause cut-off: its row has a negative `speech_end_to_commit_ms`
+///   and `commits` above one.
 ///
 /// Every committed buffer counts as a turn. Spend comes from each event's
 /// reported `usage` and is appended to a ledger outside the repository;
@@ -142,12 +146,27 @@ final class RealtimeTurnBenchTests: XCTestCase {
         let wire = try XCTUnwrap(wireBox.value)
         var rows: [[String: Any]] = []
         let chunk = 2_400  // 100 ms at 24 kHz
+        let gate = mode == "fn" ? nil : try VoiceActivityGate.silero()
+        var commits: [Double] = []
 
         func stream(_ samples: [Int16]) async throws {
             var next = ProcessInfo.processInfo.systemUptime
             for start in stride(from: 0, to: samples.count, by: chunk) {
                 let slice = Array(samples[start..<min(start + chunk, samples.count)])
-                try await client.sendAudio(slice.withUnsafeBytes { Data($0) })
+                let pcm = slice.withUnsafeBytes { Data($0) }
+                if let gate {
+                    for event in try await gate.admit(pcm) {
+                        switch event {
+                        case .audio(let data): try await client.sendAudio(data)
+                        case .turnEnded:
+                            try await client.commitAudio()
+                            commits.append(ProcessInfo.processInfo.systemUptime)
+                        case .turnStarted: break
+                        }
+                    }
+                } else {
+                    try await client.sendAudio(pcm)
+                }
                 next += Double(slice.count) / 24_000
                 let wait = next - ProcessInfo.processInfo.systemUptime
                 if wait > 0 { try await Task.sleep(for: .milliseconds(wait * 1000)) }
@@ -164,6 +183,7 @@ final class RealtimeTurnBenchTests: XCTestCase {
             let voice = Self.voices[(turn / Self.phrases.count) % Self.voices.count]
             let speech = try Self.spoken(phrase.text, voice: voice)
             let marker = ProcessInfo.processInfo.systemUptime
+            commits = []
             try await stream([Int16](repeating: 0, count: 4_800) + speech)
             let speechEnd = ProcessInfo.processInfo.systemUptime
             var row: [String: Any] = ["v": 1, "kind": "realtime", "label": label, "mode": mode, "turn": turn,
@@ -179,36 +199,40 @@ final class RealtimeTurnBenchTests: XCTestCase {
                 }
                 if let done { row["release_to_transcript_ms"] = (done.at - committedAt) * 1000 }
             } else {
-                var room = [Int16](repeating: 0, count: 19_200)
-                for i in room.indices { room[i] = Int16.random(in: -40...40) }
-                try await stream(room)
-                var stopped: RecordingWire.Event?, committed: RecordingWire.Event?
                 let tailEnd = ProcessInfo.processInfo.systemUptime + 4
-                while committed == nil, ProcessInfo.processInfo.systemUptime < tailEnd {
-                    try await stream([Int16](repeating: 0, count: chunk))
-                    stopped = stopped ?? wire.first("input_audio_buffer.speech_stopped", after: marker)
-                    committed = wire.first("input_audio_buffer.committed", after: marker)
+                while commits.last.map({ $0 < speechEnd }) ?? true, ProcessInfo.processInfo.systemUptime < tailEnd {
+                    var room = [Int16](repeating: 0, count: chunk)
+                    for i in room.indices { room[i] = Int16.random(in: -40...40) }
+                    try await stream(room)
                 }
-                if let stopped { row["speech_end_to_stopped_ms"] = (stopped.at - speechEnd) * 1000 }
-                if let committed {
-                    row["speech_end_to_commit_ms"] = (committed.at - speechEnd) * 1000
-                } else {
+                if commits.last.map({ $0 < speechEnd }) ?? true {
                     try await client.commitAudio()
+                    commits.append(ProcessInfo.processInfo.systemUptime)
                     row["tail_capped"] = true
-                    row["speech_end_to_commit_ms"] = (ProcessInfo.processInfo.systemUptime - speechEnd) * 1000
                 }
-                var done: RecordingWire.Event?
-                let after = committed?.at ?? ProcessInfo.processInfo.systemUptime
-                while done == nil, ProcessInfo.processInfo.systemUptime < after + 8 {
-                    done = wire.first("conversation.item.input_audio_transcription.completed", after: marker)
+                row["commits"] = commits.count
+                row["speech_end_to_gate_end_ms"] = (commits[0] - speechEnd) * 1000
+                var confirmed: [RecordingWire.Event] = []
+                while confirmed.count < commits.count, ProcessInfo.processInfo.systemUptime < commits.last! + 8 {
+                    confirmed = wire.snapshot().filter { $0.type == "input_audio_buffer.committed" && $0.at >= marker }
                     try await Task.sleep(for: .milliseconds(5))
+                }
+                if let first = confirmed.first { row["speech_end_to_commit_ms"] = (first.at - speechEnd) * 1000 }
+                var done: RecordingWire.Event?
+                if let last = confirmed.last {
+                    while done == nil, ProcessInfo.processInfo.systemUptime < last.at + 8 {
+                        done = wire.snapshot().first {
+                            $0.type == "conversation.item.input_audio_transcription.completed" && $0.itemID == last.itemID
+                        }
+                        try await Task.sleep(for: .milliseconds(5))
+                    }
                 }
                 if let done { row["speech_end_to_transcript_ms"] = (done.at - speechEnd) * 1000 }
             }
             try await Task.sleep(for: .milliseconds(300))
             let spent = wire.snapshot().filter { $0.at >= marker && $0.usage != nil }
                 .reduce(0) { $0 + Self.dollars($1.usage, type: $1.type) }
-            try ledger.add(turns: 1, usd: spent, note: "\(label) \(mode)")
+            try ledger.add(turns: max(1, commits.count), usd: spent, note: "\(label) \(mode)")
             row["usd"] = spent
             rows.append(row)
             print("realtime bench \(mode) turn \(turn): \(row.filter { $0.key.hasSuffix("_ms") })")
