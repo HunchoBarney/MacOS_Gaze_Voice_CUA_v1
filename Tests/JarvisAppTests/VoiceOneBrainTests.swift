@@ -714,3 +714,194 @@ final class VoiceOneBrainTests: XCTestCase {
         lane.cancel(); client.teardown()
     }
 }
+
+/// The screen question end to end on the fixture wire: the tool result
+/// carries the digest under its own item id, the model answers in a
+/// tool-free follow-up, the named control glows, and the screen text is
+/// deleted from the conversation once the answer settles.
+extension VoiceOneBrainTests {
+    func testScreenQuestionAnswersFromTextGlowsAndDeletesTheItem() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-key" }, client: client)
+        let send = CGRect(x: 40, y: 60, width: 80, height: 28)
+        var reads: [ScreenQuestion.Scope] = []
+        lane.screenReader = { scope in
+            reads.append(scope)
+            let digest = ScreenContext.digest(app: "Mail", bundleID: "com.apple.mail", windowTitle: "Draft",
+                                              root: ScreenNode(role: "AXWindow", children: [
+                ScreenNode(role: "AXStaticText", value: "Hi Linda, the photos are attached."),
+                ScreenNode(role: "AXButton", description: "Send", frame: send),
+            ]))
+            return (digest, [])
+        }
+        var glows: [CGRect] = []
+        lane.onScreenPoint = { glows.append($0) }
+        let question = "what does this button do"
+        try await lane.submitTyped(question, sessionID: UUID())
+        await waitFor { await wire.responseIDs().count == 1 }
+        let opened = await wire.responseIDs()
+        let first = try XCTUnwrap(opened.first)
+        let arguments = String(decoding: try JSONEncoder().encode(JSONValue.object(["question": .string(question)])),
+                               as: UTF8.self)
+        try await wire.push(["type": .string("response.function_call_arguments.done"), "response_id": .string(first),
+                             "call_id": .string("screen-1"), "name": .string("ask_about_screen"),
+                             "arguments": .string(arguments)])
+        try await wire.push(["type": .string("response.done"), "response": .object([
+            "id": .string(first), "status": .string("completed"), "output": .array([])])])
+
+        await waitFor { await wire.responseIDs().count == 2 }
+        let frames = await wire.frames()
+        let output = try XCTUnwrap(frames.first { $0["item"]?["type"]?.string == "function_call_output" }?["item"])
+        let itemID = try XCTUnwrap(output["id"]?.string)
+        XCTAssertTrue(itemID.hasPrefix("scr-"))
+        XCTAssertEqual(itemID.utf8.count, 32)
+        let result = try JSONDecoder().decode(JSONValue.self, from: Data((output["output"]?.string ?? "").utf8))
+        XCTAssertTrue(result["screen"]?.string?.contains(#"[e2] button "Send""#) == true)
+        XCTAssertEqual(reads, [.window])
+        let relay = try XCTUnwrap(frames.last { $0["type"]?.string == "response.create" })
+        XCTAssertEqual(relay["response"]?["tool_choice"]?.string, "none", "the answer is spoken, not another tool")
+
+        let responses = await wire.responseIDs()
+        let second = try XCTUnwrap(responses.last)
+        try await wire.push(["type": .string("response.output_audio_transcript.done"), "response_id": .string(second),
+                             "transcript": .string("Press the Send button at the top.")])
+        await waitFor { glows == [send] }
+        let early = await wire.frames()
+        XCTAssertFalse(early.contains { $0["type"]?.string == "conversation.item.delete" },
+                       "the screen text stays until the answer settles")
+        try await wire.push(["type": .string("response.done"), "response": .object([
+            "id": .string(second), "status": .string("completed"), "output": .array([])])])
+        await waitFor {
+            await wire.frames().contains { $0["type"]?.string == "conversation.item.delete" && $0["item_id"]?.string == itemID }
+        }
+        XCTAssertTrue(lane.screenItems.isEmpty)
+        XCTAssertNil(lane.screenAnswer)
+        lane.cancel(); client.teardown()
+    }
+
+    func testScreenQuestionVaultIsRefusedWithoutReadingIt() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-key" }, client: client)
+        lane.screenReader = { _ in
+            (ScreenContext.digest(app: "1Password", bundleID: "com.1password.1password", windowTitle: "Vault",
+                                  root: ScreenNode(role: "AXWindow", children: [
+                ScreenNode(role: "AXStaticText", value: "bank: rose / hunter2")])), [])
+        }
+        var said: [String] = []
+        lane.onEvent = { _, event in if case .toolSay(let text) = event { said.append(text) } }
+        let question = "what does this window say"
+        try await lane.submitTyped(question, sessionID: UUID())
+        await waitFor { await wire.responseIDs().count == 1 }
+        let opened = await wire.responseIDs()
+        let first = try XCTUnwrap(opened.first)
+        let arguments = String(decoding: try JSONEncoder().encode(JSONValue.object(["question": .string(question)])),
+                               as: UTF8.self)
+        try await wire.push(["type": .string("response.function_call_arguments.done"), "response_id": .string(first),
+                             "call_id": .string("screen-2"), "name": .string("ask_about_screen"),
+                             "arguments": .string(arguments)])
+        await waitFor { said == [ScreenQuestion.vaultRefusal] }
+        let written = await wire.frames()
+        let output = written.first { $0["item"]?["type"]?.string == "function_call_output" }?["item"]
+        XCTAssertFalse(output?["output"]?.string?.contains("hunter2") ?? true)
+        XCTAssertNil(output?["id"], "a fixed line leaves no screen text to delete")
+        lane.cancel(); client.teardown()
+    }
+}
+
+/// Codex P1/P2 on #538: the screen answer survives a tool result that
+/// settles before the first response's done, and a hands-free
+/// interruption deletes the screen text and the owed answer.
+extension VoiceOneBrainTests {
+    private func screenLane(_ wire: RecordedVoiceWire, client: RealtimeVoiceClient,
+                            send: CGRect) -> RealtimeVoiceLane {
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-key" }, client: client)
+        lane.screenReader = { _ in
+            (ScreenContext.digest(app: "Mail", bundleID: "com.apple.mail", windowTitle: "Draft",
+                                  root: ScreenNode(role: "AXWindow", children: [
+                ScreenNode(role: "AXStaticText", value: "Hi Linda, the photos are attached."),
+                ScreenNode(role: "AXButton", description: "Send", frame: send),
+            ])), [])
+        }
+        return lane
+    }
+
+    private func askAboutScreen(_ wire: RecordedVoiceWire, response: String, question: String) async throws {
+        let arguments = String(decoding: try JSONEncoder().encode(JSONValue.object(["question": .string(question)])),
+                               as: UTF8.self)
+        try await wire.push(["type": .string("response.function_call_arguments.done"), "response_id": .string(response),
+                             "call_id": .string("screen-" + response), "name": .string("ask_about_screen"),
+                             "arguments": .string(arguments)])
+    }
+
+    private func screenItemID(_ wire: RecordedVoiceWire) async -> String? {
+        await wire.frames().first { $0["item"]?["type"]?.string == "function_call_output" }?["item"]?["id"]?.string
+    }
+
+    func testScreenResultSettledBeforeFirstDoneStillGetsItsAnswer() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let send = CGRect(x: 40, y: 60, width: 80, height: 28)
+        let lane = screenLane(wire, client: client, send: send)
+        var glows: [CGRect] = []
+        var ended = false
+        lane.onScreenPoint = { glows.append($0) }
+        lane.onEvent = { _, event in if case .turnEnded = event { ended = true } }
+        let question = "what does this button do"
+        try await lane.submitTyped(question, sessionID: UUID())
+        await waitFor { await wire.responseIDs().count == 1 }
+        let opened = await wire.responseIDs()
+        let first = try XCTUnwrap(opened.first)
+        try await askAboutScreen(wire, response: first, question: question)
+        await waitFor { await self.screenItemID(wire) != nil }
+        XCTAssertTrue(lane.toolRelayOwed, "the result settled while the first response is still open")
+        try await wire.push(["type": .string("response.done"), "response": .object([
+            "id": .string(first), "status": .string("completed"), "output": .array([])])])
+        await waitFor { await wire.responseIDs().count == 2 }
+        let afterFirst = await wire.frames()
+        XCTAssertFalse(afterFirst.contains { $0["type"]?.string == "conversation.item.delete" },
+                       "the first done must not delete the text the answer reads from")
+        XCTAssertFalse(ended, "the first done must not end the turn")
+        XCTAssertNotNil(lane.screenAnswer)
+
+        let responses = await wire.responseIDs()
+        let second = try XCTUnwrap(responses.last)
+        try await wire.push(["type": .string("response.output_audio_transcript.done"), "response_id": .string(second),
+                             "transcript": .string("Press the Send button.")])
+        await waitFor { glows == [send] }
+        try await wire.push(["type": .string("response.done"), "response": .object([
+            "id": .string(second), "status": .string("completed"), "output": .array([])])])
+        let itemID = await screenItemID(wire)
+        await waitFor {
+            await wire.frames().contains { $0["type"]?.string == "conversation.item.delete" && $0["item_id"]?.string == itemID }
+        }
+        lane.cancel(); client.teardown()
+    }
+
+    func testHandsFreeInterruptionDeletesScreenTextAndTheOwedAnswer() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = screenLane(wire, client: client, send: CGRect(x: 0, y: 0, width: 40, height: 20))
+        let question = "what does this button do"
+        try await lane.submitTyped(question, sessionID: UUID())
+        await waitFor { await wire.responseIDs().count == 1 }
+        let opened = await wire.responseIDs()
+        let first = try XCTUnwrap(opened.first)
+        try await askAboutScreen(wire, response: first, question: question)
+        await waitFor { await self.screenItemID(wire) != nil }
+        let written = await screenItemID(wire)
+        let itemID = try XCTUnwrap(written)
+        XCTAssertEqual(lane.screenItems, [itemID])
+
+        lane.interruptConversationPlayback()
+
+        XCTAssertTrue(lane.screenItems.isEmpty)
+        XCTAssertNil(lane.screenAnswer)
+        XCTAssertFalse(lane.toolRelayOwed, "an interrupted answer is no longer owed")
+        await waitFor {
+            await wire.frames().contains { $0["type"]?.string == "conversation.item.delete" && $0["item_id"]?.string == itemID }
+        }
+        lane.cancel(); client.teardown()
+    }
+}

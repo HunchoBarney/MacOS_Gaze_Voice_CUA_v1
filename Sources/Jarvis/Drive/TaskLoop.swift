@@ -151,6 +151,10 @@ struct ActuationRequest: Sendable, Equatable {
     /// title. Typed text stays out, the same exclusion the policy
     /// applies to args["text"].
     var elementText: String? = nil
+    /// The text a press is judged by for consent. A vision-model click
+    /// uses the labels under its point, never the model's guess at the
+    /// control, so a point with no label asks.
+    var pressText: String? { visualTarget.map(\.pressLabel) ?? elementText }
     /// Ledger line — "press \"Save\" (button)".
     var summary: String
 }

@@ -123,8 +123,16 @@ final class TargetOverlay {
             return (CGRect(x: m.midX - d / 2, y: m.midY - d / 2,
                            width: d, height: d), d / 2)
         }
-        let r = c.frame.insetBy(dx: -ringOutset, dy: -ringOutset)
-        if c.kind == .dom { return (r, min(r.width, r.height) / 2) }
+        if c.kind == .dom {
+            let r = c.frame.insetBy(dx: -ringOutset, dy: -ringOutset)
+            return (r, min(r.width, r.height) / 2)
+        }
+        return ringTarget(frame: c.frame)
+    }
+
+    /// The ring's shape on a plain control frame (top-left points).
+    nonisolated static func ringTarget(frame: CGRect) -> (rect: CGRect, corner: CGFloat) {
+        let r = frame.insetBy(dx: -ringOutset, dy: -ringOutset)
         let w = r.width, h = r.height
         if max(w, h) <= 64, abs(w - h) <= max(6, min(w, h) / 4) {
             let d = max(w, h)
@@ -347,6 +355,24 @@ final class TargetOverlay {
     func hideHalo() {
         haloPanel?.orderOut(nil)
         haloRect = nil
+    }
+
+    // MARK: Press glow
+
+    static let pressGlowSeconds: Double = 1.2
+
+    /// The gaze glow on a control Jarvis is pressing because the person
+    /// named it ("click Send"): same shape and light, held long enough to
+    /// see what was pressed, then faded. A gaze acquire in the meantime
+    /// takes the ring over, and Reduce Motion is honoured the same way.
+    func glowPress(frame: CGRect) {
+        acquireRing(target: Self.ringTarget(frame: frame))
+        let generation = ringGeneration
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.pressGlowSeconds * 1e9))
+            guard let self, self.ringGeneration == generation else { return }
+            self.releaseRing()
+        }
     }
 
     /// All currently-acting agent chip rects — a distant pair must not
@@ -669,8 +695,11 @@ final class TargetOverlay {
     /// shape; a live highlight glides to the next element. Reduce Motion
     /// keeps only the opacity change — no lift, no glide.
     private func acquireRing(on c: IntentCandidate) {
+        acquireRing(target: Self.ringTarget(for: c))
+    }
+
+    private func acquireRing(target: (rect: CGRect, corner: CGFloat)) {
         ensureRing()
-        let target = Self.ringTarget(for: c)
         let still = reduceMotion()
         let t = now()
         if ringLive || ringReleasing {

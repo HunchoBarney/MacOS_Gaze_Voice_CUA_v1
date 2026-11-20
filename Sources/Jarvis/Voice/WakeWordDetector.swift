@@ -155,6 +155,14 @@ final class WakePhraseSpotter {
                                       phrases: [wake] + Self.rivals(excluding: Set(words)).filter(vosk.knows).map { "hey \($0)" }, words: true)
     }
 
+    /// Forgets audio and any phrase still being confirmed, so audio heard
+    /// before a stop can't complete a wake after the next start.
+    func reset() {
+        recent = []
+        awaiting = nil
+        listener.restart()
+    }
+
     /// Lowercased words of a typed name, as the model spells them.
     static func words(_ name: String) -> [String] {
         name.lowercased()
@@ -217,11 +225,13 @@ final class VoskWakeWordDetector: WakeWordDetecting, @unchecked Sendable {
         listening.withLock { $0 = true }
         queue.async {
             do {
-                if self.spotter == nil || self.spotterName != name {
+                if let spotter = self.spotter, self.spotterName == name { spotter.reset() }
+                else {
                     self.spotter = nil
                     self.spotter = try WakePhraseSpotter(name: name, vosk: try Vosk.shared())
                     self.spotterName = name
                 }
+                self.converter = nil
                 self.heard = heard
             } catch {
                 Self.log.error("wake word unavailable: \(error.localizedDescription, privacy: .public)")

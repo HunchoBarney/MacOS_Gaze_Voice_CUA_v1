@@ -96,9 +96,21 @@ struct FastAction: Sendable {
         /// again". The coordinator owns the replay log; the executor asks
         /// it through the injected seam and refuses honestly when empty.
         case repeatLast
-        /// "Where did X go" — locate a minimized/hidden/off-Space window
-        /// by app name or title fragment, report where it is, restore it.
+        /// "Where did X go" — find out why a window left the screen
+        /// (minimized, hidden, full screen, another desktop, off the edge,
+        /// buried, closed, quit, Stage Manager), fix it and say why. An
+        /// empty query ("where did my window go", "everything
+        /// disappeared") means the app in front.
         case locate(query: String)
+        /// Take the bound window out of macOS full screen: the AXFullScreen
+        /// attribute, then the window's full-screen button, then View →
+        /// Exit Full Screen, and only then ⌃⌘F — each rung read back.
+        case exitFullScreen
+        /// Desktops (Spaces): switch by number, "my other desktop", next or
+        /// previous, a full-screen app by name; say which one you're on; show
+        /// them all; and guide-only help to move a window or remove a
+        /// desktop. A window never moves between desktops.
+        case desktop(DesktopVerb)
         /// A control named out loud — "click Send", "press Reply all". The
         /// executor matches the name against the front window's labelled
         /// controls; no gaze and no model call. Several equal matches get
@@ -129,10 +141,30 @@ struct FastAction: Sendable {
         case showNames
         /// A halo around the one control a "show me <name>" matched.
         case highlight
+        /// The glow on a consequential control as Jarvis presses it for
+        /// the person ("click Send"). Never parsed from speech.
+        case pressGlow
         case hideNumbers
         /// Pick chip N — resolves through the pending overlay state, so a
         /// spoken number only acts while chips are up.
         case clickIndex(Int)
+    }
+
+    enum DesktopVerb: Equatable, Sendable {
+        case go(DesktopTarget)
+        case which
+        case show
+        /// Not automated: Mission Control plus how to drag it there.
+        case moveWindow(to: Int?)
+        /// Not automated: Mission Control plus where the X is.
+        case removeExtra
+    }
+
+    enum DesktopTarget: Equatable, Sendable {
+        case number(Int)
+        case other
+        case step(DesktopSpaceSwitch.Direction)
+        case fullScreen(app: String)
     }
 
     /// Gaze-referent verbs — "click", "open this", "what is this". The
@@ -310,6 +342,15 @@ struct FastAction: Sendable {
         // outranks it ("minimize in notes on this monitor" still names notes).
         let display = peelDisplayScope(normalized)
         var command = display.rest
+        // "the menu bar is gone" means full screen, not a menu called "the".
+        if let exit = table[command], case .exitFullScreen = exit.body {
+            return (exit, display.scoped ? Self.gazeDisplayQualifier : nil)
+        }
+        // "put this window on desktop 2" names a desktop, not an app called
+        // "desktop 2": desktops parse before the qualifier split. A named
+        // screen ("on the other screen") is more than one display, which the
+        // switch won't guess at.
+        if !display.scoped, let desktop = parseDesktop(command) { return (desktop, nil) }
         // Menu frames carry their own "in the X menu" preposition — the
         // app-qualifier split would eat the tail as an app name, so the
         // frame parses before the split.
@@ -964,22 +1005,174 @@ struct FastAction: Sendable {
     /// a search, never a window hunt.
     private static func parseLocate(_ command: String) -> FastAction? {
         var rest: String?
-        for prefix in ["where did ", "where is ", "wheres ", "bring back ", "find my "] {
+        for prefix in ["where did ", "where is ", "wheres ", "bring back ", "find my ", "i lost "] {
             if command.hasPrefix(prefix) { rest = String(command.dropFirst(prefix.count)); break }
+        }
+        // "my window disappeared" / "everything is gone" — the suffix forms
+        // only ever name windows or everything, never an app: "the sound is
+        // gone" is not a window hunt.
+        var suffixed = false
+        if rest == nil {
+            for suffix in [" disappeared", " is gone", " are gone", " went away", " vanished"]
+            where command.hasSuffix(suffix) {
+                rest = String(command.dropLast(suffix.count)); suffixed = true; break
+            }
         }
         guard var query = rest else { return nil }
         if query.hasSuffix(" go") { query = String(query.dropLast(3)) }
         // Packaging words are not the target — "where did my notes window
         // go" hunts "notes".
-        let words = query.split(separator: " ")
-            .map(String.init)
-            .filter { !["my", "the", "window", "windows", "app"].contains($0) }
+        let raw = query.split(separator: " ").map(String.init)
+        let words = raw.filter { !["my", "the", "window", "windows", "app", "all"].contains($0) }
         query = words.joined(separator: " ")
+        // "where did my window go" and "everything disappeared" name no app:
+        // the lane diagnoses the one in front.
+        let namesWindows = raw.contains("window") || raw.contains("windows") || query == "everything"
+        if query == "everything" { query = "" }
+        if suffixed, !query.isEmpty { return nil }
         // A pronoun or an empty remainder names nothing the lane can find.
-        guard !query.isEmpty, !["it", "this", "that", "there"].contains(query) else { return nil }
+        guard !query.isEmpty || namesWindows,
+              !["it", "this", "that", "there"].contains(query) else { return nil }
+        guard !query.isEmpty else {
+            return FastAction(body: .locate(query: ""), generic: true,
+                              description: "Finding your window",
+                              result: "Found your window", effect: .delivered)
+        }
         return FastAction(body: .locate(query: query), generic: true,
                           description: "Finding where “\(query)” went",
                           result: "Located “\(query)”", effect: .delivered)
+    }
+
+    /// Desktops by voice: "go to Desktop 2", "switch to my other desktop",
+    /// "next desktop", "go to my full-screen Safari", "which desktop am I
+    /// on", "show me my desktops", and the guide-only "move this window to
+    /// Desktop 2" and "get rid of the extra desktops". Whole utterances only,
+    /// so "go to Desktop 2 then click" stays with the loop.
+    private static func parseDesktop(_ command: String) -> FastAction? {
+        func action(_ verb: DesktopVerb, _ description: String, _ result: String) -> FastAction {
+            FastAction(body: .desktop(verb), generic: true, description: description,
+                       result: result, effect: .delivered)
+        }
+        func strip(_ text: String, _ prefixes: [String]) -> String? {
+            prefixes.first(where: text.hasPrefix).map { String(text.dropFirst($0.count)) }
+        }
+        if desktopQuestions.contains(command) {
+            return action(.which, "Checking which desktop you're on", "Said which desktop you're on")
+        }
+        if desktopShows.contains(command) {
+            return action(.show, "Showing your desktops", "Showed your desktops")
+        }
+        let asked = strip(command, ["how do i ", "how can i ", "how to ", "can i "]) ?? command
+        // "move this window to Desktop 2": a guide, never a move.
+        if let verb = strip(asked, ["move ", "put ", "send ", "drag "]),
+           let object = strip(verb, ["this window ", "the window ", "my window ", "a window ",
+                                     "windows ", "this ", "it "]),
+           let place = strip(object, ["over to ", "onto ", "into ", "to ", "on "]) {
+            if case .number(let number)? = desktopTarget(place, fullScreen: false) {
+                return action(.moveWindow(to: number), "Showing how to move a window to Desktop \(number)",
+                              "Showed how to move a window")
+            }
+            if desktopTarget(place, fullScreen: false) == .other || Self.anyDesktop.contains(place) {
+                return action(.moveWindow(to: nil), "Showing how to move a window to another desktop",
+                              "Showed how to move a window")
+            }
+        }
+        // "get rid of the extra desktops": a guide, never a removal.
+        if ["too many desktops", "i have too many desktops"].contains(command) {
+            return action(.removeExtra, "Showing how to tidy up your desktops", "Showed how to tidy up desktops")
+        }
+        if var rest = strip(asked, ["get rid of ", "remove ", "delete ", "close "]) {
+            rest = strip(rest, ["all the ", "all my ", "one of my ", "the ", "my ", "a ", "an "]) ?? rest
+            rest = strip(rest, ["extra ", "other ", "spare ", "empty "]) ?? rest
+            let named: Bool
+            if case .number? = desktopTarget(rest, fullScreen: false) { named = true } else { named = false }
+            if named || ["desktop", "desktops"].contains(rest) {
+                return action(.removeExtra, "Showing how to tidy up your desktops", "Showed how to tidy up desktops")
+            }
+        }
+        let goes = strip(command, ["go back to ", "go over to ", "go to ", "switch over to ", "switch to ",
+                                   "take me to ", "bring me to ", "jump to ", "change to ", "move to ",
+                                   "show me ", "open "])
+        guard let target = goes.flatMap({ desktopTarget($0, fullScreen: !command.hasPrefix("open ")) })
+                ?? desktopTarget(command, fullScreen: false) else { return nil }
+        switch target {
+        case .number(let number):
+            return action(.go(target), "Switching to Desktop \(number)", "Switched to Desktop \(number)")
+        case .other:
+            return action(.go(target), "Switching to your other desktop", "Switched desktops")
+        case .step(let direction):
+            let word = direction == .next ? "next" : "previous"
+            return action(.go(target), "Moving to the \(word) desktop", "Moved to the \(word) desktop")
+        case .fullScreen(let app):
+            return action(.go(target), "Switching to full-screen \(app)", "Switched to full-screen \(app)")
+        }
+    }
+
+    private static let desktopQuestions: Set<String> = [
+        "which desktop am i on", "what desktop am i on", "which desktop am i in", "what desktop am i in",
+        "which desktop is this", "what desktop is this", "which desktop is it", "what desktop is it",
+        "what desktop number am i on", "what desktop number is this",
+        "which space am i on", "what space am i on", "which space is this"
+    ]
+
+    private static let desktopShows: Set<String> = [
+        "show me my desktops", "show my desktops", "show me the desktops", "show the desktops",
+        "show desktops", "show all desktops", "show all my desktops", "show me all my desktops",
+        "show me all the desktops", "see my desktops", "let me see my desktops", "my desktops",
+        "where are my desktops", "how many desktops do i have", "show me my spaces", "show my spaces"
+    ]
+
+    private static let anyDesktop: Set<String> = [
+        "another desktop", "a different desktop", "a new desktop", "a desktop",
+        "another space", "a different space", "my other desktop", "the other desktop"
+    ]
+
+    /// The desktop a phrase names: "desktop 2", "desktop two", "the second
+    /// desktop", "space 3", "my other desktop", "the next desktop", and with
+    /// `fullScreen` "my full-screen Safari". Recognisers write "2" as "to" or
+    /// "too", and "4" as "for".
+    private static func desktopTarget(_ phrase: String, fullScreen: Bool) -> DesktopTarget? {
+        var words = phrase.split(separator: " ").map(String.init)
+        while let first = words.first, ["my", "the"].contains(first) { words.removeFirst() }
+        let text = words.joined(separator: " ")
+        let nouns: Set<String> = ["desktop", "space"]
+        switch text {
+        case "other desktop", "other space": return .other
+        case "next desktop", "next space", "desktop on the right": return .step(.next)
+        case "previous desktop", "previous space", "desktop on the left": return .step(.previous)
+        default: break
+        }
+        func number(_ word: String) -> Int? {
+            let spoken = ["one": 1, "two": 2, "to": 2, "too": 2, "three": 3, "four": 4, "for": 4, "five": 5,
+                          "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10]
+            guard let value = Int(word) ?? spoken[word], (1...16).contains(value) else { return nil }
+            return value
+        }
+        func ordinal(_ word: String) -> Int? {
+            let spoken = ["first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+                          "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10]
+            if let value = spoken[word] { return value }
+            guard word.count >= 3, ["st", "nd", "rd", "th"].contains(String(word.suffix(2))) else { return nil }
+            return number(String(word.dropLast(2)))
+        }
+        if words.count == 2, nouns.contains(words[0]), let value = number(words[1]) { return .number(value) }
+        if words.count == 3, nouns.contains(words[0]), words[1] == "number", let value = number(words[2]) {
+            return .number(value)
+        }
+        if words.count == 2, nouns.contains(words[1]), let value = ordinal(words[0]) { return .number(value) }
+        guard fullScreen else { return nil }
+        var app: String?
+        for prefix in ["full screen ", "fullscreen ", "full-screen "] where text.hasPrefix(prefix) {
+            app = String(text.dropFirst(prefix.count))
+        }
+        for suffix in [" in full screen", " full screen", " fullscreen", " full-screen"] where app == nil && text.hasSuffix(suffix) {
+            app = String(text.dropLast(suffix.count))
+        }
+        guard var name = app else { return nil }
+        for tail in [" window", " app"] where name.hasSuffix(tail) { name = String(name.dropLast(tail.count)) }
+        guard !name.isEmpty, desktopTarget(name, fullScreen: false) == nil,
+              !["it", "this", "that"].contains(name) else { return nil }
+        return .fullScreen(app: name)
     }
 
     /// The same leading-filler strip on raw text (case-insensitive), so a
@@ -1228,10 +1421,25 @@ struct FastAction: Sendable {
              "make it fullscreen", "make this fullscreen", "maximize", "maximise"],
             ["ctrl", "cmd", "f"], "⌃⌘F", "Entering full screen", "Entered full screen", .boundsToScreen,
             generic: true)
-        add(["exit full screen", "exit fullscreen", "leave full screen", "leave fullscreen",
-             "leave full-screen", "exit full-screen"],
-            ["ctrl", "cmd", "f"], "⌃⌘F", "Exiting full screen", "Exited full screen", .boundsFromScreen,
-            generic: true)
+        // Exit full screen is its own ladder, not a blind ⌃⌘F toggle — the
+        // chord would put a normal window INTO full screen. "The menu bar
+        // is gone" is how most people notice they're in it.
+        let exitFullScreen = FastAction(body: .exitFullScreen, generic: true,
+                                        description: "Exiting full screen",
+                                        result: "Exited full screen", effect: .boundsFromScreen)
+        for phrase in ["exit full screen", "exit fullscreen", "leave full screen", "leave fullscreen",
+                       "leave full-screen", "exit full-screen", "exit full screen mode",
+                       "get out of full screen", "get out of fullscreen", "come out of full screen",
+                       "turn off full screen", "turn off fullscreen", "turn full screen off",
+                       "take it out of full screen", "take this out of full screen",
+                       "make it a normal window", "make this a normal window",
+                       "make it a regular window", "make it a normal window again",
+                       "the menu bar is gone", "my menu bar is gone", "menu bar is gone",
+                       "the menu bar disappeared", "my menu bar disappeared",
+                       "where is the menu bar", "where did the menu bar go",
+                       "i cant see the menu bar", "bring back the menu bar"] {
+            t[phrase] = exitFullScreen
+        }
         addKey(["press enter", "press return", "hit enter", "hit return",
                 "press the enter key", "press the return key"], "return", "Return")
         addKey(["press escape", "press esc", "hit escape", "press the escape key"], "escape", "Escape")

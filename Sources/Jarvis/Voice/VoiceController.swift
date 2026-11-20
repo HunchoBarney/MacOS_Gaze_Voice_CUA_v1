@@ -738,6 +738,7 @@ final class VoiceController: ObservableObject {
                 return VoiceToolCatalog.result(status: "accepted", summary: "Cancellation requested.", taskID: task.uuidString)
             }
             lane.admissionContextProvider = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
+            lane.onScreenPoint = { [weak self] frame in self?.cua.glowAnswer(frame: frame) }
             lane.semanticEnabled = { [weak self] in
                 self?.config.semanticAppSuggestions == true
             }

@@ -143,7 +143,7 @@ struct BrowserSupport {
                                 elementText: "this browser's page content",
                                 standingGrant: standing) {
         case .allow: return true
-        case .deny: return false
+        case .deny, .askFirst: return false
         case .needsConfirm(let prompt):
             guard let confirm, await confirm(prompt) else { return false }
             CuaStandingGrants.browserPageAccess = true

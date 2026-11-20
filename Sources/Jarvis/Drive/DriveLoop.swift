@@ -152,6 +152,14 @@ actor DriveLoop {
     /// lane) so a consent ask can offer "Always for <app>" and a yes
     /// lands as a (tool, bundle) scoped grant, never a blanket one.
     var consentAppName: String?
+    /// The person's own words for the running task ("send it", "delete
+    /// that email"). A consequential press they name goes ahead with a
+    /// glow; any other asks first. Nil when the goal is model-authored
+    /// (`explicitConsent` off).
+    private(set) var spokenGoal: String?
+    /// Control phrases the words already pressed once this task: "click
+    /// Send" covers one Send, and a second one asks.
+    private var spentCoverage: Set<String> = []
     var consentAppBundleID: String?
     let ask: AskFn?
     let granted: () -> Bool
@@ -164,7 +172,7 @@ actor DriveLoop {
     /// autonomous effects and ride `CuaPolicy.decide`'s grant/confirm
     /// path like every other model-picked mutation.
     let explicitConsent: Bool
-    private let resolver: AppResolver
+    let resolver: AppResolver
     private let config: Config
     /// Serializes activation-prone calls (raise, host-side activate, menu
     /// focus) so parallel tasks can't interleave a raise with another
@@ -204,6 +212,12 @@ actor DriveLoop {
     let windowControlPress: (WindowControls.Kind, pid_t) -> Bool
     let windowControlButtonsInWindow: (pid_t, Int) -> [WindowControls.Button]
     let windowControlPressInWindow: (WindowControls.Kind, pid_t, Int) -> Bool
+    /// Minimized, full-screen, raise and Stage Manager reads and writes for
+    /// the lost-window and exit-full-screen lanes — same seam posture.
+    let windowAttributes: WindowControls.Attributes
+    /// Mission Control's tree, the desktop-change notification, SkyLight's
+    /// read-only Spaces layout and the ⌃←/⌃→ preference — same seam posture.
+    let desktopSpaces: DesktopSpaceSwitch.System
     private let nativeReadOnly: NativeWindowObservation.Read
     let nativeScrollRead: NativeWindowObservation.ScrollRead
     let nativeScrollControl: NativeWindowObservation.ScrollControl
@@ -314,6 +328,8 @@ actor DriveLoop {
          windowControlPress: ((WindowControls.Kind, pid_t) -> Bool)? = nil,
          windowControlButtonsInWindow: ((pid_t, Int) -> [WindowControls.Button])? = nil,
          windowControlPressInWindow: ((WindowControls.Kind, pid_t, Int) -> Bool)? = nil,
+         windowAttributes: WindowControls.Attributes = .live,
+         desktopSpaces: DesktopSpaceSwitch.System = .live,
          overlayDispatch: ((FastAction.OverlayVerb,
                             [(frame: CGRect, label: String)],
                             CGPoint?) async -> DriveResult?)? = nil,
@@ -464,6 +480,8 @@ actor DriveLoop {
         self.windowControlPressInWindow = windowControlPressInWindow ?? { kind, pid, windowID in
             windowControlPress?(kind, pid) ?? WindowControls.press(kind, pid: pid, windowID: windowID)
         }
+        self.windowAttributes = windowAttributes
+        self.desktopSpaces = desktopSpaces
         self.overlayDispatch = overlayDispatch
         self.frontmostBundleID = frontmostBundleID
         self.frontmostPID = frontmostPID
@@ -611,6 +629,7 @@ actor DriveLoop {
         /// A per-task approval granted this run — one `ask` covers every
         /// later consent prompt, including the bind-phase launch gate.
         var confirmedTask = false
+        bindSpokenGoal(explicitConsent ? task.goal : nil)
         func step(_ s: String) { feed(s); history.append(s) }
 
         do {
@@ -1232,10 +1251,10 @@ actor DriveLoop {
         if let parsed = FastAction.parse(goal) {
             switch parsed.action.body {
             case .gaze, .tracker, .mediaKey, .systemHotkey, .overlay,
-                 .repeatLast, .locate, .dictation, .webSearch, .navigateURL:
+                 .repeatLast, .locate, .dictation, .webSearch, .navigateURL, .desktop:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,
-                 .menu, .windowFrame, .clickNamed, .showNamed:
+                 .menu, .windowFrame, .clickNamed, .showNamed, .exitFullScreen:
                 return true
             }
         }
@@ -1308,18 +1327,31 @@ actor DriveLoop {
     /// host-side AXPress) run the identical gate instead of a hand copy.
     func consentGate(tool: String, args: [String: JSONValue],
                      elementText: String?, denied: [String],
-                     confirmed: inout Bool) async throws {
+                     confirmed: inout Bool, pressFrame: CGRect? = nil) async throws {
         if let elementText,
            let hit = denied.first(where: { elementText.lowercased().contains($0.lowercased()) }) {
             feed("denied by task rule: \(hit)")
             throw Abort.denied("Refused: '\(hit)' is blocked for this task.")
         }
-        switch CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
-                                standingGrant: granted() || confirmed,
-                                scopedGrant: consentScopedGrant(for: tool)) {
+        let press = CuaPolicy.consequentialPress(tool: tool, args: args, elementText: elementText)
+        let covered = spokenCoverage(press)
+        var decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
+                                        standingGrant: granted() || confirmed,
+                                        scopedGrant: consentScopedGrant(for: tool),
+                                        consequenceConfirmed: covered != nil)
+        if case .askFirst(let consequence) = decision {
+            if let pressFrame { await glowPress(pressFrame, label: press?.label ?? "") }
+            try await confirmConsequence(consequence, label: press?.label)
+            decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
+                                        standingGrant: true, scopedGrant: consentScopedGrant(for: tool),
+                                        consequenceConfirmed: true)
+        }
+        switch decision {
         case .deny(let why):
             feed("denied: \(why)")
             throw Abort.denied(why)
+        case .askFirst:
+            throw Abort.denied("Refused: the press still needed a yes after one was given.")
         case .needsConfirm(let prompt):
             guard let ask else { throw Abort.missingGrant }
             // ONE ask carries every consent shape — the radial shows
@@ -1351,6 +1383,51 @@ actor DriveLoop {
         case .allow:
             break
         }
+        if let covered { spentCoverage.insert(covered) }
+        if let pressFrame, let press { await glowPress(pressFrame, label: press.label) }
+    }
+
+    /// Binds the person's words for a new task. Internal so tests can
+    /// stand in for `run`.
+    func bindSpokenGoal(_ goal: String?) {
+        spokenGoal = goal
+        spentCoverage = []
+    }
+
+    /// The control phrase when the person's words name this press and
+    /// haven't been spent on an earlier one, else nil.
+    private func spokenCoverage(_ press: (consequence: Consequence, label: String, coverage: String)?) -> String? {
+        guard let press, let spokenGoal,
+              let phrase = Consequence.match(control: press.coverage)?.phrase,
+              !spentCoverage.contains(phrase),
+              Consequence.covers(goal: spokenGoal, control: press.coverage) else { return nil }
+        return phrase
+    }
+
+    /// Ask-first for a consequential press Jarvis chose itself (one the
+    /// person's words didn't name): one short `Consequence` question, and
+    /// only a clear yes within 30 s goes on. The yes covers this one press;
+    /// it never sets the task's `confirmed` flag. With nobody to ask, the
+    /// press is refused.
+    private func confirmConsequence(_ consequence: Consequence, label: String?) async throws {
+        guard let ask else {
+            feed("denied: \(consequence.rawValue) needs a yes and nobody can answer")
+            throw Abort.denied("Refused: pressing that needs your OK, and I can't ask right now.")
+        }
+        let pending = ConsequenceConfirmation(consequence: consequence, label: label)
+        let answer = await ask(.confirm(pending.question))
+        guard pending.accepts(answer) else {
+            feed("not confirmed: \(consequence.rawValue)")
+            throw Abort.declined
+        }
+        feed("confirmed \(consequence.rawValue)")
+    }
+
+    /// The glow on a consequential control as Jarvis presses it, so the
+    /// person sees what was pressed for them. Best effort: no overlay
+    /// (agent contexts, tests) means no glow, never a refusal.
+    func glowPress(_ frame: CGRect, label: String) async {
+        _ = await overlayDispatch?(.pressGlow, [(frame: frame, label: label)], nil)
     }
 
     /// The fast lane's consent gate — the (a) side of the two-class
@@ -1374,9 +1451,9 @@ actor DriveLoop {
                 feed("denied by task rule: \(hit)")
                 throw Abort.denied("Refused: '\(hit)' is blocked for this task.")
             }
-            if let hit = CuaPolicy.deniedPhrase(in: corpus) {
-                feed("denied: \(hit)")
-                throw Abort.denied("Refused: '\(hit)' is on the protected list — it requires the user's hands, not ours")
+            if let why = CuaPolicy.neverReason(text: corpus) {
+                feed("denied: \(why)")
+                throw Abort.denied(why)
             }
             return
         }
@@ -1388,9 +1465,9 @@ actor DriveLoop {
     /// join the code deny list for this call only.
     private func dispatch(_ tool: String, _ args: [String: JSONValue],
                           elementText: String?, denied: [String],
-                          confirmed: inout Bool) async throws -> (effect: String, escalation: String?, confirmed: Bool) {
+                          confirmed: inout Bool, pressFrame: CGRect? = nil) async throws -> (effect: String, escalation: String?, confirmed: Bool) {
         try await consentGate(tool: tool, args: args, elementText: elementText,
-                              denied: denied, confirmed: &confirmed)
+                              denied: denied, confirmed: &confirmed, pressFrame: pressFrame)
         do {
             let result = try await call(tool, args)
             let effect = result["effect"]?.string ?? "unverifiable"
@@ -1490,10 +1567,10 @@ actor DriveLoop {
     }
 
     static func affirmative(_ answer: String?) -> Bool {
-        guard let answer else { return false }
-        let a = answer.lowercased()
+        guard let answer, !Consequence.hasNegation(answer) else { return false }
+        let a = CuaPolicy.normalize(answer.lowercased()) + " "
         return ["yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "do it",
-                "confirm", "allow", "approve", "run it", "fine"].contains { a.hasPrefix($0) }
+                "confirm", "allow", "approve", "run it", "fine"].contains { a.hasPrefix($0 + " ") }
     }
 
     // MARK: - Observation → candidates
@@ -1821,10 +1898,21 @@ extension DriveLoop {
         args["pid"] = .number(Double(pid))
         args["window_id"] = .number(Double(windowID))
         switch CuaPolicy.decide(tool: request.tool, args: args,
-                                elementText: request.elementText,
+                                elementText: request.pressText,
                                 standingGrant: granted() || box.confirmed,
-                                scopedGrant: consentScopedGrant(for: request.tool)) {
+                                scopedGrant: consentScopedGrant(for: request.tool),
+                                consequenceConfirmed: spokenCoverage(CuaPolicy.consequentialPress(
+                                    tool: request.tool, args: args, elementText: request.pressText)) != nil) {
         case .allow:
+            return .allow
+        case .askFirst:
+            // A consequential press Jarvis chose: `consentGate` asks at
+            // dispatch, where it hears the spoken words, and the yes covers
+            // that one press. With nobody to ask, refuse here.
+            guard ask != nil else {
+                box.consentBlock = .permanent
+                return .deny(.consent("Pressing that needs your OK, and I can't ask right now."))
+            }
             return .allow
         case .deny(let why):
             feed("denied: \(why)")
@@ -1882,7 +1970,7 @@ extension DriveLoop {
                   args["pid"]?.integer == pid, args["window_id"]?.integer == windowID else {
                 throw Abort.refused("The visual input lost its original capture scope.")
             }
-            try await consentGate(tool: request.tool, args: args, elementText: request.elementText,
+            try await consentGate(tool: request.tool, args: args, elementText: request.pressText,
                                   denied: task.deny, confirmed: &box.confirmed)
             do {
                 let result = try await focusLeased {
@@ -1996,7 +2084,7 @@ extension DriveLoop {
             do {
                 var outcome = try await dispatch(request.tool, args,
                     elementText: request.elementText, denied: task.deny,
-                    confirmed: &box.confirmed)
+                    confirmed: &box.confirmed, pressFrame: element.flatMap(Self.nativeAXScreenRect))
                 if outcome.effect == "suspected_noop", let element {
                     outcome = try await escalateNoop(request.tool, args,
                         outcome: outcome, element: element,

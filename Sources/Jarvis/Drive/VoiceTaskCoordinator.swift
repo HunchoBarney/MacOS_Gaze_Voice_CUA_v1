@@ -1645,7 +1645,7 @@ final class VoiceTaskCoordinator {
         work.ask = ask
         let prompt: String
         switch ask {
-        case .confirm(let p): prompt = p + " Say yes or no."
+        case .confirm(let p): prompt = p.contains("Say ") ? p : p + " Say yes or no."
         case .question(let p): prompt = p
         case .choice(let p, let options):
             // Spoken choices carry their numbering so a voice "two" and a
@@ -1874,9 +1874,17 @@ final class VoiceTaskCoordinator {
                 return DriveResult(status: .blocked("Nothing to point at."),
                                    blockedReason: "no overlay targets")
             }
+            answerGlowRetire?.cancel(); answerGlowing = false
             overlay.showHalo(frame: target.frame)
             return DriveResult(status: .done, history: ["highlighted \(target.label)"],
                                dispatchedEffect: true)
+        case .pressGlow:
+            guard let target = targets.first else {
+                return DriveResult(status: .blocked("Nothing to point at."),
+                                   blockedReason: "no overlay targets")
+            }
+            overlay.glowPress(frame: target.frame)
+            return DriveResult(status: .done, history: ["glowed \(target.label)"])
         case .showNumbers:
             // The executor hands exactly the matches of an ambiguous
             // name. A pick clicks the chip's frame center — same path
@@ -2136,9 +2144,7 @@ final class VoiceTaskCoordinator {
         service.staleSink = { [weak self] stale in
             guard let self else { return }
             self.overlay.gazeLost(stale > GazeSample.freshnessWindow)
-            if self.overlay.haloArmed, stale > Self.haloStaleLimit {
-                self.overlay.hideHalo()
-            }
+            self.retireStaleGazeHalo(stale: stale)
         }
         // Dwell never fires while the overlay owns a pick, an ask is
         // parked, or the user is mid-sentence — the voice answer is the
@@ -2421,7 +2427,7 @@ final class VoiceTaskCoordinator {
         let hint = listenHintTask
         hint?.cancel(); listenHintTask = nil
         gazePump?.cancel(); gazePump = nil
-        overlay.hideHalo()
+        if !answerGlowing { overlay.hideHalo() }
         overlay.gazeLost(false)
         let generation = listenHintGeneration
         Task {
@@ -2487,9 +2493,7 @@ final class VoiceTaskCoordinator {
                     gazeLost = lost
                     overlay?.gazeLost(lost)
                 }
-                if overlay?.haloArmed == true, staleFor > Self.haloStaleLimit {
-                    overlay?.hideHalo()
-                }
+                self?.retireStaleGazeHalo(stale: staleFor)
                 try? await Task.sleep(for: .milliseconds(66))
             }
             // Whoever ends the pump — Fn-up, watchdog, cancel — the
@@ -2527,6 +2531,32 @@ final class VoiceTaskCoordinator {
         return CGPoint(x: sample.x, y: sample.y)
     }
 
+    private var answerGlowRetire: Task<Void, Never>?
+    /// A screen answer owns the halo — gaze hints and their stale cleanup
+    /// leave it alone until it retires. Internal for tests.
+    private(set) var answerGlowing = false
+
+    /// The glow on the control a screen answer names. It stays 8 s so a
+    /// slow reader can find it; the next glow replaces it.
+    func glowAnswer(frame: CGRect, for duration: Duration = .seconds(8)) {
+        overlay.showHalo(frame: frame)
+        answerGlowing = true
+        answerGlowRetire?.cancel()
+        answerGlowRetire = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled, let self else { return }
+            self.answerGlowing = false
+            self.overlay.hideHalo()
+        }
+    }
+
+    /// A gaze hint goes once gaze has been stale past the limit; an answer
+    /// glow is not a gaze hint and stays.
+    func retireStaleGazeHalo(stale: TimeInterval) {
+        guard !answerGlowing, overlay.haloArmed, stale > Self.haloStaleLimit else { return }
+        overlay.hideHalo()
+    }
+
     /// One halo arm: window under the gaze point, then the deepest element
     /// containing it — silent on every miss, this is a hint not a claim.
     /// Native AX frames and gaze share global top-left screen points.
@@ -2538,7 +2568,7 @@ final class VoiceTaskCoordinator {
                   "session": .string(Self.gazeSession)]),
               !Task.isCancelled else { return }
         let content = snap["structuredContent"] ?? snap
-        guard let frame = Self.haloFrame(at: point, in: content) else { return }
+        guard let frame = Self.haloFrame(at: point, in: content), !answerGlowing else { return }
         overlay.showHalo(frame: frame)
     }
 

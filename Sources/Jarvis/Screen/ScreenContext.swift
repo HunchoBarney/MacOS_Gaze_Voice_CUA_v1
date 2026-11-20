@@ -9,6 +9,7 @@ struct ScreenNode: Sendable {
     var title: String? = nil
     var description: String? = nil
     var value: String? = nil
+    var placeholder: String? = nil
     var url: String? = nil
     var frame: CGRect? = nil
     var children: [ScreenNode] = []
@@ -38,6 +39,7 @@ struct ScreenDigest: Sendable, Equatable {
     var items: [Item] = []
     var redactions: [CGRect] = []
     var withheld: Withheld? = nil
+    var webArea = false
     var truncated = false
     var redactionsComplete = true
 
@@ -114,18 +116,19 @@ enum ScreenContext {
             }
             if fieldRoles.contains(node.role) {
                 let name = clean(label(node) ?? "", limits)
-                if SensitiveContent.isSensitiveLabel(name) {
+                if isSecretField(node) {
                     if let frame = node.frame { digest.redactions.append(frame) } else { digest.redactionsComplete = false }
-                    add("field", name.isEmpty ? "(hidden)" : "\(name) (hidden)", frame: node.frame)
+                    add("text field", name.isEmpty ? "(hidden)" : "\(name) (hidden)", frame: node.frame)
                 } else {
                     let value = clean(node.value ?? "", limits)
-                    add("field", [name, value].filter { !$0.isEmpty }.joined(separator: ": "), frame: node.frame)
+                    add("text field", [name, value].filter { !$0.isEmpty }.joined(separator: ": "), frame: node.frame)
                 }
                 node.children.forEach(visitSecretsOnly)
                 return
             }
-            if node.role == "AXWebArea", digest.pageURL == nil, let url = node.url, !url.isEmpty {
-                digest.pageURL = clean(url, limits)
+            if node.role == "AXWebArea" {
+                digest.webArea = true
+                if digest.pageURL == nil, let url = node.url, !url.isEmpty { digest.pageURL = clean(url, limits) }
             }
             if let kind = controlKinds[node.role] {
                 var text = label(node) ?? descendantText(node)
@@ -149,8 +152,7 @@ enum ScreenContext {
         }
 
         func visitSecretsOnly(_ node: ScreenNode) {
-            if SensitiveContent.isSecure(role: node.role, subrole: node.subrole)
-                || (fieldRoles.contains(node.role) && SensitiveContent.isSensitiveLabel(label(node) ?? "")) {
+            if SensitiveContent.isSecure(role: node.role, subrole: node.subrole) || isSecretField(node) {
                 if let frame = node.frame { digest.redactions.append(frame) } else { digest.redactionsComplete = false }
                 return
             }
@@ -165,8 +167,14 @@ enum ScreenContext {
         return digest
     }
 
+    private static func isSecretField(_ node: ScreenNode) -> Bool {
+        fieldRoles.contains(node.role)
+            && SensitiveContent.isSensitiveField(title: node.title, description: node.description,
+                                                 placeholder: node.placeholder)
+    }
+
     private static func label(_ node: ScreenNode) -> String? {
-        [node.title, node.description].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        [node.title, node.description, node.placeholder].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty }
     }
 
@@ -204,6 +212,52 @@ enum ScreenContext {
         return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
     }
 
+    /// Every visible window's app and title, front to back, for "what's on
+    /// my screen". Jarvis's own panels are skipped, and a password manager
+    /// keeps its name but not its titles.
+    static func visibleWindows() async -> [ScreenQuestion.WindowTitle] {
+        await Task.detached(priority: .userInitiated) { listWindows() }.value
+    }
+
+    private static func listWindows() -> [ScreenQuestion.WindowTitle] {
+        guard let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return [] }
+        let own = ProcessInfo.processInfo.processIdentifier
+        var titles: [pid_t: [UInt32: String]] = [:]
+        var result: [ScreenQuestion.WindowTitle] = []
+        for row in rows where result.count < ScreenQuestion.maxWindows {
+            guard (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let pid = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, pid != own,
+                  let number = (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let app = NSRunningApplication(processIdentifier: pid) else { continue }
+            let name = app.localizedName ?? ""
+            if SensitiveContent.isVault(bundleID: app.bundleIdentifier, appName: name) {
+                result.append(.init(app: name, title: ""))
+                continue
+            }
+            if titles[pid] == nil { titles[pid] = windowTitles(pid) }
+            result.append(.init(app: name, title: clean(titles[pid]?[number] ?? "", .standard)))
+        }
+        return result
+    }
+
+    private static func windowTitles(_ pid: pid_t) -> [UInt32: String] {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.2)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement] else { return [:] }
+        var titles: [UInt32: String] = [:]
+        for window in windows {
+            var title: CFTypeRef?
+            guard let number = FocusedTextBinding.windowNumber(window),
+                  AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &title) == .success,
+                  let text = title as? String else { continue }
+            titles[number] = text
+        }
+        return titles
+    }
+
     private static func collect(_ window: WindowRef, limits: Limits) -> ScreenDigest? {
         guard let pid = pid_t(exactly: window.pid), pid > 0,
               let windowID = UInt32(exactly: window.windowID), windowID > 0,
@@ -230,6 +284,7 @@ enum ScreenContext {
     private static let attributes = [
         kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
         kAXChildrenAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXURLAttribute,
+        kAXPlaceholderValueAttribute,
     ] as CFArray
 
     private static func node(_ element: AXUIElement, depth: Int, limits: Limits, deadline: ContinuousClock.Instant,
@@ -238,17 +293,16 @@ enum ScreenContext {
         AXUIElementSetMessagingTimeout(element, 0.2)
         var raw: CFArray?
         guard AXUIElementCopyMultipleAttributeValues(element, attributes, AXCopyMultipleAttributeOptions(rawValue: 0), &raw) == .success,
-              let values = raw as? [Any], values.count == 8, let role = values[0] as? String else {
+              let values = raw as? [Any], values.count == 9, let role = values[0] as? String else {
             complete = false
             return ScreenNode(role: "AXUnknown")
         }
         var result = ScreenNode(role: role, subrole: values[1] as? String, title: values[2] as? String,
-                                description: values[3] as? String,
+                                description: values[3] as? String, placeholder: values[8] as? String,
                                 url: (values[7] as? URL)?.absoluteString ?? (values[7] as? String),
                                 frame: frame(position: values[5], size: values[6]))
         let secure = SensitiveContent.isSecure(role: role, subrole: result.subrole)
-        let secret = fieldRoles.contains(role)
-            && SensitiveContent.isSensitiveLabel(label(result) ?? "")
+        let secret = isSecretField(result)
         if !secure, !secret, ["AXStaticText", "AXCheckBox"].contains(role) || fieldRoles.contains(role) {
             var current: CFTypeRef?
             if AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &current) == .success {
