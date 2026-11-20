@@ -1,0 +1,21 @@
+{
+  "name": "jarvis-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Jarvis's end-to-end flows on the signed app, through e2e and its macOS engine",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@e2e-dev/core": "0.24.0",
+    "@e2e-dev/desktop": "file:vendor/e2e-dev-desktop-0.0.0-pr1953.7e0b7d2.tgz",
+    "@types/node": "25.9.3",
+    "e2e": "0.24.0",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=24.8.0"
+  }
+}

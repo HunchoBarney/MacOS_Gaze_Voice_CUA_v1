@@ -706,7 +706,6 @@ final class JevChooserTests: XCTestCase {
                 "done": result?.doneVote.map(JSONValue.bool) ?? .null,
                 "latency": result?.latencyMs.map(JSONValue.number) ?? .null,
                 "probabilities": .object((result?.probabilities ?? [:]).mapValues(JSONValue.number)),
-                "proposed": result?.proposedActionID.map(JSONValue.string) ?? .null,
                 "support": .object((result?.actionSupport ?? [:]).mapValues(JSONValue.number)),
                 "rejection": result?.actionRejection.map { .string($0.rawValue) } ?? .null,
             ])
