@@ -166,8 +166,8 @@ final class EmbeddedDaemon {
     }
 }
 
-/// One daemon for the whole app. Every consumer (voice session, agent MCP
-/// children, setup probes) spawns its own `mcp --embedded` proxy onto this
+/// One daemon for the whole app. Every consumer in the app (voice session,
+/// each agent's drive, setup probes) spawns its own `mcp --embedded` proxy onto this
 /// socket — the daemon serves N connections concurrently by design.
 ///
 /// Health model: `socket()` re-mints a dead daemon lazily (child exited or
