@@ -88,6 +88,18 @@ export async function openActivity(desktop: Desktop, screen: Screen): Promise<vo
   await sleep(3_000);
 }
 
+/** Opens the fixture board in front of everything, recording into one file, and returns that file's lines. */
+async function launchBoard(name: string, ...args: string[]): Promise<() => Promise<string[]>> {
+  const record = path.join(required('JARVIS_E2E_TMP'), name);
+  await run('open', ['-n', required('JARVIS_E2E_BOARD'), '--args', record, ...args]);
+  await expect.poll(() => readFile(record).then(() => true, () => false), { timeout: 15_000 }).toBe(true);
+  await sleep(1_000);
+  return async () =>
+    (await readFile(record, 'utf8').catch(() => ''))
+      .split('\n')
+      .filter((line) => line !== '');
+}
+
 /** The fixture board, frontmost, and the presses it has recorded so far. */
 export interface Board {
   presses(): Promise<string[]>;
@@ -95,15 +107,19 @@ export interface Board {
 
 /** Opens the board in front of everything, so Jarvis's "this window" is the board. */
 export async function openBoard(name: string): Promise<Board> {
-  const clicks = path.join(required('JARVIS_E2E_TMP'), name + '-presses.txt');
-  await run('open', ['-n', required('JARVIS_E2E_BOARD'), '--args', clicks]);
-  const board: Board = {
-    presses: async () =>
-      (await readFile(clicks, 'utf8').catch(() => ''))
-        .split('\n')
-        .filter((line) => line !== ''),
-  };
-  await expect.poll(() => readFile(clicks).then(() => true, () => false), { timeout: 15_000 }).toBe(true);
-  await sleep(1_000);
-  return board;
+  return { presses: await launchBoard(name + '-presses.txt') };
+}
+
+/** How far the fixture list can scroll: 4,000 rows of 28 points (Rows in fixtures/Board.swift), less one window. */
+export const LIST_END = 4_000 * 28 - 360;
+
+/** The fixture list, frontmost, and its scroll offset in points, 0 at the top. */
+export interface List {
+  offset(): Promise<number>;
+}
+
+/** Opens the board's long list in front of everything, so Jarvis's "this window" is the list. */
+export async function openList(name: string): Promise<List> {
+  const lines = await launchBoard(name + '-offsets.txt', '--list');
+  return { offset: async () => Number((await lines()).at(-1) ?? 0) };
 }

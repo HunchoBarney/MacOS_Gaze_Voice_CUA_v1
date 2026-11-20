@@ -328,19 +328,15 @@ public actor CodexRuntimeBridge {
     }
 
     /// The credentials this configuration transports, read live at spawn.
-    /// Covers the provider's env_key and the TYPESAFE_API_KEY the jev-drive
+    /// Covers the provider's env_key and the Jev credential the jev-drive
     /// MCP server picks up via env_vars — both live in Config (Keychain-
     /// backed) so mid-session entry lands without a relaunch. Keys with no
     /// live source (or an empty live value) pass through untouched.
     private func liveCredentials() -> [String: String] {
-        var live: [String: String] = [:]
-        for key in [configuration.provider.envKey, "TYPESAFE_API_KEY"] where !key.isEmpty {
-            let value: String?
-            switch key {
-            case "OPENAI_API_KEY": value = Config.shared.openAIAPIKey
-            case "TYPESAFE_API_KEY": value = Config.shared.apiKey
-            default: value = ProcessInfo.processInfo.environment[key]
-            }
+        var live = Config.shared.jevEnvironment
+        let key = configuration.provider.envKey
+        if !key.isEmpty {
+            let value = key == "OPENAI_API_KEY" ? Config.shared.openAIAPIKey : ProcessInfo.processInfo.environment[key]
             if let value, !value.isEmpty { live[key] = value }
         }
         return live

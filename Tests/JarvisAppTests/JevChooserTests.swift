@@ -941,6 +941,27 @@ final class JevChooserTests: XCTestCase {
         XCTAssertEqual(JevChooser.model, "jev-1.14.0")
     }
 
+    func testVoiceRouterRejectsAnAnswerFromAnotherJevVersion() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FixtureProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let router = VoiceSemanticRouter.live(apiKey: "fixture-key", session: session)
+        let state = JSONValue.object(["goal": .string("open mail")])
+        for (model, accepted) in [(JevChooser.model, true), ("jev-1.15.0", false), ("jev-latest", false)] {
+            FixtureProtocol.body = try JSONSerialization.data(withJSONObject: [
+                "model": model, "answers": [:] as [String: Any]
+            ])
+            do {
+                let response = try await router.infer(state, [:])
+                XCTAssertTrue(accepted, model)
+                XCTAssertEqual(response.model, JevChooser.model)
+            } catch VoiceSemanticRouter.Failure.invalidResponse {
+                XCTAssertFalse(accepted, model)
+            }
+        }
+    }
+
     func testProductionClientBatchesSelectionAndCandidateSupportOnce() async throws {
         let result = try await choose()
         XCTAssertEqual(FixtureProtocol.requests.count, 1)
