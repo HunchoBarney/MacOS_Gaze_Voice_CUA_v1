@@ -6,6 +6,9 @@ import JarvisCore
 /// tracker point, and refuse honestly when the tracker can't say where the
 /// user is looking.
 final class GazeLaneTests: XCTestCase {
+    override func setUp() {
+        useGazeTrackingOn()
+    }
 
     // MARK: - Parse + resolve
 
@@ -133,7 +136,11 @@ final class GazeLaneTests: XCTestCase {
     private final class FakeDriver {
         var calls: [(tool: String, args: [String: JSONValue])] = []
         var responses: [String: [JSONValue]] = [:]
+        private let lock = NSLock()
+
         func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+            lock.lock()
+            defer { lock.unlock() }
             calls.append((tool, args))
             if var queue = responses[tool], !queue.isEmpty {
                 let first = queue.removeFirst()

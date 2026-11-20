@@ -53,10 +53,21 @@ resolve() {
     esac
 }
 
+# "swift <total>/<failed> fail · vitest <passed>/<all>". A parallel run's
+# total is the last [N/N] progress line and counts only when every test ran;
+# a serial run's is XCTest's own summary.
 summary() {
     local log=$1 part total=0 failed=0 skipped="" out=""
-    part=$(grep -aoE 'Executed [0-9]+ tests?, with .*[0-9]+ failures?' "$log" | tail -1)
+    part=$(grep -aoE '^\[[0-9]+/[0-9]+\] Testing ' "$log" | tail -1)
     if [ -n "$part" ]; then
+        local ran listed
+        ran=$(echo "$part" | sed -E 's/^\[([0-9]+)\/.*/\1/')
+        listed=$(echo "$part" | sed -E 's/^\[[0-9]+\/([0-9]+)\].*/\1/')
+        [ "$ran" = "$listed" ] && total=$listed
+        failed=$(grep -aoE "Test Case '-\[[^]]+\]' failed" "$log" | sort -u | wc -l | tr -d ' ')
+    fi
+    part=$(grep -aoE 'Executed [0-9]+ tests?, with .*[0-9]+ failures?' "$log" | tail -1)
+    if [ "$total" -eq 0 ] && [ -n "$part" ]; then
         total=$(echo "$part" | sed -E 's/Executed ([0-9]+).*/\1/')
         failed=$(echo "$part" | grep -oE '[0-9]+ failures?' | grep -oE '^[0-9]+')
         skipped=$(echo "$part" | grep -oE '[0-9]+ tests? skipped' | grep -oE '^[0-9]+' || true)
@@ -129,7 +140,7 @@ run_sha() {
     say "make test at $sha" | tee -a "$log"
     local start=$SECONDS rc
     set -m
-    (cd "$CHECKOUT" && exec nice -n 10 taskpolicy -c utility make test) >>"$log" 2>&1 &
+    (cd "$CHECKOUT" && exec nice -n 10 make test) >>"$log" 2>&1 &
     test_pid=$!
     set +m
     rm -f "$CI_HOME/timed-out"
@@ -144,6 +155,10 @@ run_sha() {
     fi
     local minutes=$(((SECONDS - start + 59) / 60)) counts
     counts=$(summary "$log")
+    if [ "$rc" -eq 0 ] && ! [[ $counts == swift* && $counts == *vitest* ]]; then
+        say "make test exited 0 but the log has no complete swift and vitest count" | tee -a "$log"
+        rc=1 counts="no complete test count in the log"
+    fi
     say "make test exited $rc after $minutes min: $counts" | tee -a "$log"
     if [ "$rc" -eq 0 ]; then
         post "$sha" success "${counts:-make test passed} · ${minutes} min"

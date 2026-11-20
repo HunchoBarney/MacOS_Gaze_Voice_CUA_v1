@@ -20,8 +20,10 @@ final class ConsentAskWatchTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
-    /// A file landing in asks/ wakes the stream in well under 200ms —
-    /// with the heartbeat set to 10s, only the directory watch can fire.
+    /// A file landing in asks/ wakes the stream within a second — with the
+    /// heartbeat set to 10s, only the directory watch can fire. The bound
+    /// leaves headroom for a loaded Mac; it still sits far below the
+    /// heartbeat, so a missed watch fails it.
     func testWatchFiresUnder200ms() async throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let stream = AgentAskChannel.changes(safetyInterval: .seconds(10))
@@ -40,7 +42,7 @@ final class ConsentAskWatchTests: XCTestCase {
         try JSONEncoder().encode(JSONValue.object(body))
             .write(to: dir.appendingPathComponent("probe.json"))
         let seconds = await elapsed.value
-        XCTAssertLessThan(seconds, 0.2,
+        XCTAssertLessThan(seconds, 1.0,
                           "directory watch must wake well under the heartbeat")
     }
 

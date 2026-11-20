@@ -6,6 +6,9 @@ import JarvisCore
 /// a model, dispatches once, and verifies the effect from live state.
 /// Parse tests are pure; run() tests drive a scripted driver.
 final class FastLaneTests: XCTestCase {
+    override func setUp() {
+        usePrivateStandingGrants()
+    }
 
     @MainActor
     func testCapturedApplicationResolutionRequiresExactFreshOwner() {
@@ -472,8 +475,11 @@ final class FastLaneTests: XCTestCase {
         var responses: [String: [JSONValue]] = [:]
         var snapshotForRound: (Int) -> JSONValue = { _ in .object(["elements": .array([])]) }
         private var round = 0
+        private let lock = NSLock()
 
         func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+            lock.lock()
+            defer { lock.unlock() }
             calls.append((tool, args))
             if tool == "get_window_state" {
                 defer { round += 1 }

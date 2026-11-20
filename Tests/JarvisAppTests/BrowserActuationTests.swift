@@ -26,7 +26,11 @@ final class BrowserActuationTests: XCTestCase {
             "elements": .array([]),
         ])
 
+        private let lock = NSLock()
+
         func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+            lock.lock()
+            defer { lock.unlock() }
             calls.append((tool, args))
             if let error = errorsOnce.removeValue(forKey: tool) { throw error }
             if let error = errors[tool] { throw error }
@@ -87,19 +91,8 @@ final class BrowserActuationTests: XCTestCase {
         var count = 0
     }
 
-    private var savedPageAccess = false
-    private var savedComputerUse = false
-
     override func setUp() {
-        savedPageAccess = CuaStandingGrants.browserPageAccess
-        savedComputerUse = CuaStandingGrants.computerUseInput
-        CuaStandingGrants.browserPageAccess = false
-        CuaStandingGrants.computerUseInput = false
-    }
-
-    override func tearDown() {
-        CuaStandingGrants.browserPageAccess = savedPageAccess
-        CuaStandingGrants.computerUseInput = savedComputerUse
+        usePrivateStandingGrants()
     }
 
     /// A loop bound to a Safari fixture — the resolver serves the pid so

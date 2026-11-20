@@ -155,7 +155,8 @@ final class GazeHighlightBenchTests: XCTestCase {
     }
 
     /// The scorer's share of the sample-to-highlight path: one update over
-    /// a crowded window's worth of candidates.
+    /// a crowded window's worth of candidates. Measured in this thread's CPU
+    /// time, so other test processes sharing the cores can't inflate it.
     func testScorerUpdateCostPerSample() {
         let frames = (0..<60).map { i in
             CGRect(x: 40 + CGFloat(i % 10) * 90, y: 80 + CGFloat(i / 10) * 40, width: 80, height: 28)
@@ -167,15 +168,13 @@ final class GazeHighlightBenchTests: XCTestCase {
         let core = IntentScorerCore(config: .init(sigmaPx: 40))
         var rng = SplitMix(state: 3)
         let n = 3000
-        let clock = ContinuousClock()
-        let started = clock.now
+        let started = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         for i in 0..<n {
             let point = CGPoint(x: 300 + rng.gaussian() * 30, y: 150 + rng.gaussian() * 30)
             core.update(candidates: candidates, at: point, isSaccade: i % 8 == 0,
                         now: Date(timeIntervalSinceReferenceDate: Double(i) / 15))
         }
-        let perUpdateMs = Double((clock.now - started).components.attoseconds) / 1e15 / Double(n)
-            + Double((clock.now - started).components.seconds) * 1000 / Double(n)
+        let perUpdateMs = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - started) / 1e6 / Double(n)
         print(String(format: "GAZE-SCORER-UPDATE %.3f ms per sample, 60 candidates", perUpdateMs))
         XCTAssertLessThan(perUpdateMs, 5)
     }

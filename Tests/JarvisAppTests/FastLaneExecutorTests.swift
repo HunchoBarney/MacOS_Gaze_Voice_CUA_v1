@@ -9,6 +9,10 @@ import JarvisCore
 /// snaps verify a bounds readback, locate hunts the global inventory,
 /// and the display-scope qualifier resolves the app under the gaze point.
 final class FastLaneExecutorTests: XCTestCase {
+    override func setUp() {
+        usePrivateStandingGrants()
+        useGazeTrackingOn()
+    }
 
     func testVerifiedCapturedOwnerAvoidsResolverButMissingOrChangedOwnerDoesNot() async {
         let resolutions = LockedBox(0)
@@ -51,7 +55,11 @@ final class FastLaneExecutorTests: XCTestCase {
         var responses: [String: [JSONValue]] = [:]
         var thrown: [String: Error] = [:]
         var modelCalls = 0
+        private let lock = NSLock()
+
         func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+            lock.lock()
+            defer { lock.unlock() }
             calls.append((tool, args))
             if let error = thrown[tool] { throw error }
             if var queue = responses[tool], !queue.isEmpty {

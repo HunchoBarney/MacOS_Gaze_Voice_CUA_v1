@@ -11,7 +11,7 @@ Requires macOS 26 with the macOS 26 SDK, Xcode command-line tools, and Node
 (pnpm comes through Corepack).
 
 ```sh
-make test      # swift test, tracker typecheck and Vitest
+make test      # swift test --parallel, tracker typecheck and Vitest
 make release   # one signed build from source → build/Jarvis.app + zip
 make install   # release, then copy to ~/jarvis-local (does not launch)
 make local     # install, then relaunch the app

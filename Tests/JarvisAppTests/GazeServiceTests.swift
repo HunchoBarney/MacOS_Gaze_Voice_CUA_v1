@@ -299,23 +299,21 @@ final class GazeServiceTests: XCTestCase {
     /// `.safe` forever.
     func testPolicyReloadsOnDefaultsChange() async throws {
         let key = DwellPolicy.modeKey
-        let prior = UserDefaults.standard.object(forKey: key)
-        defer {
-            if let prior { UserDefaults.standard.set(prior, forKey: key) }
-            else { UserDefaults.standard.removeObject(forKey: key) }
-        }
-        let service = GazeService(stream: stream(yielding: []))
+        let suite = "GazeServiceTests.reload.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = GazeService(stream: stream(yielding: []), defaults: defaults)
         service.eventSink = { _ in }
         service.gazePointSink = { _ in }
         service.staleSink = { _ in }
         service.start()
         defer { service.stop() }
-        UserDefaults.standard.set("all", forKey: key)
+        defaults.set("all", forKey: key)
         for _ in 0..<200 where service.dwellPolicy.mode != .all {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(service.dwellPolicy.mode, .all)
-        UserDefaults.standard.set("off", forKey: key)
+        defaults.set("off", forKey: key)
         for _ in 0..<200 where service.dwellPolicy.mode != .off {
             try await Task.sleep(for: .milliseconds(10))
         }
