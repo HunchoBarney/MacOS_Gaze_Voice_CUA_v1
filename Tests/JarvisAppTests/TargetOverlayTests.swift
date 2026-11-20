@@ -335,6 +335,7 @@ final class TargetOverlayTests: XCTestCase {
     func testRingViewProgressMapsStrokeEndAndOpacity() {
         let view = TargetOverlay.IntentRingView(
             frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        view.showsProgress = true
         view.setProgress(0.4)
         XCTAssertEqual(view.fill.strokeEnd, 0.4, accuracy: 0.001)
         XCTAssertEqual(view.container.opacity, 1, accuracy: 0.001)
@@ -342,6 +343,19 @@ final class TargetOverlayTests: XCTestCase {
         XCTAssertEqual(view.fill.strokeEnd, 1, accuracy: 0.001)
         XCTAssertEqual(view.container.opacity,
                        Float(TargetOverlay.ringDwellFloor), accuracy: 0.01)
+    }
+
+    /// Dwell off: the highlight is a plain look-glow — no sweep stroke,
+    /// no dwell-fade however long the look lasts.
+    func testLookHighlightWithoutDwellHidesSweepAndHoldsSteady() {
+        XCTAssertEqual(TargetOverlay.ringAlpha(progress: 1, dwell: false), 1, accuracy: 0.001)
+        let view = TargetOverlay.IntentRingView(
+            frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        XCTAssertTrue(view.fill.isHidden)
+        view.setProgress(1)
+        XCTAssertEqual(view.container.opacity, 1, accuracy: 0.001)
+        view.showsProgress = true
+        XCTAssertFalse(view.fill.isHidden)
     }
 
     /// Paths land canvas-relative — the panel covers a union rect in
@@ -352,8 +366,8 @@ final class TargetOverlayTests: XCTestCase {
         let canvas = CGRect(x: 100, y: 100, width: 200, height: 200)
         let to = (rect: CGRect(x: 110, y: 120, width: 60, height: 40),
                   corner: CGFloat(8))
-        view.morph(from: TargetOverlay.ringDotGeo(at: CGPoint(x: 140, y: 140)),
-                   to: to, in: canvas, duration: 0.16)
+        view.morph(from: TargetOverlay.ringLift(to),
+                   to: to, in: canvas, duration: 0.08)
         XCTAssertEqual(view.base.path?.boundingBox,
                        CGRect(x: 10, y: 20, width: 60, height: 40))
     }
@@ -369,7 +383,7 @@ final class TargetOverlayTests: XCTestCase {
             startedAt: 0, duration: 0.16, active: true)
         let mid = m.current(at: 0.08)
         XCTAssertNotEqual(mid.rect, m.to.rect)
-        m.retarget(to: TargetOverlay.ringDotGeo(at: CGPoint(x: 4, y: 4)),
+        m.retarget(to: (CGRect(x: 0, y: 0, width: 30, height: 20), 6),
                    at: 0.08, duration: 0.16)
         XCTAssertEqual(m.from.rect, mid.rect)
         XCTAssertEqual(m.from.corner, mid.corner, accuracy: 0.001)
@@ -380,38 +394,72 @@ final class TargetOverlayTests: XCTestCase {
         XCTAssertEqual(m.from.rect, rel.rect)
     }
 
-    /// acquire → release mid-morph → acquire: the second acquire's `from`
-    /// is exactly where the release morph had reached — no jump, no
-    /// snap back to the dot.
+    /// A fresh acquire appears ON the element — lifting out of its own
+    /// shape, never blooming from a cursor dot at the gaze point.
+    func testAcquireLiftsFromTheElementNotADot() {
+        let overlay = TargetOverlay()
+        overlay.now = { 0 }
+        overlay.reduceMotion = { false }
+        let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
+        overlay.intentEvent(.acquire(a))
+        let target = TargetOverlay.ringTarget(for: a)
+        XCTAssertEqual(overlay.ringMorph.from.rect, TargetOverlay.ringLift(target).rect)
+        XCTAssertTrue(target.rect.contains(overlay.ringMorph.from.rect))
+        XCTAssertEqual(overlay.ringMorph.to.rect, target.rect)
+        XCTAssertEqual(overlay.ringMorph.duration, TargetOverlay.ringAppearSeconds, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(TargetOverlay.ringAppearSeconds, 0.1)
+        overlay.hideAll()
+    }
+
+    /// Reduce Motion: no lift, no glide — the shape is placed outright
+    /// and only opacity changes.
+    func testReduceMotionPlacesTheHighlightWithoutMovement() {
+        let overlay = TargetOverlay()
+        var t: TimeInterval = 0
+        overlay.now = { t }
+        overlay.reduceMotion = { true }
+        let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
+        overlay.intentEvent(.acquire(a))
+        XCTAssertEqual(overlay.ringMorph.from.rect, overlay.ringMorph.to.rect)
+        XCTAssertEqual(overlay.ringMorph.duration, 0, accuracy: 0.001)
+        t = 0.5
+        let b = intentCandidate(x: 260, y: 100, w: 80, h: 28, id: "b")
+        overlay.intentEvent(.acquire(b))
+        XCTAssertEqual(overlay.ringMorph.duration, 0, accuracy: 0.001)
+        XCTAssertEqual(overlay.ringMorph.current(at: t).rect,
+                       TargetOverlay.ringTarget(for: b).rect)
+        overlay.hideAll()
+    }
+
+    /// acquire → release mid-appear → acquire elsewhere: release fades in
+    /// place (no shrink toward a dot), and the next acquire glides from
+    /// exactly where the shape had reached — no jump.
     func testAcquireReleaseAcquireLeavesMorphConsistent() {
         let overlay = TargetOverlay()
         var t: TimeInterval = 0
         overlay.now = { t }
+        overlay.reduceMotion = { false }
         let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
         overlay.intentEvent(.acquire(a))
         let target = TargetOverlay.ringTarget(for: a)
-        let dot = TargetOverlay.ringDotGeo(
-            at: CGPoint(x: target.rect.midX, y: target.rect.midY))
-        XCTAssertEqual(overlay.ringMorph.from.rect, dot.rect)
+        let lift = TargetOverlay.ringLift(target)
         XCTAssertTrue(overlay.ringArmed)
 
-        t = 0.08                                       // mid acquire-morph
+        t = 0.04                                       // mid appear
         overlay.intentEvent(.release(a))
         XCTAssertFalse(overlay.ringArmed)              // fade = no claim
-        let releaseFrom = overlay.ringMorph.from
-        let expectedMid = TargetOverlay.lerpRing(
-            from: dot, to: target, t: TargetOverlay.ringEase(0.5))
-        XCTAssertEqual(releaseFrom.rect, expectedMid.rect)
-        XCTAssertEqual(overlay.ringMorph.to.rect, dot.rect)
+        XCTAssertEqual(overlay.ringMorph.to.rect, target.rect)
 
-        t = 0.12                                       // mid release-morph
+        t = 0.06                                       // mid release-fade
         let b = intentCandidate(x: 300, y: 100, w: 40, h: 40, id: "b")
         overlay.intentEvent(.acquire(b))
-        let continued = TargetOverlay.lerpRing(
-            from: releaseFrom, to: dot, t: TargetOverlay.ringEase(0.25))
-        XCTAssertEqual(overlay.ringMorph.from.rect, continued.rect)
+        let reached = TargetOverlay.lerpRing(
+            from: lift, to: target, t: TargetOverlay.ringEase(0.06 / TargetOverlay.ringAppearSeconds))
+        XCTAssertEqual(overlay.ringMorph.from.rect, reached.rect)
         XCTAssertEqual(overlay.ringMorph.to.rect,
                        TargetOverlay.ringTarget(for: b).rect)
+        XCTAssertEqual(overlay.ringMorph.duration,
+                       TargetOverlay.ringRetargetSeconds, accuracy: 0.001)
         XCTAssertTrue(overlay.ringArmed)
         overlay.hideAll()
     }
@@ -422,6 +470,7 @@ final class TargetOverlayTests: XCTestCase {
         let overlay = TargetOverlay()
         var t: TimeInterval = 0
         overlay.now = { t }
+        overlay.reduceMotion = { false }
         let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
         overlay.intentEvent(.acquire(a))
         t = 0.5

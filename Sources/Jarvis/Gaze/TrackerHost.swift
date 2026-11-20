@@ -980,10 +980,13 @@ actor TrackerHost {
                          // or force-quit host can't orphan it, because one
                          // app means the tracker never outlives the host.
                          "--host-pid", "\(hostPid)",
-                         // First enable: with no usable calibration (none
-                         // yet, or one fit by another gaze model) the
-                         // tracker starts the full calibration itself.
-                         "--calibrate-if-missing"]
+                         // Invisible calibration: with no usable
+                         // calibration (none yet, or one fit by another
+                         // gaze model) the tracker starts from its prior
+                         // or the raw projection and learns from ordinary
+                         // use. Nothing on screen asks for a calibration;
+                         // the follow-the-dot stays optional.
+                         "--learn-if-missing"]
         // Display size: explicit default wins; otherwise the main
         // display's physical diagonal (CGDisplayScreenSize is real
         // millimetres — pixel metrics would misreport Retina panels);

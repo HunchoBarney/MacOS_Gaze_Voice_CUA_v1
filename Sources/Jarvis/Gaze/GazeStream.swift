@@ -39,6 +39,39 @@ actor GazeStream {
 
     func latest() -> GazeSample? { latestSample }
 
+    /// Good samples ingested so far — a reader compares it to know whether
+    /// anything new arrived.
+    private(set) var sequence = 0
+    private var waiters: [Int: CheckedContinuation<Int, Never>] = [:]
+    private var nextWaiter = 0
+
+    /// Suspends until a sample newer than `seen` lands or `timeout`
+    /// passes, and returns the current sequence. The gaze pump waits here
+    /// so it reacts to each sample the moment it arrives instead of on a
+    /// fixed poll.
+    func waitForSample(after seen: Int, timeout: Duration) async -> Int {
+        if sequence != seen { return sequence }
+        nextWaiter += 1
+        let id = nextWaiter
+        return await withCheckedContinuation { continuation in
+            waiters[id] = continuation
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                await self?.resumeWaiter(id)
+            }
+        }
+    }
+
+    private func resumeWaiter(_ id: Int) {
+        waiters.removeValue(forKey: id)?.resume(returning: sequence)
+    }
+
+    private func resumeAllWaiters() {
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending.values { continuation.resume(returning: sequence) }
+    }
+
     /// Idempotent start — stops first so a tracker restart lands on a
     /// fresh socket.
     func start() {
@@ -73,6 +106,7 @@ actor GazeStream {
         pump = nil
         streaming = false
         latestSample = nil
+        resumeAllWaiters()
     }
 
     /// Parse one frame; keep the newest good gaze sample.
@@ -87,6 +121,8 @@ actor GazeStream {
               let gazeData = try? JSONSerialization.data(withJSONObject: gaze),
               let sample = try? GazeClient.decode(gazeData) else { return }
         latestSample = sample
+        sequence += 1
+        resumeAllWaiters()
     }
 
     /// The production WebSocket — URLSession's task sends no Origin header,

@@ -2,14 +2,20 @@ import CoreGraphics
 import Foundation
 
 /// The user's measured gaze error in screen points — what spreads gaze
-/// evidence instead of a fixed guess. Two reports sit beside the tracker's
-/// calibration file and the newer one wins: the held-out accuracy test
-/// (`accuracy_report.json`, `error_px.overall.median`) and the calibration's
-/// own verify pass (`calibration_report.json`, `median_pt`). A recalibration
-/// therefore supersedes an older accuracy run.
+/// evidence instead of a fixed guess. Three reports sit beside the
+/// tracker's calibration file and the newest wins: the held-out accuracy
+/// test (`accuracy_report.json`, `error_px.overall.median`), the
+/// calibration's own verify pass (`calibration_report.json`, `median_pt`)
+/// and invisible calibration's running label error (`learning_report.json`,
+/// `median_pt`, rewritten as ordinary use labels the map). A recalibration
+/// therefore supersedes an older accuracy run, and everyday use keeps the
+/// band honest as the learned map improves or drifts.
 enum GazeErrorBand {
-    /// σ with no measurement yet — about 2° at laptop distance.
-    static let fallbackSigmaPt: Double = 40
+    /// σ with no measurement yet: invisible calibration is still on its
+    /// prior or the raw projection, which the literature puts at 4–7°
+    /// before any personal data. 150 pt is a ~4° median at 50 cm, so the
+    /// band stays wide until the first learning report narrows it.
+    static let fallbackSigmaPt: Double = 150
     /// Below ~0.5° the webcam can't honestly claim more.
     static let minimumSigmaPt: Double = 20
     /// Median radial error of an isotropic 2-D Gaussian is σ·√(2 ln 2).
@@ -24,6 +30,7 @@ enum GazeErrorBand {
         let sources: [(file: String, path: [String])] = [
             ("accuracy_report.json", ["error_px", "overall", "median"]),
             ("calibration_report.json", ["median_pt"]),
+            ("learning_report.json", ["median_pt"]),
         ]
         var best: (date: Date, value: Double)?
         for source in sources {

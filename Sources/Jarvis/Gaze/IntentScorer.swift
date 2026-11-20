@@ -156,6 +156,24 @@ final class IntentScorerCore {
         var sigmaPx: Double = GazeErrorBand.fallbackSigmaPt
         /// Evidence half-life — stale evidence decays away in ~1s.
         var halfLifeSec: Double = 0.8
+        /// Gaze observations per second counted as independent evidence.
+        /// Scores stay Δt-weighted (frame-rate independent); this sets
+        /// how fast they separate — at 1 a whole second of looking moved
+        /// the posterior as much as one sample should.
+        var evidenceRate: Double = 5
+        /// A point this far from the running fixation centroid starts a
+        /// new fixation even without the tracker's saccade flag (its
+        /// dispersion radius is wider than neighbouring controls).
+        var fixationBreakPt: Double = 48
+        /// Share of the old evidence a new fixation keeps. Evidence
+        /// describes where the eyes WERE: carried in full, a look at the
+        /// next control waited out a whole half-life before the winner
+        /// could move.
+        var fixationCarry: Double = 0
+        /// Frames a challenger must lead inside the new fixation before
+        /// it can take over a live highlight — one noisy landing sample
+        /// never moves it.
+        var minHandoverFrames: Int = 2
         /// Meta's consensus window for a handover.
         var consensusWindowSec: Double = 0.2
         /// Log score margin a challenger needs over the incumbent.
@@ -212,6 +230,10 @@ final class IntentScorerCore {
     /// window; summed argmax residue from a previous reign isn't a tie.
     private var tiePair: (String, String)?
     private var tieSince: Date?
+    /// Running centroid of the current fixation — a point past
+    /// `fixationBreakPt` from it starts the next one.
+    private var fixationCentroid: CGPoint?
+    private var fixationSamples = 0
 
     private(set) var incumbent: IntentCandidate?
     private var incumbentSince: Date?
@@ -293,6 +315,11 @@ final class IntentScorerCore {
             for id in argmaxSec.keys { argmaxSec[id]! *= gazeDecay }
         }
 
+        if freshGaze, startsFixation(at: point, flagged: isSaccade) {
+            for id in scores.keys { scores[id]! *= config.fixationCarry }
+            argmaxHistory.removeAll()
+        }
+
         feedIDs = Set(candidates.map(\.id))
         if freshGaze {
             for c in candidates {
@@ -314,7 +341,8 @@ final class IntentScorerCore {
                 // evidence, so margins mean the same at any frame rate.
                 // Floor at -3 nats·s: a long look-away can't dig a hole
                 // so deep that re-look can never recover (~5% share).
-                scores[c.id, default: 0] = max(-3.0, scores[c.id, default: 0] + log(l * p) * dt)
+                scores[c.id, default: 0] = max(-3.0, scores[c.id, default: 0]
+                                                   + log(l * p) * dt * config.evidenceRate)
             }
             let argmaxID = topCandidate()?.0.id
             argmaxHistory.append((now, argmaxID))
@@ -389,6 +417,28 @@ final class IntentScorerCore {
         incumbent = nil; incumbentSince = nil
         lastCandidateSeenAt = nil; lastUpdateAt = nil; lastTickAt = nil
         tiePair = nil; tieSince = nil
+        fixationCentroid = nil; fixationSamples = 0
+    }
+
+    /// Tracks the running fixation and reports when this point begins a
+    /// new one — the tracker's saccade flag, or a jump past
+    /// `fixationBreakPt` it filtered as the same fixation.
+    private func startsFixation(at point: CGPoint, flagged: Bool) -> Bool {
+        guard let centroid = fixationCentroid else {
+            fixationCentroid = point
+            fixationSamples = 1
+            return true
+        }
+        if flagged || hypot(point.x - centroid.x, point.y - centroid.y) > config.fixationBreakPt {
+            fixationCentroid = point
+            fixationSamples = 1
+            return true
+        }
+        fixationSamples += 1
+        let n = CGFloat(fixationSamples)
+        fixationCentroid = CGPoint(x: centroid.x + (point.x - centroid.x) / n,
+                                   y: centroid.y + (point.y - centroid.y) / n)
+        return false
     }
 
     // MARK: - Internals
@@ -520,7 +570,7 @@ final class IntentScorerCore {
         if let current = incumbent {
             let frames = argmaxHistory.map(\.id)
             let wins = frames.filter { $0 == leader.id }.count
-            let majority = !frames.isEmpty && wins * 2 > frames.count
+            let majority = wins >= config.minHandoverFrames && wins * 2 > frames.count
             // Margin in share space — exp of the log-score diff — so it's
             // identical at any accumulation rate.
             let marginOk = share(of: leader.id) >= share(of: current.id) * exp(config.handoverLogMargin)
@@ -564,6 +614,9 @@ final class IntentScorerCore {
         }
         incumbent = nil
         incumbentSince = nil
+        // Whatever the eyes were on is gone — the next sample opens a new
+        // fixation instead of inheriting this one's evidence.
+        fixationCentroid = nil
         return .release(old)
     }
 
@@ -611,9 +664,13 @@ final class IntentScorerCore {
         selectionCounts = selectionCounts.filter { $0.value > 0.01 }
     }
 
+    private func fuzzyMatch(_ hint: String, _ label: String) -> Bool {
+        Self.labelMatches(hint: hint, label: label)
+    }
+
     /// Token overlap — enough to bias "click save" toward the Save button
     /// without pretending to be a matcher.
-    private func fuzzyMatch(_ hint: String, _ label: String) -> Bool {
+    nonisolated static func labelMatches(hint: String, label: String) -> Bool {
         let stop: Set<String> = ["the", "a", "an", "this", "that", "it", "click", "open", "press"]
         let h = Set(hint.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)).subtracting(stop)
         let l = Set(label.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
@@ -663,6 +720,12 @@ actor GazeIntentScorer {
 
     func reset() {
         core.reset()
+        refreshMeasuredSigma()
+    }
+
+    /// Re-read σ from the newest report — invisible calibration rewrites
+    /// its learning report as the map improves, so the band follows it.
+    func refreshMeasuredSigma() {
         if measuresSigma { core.setSigma(GazeErrorBand.sigmaPt()) }
     }
 }

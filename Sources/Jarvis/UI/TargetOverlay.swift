@@ -52,22 +52,26 @@ final class TargetOverlay {
     static let flashSeconds: CFTimeInterval = 0.4
     /// The cheat sheet hangs this far below the screen's top edge.
     static let cheatSheetDrop: CGFloat = 24
-    /// Conforming ring: outset off the element frame, the dot a fresh
-    /// acquire blooms from, morph + retarget durations, stroke width,
-    /// and the padding the panel adds around a morph's bounding union.
+    /// Gaze highlight: outset off the element frame, how far inside its
+    /// resting shape a fresh highlight lifts from, appear / glide /
+    /// release durations, stroke width, and the padding the panel adds
+    /// around the shape for the glow.
     nonisolated static let ringOutset: CGFloat = 5
-    nonisolated static let ringDotSize: CGFloat = 8
-    static let ringMorphSeconds: CFTimeInterval = 0.16
+    nonisolated static let ringLiftInset: CGFloat = 3
+    static let ringAppearSeconds: CFTimeInterval = 0.08
     static let ringRetargetSeconds: CFTimeInterval = 0.10
-    static let ringLineWidth: CGFloat = 2
-    static let ringPanelPad: CGFloat = 10
+    static let ringReleaseSeconds: CFTimeInterval = 0.12
+    static let ringLineWidth: CGFloat = 1.5
+    static let ringPanelPad: CGFloat = 14
     /// Meta's sustained-dwell fade — the ring settles toward this alpha
     /// once the countdown passes halfway rather than sitting bright in
     /// the fovea.
     nonisolated static let ringDwellFloor: Double = 0.65
 
     /// System Reduce Motion — morphs and the confirm ring land without
-    /// travelling. Tests swap in a fixed answer.
+    /// travelling; the gaze highlight keeps only its opacity fades and
+    /// jumps between elements instead of gliding. Tests swap in a fixed
+    /// answer.
     var reduceMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     /// Monotonic seconds for the dwell clock — tests swap in a fake.
@@ -131,15 +135,16 @@ final class TargetOverlay {
         return (r, min(8, h / 4))
     }
 
-    /// The little circle a fresh acquire blooms out of — centered on
-    /// the last gaze point (or the element center as fallback).
-    nonisolated static func ringDotGeo(at point: CGPoint)
+    /// The shape a fresh highlight lifts out of — the element's own
+    /// shape a few points smaller, so it appears on the control (the
+    /// visionOS hover lift) rather than growing from a cursor dot.
+    nonisolated static func ringLift(_ g: (rect: CGRect, corner: CGFloat))
         -> (rect: CGRect, corner: CGFloat) {
-        (CGRect(x: point.x - ringDotSize / 2, y: point.y - ringDotSize / 2,
-                width: ringDotSize, height: ringDotSize), ringDotSize / 2)
+        let inset = min(ringLiftInset, g.rect.width / 4, g.rect.height / 4)
+        return (g.rect.insetBy(dx: inset, dy: inset), max(0, g.corner - inset))
     }
 
-    /// Ease-out cubic — springish 160ms feel while staying a pure t-map,
+    /// Ease-out cubic — springish feel while staying a pure t-map,
     /// which is what makes mid-morph reversal computable.
     nonisolated static func ringEase(_ t: Double) -> Double {
         let t = min(1, max(0, t))
@@ -162,8 +167,9 @@ final class TargetOverlay {
 
     /// Dwell countdown → ring alpha: full through the halfway point,
     /// then fades toward the floor per Meta's sustained-dwell guidance.
-    nonisolated static func ringAlpha(progress: Double) -> Double {
-        guard progress > 0.5 else { return 1 }
+    /// A plain look-highlight (dwell off) has no countdown and stays put.
+    nonisolated static func ringAlpha(progress: Double, dwell: Bool = true) -> Double {
+        guard dwell, progress > 0.5 else { return 1 }
         return 1 - (1 - ringDwellFloor) * min(1, (progress - 0.5) * 2)
     }
 
@@ -301,8 +307,15 @@ final class TargetOverlay {
     /// Bumped on every acquire/hide — a stale retire task can never
     /// order out a live ring's panel.
     private var ringGeneration = 0
-    /// Last gaze point seen by `ingestGaze` — the morph's bloom origin.
-    private var lastGazePoint: CGPoint?
+    /// The dwell countdown sweeps around the highlight only while dwell
+    /// can actually click; otherwise the highlight is a plain look-glow.
+    var showsDwellProgress = false {
+        didSet {
+            guard showsDwellProgress != oldValue else { return }
+            ringView?.showsProgress = showsDwellProgress
+            ringView?.setProgress(ringProgress)
+        }
+    }
 
     // MARK: Halo
 
@@ -526,60 +539,68 @@ final class TargetOverlay {
     /// set unless it armed as persistent, in which case the chips stay
     /// up for the next pick.
     func ingestGaze(_ point: CGPoint) {
-        lastGazePoint = point
         guard let hit = dwell.advance(point: point, now: now()) else { return }
         let pick = onPick
         if dismissOnPick { clearChips() }
         pick?(hit)
     }
 
-    // MARK: Conforming ring
+    // MARK: Gaze highlight
 
     /// Gaze-intent event feed — the scorer's acquire/hold/release
-    /// transitions drive the conforming ring on the element frame (the
-    /// visionOS "feedback lives on the element" pattern). `ambiguous`
-    /// only bubbles up through `onAmbiguous`; the coordinator owns the
-    /// radial itself.
+    /// transitions drive the highlight on the element's own frame (the
+    /// visionOS "feedback lives on the element" pattern: no cursor, the
+    /// looked-at control glows). `ambiguous` only bubbles up through
+    /// `onAmbiguous`; the coordinator owns the radial itself.
     var onAmbiguous: (([IntentCandidate]) -> Void)?
 
     func intentEvent(_ event: IntentEvent) {
         switch event {
-        case .none:
+        case .none, .release:
             releaseRing()
         case .acquire(let c):
             acquireRing(on: c)
         case .hold(let c, let progress):
             holdRing(on: c, progress: progress)
-        case .release(let c):
-            releaseRing(fallbackAnchor: CGPoint(x: c.frame.midX, y: c.frame.midY))
         case .ambiguous(let candidates):
             onAmbiguous?(candidates)
         }
     }
 
-    /// The conforming ring itself: a faint full-shape base plus a
-    /// brighter stroke that sweeps 0→1 with dwell progress, inside a
-    /// container layer whose opacity carries the dwell-fade and the
-    /// release fade-out. `isFlipped` puts the backing layer in top-left
+    /// The highlight itself: a soft accent-tinted fill with a hairline
+    /// edge and a faint outer glow on the element's shape, plus a brighter
+    /// stroke that sweeps 0→1 with dwell progress when dwell is on. A
+    /// container layer's opacity carries the dwell-fade, the appear and
+    /// the release. `isFlipped` puts the backing layer in top-left
     /// coordinates so paths are canvas-relative without a second flip.
     final class IntentRingView: NSView {
         let container = CALayer()
         let base = CAShapeLayer()
         let fill = CAShapeLayer()
+        var showsProgress = false {
+            didSet { fill.isHidden = !showsProgress }
+        }
 
         override var isFlipped: Bool { true }
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             wantsLayer = true
-            base.strokeColor = NSColor.systemBlue.withAlphaComponent(0.45).cgColor
-            base.fillColor = NSColor.clear.cgColor
+            let accent = NSColor.controlAccentColor
+            base.fillColor = accent.withAlphaComponent(0.14).cgColor
+            base.strokeColor = accent.withAlphaComponent(0.55).cgColor
             base.lineWidth = TargetOverlay.ringLineWidth
-            fill.strokeColor = NSColor.systemBlue.cgColor
+            base.shadowColor = accent.cgColor
+            base.shadowOpacity = 0.45
+            base.shadowRadius = 6
+            base.shadowOffset = .zero
+            fill.strokeColor = accent.cgColor
             fill.fillColor = NSColor.clear.cgColor
             fill.lineWidth = TargetOverlay.ringLineWidth + 1
             fill.lineCap = .round
             fill.strokeEnd = 0
+            fill.isHidden = true
+            container.opacity = 0
             container.addSublayer(base)
             container.addSublayer(fill)
             layer?.addSublayer(container)
@@ -588,10 +609,9 @@ final class TargetOverlay {
 
         /// Model paths land on `to`; one keyed animation covers the
         /// transit. Re-morphing replaces the same key, and because
-        /// `from` is the morph model's *current* geometry a reverse
-        /// starts exactly where the ring visually is — no jump. All
-        /// paths share the rounded-rect structure, so CA path
-        /// interpolation always applies.
+        /// `from` is the morph model's *current* geometry a glide
+        /// starts exactly where the highlight visually is — no jump. A
+        /// zero duration places the shape outright (Reduce Motion).
         func morph(from: (rect: CGRect, corner: CGFloat),
                    to: (rect: CGRect, corner: CGFloat),
                    in canvas: CGRect, duration: CFTimeInterval) {
@@ -603,6 +623,7 @@ final class TargetOverlay {
             for l in [base, fill] {
                 l.frame = container.bounds
                 l.path = toPath
+                l.removeAnimation(forKey: "morph")
                 guard duration > 0 else { continue }
                 let anim = CABasicAnimation(keyPath: "path")
                 anim.fromValue = fromPath
@@ -611,21 +632,24 @@ final class TargetOverlay {
                 anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.215, 0.61, 0.355, 1.0)
                 l.add(anim, forKey: "morph")
             }
+            base.shadowPath = toPath
             CATransaction.commit()
         }
 
         /// Dwell countdown — the fill stroke sweeps 0→1 while the whole
-        /// ring fades toward the floor once progress passes halfway.
+        /// highlight fades toward the floor once progress passes halfway.
+        /// Without dwell the highlight holds steady.
         func setProgress(_ progress: Double) {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             fill.strokeEnd = CGFloat(min(1, max(0, progress)))
-            container.opacity = Float(TargetOverlay.ringAlpha(progress: progress))
+            container.opacity = Float(TargetOverlay.ringAlpha(progress: progress,
+                                                              dwell: showsProgress))
             CATransaction.commit()
         }
 
-        /// Fade the whole ring — release fades to 0, a re-acquire from
-        /// mid-fade animates back up from wherever the presentation is.
+        /// Fade the whole highlight — release fades to 0, a re-acquire
+        /// from mid-fade animates back up from wherever the presentation is.
         func fade(to alpha: Float, duration: CFTimeInterval) {
             let current = container.presentation()?.opacity ?? container.opacity
             CATransaction.begin()
@@ -641,22 +665,22 @@ final class TargetOverlay {
         }
     }
 
-    /// Dot → element morph on acquire; element → element retarget when
-    /// the ring is already live (handover to a different candidate).
+    /// A fresh acquire lifts the highlight out of the element's own
+    /// shape; a live highlight glides to the next element. Reduce Motion
+    /// keeps only the opacity change — no lift, no glide.
     private func acquireRing(on c: IntentCandidate) {
-        ringGeneration += 1
         ensureRing()
         let target = Self.ringTarget(for: c)
+        let still = reduceMotion()
         let t = now()
         if ringLive || ringReleasing {
-            // Retarget from wherever the morph is now — a re-acquire mid
-            // -release continues the shape, never teleports.
-            ringMorph.retarget(to: target, at: t, duration: Self.ringMorphSeconds)
+            // Glide from wherever the shape is now — a re-acquire mid
+            // -release continues, never teleports.
+            ringMorph.retarget(to: target, at: t,
+                               duration: still ? 0 : Self.ringRetargetSeconds)
         } else {
-            let anchor = lastGazePoint
-                ?? CGPoint(x: target.rect.midX, y: target.rect.midY)
-            ringMorph = RingMorph(from: Self.ringDotGeo(at: anchor), to: target,
-                                  startedAt: t, duration: Self.ringMorphSeconds,
+            ringMorph = RingMorph(from: still ? target : Self.ringLift(target), to: target,
+                                  startedAt: t, duration: still ? 0 : Self.ringAppearSeconds,
                                   active: true)
         }
         ringLive = true
@@ -666,22 +690,22 @@ final class TargetOverlay {
         ringGeneration += 1
         ringRect = target.rect
         ringProgress = 0
-        presentRing(duration: Self.ringMorphSeconds)
+        presentRing(duration: ringMorph.duration)
         ringView?.setProgress(0)
-        ringView?.fade(to: 1, duration: reduceMotion() ? 0 : Self.ringMorphSeconds)
+        ringView?.fade(to: 1, duration: Self.ringAppearSeconds)
         applyRingAlpha()
         if ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
     }
 
-    /// Streams the dwell countdown onto the fill stroke and re-targets
-    /// the morph when a refreshed feed moved the element.
+    /// Streams the dwell countdown and re-targets the shape when a
+    /// refreshed feed moved the element.
     private func holdRing(on c: IntentCandidate, progress: Double) {
-        if !ringLive { acquireRing(on: c) }
+        if !ringLive || ringReleasing { acquireRing(on: c) }
         let target = Self.ringTarget(for: c)
         if target != ringMorph.to {
             ringMorph.retarget(to: target, at: now(),
-                               duration: Self.ringRetargetSeconds)
-            presentRing(duration: Self.ringRetargetSeconds)
+                               duration: reduceMotion() ? 0 : Self.ringRetargetSeconds)
+            presentRing(duration: ringMorph.duration)
         }
         ringRect = target.rect
         ringProgress = progress
@@ -689,24 +713,20 @@ final class TargetOverlay {
         applyRingAlpha()
     }
 
-    /// Reverse morph + fade; the panel retires itself, generation-
-    /// guarded so a re-acquire mid-fade can never lose its panel.
-    /// `ringReleasing` makes the release a one-shot transition — repeated
-    /// `.none`/`.release` ticks must not restart the morph and fade.
+    /// Fades out in place on the element — the eyes have left, there is
+    /// nothing to shrink back into. The panel retires itself,
+    /// generation-guarded so a re-acquire mid-fade can never lose its
+    /// panel. `ringReleasing` makes the release one-shot — repeated
+    /// `.none`/`.release` ticks must not restart the fade.
     private var ringReleasing = false
-    private func releaseRing(fallbackAnchor: CGPoint? = nil) {
+    private func releaseRing() {
         guard ringLive, !ringReleasing else { return }
         ringReleasing = true
-        let anchor = lastGazePoint ?? fallbackAnchor
-            ?? ringRect.map { CGPoint(x: $0.midX, y: $0.midY) } ?? .zero
-        ringMorph.retarget(to: Self.ringDotGeo(at: anchor), at: now(),
-                           duration: Self.ringMorphSeconds)
         ringRect = nil
-        presentRing(duration: Self.ringMorphSeconds)
-        ringView?.fade(to: 0, duration: reduceMotion() ? 0 : Self.ringMorphSeconds)
+        ringView?.fade(to: 0, duration: Self.ringReleaseSeconds)
         let generation = ringGeneration
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.ringMorphSeconds * 1e9) + 80_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(Self.ringReleaseSeconds * 1e9) + 80_000_000)
             guard let self, self.ringGeneration == generation else { return }
             self.ringPanel?.orderOut(nil)
             self.ringLive = false
@@ -719,15 +739,15 @@ final class TargetOverlay {
         guard ringPanel == nil else { return }
         let panel = Self.makePanel()
         let view = IntentRingView(frame: .zero)
+        view.showsProgress = showsDwellProgress
         panel.contentView = view
         ringPanel = panel
         ringView = view
     }
 
-    /// The panel covers the union of the morph's endpoints — the dot a
-    /// morph blooms from can sit off the element — padded past the
-    /// stroke. Paths draw canvas-relative, so panel moves never distort
-    /// the geometry.
+    /// The panel covers the union of the morph's endpoints, padded past
+    /// the stroke and glow. Paths draw canvas-relative, so panel moves
+    /// never distort the geometry.
     private func presentRing(duration: CFTimeInterval) {
         let canvas = ringMorph.from.rect.union(ringMorph.to.rect)
             .insetBy(dx: -Self.ringPanelPad, dy: -Self.ringPanelPad)

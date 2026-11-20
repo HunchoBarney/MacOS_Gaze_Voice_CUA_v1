@@ -1,4 +1,4 @@
-import type { BackendMessage, WebAccelerator, WebInferenceConfig } from "../global";
+import type { BackendMessage, ImplicitLabelKind, WebAccelerator, WebInferenceConfig } from "../global";
 import { logStatus } from "../logger";
 import {
   AppearanceChannel,
@@ -17,6 +17,7 @@ import {
   ScreenProjector,
   EyeValidity,
   DriftMonitor,
+  applyImplicitLabel,
   center,
   clamp01,
   coastPosition,
@@ -51,7 +52,7 @@ export interface WebRuntimeController {
   pursuitTarget(x: number, y: number): void;
   pursuitEnd(): void;
   pursuitAbort(): void;
-  implicitSample(xNorm: number, yNorm: number): void;
+  implicitSample(xNorm: number, yNorm: number, kind?: ImplicitLabelKind): void;
   setPaused(paused: boolean): void;
   setFilterOptions(options: WebFilterOptions): void;
   setPreviewEnabled(enabled: boolean): void;
@@ -1303,8 +1304,11 @@ export async function startWebRuntime(
       lastPursuitCountEmit = 0;
       calibration.abortPursuit();
     },
-    implicitSample: (xNorm, yNorm) => {
-      if (handleImplicitSample(calibration, recentFeatures, xNorm, yNorm, pursuitActive, driftMonitor)) {
+    implicitSample: (xNorm, yNorm, kind = "cursor_rest") => {
+      if (pursuitActive) {
+        return;
+      }
+      if (applyImplicitLabel(calibration, recentFeatures, xNorm, yNorm, kind, performance.now(), driftMonitor)?.driftSaturated) {
         emit({ type: "status", level: "warning", message: "drift_detected" });
       }
     },
@@ -1351,54 +1355,6 @@ function irisInBox(irisCenter: [number, number] | undefined, box: Detection): [n
 
 // COMETIC-style implicit label: accept a fixated on-screen position only when
 // the current map already lands near it — filters "looked elsewhere" moments.
-function handleImplicitSample(calibration: Calibration, recentFeatures: TimedFeature[], xNorm: number, yNorm: number, pursuitActive: boolean, driftMonitor: DriftMonitor): boolean {
-  if (recentFeatures.length < 3 || pursuitActive) {
-    return false;
-  }
-  if (calibration.featureMap === null && calibration.matrix === null) {
-    return false;
-  }
-  const now = performance.now();
-  const featureAt = now - 250;
-  let best: TimedFeature | null = null;
-  for (const entry of recentFeatures) {
-    if (best === null || Math.abs(entry.at - featureAt) < Math.abs(best.at - featureAt)) {
-      best = entry;
-    }
-  }
-  if (best === null || Math.abs(best.at - featureAt) > 400) {
-    return false;
-  }
-  const target: [number, number] = [clamp01(xNorm), clamp01(yNorm)];
-  const estimate = calibration.applyFeature(best.feature);
-  const offset: [number, number] = [target[0] - estimate[0], target[1] - estimate[1]];
-  const agreed = Math.hypot(offset[0], offset[1]) <= 0.09;
-  const correction = driftMonitor.record(agreed, offset, now, target);
-  if (correction !== null) {
-    const applied = calibration.applyDriftCorrection(correction[0] * 0.85, correction[1] * 0.85);
-    // Match the worker path: escalate at 0.15 cumulative — ~8 sustained
-    // confirmations — not the 0.35 hard bound.
-    const saturated = Math.hypot(applied[0], applied[1]) >= 0.15;
-    console.info("Drift auto-corrected", JSON.stringify({ applied, saturated }));
-    if (saturated) {
-      return true;
-    }
-  }
-  if (!agreed) {
-    // Bounded rejects still carry regional-bias signal: the map predicted a
-    // point within 0.2 of this label — close enough that the miss is the
-    // map's bias, not a look-elsewhere label. Low weight keeps a stray from
-    // steering the field.
-    if (Math.hypot(offset[0], offset[1]) <= 0.2) {
-      calibration.addResidualBiasEvidence(best.feature, target, 0.3);
-    }
-    return false;
-  }
-  calibration.addImplicitSample(best.feature, target);
-  void calibration.refitWithImplicit(now);
-  return false;
-}
-
 function createLongTaskCounter(): { count(): number; stop(): void } {
   let count = 0;
   let observer: PerformanceObserver | null = null;
@@ -1458,7 +1414,7 @@ type MainToWorkerMessage =
   | { type: "pursuit_target"; x: number; y: number; at: number }
   | { type: "pursuit_end" }
   | { type: "pursuit_abort" }
-  | { type: "implicit_sample"; x_norm: number; y_norm: number }
+  | { type: "implicit_sample"; x_norm: number; y_norm: number; kind?: ImplicitLabelKind }
   | { type: "set_paused"; paused: boolean }
   | { type: "filter_options"; dwellLock?: boolean }
   | { type: "set_preview"; enabled: boolean }
@@ -1789,8 +1745,8 @@ async function startDedicatedWorkerRuntime(
     pursuitAbort: () => {
       post({ type: "pursuit_abort" });
     },
-    implicitSample: (xNorm, yNorm) => {
-      post({ type: "implicit_sample", x_norm: xNorm, y_norm: yNorm });
+    implicitSample: (xNorm, yNorm, kind) => {
+      post({ type: "implicit_sample", x_norm: xNorm, y_norm: yNorm, kind });
     },
     setPaused: (value) => {
       paused = value;

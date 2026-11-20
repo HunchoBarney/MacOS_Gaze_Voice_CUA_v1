@@ -57,7 +57,10 @@ struct TrackerStatus: Sendable, Equatable {
         if calibration == "missing" || calibration == "invalid" {
             return "Needs calibration"
         }
-        if !calibration.isEmpty, calibration != "loaded", calibration != "saved" {
+        // "learning" is invisible calibration fitting from ordinary use —
+        // gaze is live, so it reads like any tracking state.
+        if !calibration.isEmpty, calibration != "loaded", calibration != "saved",
+           calibration != "learning" {
             return "Calibrating"
         }
         if headDetected == false { return "No face" }

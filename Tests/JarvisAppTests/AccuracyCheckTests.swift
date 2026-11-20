@@ -27,6 +27,18 @@ final class AccuracyCheckTests: XCTestCase {
                        "Typical error 4.0°; 9 in 10 targets were within 6.0°. No target size up to 3° was hit 9 times in 10.")
     }
 
+    /// A measure-only run scored the learned map, not a fresh calibration —
+    /// the sentence says so.
+    @MainActor
+    func testSummaryNamesAMeasureOnlyRun() throws {
+        let data = try json([
+            "measure_only": true,
+            "held_out": ["overall": ["median_deg": 2.6, "p90_deg": 4.1]],
+        ])
+        XCTAssertEqual(AccuracyCheck.summary(from: data),
+                       "Without calibrating: Typical error 2.6°; 9 in 10 targets were within 4.1°.")
+    }
+
     @MainActor
     func testSummaryRejectsReportsWithoutTheHeldOutGrid() throws {
         XCTAssertNil(AccuracyCheck.summary(from: try json(["error_px": ["overall": ["median": 50]]])))

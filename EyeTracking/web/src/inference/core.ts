@@ -1,4 +1,4 @@
-import type { BackendMessage, GazeProjectionMode } from "../global";
+import type { BackendMessage, GazeProjectionMode, ImplicitLabelKind } from "../global";
 
 export const CAMERA_WIDTH = 640;
 export const CAMERA_HEIGHT = 480;
@@ -83,6 +83,48 @@ const MAX_POOL_SAMPLES = 1200;
 // evidence a session accrues — the fit pool feeds the design matrix and each
 // RBF center is a solve row (RBF centers have their own cap in rbfFit).
 const FIT_POOL_CAP = 400;
+
+// Invisible calibration: labels from ordinary use (cursor rests, clicks,
+// voice-named picks, the text caret) fit the map instead of a calibration
+// screen. Each kind names how far back the eyes were on the target, whether
+// it may seed a map from nothing, and whether it joins the main fit pool. A
+// commit that gaze itself chose only echoes the map's own guess, so it is
+// low-weight residual evidence, never ground truth.
+export type { ImplicitLabelKind };
+export const IMPLICIT_LABEL_KINDS: Record<ImplicitLabelKind, { lookbackMs: number; bootstrap: boolean; mainPool: boolean }> = {
+  cursor_rest: { lookbackMs: 250, bootstrap: true, mainPool: true },
+  click: { lookbackMs: 120, bootstrap: true, mainPool: true },
+  voice: { lookbackMs: 600, bootstrap: true, mainPool: true },
+  caret: { lookbackMs: 150, bootstrap: false, mainPool: true },
+  gaze_pick: { lookbackMs: 250, bootstrap: false, mainPool: false }
+};
+export function isImplicitLabelKind(value: unknown): value is ImplicitLabelKind {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(IMPLICIT_LABEL_KINDS, value);
+}
+// Personal samples before a map counts as settled. Below it refits run on a
+// short cadence and the drift monitor stays quiet: a learning map's misses
+// are not a moved camera.
+export const LEARNING_POOL_TARGET = 60;
+const LEARNING_REFIT_MIN_LABELS = 8;
+const LEARNING_REFIT_INTERVAL_MS = 10_000;
+// A map from nothing needs labels spread across the screen first.
+export const BOOTSTRAP_MIN_LABELS = 16;
+const BOOTSTRAP_MIN_SPREAD: [number, number] = [0.3, 0.25];
+const LEARNED_ERROR_WINDOW = 40;
+const LEARNED_ERROR_MIN_LABELS = 10;
+// The feature map has dozens of dims; on a few implicit labels its ridge fit
+// interpolates noise. Implicit fits stay affine until the pool can carry it.
+const IMPLICIT_FEATURE_MAP_MIN_SAMPLES = 40;
+// Accept gate in normalized screen units: 2.5x the learned median error,
+// never tighter than the settled-map gate nor looser than about a fifth of
+// the screen. Before any error is learned, a settled map keeps the tight
+// gate and a learning one starts wide.
+export function implicitAcceptGate(learnedMedian: number | null, learning: boolean): number {
+  if (learnedMedian === null) {
+    return learning ? 0.22 : 0.09;
+  }
+  return Math.min(0.22, Math.max(0.09, learnedMedian * 2.5));
+}
 
 export interface CameraResolution {
   name?: string;
@@ -2425,6 +2467,85 @@ export function calibrationContextFingerprint(context: CalibrationContext): stri
   ].join("|");
 }
 
+// One implicit label from ordinary use, applied to the live calibration.
+// The eyes reach a target before the hand or voice confirms it, so the label
+// pairs with the feature from the kind's look-back. Returns null when no
+// feature from then is buffered; otherwise whether the drift correction
+// saturated and the refit (or bootstrap fit) it started, if any.
+export function applyImplicitLabel(
+  calibration: Calibration,
+  recentFeatures: TimedFeature[],
+  xNorm: number,
+  yNorm: number,
+  kind: ImplicitLabelKind,
+  now: number,
+  driftMonitor: DriftMonitor
+): { driftSaturated: boolean; refit: Promise<boolean> | null } | null {
+  if (recentFeatures.length < 3) {
+    return null;
+  }
+  const spec = IMPLICIT_LABEL_KINDS[kind];
+  const featureAt = now - spec.lookbackMs;
+  let best: TimedFeature | null = null;
+  for (const entry of recentFeatures) {
+    if (best === null || Math.abs(entry.at - featureAt) < Math.abs(best.at - featureAt)) {
+      best = entry;
+    }
+  }
+  if (best === null || Math.abs(best.at - featureAt) > 400) {
+    return null;
+  }
+  const target: [number, number] = [clamp01(xNorm), clamp01(yNorm)];
+  // applyFeature falls back to the raw geometric projection with no map, so
+  // the error is honest from the very first label.
+  const estimate = calibration.applyFeature(best.feature);
+  const offset: [number, number] = [target[0] - estimate[0], target[1] - estimate[1]];
+  const distance = Math.hypot(offset[0], offset[1]);
+  if (spec.mainPool) {
+    calibration.recordLabelError(distance);
+  }
+  // No map yet: nothing can gate the label, so it only feeds the bootstrap
+  // fit, which waits for spread and trims outliers itself.
+  if (calibration.featureMap === null && calibration.matrix === null) {
+    if (!spec.bootstrap) {
+      return { driftSaturated: false, refit: null };
+    }
+    calibration.addImplicitSample(best.feature, target);
+    return { driftSaturated: false, refit: calibration.bootstrapFit(now) };
+  }
+  const gate = implicitAcceptGate(calibration.learnedError?.median ?? null, calibration.learning);
+  // Rejected labels this close still show the map's regional bias rather
+  // than a look elsewhere; low weight keeps a stray from steering the field.
+  const biasBand = Math.max(0.2, gate + 0.08);
+  if (!spec.mainPool) {
+    // Gaze chose this target, so its centre mostly echoes the map.
+    if (distance <= biasBand) {
+      calibration.addResidualBiasEvidence(best.feature, target, 0.3);
+    }
+    return { driftSaturated: false, refit: null };
+  }
+  const agreed = distance <= gate;
+  // Sustained, directionally consistent rejection means the camera or laptop
+  // moved: apply the rejection vector (damped) instead of interrupting for a
+  // recalibration, and escalate at 0.15 cumulative (~8 confirmations). A map
+  // still learning misses for its own reasons, so it stays out.
+  let driftSaturated = false;
+  const correction = calibration.learning || calibration.priorActive ? null : driftMonitor.record(agreed, offset, now, target);
+  if (correction !== null) {
+    const applied = calibration.applyDriftCorrection(correction[0] * 0.85, correction[1] * 0.85);
+    driftSaturated = Math.hypot(applied[0], applied[1]) >= 0.15;
+    console.info("Drift auto-corrected", JSON.stringify({ applied, saturated: driftSaturated }));
+  }
+  if (!agreed) {
+    if (distance <= biasBand) {
+      calibration.addResidualBiasEvidence(best.feature, target, 0.3);
+    }
+    return { driftSaturated, refit: null };
+  }
+  calibration.addImplicitSample(best.feature, target);
+  return { driftSaturated, refit: calibration.refitWithImplicit(now) };
+}
+
 export class Calibration {
   matrix: number[][] | null = null;
   rbf: RbfCorrection | null = null;
@@ -2902,7 +3023,7 @@ export class Calibration {
   // One full fit over the given pairs: affine candidates + feature-map
   // regression, LOO-chosen model, gate scored on whichever map will run.
   // Returns the fit or a rejection reason.
-  private fitOnce(samplePairs: Array<[GazeFeature, [number, number]]>): PendingFit | string {
+  private fitOnce(samplePairs: Array<[GazeFeature, [number, number]]>, minFeatureMapSamples = 9): PendingFit | string {
     const features = samplePairs.map(([feature]) => feature);
     const targets = samplePairs.map(([, target]) => target);
     const liveXs = features.map((feature) => feature.point[0]);
@@ -2980,7 +3101,7 @@ export class Calibration {
     const looAffine = looAffineError(best.raws, targets);
     let looFeature = Infinity;
     const featureMap = fitFeatureMap(features, targets);
-    if (featureMap !== null && features.length >= 9) {
+    if (featureMap !== null && features.length >= minFeatureMapSamples) {
       looFeature = looFeatureError(features, targets);
       best.featureMap = featureMap;
       const preds = features.map((f) => applyFeatureMap(featureMap, f));
@@ -3166,6 +3287,9 @@ export class Calibration {
   // style): a fixation at a known on-screen position is a free ground-truth
   // pair that lets the map keep correcting drift over time.
   readonly implicitSamples: Array<[GazeFeature, [number, number]]> = [];
+  // Bundled starting samples (see seedPrior) — fit-pool filler only.
+  readonly priorSamples: Array<[GazeFeature, [number, number]]> = [];
+  private readonly learnedErrors: number[] = [];
   private lastImplicitRefit = 0;
   // Consecutive implicit labels resting on (nearly) the same spot — a parked
   // cursor must not flood the pool or it starves spread (see refit gate).
@@ -3223,7 +3347,10 @@ export class Calibration {
     // Refit only when there's enough fresh evidence and enough time has passed;
     // adopt only if the new map scores no worse than the current one. Either
     // map kind can adapt — an affine-only calibration shouldn't freeze.
-    if ((this.featureMap === null && this.matrix === null) || this.implicitSamples.length < 30 || now - this.lastImplicitRefit < 90_000) {
+    const learning = this.learning;
+    const minLabels = learning ? LEARNING_REFIT_MIN_LABELS : 30;
+    const cadence = learning ? LEARNING_REFIT_INTERVAL_MS : 90_000;
+    if ((this.featureMap === null && this.matrix === null) || this.implicitSamples.length < minLabels || now - this.lastImplicitRefit < cadence) {
       return false;
     }
     // Pool-spread gate: a cursor parked at one spot yields dozens of rests at
@@ -3248,16 +3375,13 @@ export class Calibration {
     // Cap the fit pool — a session-aged pool made the O(nk² + k³) fit and the
     // RBF solve grow without bound. Keep the freshest evidence and fill the
     // rest by max-min target spread so coverage survives the cap.
-    const merged =
-      this.samples.length + this.implicitSamples.length <= FIT_POOL_CAP
-        ? this.samples.concat(this.implicitSamples)
-        : selectFitPool(this.samples, this.implicitSamples, FIT_POOL_CAP);
+    const merged = this.fitPool();
     // Same-stack comparison: both sides are scored through the FULL live
     // chain — map+rbf plus the residual field and drift offset that keep
     // applying after adoption — so neither side wins by carrying (or hiding)
     // corrections the other hasn't been fitted yet.
     const oldError = merged.reduce((sum, [feature, target]) => sum + pointError(this.applyFeature(feature), target), 0) / merged.length;
-    const result = this.fitOnce(merged);
+    const result = this.fitOnce(merged, IMPLICIT_FEATURE_MAP_MIN_SAMPLES);
     if (typeof result === "string") {
       // A failed refit already paid for the fit attempt — honor the cadence
       // anyway or every later implicit sample re-runs it.
@@ -3270,6 +3394,16 @@ export class Calibration {
       this.lastImplicitRefit = now;
       return false;
     }
+    this.adopt(result, merged, now, true);
+    console.info("Implicit refit adopted", JSON.stringify({ oldError: Number(oldError.toFixed(4)), newError: Number(newError.toFixed(4)) }));
+    return true;
+  }
+
+  // Swap a fit in as the live map: retune geometry, refit the residual field
+  // over the pool, consolidate the pending labels into the durable pool and
+  // optionally persist. Shared by the implicit refit, the bootstrap fit and
+  // the prior seed.
+  private adopt(result: PendingFit, merged: Array<[GazeFeature, [number, number]]>, now: number, persist: boolean): void {
     const previousGeometry = this.geometry;
     this.matrix = result.matrix;
     this.rbf = result.rbf;
@@ -3325,8 +3459,143 @@ export class Calibration {
     this.implicitSamples.length = 0;
     this.sameSpotRun = 0;
     this.lastImplicitRefit = now;
-    console.info("Implicit refit adopted", JSON.stringify({ oldError: Number(oldError.toFixed(4)), newError: Number(newError.toFixed(4)) }));
-    void this.io.write(this.path, this.toPayload()).catch(() => {});
+    if (persist) {
+      void this.io.write(this.path, this.toPayload()).catch(() => {});
+    }
+  }
+
+  // Fit pool for a refit: the personal pools under the cap, plus a share of
+  // the bundled prior that shrinks as personal evidence grows.
+  private fitPool(): Array<[GazeFeature, [number, number]]> {
+    const personal =
+      this.samples.length + this.implicitSamples.length <= FIT_POOL_CAP
+        ? this.samples.concat(this.implicitSamples)
+        : selectFitPool(this.samples, this.implicitSamples, FIT_POOL_CAP);
+    const priorShare = Math.max(0, Math.min(this.priorSamples.length, this.priorSamples.length - 2 * personal.length));
+    if (priorShare === 0) {
+      return personal;
+    }
+    const step = this.priorSamples.length / priorShare;
+    const prior = Array.from({ length: priorShare }, (_, i) => this.priorSamples[Math.floor(i * step)]);
+    return personal.concat(prior);
+  }
+
+  // Personal samples behind the live map — calibration plus adopted and
+  // pending implicit labels. The prior never counts.
+  get personalSampleCount(): number {
+    return this.samples.length + this.implicitSamples.length;
+  }
+
+  // The map is still learning: too little personal evidence to call settled.
+  get learning(): boolean {
+    return this.samples.length < LEARNING_POOL_TARGET;
+  }
+
+  // The bundled prior still shapes the fit.
+  get priorActive(): boolean {
+    return this.priorSamples.length > 0 && this.priorSamples.length > 2 * this.personalSampleCount;
+  }
+
+  // Out-of-sample error of each label against the map that was live when it
+  // arrived — the honest running accuracy the host's error band reads.
+  recordLabelError(error: number): void {
+    if (!Number.isFinite(error)) {
+      return;
+    }
+    this.learnedErrors.push(error);
+    if (this.learnedErrors.length > LEARNED_ERROR_WINDOW) {
+      this.learnedErrors.shift();
+    }
+  }
+
+  get learnedError(): { median: number; labels: number } | null {
+    if (this.learnedErrors.length < LEARNED_ERROR_MIN_LABELS) {
+      return null;
+    }
+    return { median: medianOf(this.learnedErrors) ?? 0, labels: this.learnedErrors.length };
+  }
+
+  // Seed a starting map from the bundled prior (other people's labelled
+  // samples, or the owner's own) when no calibration loaded. Never persisted:
+  // the prior is not this user's evidence, and it fades from the fit pool as
+  // personal labels arrive.
+  seedPrior(entries: Array<{ feature: GazeFeature; target: [number, number] }>, now: number): boolean {
+    if (this.featureMap !== null || this.matrix !== null) {
+      return false;
+    }
+    for (const entry of entries) {
+      if (this.isUsableSample(entry?.feature, entry?.target)) {
+        this.priorSamples.push([entry.feature, [entry.target[0], entry.target[1]]]);
+      }
+    }
+    const result = this.priorSamples.length >= 9 ? this.fitOnce(this.priorSamples) : "too few prior samples";
+    if (typeof result === "string") {
+      this.priorSamples.length = 0;
+      return false;
+    }
+    this.adopt(result, this.priorSamples, now, false);
+    return true;
+  }
+
+  // First map from nothing: no map exists to gate the labels, so wait for a
+  // screen's worth of spread, trim the worst quarter (looks elsewhere while
+  // the cursor rested) and adopt only a fit that clearly beats the raw
+  // geometric projection.
+  async bootstrapFit(now: number): Promise<boolean> {
+    if (this.featureMap !== null || this.matrix !== null) {
+      return false;
+    }
+    if (this.implicitSamples.length < BOOTSTRAP_MIN_LABELS || now - this.lastImplicitRefit < LEARNING_REFIT_INTERVAL_MS) {
+      return false;
+    }
+    const xs = this.implicitSamples.map(([, target]) => target[0]);
+    const ys = this.implicitSamples.map(([, target]) => target[1]);
+    if (Math.max(...xs) - Math.min(...xs) < BOOTSTRAP_MIN_SPREAD[0] || Math.max(...ys) - Math.min(...ys) < BOOTSTRAP_MIN_SPREAD[1]) {
+      return false;
+    }
+    this.lastImplicitRefit = now;
+    const pool = this.implicitSamples.slice();
+    const first = this.fitOnce(pool, IMPLICIT_FEATURE_MAP_MIN_SAMPLES);
+    if (typeof first === "string") {
+      return false;
+    }
+    // Two trim passes: an outlier drags the first fit toward itself, so the
+    // second ranking against the cleaner fit catches what the first missed.
+    const keep = Math.max(BOOTSTRAP_MIN_LABELS - 4, Math.ceil(pool.length * 0.75));
+    let result = first;
+    let kept = pool;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const fit = result;
+      kept = pool
+        .map((pair) => ({ pair, error: pointError(this.pendingEstimate(fit, pair[0]), pair[1]) }))
+        .sort((a, b) => a.error - b.error)
+        .slice(0, keep)
+        .map(({ pair }) => pair);
+      const trimmed = this.fitOnce(kept, IMPLICIT_FEATURE_MAP_MIN_SAMPLES);
+      if (typeof trimmed === "string") {
+        break;
+      }
+      result = trimmed;
+    }
+    // Judge the fit on labels it never saw: half fits, the other half scores
+    // it against the raw projection. In-sample error means nothing here —
+    // the residual RBF interpolates its own pool exactly.
+    const half = this.fitOnce(kept.filter((_, i) => i % 2 === 0), IMPLICIT_FEATURE_MAP_MIN_SAMPLES);
+    const probe = kept.filter((_, i) => i % 2 === 1);
+    const rawError = medianOf(probe.map(([feature, target]) => pointError(feature.point, target))) ?? Infinity;
+    const fitError =
+      typeof half === "string" ? Infinity : (medianOf(probe.map(([feature, target]) => pointError(this.pendingEstimate(half, feature), target))) ?? Infinity);
+    if (!(fitError < rawError * 0.9)) {
+      console.info("Bootstrap fit kept raw projection", JSON.stringify({ rawError: Number(rawError.toFixed(4)), fitError: Number(fitError.toFixed(4)) }));
+      return false;
+    }
+    this.implicitSamples.length = 0;
+    this.implicitSamples.push(...kept);
+    this.adopt(result, kept, now, true);
+    // Errors measured against the raw projection say nothing about the map
+    // that replaces it.
+    this.learnedErrors.length = 0;
+    console.info("Bootstrap fit adopted", JSON.stringify({ rawError: Number(rawError.toFixed(4)), fitError: Number(fitError.toFixed(4)), labels: kept.length }));
     return true;
   }
 

@@ -105,11 +105,12 @@ final class TrackerArgumentsTests: XCTestCase {
         XCTAssertEqual(value(after: "--gaze-max-fps", in: args(forceWasm: true)), "10")
     }
 
-    /// First enable calibrates on its own: the tracker starts the full
-    /// calibration whenever no usable calibration loads.
-    func testCalibrateIfMissingAlwaysEmitted() {
-        XCTAssertTrue(args().contains("--calibrate-if-missing"))
-        XCTAssertTrue(args(useProdRenderer: true).contains("--calibrate-if-missing"))
+    /// First enable never shows a calibration screen: with no usable
+    /// calibration the tracker learns from ordinary use instead.
+    func testLearnIfMissingAlwaysEmitted() {
+        XCTAssertTrue(args().contains("--learn-if-missing"))
+        XCTAssertTrue(args(useProdRenderer: true).contains("--learn-if-missing"))
+        XCTAssertFalse(args().contains("--calibrate-if-missing"))
     }
 
     // MARK: - Geometry defaults
@@ -257,7 +258,7 @@ final class TrackerArgumentsTests: XCTestCase {
         XCTAssertEqual(
             args(forceWasm: true),
             ["scripts/dev.cjs", "--external-api", "--no-tray",
-             "--host-pid", "4242", "--calibrate-if-missing",
+             "--host-pid", "4242", "--learn-if-missing",
              "--display-size-inch", "31.5",
              "--camera-fov", "87",
              "--gaze-projection-mode", "monocular",
