@@ -71,6 +71,18 @@ final class TerraChooserTests: XCTestCase {
         XCTAssertEqual(clamped?.confidence, 1)
     }
 
+    func testAnActionBelowTheLoopsProbabilityFloorBecomesARejectedReobserve() async throws {
+        let unsure = TerraChooser.make(client: client(Self.payload(option: "c0", confidence: 0.6)))
+        let choice = try await unsure(state(), candidates)
+        XCTAssertEqual(choice?.id, "reobserve")
+        XCTAssertEqual(choice?.actionRejection, .selection)
+        XCTAssertNil(choice?.confidence)
+        let lowDone = TerraChooser.make(client: client(Self.payload(option: "done", confidence: 0.6)))
+        let done = try await lowDone(state(), candidates)
+        XCTAssertEqual(done?.id, "done")
+        XCTAssertEqual(done?.actionRejection, nil)
+    }
+
     func testAPasswordManagerWindowIsNeverSent() async {
         let seen = LockedBox<[Data]>([])
         let choose = TerraChooser.make(client: client(Self.payload(option: "c0", confidence: 1), seen: seen))

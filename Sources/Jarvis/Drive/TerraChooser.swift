@@ -93,8 +93,16 @@ enum TerraChooser {
             guard candidates.contains(where: { $0.id == answer.option }), answer.confidence.isFinite else {
                 return nil
             }
-            return DriveLoop.JevChoice(id: answer.option, confidence: min(1, max(0, answer.confidence)),
-                                       latencyMs: latencyMs)
+            let confidence = min(1, max(0, answer.confidence))
+            let reserved: Set<String> = ["done", "reobserve", "stuck"]
+            let floor = state["_action_probability_floor"]?.numberValue
+                ?? JevChooser.actionProbabilityFloor(optionCount: candidates.filter { !reserved.contains($0.id) }.count)
+            if !reserved.contains(answer.option), confidence < floor {
+                guard candidates.contains(where: { $0.id == "reobserve" }) else { return nil }
+                return DriveLoop.JevChoice(id: "reobserve", confidence: nil, doneVote: false,
+                                           latencyMs: latencyMs, actionRejection: .selection)
+            }
+            return DriveLoop.JevChoice(id: answer.option, confidence: confidence, latencyMs: latencyMs)
         }
     }
 
