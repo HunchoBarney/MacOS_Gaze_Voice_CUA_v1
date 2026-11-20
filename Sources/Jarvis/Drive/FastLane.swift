@@ -106,6 +106,11 @@ struct FastAction: Sendable {
         /// attribute, then the window's full-screen button, then View →
         /// Exit Full Screen, and only then ⌃⌘F — each rung read back.
         case exitFullScreen
+        /// Desktops (Spaces): switch by number, "my other desktop", next or
+        /// previous, a full-screen app by name; say which one you're on; show
+        /// them all; and guide-only help to move a window or remove a
+        /// desktop. A window never moves between desktops.
+        case desktop(DesktopVerb)
         /// A control named out loud — "click Send", "press Reply all". The
         /// executor matches the name against the front window's labelled
         /// controls; no gaze and no model call. Several equal matches get
@@ -143,6 +148,23 @@ struct FastAction: Sendable {
         /// Pick chip N — resolves through the pending overlay state, so a
         /// spoken number only acts while chips are up.
         case clickIndex(Int)
+    }
+
+    enum DesktopVerb: Equatable, Sendable {
+        case go(DesktopTarget)
+        case which
+        case show
+        /// Not automated: Mission Control plus how to drag it there.
+        case moveWindow(to: Int?)
+        /// Not automated: Mission Control plus where the X is.
+        case removeExtra
+    }
+
+    enum DesktopTarget: Equatable, Sendable {
+        case number(Int)
+        case other
+        case step(DesktopSpaceSwitch.Direction)
+        case fullScreen(app: String)
     }
 
     /// Gaze-referent verbs — "click", "open this", "what is this". The
@@ -324,6 +346,11 @@ struct FastAction: Sendable {
         if let exit = table[command], case .exitFullScreen = exit.body {
             return (exit, display.scoped ? Self.gazeDisplayQualifier : nil)
         }
+        // "put this window on desktop 2" names a desktop, not an app called
+        // "desktop 2": desktops parse before the qualifier split. A named
+        // screen ("on the other screen") is more than one display, which the
+        // switch won't guess at.
+        if !display.scoped, let desktop = parseDesktop(command) { return (desktop, nil) }
         // Menu frames carry their own "in the X menu" preposition — the
         // app-qualifier split would eat the tail as an app name, so the
         // frame parses before the split.
@@ -1014,6 +1041,138 @@ struct FastAction: Sendable {
         return FastAction(body: .locate(query: query), generic: true,
                           description: "Finding where “\(query)” went",
                           result: "Located “\(query)”", effect: .delivered)
+    }
+
+    /// Desktops by voice: "go to Desktop 2", "switch to my other desktop",
+    /// "next desktop", "go to my full-screen Safari", "which desktop am I
+    /// on", "show me my desktops", and the guide-only "move this window to
+    /// Desktop 2" and "get rid of the extra desktops". Whole utterances only,
+    /// so "go to Desktop 2 then click" stays with the loop.
+    private static func parseDesktop(_ command: String) -> FastAction? {
+        func action(_ verb: DesktopVerb, _ description: String, _ result: String) -> FastAction {
+            FastAction(body: .desktop(verb), generic: true, description: description,
+                       result: result, effect: .delivered)
+        }
+        func strip(_ text: String, _ prefixes: [String]) -> String? {
+            prefixes.first(where: text.hasPrefix).map { String(text.dropFirst($0.count)) }
+        }
+        if desktopQuestions.contains(command) {
+            return action(.which, "Checking which desktop you're on", "Said which desktop you're on")
+        }
+        if desktopShows.contains(command) {
+            return action(.show, "Showing your desktops", "Showed your desktops")
+        }
+        let asked = strip(command, ["how do i ", "how can i ", "how to ", "can i "]) ?? command
+        // "move this window to Desktop 2": a guide, never a move.
+        if let verb = strip(asked, ["move ", "put ", "send ", "drag "]),
+           let object = strip(verb, ["this window ", "the window ", "my window ", "a window ",
+                                     "windows ", "this ", "it "]),
+           let place = strip(object, ["over to ", "onto ", "into ", "to ", "on "]) {
+            if case .number(let number)? = desktopTarget(place, fullScreen: false) {
+                return action(.moveWindow(to: number), "Showing how to move a window to Desktop \(number)",
+                              "Showed how to move a window")
+            }
+            if desktopTarget(place, fullScreen: false) == .other || Self.anyDesktop.contains(place) {
+                return action(.moveWindow(to: nil), "Showing how to move a window to another desktop",
+                              "Showed how to move a window")
+            }
+        }
+        // "get rid of the extra desktops": a guide, never a removal.
+        if ["too many desktops", "i have too many desktops"].contains(command) {
+            return action(.removeExtra, "Showing how to tidy up your desktops", "Showed how to tidy up desktops")
+        }
+        if var rest = strip(asked, ["get rid of ", "remove ", "delete ", "close "]) {
+            rest = strip(rest, ["all the ", "all my ", "one of my ", "the ", "my ", "a ", "an "]) ?? rest
+            rest = strip(rest, ["extra ", "other ", "spare ", "empty "]) ?? rest
+            let named: Bool
+            if case .number? = desktopTarget(rest, fullScreen: false) { named = true } else { named = false }
+            if named || ["desktop", "desktops"].contains(rest) {
+                return action(.removeExtra, "Showing how to tidy up your desktops", "Showed how to tidy up desktops")
+            }
+        }
+        let goes = strip(command, ["go back to ", "go over to ", "go to ", "switch over to ", "switch to ",
+                                   "take me to ", "bring me to ", "jump to ", "change to ", "move to ",
+                                   "show me ", "open "])
+        guard let target = goes.flatMap({ desktopTarget($0, fullScreen: !command.hasPrefix("open ")) })
+                ?? desktopTarget(command, fullScreen: false) else { return nil }
+        switch target {
+        case .number(let number):
+            return action(.go(target), "Switching to Desktop \(number)", "Switched to Desktop \(number)")
+        case .other:
+            return action(.go(target), "Switching to your other desktop", "Switched desktops")
+        case .step(let direction):
+            let word = direction == .next ? "next" : "previous"
+            return action(.go(target), "Moving to the \(word) desktop", "Moved to the \(word) desktop")
+        case .fullScreen(let app):
+            return action(.go(target), "Switching to full-screen \(app)", "Switched to full-screen \(app)")
+        }
+    }
+
+    private static let desktopQuestions: Set<String> = [
+        "which desktop am i on", "what desktop am i on", "which desktop am i in", "what desktop am i in",
+        "which desktop is this", "what desktop is this", "which desktop is it", "what desktop is it",
+        "what desktop number am i on", "what desktop number is this",
+        "which space am i on", "what space am i on", "which space is this"
+    ]
+
+    private static let desktopShows: Set<String> = [
+        "show me my desktops", "show my desktops", "show me the desktops", "show the desktops",
+        "show desktops", "show all desktops", "show all my desktops", "show me all my desktops",
+        "show me all the desktops", "see my desktops", "let me see my desktops", "my desktops",
+        "where are my desktops", "how many desktops do i have", "show me my spaces", "show my spaces"
+    ]
+
+    private static let anyDesktop: Set<String> = [
+        "another desktop", "a different desktop", "a new desktop", "a desktop",
+        "another space", "a different space", "my other desktop", "the other desktop"
+    ]
+
+    /// The desktop a phrase names: "desktop 2", "desktop two", "the second
+    /// desktop", "space 3", "my other desktop", "the next desktop", and with
+    /// `fullScreen` "my full-screen Safari". Recognisers write "2" as "to" or
+    /// "too", and "4" as "for".
+    private static func desktopTarget(_ phrase: String, fullScreen: Bool) -> DesktopTarget? {
+        var words = phrase.split(separator: " ").map(String.init)
+        while let first = words.first, ["my", "the"].contains(first) { words.removeFirst() }
+        let text = words.joined(separator: " ")
+        let nouns: Set<String> = ["desktop", "space"]
+        switch text {
+        case "other desktop", "other space": return .other
+        case "next desktop", "next space", "desktop on the right": return .step(.next)
+        case "previous desktop", "previous space", "desktop on the left": return .step(.previous)
+        default: break
+        }
+        func number(_ word: String) -> Int? {
+            let spoken = ["one": 1, "two": 2, "to": 2, "too": 2, "three": 3, "four": 4, "for": 4, "five": 5,
+                          "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10]
+            guard let value = Int(word) ?? spoken[word], (1...16).contains(value) else { return nil }
+            return value
+        }
+        func ordinal(_ word: String) -> Int? {
+            let spoken = ["first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+                          "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10]
+            if let value = spoken[word] { return value }
+            guard word.count >= 3, ["st", "nd", "rd", "th"].contains(String(word.suffix(2))) else { return nil }
+            return number(String(word.dropLast(2)))
+        }
+        if words.count == 2, nouns.contains(words[0]), let value = number(words[1]) { return .number(value) }
+        if words.count == 3, nouns.contains(words[0]), words[1] == "number", let value = number(words[2]) {
+            return .number(value)
+        }
+        if words.count == 2, nouns.contains(words[1]), let value = ordinal(words[0]) { return .number(value) }
+        guard fullScreen else { return nil }
+        var app: String?
+        for prefix in ["full screen ", "fullscreen ", "full-screen "] where text.hasPrefix(prefix) {
+            app = String(text.dropFirst(prefix.count))
+        }
+        for suffix in [" in full screen", " full screen", " fullscreen", " full-screen"] where app == nil && text.hasSuffix(suffix) {
+            app = String(text.dropLast(suffix.count))
+        }
+        guard var name = app else { return nil }
+        for tail in [" window", " app"] where name.hasSuffix(tail) { name = String(name.dropLast(tail.count)) }
+        guard !name.isEmpty, desktopTarget(name, fullScreen: false) == nil,
+              !["it", "this", "that"].contains(name) else { return nil }
+        return .fullScreen(app: name)
     }
 
     /// The same leading-filler strip on raw text (case-insensitive), so a
