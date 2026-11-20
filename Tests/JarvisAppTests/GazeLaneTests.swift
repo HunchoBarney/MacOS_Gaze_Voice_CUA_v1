@@ -342,20 +342,13 @@ final class GazeLaneTests: XCTestCase {
         driver.responses["list_windows"] = [.object(["windows": .array([
             windowRow(id: 7, pid: 42, app: "Safari", title: "Example",
                       x: 100, y: 100, w: 800, h: 600)])])]
-        driver.responses["get_window_state"] = [.object([
-            "window_bounds": .object(["x": .number(100), "y": .number(100),
-                                      "width": .number(800), "height": .number(600)]),
-            "screenshot_scale": .number(2),
-            "app_name": .string("Safari"), "window_title": .string("Example"),
-            "elements": .array([
-                .object(["element_index": .number(0), "role": .string("window"),
-                         "frame": .object(["x": .number(100), "y": .number(100),
-                                           "w": .number(800), "h": .number(600)])]),
-                .object(["element_index": .number(1), "role": .string("button"),
-                         "label": .string("Save"),
-                         "frame": .object(["x": .number(380), "y": .number(330),
-                                           "w": .number(60), "h": .number(30)])]),
-            ])])]
+        let old = DriveLoop.screenReader
+        defer { DriveLoop.screenReader = old }
+        DriveLoop.screenReader = { _ in
+            ScreenContext.digest(app: "Safari", bundleID: "com.apple.Safari", windowTitle: "Example", root: ScreenNode(
+                role: "AXWindow", frame: CGRect(x: 100, y: 100, width: 800, height: 600), children: [
+                    ScreenNode(role: "AXButton", title: "Save", frame: CGRect(x: 380, y: 330, width: 60, height: 30))]))
+        }
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(400, 340)) // native screen points, inside the same physical button

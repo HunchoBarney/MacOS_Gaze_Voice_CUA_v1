@@ -12,7 +12,7 @@ enum VoiceToolCatalog {
     static let version = 1
     static let names = ["run_script", "browser_task", "computer_task", "ask_about_screen",
                         "web_lookup", "inbox_brief", "delegate_to_agent", "respond_to_task", "answer"]
-    static let unavailable = Set(["run_script", "browser_task", "ask_about_screen", "web_lookup", "inbox_brief"])
+    static let unavailable = Set(["run_script", "browser_task", "web_lookup", "inbox_brief"])
     static let capabilityIDs = ["run_script": "script_lane", "browser_task": "browser_driver",
                                 "ask_about_screen": "screen_reasoner", "web_lookup": "web_lookup",
                                 "inbox_brief": "inbox_brief"]
@@ -342,9 +342,14 @@ final class RealtimeVoiceClient {
         One reasoning turn permits at most one tool invocation. Use the exact
         tool schema. Only use target, task, ask and agent identities supplied in
         the host context. Do not infer consent or create an agent implicitly.
-        No screenshot is provided. Ask-about-screen and other capabilities may
-        return unavailable; report that honestly, never pretend to have seen
-        private screen content or completed an unavailable action.
+        For a question about the screen, say "Let me look." and call
+        ask_about_screen; use scope screen only for the whole screen. Its result
+        is the words in the window read as text, never a picture: answer from
+        those words in one or two short sentences, call a control by its exact
+        label, and never claim to see pixels, images or colours.
+        Other capabilities may return unavailable; report that honestly, never
+        pretend to have seen private screen content or completed an
+        unavailable action.
         Accepted means work started, not done. Verified task outcomes arrive
         separately; never claim an effect before its outcome evidence.
         Use answer only for a direct non-actuating reply. Outcomes are spoken
@@ -547,11 +552,10 @@ final class RealtimeVoiceClient {
         ])
     }
 
-    func sendFunctionOutput(callID: String, output: String) async throws {
-        try await send([
-            "type": "conversation.item.create",
-            "item": ["type": "function_call_output", "call_id": callID, "output": output]
-        ])
+    func sendFunctionOutput(callID: String, output: String, itemID: String? = nil) async throws {
+        var item: [String: Any] = ["type": "function_call_output", "call_id": callID, "output": output]
+        if let itemID { item["id"] = itemID }
+        try await send(["type": "conversation.item.create", "item": item])
     }
 
     @discardableResult
@@ -596,8 +600,14 @@ final class RealtimeVoiceClient {
     /// item.id caps at 32 chars server-side — a full UUID string (36+4)
     /// got the whole session killed with a validation error. Keep it at
     /// exactly 32.
-    nonisolated static func contextItemID() -> String {
-        "ctx-" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(28)
+    nonisolated static func contextItemID(prefix: String = "ctx-") -> String {
+        prefix + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(28)
+    }
+
+    /// OpenAI error text can echo a partly masked key ("sk-abc…xyz"); the
+    /// key-shaped part never reaches speech or a log.
+    nonisolated static func scrubbed(_ message: String) -> String {
+        message.replacingOccurrences(of: #"sk-[A-Za-z0-9_*\-…]+"#, with: "[key hidden]", options: .regularExpression)
     }
 
     func deleteItem(itemID: String) async throws {
@@ -729,7 +739,7 @@ final class RealtimeVoiceClient {
             // The transcript died but the model still heard the audio — the
             // turn can succeed display-less. A distinct event, not .failure:
             // killing the capture over a lost caption is wrong.
-            let detail = (frame["error"] as? [String: Any])?["message"] as? String ?? "Transcription failed."
+            let detail = Self.scrubbed((frame["error"] as? [String: Any])?["message"] as? String ?? "Transcription failed.")
             return [.transcriptFailed(detail, itemID: frame["item_id"] as? String ?? "")]
         case "response.output_audio.delta":
             guard let delta = frame["delta"] as? String,
@@ -771,15 +781,15 @@ final class RealtimeVoiceClient {
             if let status = (frame["response"] as? [String: Any])?["status"] as? String,
                status == "failed" || status == "incomplete" {
                 let details = (frame["response"] as? [String: Any])?["status_details"] as? [String: Any]
-                let reason = (details?["error"] as? [String: Any])?["message"] as? String
-                    ?? details?["reason"] as? String ?? "response \(status)"
+                let reason = Self.scrubbed((details?["error"] as? [String: Any])?["message"] as? String
+                    ?? details?["reason"] as? String ?? "response \(status)")
                 events.append(.failure("The voice reply \(status == "failed" ? "failed" : "was cut short"): \(reason)."))
             }
             events.append(.responseDone)
             return events
         case "error", "invalid_request_error":
             let error = frame["error"] as? [String: Any] ?? frame
-            let detail = error["message"] as? String ?? ""
+            let detail = Self.scrubbed(error["message"] as? String ?? "")
             let text = detail.isEmpty ? "Realtime session error." : detail
             // Session-fatal errors announce themselves by type/code — every
             // other error frame is a rejected request on a live socket (an

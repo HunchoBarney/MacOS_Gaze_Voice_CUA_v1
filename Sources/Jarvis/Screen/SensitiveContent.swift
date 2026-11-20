@@ -41,6 +41,13 @@ enum SensitiveContent {
         return sensitiveLabels.contains { words.contains(" \($0) ") }
     }
 
+    /// A field is secret when any of its names says so. The placeholder
+    /// counts too: it is often a payment or sign-in field's only label
+    /// ("CVV", "Security code", "One-time code").
+    static func isSensitiveField(title: String?, description: String?, placeholder: String?) -> Bool {
+        [title, description, placeholder].contains { isSensitiveLabel($0 ?? "") }
+    }
+
     /// Replaces Luhn-valid 13–19 digit runs (spaces and dashes allowed
     /// between digits) so a card number on screen never leaves the Mac.
     static func maskCardNumbers(_ text: String) -> String {

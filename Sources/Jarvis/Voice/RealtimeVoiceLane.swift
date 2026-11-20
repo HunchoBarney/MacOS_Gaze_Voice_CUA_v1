@@ -444,6 +444,24 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// Last injected [context] note — each turn replaces it rather than
     /// stacking stale frontmost-app/time facts on top of each other.
     private var lastContextItemID: String?
+    /// A screen-text result is waiting for the model to answer from it.
+    /// Internal for tests.
+    var toolRelayOwed = false
+    /// Screen-text tool results still in the conversation — deleted once
+    /// the answer settles, so window text never outlives its turn.
+    /// Internal for tests.
+    var screenItems: [String] = []
+    /// The digest the pending screen answer reads from — its refs turn the
+    /// control the answer names into a frame to glow. Internal for tests.
+    var screenAnswer: ScreenDigest?
+    /// Reads the focused window, plus every visible window's title for the
+    /// screen scope. Tests inject digests; the live read walks AX.
+    var screenReader: @MainActor (ScreenQuestion.Scope) async
+        -> (focused: ScreenDigest?, windows: [ScreenQuestion.WindowTitle]) = { scope in
+        (await ScreenContext.readFocused(), scope == .screen ? await ScreenContext.visibleWindows() : [])
+    }
+    /// Glows the control a screen answer names. Wired by VoiceController.
+    var onScreenPoint: ((CGRect) -> Void)?
     /// Serializes cancel()'s server sends against the next hold's stream —
     /// a clearAudio landing late would wipe freshly streamed audio.
     private var teardownTask: Task<Void, Never>?
@@ -643,13 +661,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
             case .outputAudio(let data, let item):
                 guard let response = envelope.responseID,
                       responseAuthority.matches(connection: envelope.connectionID, responseID: response),
-                      responseAuthority.purpose == .outcomeOnly || speechSession.gate.admission?.intent == "question",
+                      responseAuthority.purpose == .outcomeOnly || speaksDuringReasoning,
                       outputGate.load(ordering: .acquiring) else { continue }
                 player.enqueue(data, itemID: item)
             case .assistantDelta, .assistantDone, .outputAudioDone:
                 guard let response = envelope.responseID,
                       responseAuthority.matches(connection: envelope.connectionID, responseID: response),
-                      responseAuthority.purpose == .outcomeOnly || speechSession.gate.admission?.intent == "question" else { continue }
+                      responseAuthority.purpose == .outcomeOnly || speaksDuringReasoning else { continue }
                 handle(event)
             case .responseDone:
                 guard let response = envelope.responseID,
@@ -670,7 +688,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 responseInFlight = false; awaitingTurnEnd = false
                 turnResponseOutstanding = false; responseWatchdog?.cancel()
                 if ownsRemote, let id = turnID {
-                    if case .failure(let message) = event { onEvent?(id, .failure(message)) }
+                    if case .failure(let message) = event { onEvent?(id, .failure(turnFailure(message))) }
                     else { onEvent?(id, .failure("The remote voice session closed. Local speech remains available.")) }
                 }
             default:
@@ -730,6 +748,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             guard let self else { return }
             defer { self.pendingCalls.remove(pendingKey) }
             let output: String
+            var screenItem: String?
             do {
                 let fresh = await self.admissionContextProvider?() ?? self.speechSession.context
                 var context = self.speechSession.boundContext
@@ -771,6 +790,21 @@ final class RealtimeVoiceLane: SpeechCapturing {
                         output = Self.wrapExecutorResult(await self.delegationHandler(
                             admission.text, call.args["agent"]?.string, create?["name"]?.string,
                             create?["role"]?.string, create?["description"]?.string))
+                    case "ask_about_screen":
+                        let scope = ScreenQuestion.Scope(rawValue: call.args["scope"]?.string ?? "") ?? .window
+                        let read = await self.screenReader(scope)
+                        switch await ScreenQuestion.reply(question: call.args["question"]?.string ?? admission.text,
+                                                          scope: scope, focused: read.focused, windows: read.windows) {
+                        case .text(let text, let digest):
+                            output = ScreenQuestion.output(text)
+                            screenItem = RealtimeVoiceClient.contextItemID(prefix: "scr-")
+                            self.screenAnswer = digest
+                        case .refused(let line):
+                            output = VoiceToolCatalog.result(status: "refused", summary: line, error: "screen_vault")
+                        case .unavailable(let line):
+                            output = VoiceToolCatalog.result(status: "unavailable", summary: line,
+                                                             error: "unavailable:screen_text")
+                        }
                     case "answer":
                         output = VoiceToolCatalog.result(status: "completed", summary: call.args["text"]?.string ?? "")
                     default:
@@ -783,7 +817,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
             }
             guard self.turnID == admission.turn.id, self.client.connectionID == connection,
                   !Task.isCancelled else { return }
-            try? await self.client.sendFunctionOutput(callID: callID, output: output)
+            try? await self.client.sendFunctionOutput(callID: callID, output: output, itemID: screenItem)
+            if let screenItem { self.screenItems.append(screenItem) }
             if let say = Self.deterministicSay(output) { self.onEvent?(admission.turn.id, .toolSay(say)) }
             self.pendingCalls.remove(pendingKey)
             self.settleToolCall(output: output, session: admission.turn.id)
@@ -1371,6 +1406,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         let cancel = responseInFlight
         let response = responseAuthority.interruptConversation()
         if cancel { cancelledResponsePending = true }
+        discardScreenItems(); toolRelayOwed = false
         finishRemoteReply(error: CancellationError())
         pendingReasoning = nil; pendingInput = nil
         awaitingTurnEnd = false; turnResponseOutstanding = false
@@ -1551,8 +1587,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // The done must belong to THIS turn's response.create — one
             // carried by a cancelled response (barge-in) or a queued push
             // that outraced release must not close the interaction.
-            if turnResponseOutstanding, let id = turnID, awaitingTurnEnd, pendingCalls.isEmpty {
+            // A screen result that settled before this done still owes its
+            // spoken answer — the relay response ends the turn, not this one.
+            if turnResponseOutstanding, let id = turnID, awaitingTurnEnd, pendingCalls.isEmpty, !toolRelayOwed {
                 awaitingTurnEnd = false
+                discardScreenItems()
                 if player.playbackIdle {
                     onEvent?(id, .turnEnded)
                     turnID = nil
@@ -1603,6 +1642,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // dispatch parked on it instead of burning the wait bound.
             transcriptPending = false
             lastContextItemID = nil
+            toolRelayOwed = false; screenItems = []; screenAnswer = nil
             prepared = nil
         case .sessionUpdated:
             // A fresh confirmed session — replay the outcome pushes a dead
@@ -1654,13 +1694,17 @@ final class RealtimeVoiceLane: SpeechCapturing {
         case .assistantDone(let text):
             assistantText = text
             onEvent?(id, .assistant(text))
+            if let digest = screenAnswer, let ref = ScreenQuestion.pointedRef(answer: text, in: digest),
+               let frame = digest.frame(ref: ref) {
+                onScreenPoint?(frame)
+            }
         case .functionCall:
             break // Only handleWire can spend response-bound executor authority.
         case .failure(let detail):
             if Self.isFatalSessionError(detail) { lastSessionError = detail }
             // A benign race must not kill a healthy capture — the hold is
             // still streaming; only real faults surface as .failure.
-            if !Self.isBenignRace(detail) { onEvent?(id, .failure(detail)) }
+            if !Self.isBenignRace(detail) { onEvent?(id, .failure(turnFailure(detail))) }
             flushSpeech()
         case .warning:
             break // logged in the session-level switch above
@@ -1695,6 +1739,34 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
+    /// Screen text leaves the conversation once its answer settles — the
+    /// same advisory delete as the dictation item.
+    private func discardScreenItems() {
+        let items = screenItems
+        screenItems = []; screenAnswer = nil
+        guard !items.isEmpty else { return }
+        let connection = client.connectionID
+        Task { [weak self] in
+            guard let self, self.client.connectionID == connection else { return }
+            for item in items {
+                do { try await self.client.deleteItem(itemID: item) }
+                catch { Self.log.notice("screen_item_delete_failed") }
+            }
+        }
+    }
+
+    /// A question about the screen speaks while it reasons ("Let me look"),
+    /// like a plain question; every other turn speaks only its outcome.
+    private var speaksDuringReasoning: Bool {
+        ["question", "screen_question"].contains(speechSession.gate.admission?.intent ?? "")
+    }
+
+    /// A screen question fails in plain, fixed words; provider error text
+    /// never reaches the person.
+    private func turnFailure(_ detail: String) -> String {
+        speechSession.gate.admission?.intent == "screen_question" ? ScreenQuestion.failure : detail
+    }
+
     /// Turn bookkeeping after a tool result reached the model — split from
     /// the socket send so tests can drive it. A say-carrying contract
     /// result ends the turn without a second response
@@ -1718,6 +1790,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
             }
             return
         }
+        // Only screen text owes a spoken follow-up. An accepted executor
+        // result with an empty summary must not be narrated: its verified
+        // outcome arrives later as its own push.
+        if ScreenQuestion.isScreenAnswer(output) { toolRelayOwed = true }
         awaitingTurnEnd = true
         requestResponseWhenFree()
     }
@@ -1903,10 +1979,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
             pendingReasoning = nil; pendingInput = nil
             awaitingTurnEnd = true; turnResponseOutstanding = true
         } else {
-            guard pendingOutcomeReady else { return }
+            guard pendingOutcomeReady || toolRelayOwed else { return }
             purpose = .outcomeOnly
             guard responseAuthority.request(admission: nil, purpose: purpose, inputItemID: nil) else { return }
-            pendingOutcomeReady = false; turnResponseOutstanding = false
+            turnResponseOutstanding = toolRelayOwed
+            pendingOutcomeReady = false; toolRelayOwed = false
         }
         responseInFlight = true
         let requireTool = purpose != .outcomeOnly && speechSession.gate.admission?.intent != "question"
@@ -2082,6 +2159,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     func cancel() {
+        discardScreenItems(); toolRelayOwed = false
         failManualFinal(CancellationError())
         cancelSemanticInterpretation(); semanticTask = nil; semanticTurn = nil
         if conversation.id != nil {
