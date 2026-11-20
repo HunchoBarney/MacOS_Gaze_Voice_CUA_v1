@@ -38,6 +38,7 @@ final class QuietByDefaultTests: XCTestCase {
 
     func testTurningSoundsOffSticks() {
         let defaults = suite()
+        config(defaults).sounds = true
         config(defaults).sounds = false
         XCTAssertFalse(config(defaults).sounds)
     }
