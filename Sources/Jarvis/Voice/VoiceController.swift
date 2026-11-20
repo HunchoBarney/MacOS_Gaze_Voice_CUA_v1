@@ -468,6 +468,7 @@ final class VoiceController: ObservableObject {
     private let authorize: () async -> Bool
     private let timings: VoiceTimings
     private let frontmost: () -> String?
+    private let focusedWindow: () -> (pid: Int, bundle: String?, windowID: Int)?
     private var appObserver: AnyCancellable?
     private var subscriptions: Set<AnyCancellable> = []
     private var lastExternalApp: String?
@@ -533,11 +534,10 @@ final class VoiceController: ObservableObject {
         }
         context.entities = cachedVoiceEntities; context.agents = cachedVoiceAgents
         context.appRoles = cachedVoiceAppRoles
-        if let front = NSWorkspace.shared.frontmostApplication,
-           let id = FocusedTextBinding.capturedWindowID(pid: Int(front.processIdentifier)) {
-            context.windowID = id
-            context.targetAppID = front.bundleIdentifier
-            context.targetID = "window:\(front.processIdentifier):\(id)"
+        if let front = focusedWindow() {
+            context.windowID = front.windowID
+            context.targetAppID = front.bundle
+            context.targetID = "window:\(front.pid):\(front.windowID)"
             // The executor still validates the focused field before typing.
             context.editableTarget = true
         }
@@ -621,6 +621,7 @@ final class VoiceController: ObservableObject {
     init(config: Config? = nil, speech: SpeechCapturing? = nil,
          authorize: (() async -> Bool)? = nil,
          timings: VoiceTimings = VoiceTimings(), frontmost: (() -> String?)? = nil,
+         focusedWindow: (() -> (pid: Int, bundle: String?, windowID: Int)?)? = nil,
          cuaRuntime: VoiceTaskCoordinator? = nil,
          dictation: DictationDelivering = DictationDelivery(),
          speaker: SpeechSynthesizing? = nil,
@@ -642,6 +643,11 @@ final class VoiceController: ObservableObject {
             jevAPIKey: { [weak config] in config?.apiKey ?? "" })
         self.timings = timings
         self.frontmost = frontmost ?? { NSWorkspace.shared.frontmostApplication?.localizedName }
+        self.focusedWindow = focusedWindow ?? {
+            guard let front = NSWorkspace.shared.frontmostApplication,
+                  let id = FocusedTextBinding.capturedWindowID(pid: Int(front.processIdentifier)) else { return nil }
+            return (Int(front.processIdentifier), front.bundleIdentifier, id)
+        }
         if config.handsFreeEnabled, config.handsFreePaused { handsFreeState = .paused }
         lastExternalApp = self.frontmost()
         appObserver = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
