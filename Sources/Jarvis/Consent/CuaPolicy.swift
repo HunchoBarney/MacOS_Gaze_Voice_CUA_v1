@@ -288,8 +288,8 @@ enum CuaPolicy {
             .appendingPathComponent("Library/Application Support/Jarvis", isDirectory: true)
     }
 
-    /// Where the daemon-facing consent state lives. Agent cua children
-    /// read it each call — no out-of-band sync.
+    /// Where the persisted consent state lives: scoped grants, read by
+    /// the in-app DriveLoop each call. Agent children never read it.
     ///
     /// Honesty about what this file is: a SOFT store, user-writable and
     /// process-writable — anything running as the user (including a
@@ -304,13 +304,13 @@ enum CuaPolicy {
     /// Settable for tests — production reads the shared support dir.
     static var policyFileOverride: URL?
 
-    /// The consent file the agent children read — written when the
+    /// The consent file — written when the
     /// grant is on; when it's revoked the file is REMOVED (never left
     /// saying `true`), except that persisted scoped "Always for this
     /// app" grants keep a `standingGrant: false` file on disk. Removing
     /// before any rewrite means a failed write can never resurrect a
-    /// revocation: `CuaDriveServer.standingGrant()` already reads a
-    /// missing or malformed file as "no grant", so absence is the honest
+    /// revocation: `readPolicyState()` reads a missing or malformed
+    /// file as "no grant", so absence is the honest
     /// off-state. Write/remove failures log rather than swallow — the
     /// alternative is a settings toggle that silently did nothing.
     static func publishStateFile(standingGrant: Bool) {

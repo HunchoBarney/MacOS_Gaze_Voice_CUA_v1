@@ -5,16 +5,17 @@ import Synchronization
 import JarvisCore
 
 /// The host end of an agent's computer use. Codex spawns each agent's
-/// `Jarvis --mcp-stdio` child, and the Cua daemon admits only the app
-/// itself (`--host-connections-only`), so the child never opens a daemon
-/// connection. It hands each `drive_until`/`suggest_action` call to the app
+/// `Jarvis --mcp-stdio` child, which is never told the daemon's socket and
+/// opens no daemon connection of its own. It hands each `drive_until`/`suggest_action` call to the app
 /// over this socket, and the app runs the DriveLoop on its own connection,
 /// under its own consent state and keys.
 ///
 /// Trust: the socket sits in a private mkdtemp directory (mode 0700), every
 /// peer must have this user's uid (`getpeereid`), and every request carries
 /// the token the app minted for that agent and passed to its Codex through
-/// `env_vars`. A token names one agent, so a child can't act as another.
+/// `env_vars`. A token names one agent, so a child can't act as another
+/// by guessing; any same-user process that reads another process's
+/// environment can still borrow its token, as with the daemon socket.
 ///
 /// Wire: one request per connection, one JSON line each way. The request is
 /// `{agent, token, tool, arguments}` and the reply is the MCP tool result.
