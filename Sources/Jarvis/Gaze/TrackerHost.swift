@@ -19,6 +19,14 @@ import Synchronization
 /// port, so the next spawn dies on EADDRINUSE — that was the crash-loop.
 /// `stopTrackerTree` is the one chain every kill goes through: a polite
 /// `/control` quit, then SIGTERM, then a dir-scoped pkill last resort.
+/// Unit tests never reach the eye tracker of a Jarvis.app running on the
+/// Mac: under XCTest the tracker API port is one nothing listens on. A live
+/// test opts in with JARVIS_LIVE_TRACKER=1.
+enum TrackerTestGuard {
+    static let blocksRealTracker = NSClassFromString("XCTestCase") != nil
+        && ProcessInfo.processInfo.environment["JARVIS_LIVE_TRACKER"] != "1"
+}
+
 actor TrackerHost {
     static let shared = TrackerHost()
     /// Tests turn spawning off so the respawn and stale-generation paths
@@ -31,7 +39,7 @@ actor TrackerHost {
     private let port: Int
 
     init(spawnEnabled: Bool = true,
-         port: Int = TrackerHost.port,
+         port: Int = TrackerHost.apiPort,
          tokenFile: @escaping @Sendable () -> URL? = { TrackerHost.trackerDirectory().map(TrackerHost.tokenFile(trackerDir:)) }) {
         self.spawnEnabled = spawnEnabled
         self.port = port
@@ -39,6 +47,10 @@ actor TrackerHost {
     }
     /// The tracker's read-only API port (`--external-api-port` default).
     static let port = 47892
+    /// The port this process probes and controls: the tracker's, except
+    /// under tests, which get a port nothing listens on so they never see,
+    /// adopt or quit the eye tracker of a Jarvis.app running on the Mac.
+    static let apiPort = TrackerTestGuard.blocksRealTracker ? 1 : port
 
     /// The tracker API's bearer token for trackers this launch spawns,
     /// passed in JARVIS_TRACKER_TOKEN. Every route but /health refuses a

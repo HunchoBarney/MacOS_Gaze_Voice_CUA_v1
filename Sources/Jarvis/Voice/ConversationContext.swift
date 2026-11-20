@@ -242,6 +242,12 @@ final class ConversationSession {
         let owner: LocalSpeechSession
         let turn: VoiceTurnToken
         let context: VoiceAdmissionContext
+
+        /// The same capture under the input item the server named at commit.
+        func bound(to itemID: String) -> RemoteCapture {
+            .init(session: session, epoch: epoch, input: .init(connectionID: input.connectionID, itemID: itemID),
+                  owner: owner, turn: turn, context: context)
+        }
     }
 
     typealias RemoteExecutor = @MainActor () async throws -> ConversationEffect?

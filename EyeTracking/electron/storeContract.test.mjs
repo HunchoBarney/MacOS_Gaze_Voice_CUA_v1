@@ -48,19 +48,28 @@ function heavyStore() {
   return store;
 }
 
-function collectFrames(url, count) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url, { headers: { authorization: `Bearer ${"c".repeat(64)}` } });
-    const frames = [];
-    socket.on("message", (data) => {
-      frames.push(JSON.parse(data.toString()));
-      if (frames.length >= count) {
-        socket.close();
-        resolve(frames);
-      }
-    });
-    socket.once("error", reject);
+// A connected /events client whose frames arrive in order: next() resolves
+// with the next frame, or rejects once the deadline passes without one.
+function openEventsSocket(url) {
+  const socket = new WebSocket(url, { headers: { authorization: `Bearer ${"c".repeat(64)}` } });
+  const buffered = [];
+  const waiters = [];
+  socket.on("message", (data) => {
+    const frame = JSON.parse(data.toString());
+    if (waiters.length > 0) waiters.shift()(frame);
+    else buffered.push(frame);
   });
+  const next = () =>
+    new Promise((resolve, reject) => {
+      if (buffered.length > 0) return resolve(buffered.shift());
+      const timer = setTimeout(() => reject(new Error("timed out waiting for an /events frame")), 4000);
+      socket.once("error", reject);
+      waiters.push((frame) => {
+        clearTimeout(timer);
+        resolve(frame);
+      });
+    });
+  return { socket, next };
 }
 
 describe("snapshot compaction contract", () => {
@@ -219,11 +228,14 @@ describe("/events wire shape", () => {
     try {
       await new Promise((resolve) => (api.server.listening ? resolve() : api.server.once("listening", resolve)));
       const { port } = api.server.address();
-      const pending = collectFrames(`ws://127.0.0.1:${port}/events`, 2);
-      // Connect handshake arrives first; the gaze update produces frame 2.
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      const events = openEventsSocket(`ws://127.0.0.1:${port}/events`);
+      // The server subscribes the socket when it sends the handshake, so the
+      // update must come after the handshake arrives; an update sent before
+      // that would never produce a second frame.
+      const handshake = await events.next();
       store.updateFromBackendMessage({ type: "gaze", x_norm: 0.5, y_norm: 0.5, confidence: 0.9 });
-      const [handshake, update] = await pending;
+      const update = await events.next();
+      events.socket.close();
 
       expect(handshake.type).toBe("snapshot");
       expect(handshake.snapshot.calibration.samples).toEqual({ count: 1200, loaded: true });

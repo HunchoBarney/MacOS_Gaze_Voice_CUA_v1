@@ -12,61 +12,6 @@ struct NativeFieldIdentity: @unchecked Sendable, Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { CFEqual(lhs.element, rhs.element) }
 }
 
-struct NativeReadOnlyValue: Sendable, Equatable {
-    let window: WindowRef
-    let document: NativeDocumentSubject?
-    let identity: NativeFieldIdentity
-    let readGeneration: UUID
-    let role: String
-    let label: String
-    let value: String
-    let frame: CGRect?
-    let ancestorRoles: [String]
-
-    fileprivate init?(node: AXUIElement, root: AXUIElement, ownerValue: Any,
-                      rawValue: CFTypeRef, window: WindowRef, document: NativeDocumentSubject?,
-                      role: String, label: String, frame: CGRect?, ancestorRoles: [String],
-                      readGeneration: UUID) {
-        var pid: pid_t = 0
-        guard CFGetTypeID(rawValue) == CFStringGetTypeID(), let value = rawValue as? String,
-              CFGetTypeID(ownerValue as CFTypeRef) == AXUIElementGetTypeID(),
-              CFEqual(ownerValue as! AXUIElement, root),
-              AXUIElementGetPid(node, &pid) == .success, Int(pid) == window.pid,
-              !DriveCandidates.editableRoles.contains(
-                role.lowercased().replacingOccurrences(of: "ax", with: "")),
-              !DriveCandidates.isSecure(role: role, label: label),
-              NativeWindowObservation.validatedAncestors(ancestorRoles) != nil,
-              document == nil || document?.window == window else { return nil }
-        self.window = window
-        self.document = document
-        identity = NativeFieldIdentity(node)
-        self.readGeneration = readGeneration
-        self.role = role
-        self.label = label
-        self.value = value
-        self.frame = frame
-        self.ancestorRoles = ancestorRoles
-    }
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.window == rhs.window && lhs.document == rhs.document
-            && lhs.identity == rhs.identity && lhs.readGeneration == rhs.readGeneration
-            && lhs.role == rhs.role && Data(lhs.label.utf8) == Data(rhs.label.utf8)
-            && Data(lhs.value.utf8) == Data(rhs.value.utf8) && lhs.frame == rhs.frame
-            && lhs.ancestorRoles == rhs.ancestorRoles
-    }
-
-    func represents(_ element: AXElement, window: WindowRef,
-                    document: NativeDocumentSubject?) -> Bool {
-        self.window == window && self.document == document
-            && element.index < 0 && element.token == nil && element.actions.isEmpty
-            && role == element.role && Data(label.utf8) == Data(element.label.utf8)
-            && element.value.map { Data($0.utf8) == Data(value.utf8) } == true
-            && frame == element.frame && ancestorRoles == element.nativeAncestorRoles
-            && !DriveCandidates.isSecure(role: element.role, label: element.label)
-    }
-}
-
 enum NativeWindowObservation {
     private static let diagnostics = Logger(subsystem: "com.karanvirkang.jarvis",
                                             category: "native-observation")
@@ -456,7 +401,6 @@ enum NativeWindowObservation {
             result.elements[index].nativeValue = nil
             result.elements[index].nativeIdentity = nil
             result.elements[index].nativeAncestorRoles = nil
-            result.elements[index].nativeReadOnlyValue = nil
             if editable(element.role) || DriveCandidates.isSecure(role: element.role, label: element.label) {
                 result.elements[index].value = nil
             }
@@ -477,7 +421,6 @@ enum NativeWindowObservation {
                 var element = $0
                 element.nativeValue = nil
                 element.nativeIdentity = nil
-                element.nativeReadOnlyValue = nil
                 element.nativeAncestorRoles = display.complete && display.window == window
                     && !DriveCandidates.isSecure(role: element.role, label: element.label)
                     ? validatedAncestors(element.nativeAncestorRoles) : nil
@@ -524,13 +467,6 @@ enum NativeWindowObservation {
             result.elements[index].nativeIdentity = fields[fieldIndex].identity
             result.elements[index].nativeAncestorRoles = fields[fieldIndex].identity != nil
                 ? validatedAncestors(fields[fieldIndex].nativeAncestorRoles) : nil
-        }
-        for (offset, native) in display.elements.enumerated() {
-            let index = snapshot.elements.count + offset
-            if let record = native.nativeReadOnlyValue,
-               record.represents(result.elements[index], window: window, document: display.nativeDocument) {
-                result.elements[index].nativeReadOnlyValue = record
-            }
         }
         return result
     }
@@ -650,9 +586,7 @@ enum NativeWindowObservation {
         let attributes = [
             kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
             kAXChildrenAttribute, kAXPositionAttribute, kAXSizeAttribute,
-            kAXWindowAttribute,
         ] as CFArray
-        let readGeneration = UUID()
         let started = ContinuousClock.now
         let deadline = started + .milliseconds(500)
         trace.phase = .traversal
@@ -678,7 +612,7 @@ enum NativeWindowObservation {
             var raw: CFArray?
             guard AXUIElementCopyMultipleAttributeValues(
                 node, attributes, AXCopyMultipleAttributeOptions(rawValue: 0), &raw) == .success,
-                  let values = raw as? [Any], values.count == 8 else {
+                  let values = raw as? [Any], values.count == 7 else {
                 complete = false
                 readFailures += 1
                 continue
@@ -741,18 +675,10 @@ enum NativeWindowObservation {
             guard !label.isEmpty || current != nil else { continue }
             let secure = DriveCandidates.isSecure(role: role, label: label)
             let rect = frame(position: values[5], size: values[6])
-            let readonly = !secure && valueStatus == .success && readStatus == .success ? rawValue.flatMap {
-                NativeReadOnlyValue(node: node, root: root, ownerValue: values[7],
-                    rawValue: $0, window: window,
-                    document: documentSubject(window: window, identifier: initialDocument),
-                    role: role, label: label, frame: rect,
-                    ancestorRoles: ancestors, readGeneration: readGeneration)
-            } : nil
             elements.append(AXElement(
                 index: -(elements.count + 1), token: nil, role: role,
                 label: secure ? "[secure]" : label, value: secure ? nil : current,
-                frame: rect, actions: [], nativeAncestorRoles: ancestors,
-                nativeReadOnlyValue: readonly))
+                frame: rect, actions: [], nativeAncestorRoles: ancestors))
         }
         trace.phase = .continuity
         value = nil
