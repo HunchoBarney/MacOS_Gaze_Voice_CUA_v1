@@ -36,10 +36,6 @@ enum JevChooser {
         + "rendered display can. A field-value fact establishing the field's requested state "
         + "is unaffected: the value is the state, wherever the row sits. "
 
-    static var experimentalWindowImages: Bool {
-        Bundle.main.object(forInfoDictionaryKey: "JevExperimentalWindowImages") as? Bool == true
-    }
-
     private static let diagnostics = Logger(subsystem: "com.karanvirkang.jarvis",
                                             category: "jev-decision")
     typealias Infer = @Sendable (JSONValue, [String: Question]) async throws -> (SystemOneResponse, Double)
@@ -73,20 +69,6 @@ enum JevChooser {
     static func make(client: JevClient) -> DriveLoop.Choose {
         make(model: client.model) { state, questions in
             try await client.systemOne(state: state, questions: questions)
-        }
-    }
-
-    static func makeVisual(client: JevClient) -> JevDecider.VisualChoose {
-        makeVisual(model: client.model, infer: visualInfer(client: client))
-    }
-
-    static func makeVisualVerifier(client: JevClient) -> TaskLoop.VisualVerify {
-        makeVisualVerifier(model: client.model, infer: visualInfer(client: client))
-    }
-
-    private static func visualInfer(client: JevClient) -> VisualInfer {
-        { state, questions, assets in
-            try await client.systemOne(state: state, questions: questions, assets: assets)
         }
     }
 

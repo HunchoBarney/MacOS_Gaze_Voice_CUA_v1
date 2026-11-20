@@ -303,39 +303,6 @@ final class JevDeciderTests: XCTestCase {
         }
     }
 
-    /// Persistent low confidence with a complete-but-unhelpful snapshot
-    /// escalates to scoped pixels once instead of dead-ending: AX can be
-    /// structurally complete while semantically insufficient.
-    func testPersistentLowConfidenceRequestsPixelsWithVisualChooser() async throws {
-        let fake = FakeChoose()
-        fake.picks = [
-            .init(id: "e1", confidence: 0.2, doneVote: nil),
-            .init(id: "e1", confidence: 0.3, doneVote: nil)]
-        let decider = JevDecider(choose: { state, candidates in
-            fake.states.append(state)
-            fake.candidateSets.append(candidates.map { $0.id })
-            guard !fake.picks.isEmpty else { return nil }
-            return fake.picks.removeFirst()
-        }, visualChoose: { _ in .blocked(reason: .safety("fixture")) })
-        let task = TaskBrief(goal: "press save", window: Jarvis.WindowRef(pid: 7, windowID: 42))
-        var observation = obs([element(1, label: "Save")], task: task)
-        let first = try await decider.nextStep(observation)
-        guard case .act(let req) = first, req.effect == .reobserve else {
-            return XCTFail("expected reobserve, got \(first)")
-        }
-        observation.stepIndex = 1
-        observation.history = [.init(stepIndex: 0, echo: .reobserve, summary: req.summary)]
-        let second = try await decider.nextStep(observation)
-        guard case .act(let req2) = second, req2.effect == .reobserve,
-              req2.summary.contains("visual evidence") else {
-            return XCTFail("expected pixel request, got \(second)")
-        }
-        observation.stepIndex = 2
-        observation.history.append(.init(stepIndex: 1, echo: .reobserve, summary: req2.summary))
-        let wantsPixels = await decider.needsScreenshot(for: observation)
-        XCTAssertTrue(wantsPixels, "persistent low confidence must request scoped pixels")
-    }
-
     /// A degraded snapshot escalates honestly — the decider can't pick
     /// what it can't see.
     func testDegradedAXEscalates() async throws {
@@ -631,13 +598,6 @@ final class JevDeciderTests: XCTestCase {
 
     // MARK: - contract surface
 
-    /// The Jev lane is AX-only — pixels are never requested, so the
-    /// loop's one-capture-per-step policy is never even consulted.
-    func testWantsScreenshotIsFalse() {
-        let decider = JevDecider(choose: { _, _ in nil })
-        XCTAssertFalse(decider.wantsScreenshot)
-    }
-
     /// Reserved candidates ride every option set — the pick stays
     /// bounded even when the AX tree offers nothing.
     func testReservedCandidatesAlwaysOffered() async throws {
@@ -652,21 +612,16 @@ final class JevDeciderTests: XCTestCase {
     }
 
     /// A re-picked scroll is incremental progress, not a
-    /// possibly-completed step — it re-dispatches instead of routing to
-    /// the pixel lane the way a re-picked menu or key would.
+    /// possibly-completed step — it re-dispatches.
     func testRepickedScrollRepeatsInsteadOfPixelEscalation() async throws {
         let fake = FakeChoose()
         fake.picks = [.init(id: "scroll:down", confidence: 0.9),
                       .init(id: "scroll:down", confidence: 0.9)]
-        var pixelCalls = 0
         let decider = JevDecider(choose: { state, candidates in
             fake.states.append(state)
             fake.candidateSets.append(candidates.map { $0.id })
             guard !fake.picks.isEmpty else { return nil }
             return fake.picks.removeFirst()
-        }, visualChoose: { _ in
-            pixelCalls += 1
-            return .blocked(reason: .decider("pixels"))
         })
         let task = TaskBrief(goal: "scroll down the page")
         let first = try await decider.nextStep(obs([
@@ -687,44 +642,5 @@ final class JevDeciderTests: XCTestCase {
             return XCTFail("expected act, got \(second)")
         }
         XCTAssertEqual(secondRequest.tool, "scroll")
-        XCTAssertEqual(pixelCalls, 0)
-    }
-
-    /// The same re-pick on a menu — an idempotent possibly-completed
-    /// step — still routes to scoped visual adjudication.
-    func testRepickedMenuStillRoutesToPixels() async throws {
-        let fake = FakeChoose()
-        fake.picks = [.init(id: "menu:View > Scientific", confidence: 0.9),
-                      .init(id: "menu:View > Scientific", confidence: 0.9)]
-        var pixelCalls = 0
-        let decider = JevDecider(choose: { state, candidates in
-            fake.states.append(state)
-            fake.candidateSets.append(candidates.map { $0.id })
-            guard !fake.picks.isEmpty else { return nil }
-            return fake.picks.removeFirst()
-        }, visualChoose: { _ in
-            pixelCalls += 1
-            return .blocked(reason: .decider("pixels"))
-        })
-        let task = TaskBrief(goal: "Run menu View > Scientific.")
-        let first = try await decider.nextStep(obs([
-            element(1, role: "AXButton", label: "Seven")], task: task))
-        guard case .act(let firstRequest) = first else {
-            return XCTFail("expected act, got \(first)")
-        }
-        XCTAssertEqual(firstRequest.tool, "invoke_menu")
-        let history = [RoundRecord(stepIndex: 0, echo: .act,
-                                   summary: firstRequest.summary,
-                                   actuated: true, settleVerified: true)]
-        let second = try await decider.nextStep(obs([
-            element(1, role: "AXButton", label: "Tangent")],
-            task: task, history: history, snapshotID: "snap-2"))
-        guard case .act(let secondRequest) = second else {
-            return XCTFail("expected act, got \(second)")
-        }
-        XCTAssertEqual(secondRequest.effect, .reobserve)
-        XCTAssertTrue(secondRequest.summary.contains("AX did not ground"),
-                      "repeat-pick should request scoped pixels, got \(secondRequest.summary)")
-        XCTAssertEqual(pixelCalls, 0, "the pixel ask rides the next round, not this pick")
     }
 }

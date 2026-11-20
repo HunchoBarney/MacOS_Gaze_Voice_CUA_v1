@@ -59,7 +59,6 @@ final class TaskLoopTests: XCTestCase {
         var settleResult = true
         private(set) var frontCalls = 0
         private(set) var treeCalls = 0
-        private(set) var screenshotCalls = 0
         private(set) var settleCalls = 0
 
         init(snapshots: [AXSnapshot]) { self.snapshots = snapshots }
@@ -76,10 +75,6 @@ final class TaskLoopTests: XCTestCase {
             return snapshots.first ?? AXSnapshot(windowTitle: nil, snapshotID: nil,
                                                  elements: [], treeMarkdown: "")
         }
-        func screenshot(of window: WindowRef?, region: CGRect?) async throws -> CapturedImage {
-            screenshotCalls += 1
-            return CapturedImage(captureID: "c1", data: nil)
-        }
         func domSnapshot(of window: WindowRef) async throws -> DOMSnapshot {
             DOMSnapshot(url: "", title: "", indexedText: "", elements: [])
         }
@@ -93,7 +88,6 @@ final class TaskLoopTests: XCTestCase {
     /// observation the LOOP built; observations land in the box so tests
     /// see exactly what crossed the contract boundary.
     struct ScriptedDecider: Decider {
-        var wantsScreenshot = false
         let box: Box
         let script: @Sendable (TaskObservation) throws -> DecideResult
         func nextStep(_ observation: TaskObservation) async throws -> DecideResult {
@@ -604,17 +598,5 @@ final class TaskLoopTests: XCTestCase {
         guard case .cancelled = result.outcome else {
             return XCTFail("expected .cancelled, got \(result.outcome)")
         }
-    }
-
-    /// The screenshot contract: captures happen only when the acting
-    /// decider opted in — an AX-only decider never pays for pixels.
-    func testScreenshotOnlyWhenDeciderAsks() async {
-        let box = Box()
-        let source = FakeSource(snapshots: [snap()])
-        let loop = makeLoop(source: source, box: box) { _ in
-            .blocked(reason: .decider("stop"))
-        }
-        _ = await loop.run(task())
-        XCTAssertEqual(source.screenshotCalls, 0)
     }
 }

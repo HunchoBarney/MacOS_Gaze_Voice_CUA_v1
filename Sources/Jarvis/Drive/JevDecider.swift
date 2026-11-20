@@ -1,6 +1,5 @@
 import CoreGraphics
 import Foundation
-import OSLog
 import JarvisCore
 
 /// The AX-first brain — CONTRACTS §1's `JevDecider`. It adapts the
@@ -16,17 +15,11 @@ import JarvisCore
 /// a type pick either carries a caller-supplied `values` literal
 /// verbatim or raises `askUser` for the loop to route.
 actor JevDecider: Decider {
-    nonisolated let wantsScreenshot = false
-
     /// The existing bounded pick — `DriveLoop.Choose` is the factory
     /// shape `JevChooser.make` produces: state JSON in, a validated
     /// `JevChoice` (id + optional confidence + same-call done vote) out.
     typealias Choose = DriveLoop.Choose
-    typealias VisualChoose = @Sendable (TaskObservation) async throws -> DecideResult
     private let choose: Choose
-    private let visualChoose: VisualChoose?
-    private var requestedPixels = false
-    private var pendingProposal: JevActionProposal?
     private var activeTask: TaskBrief?
 
     /// Per-round candidates the AX tree can't mint (traffic lights,
@@ -52,22 +45,6 @@ actor JevDecider: Decider {
     private let windowOnly: Bool
     private var invalidPicks = 0
     private var lowConfidenceStreak = 0
-    /// Confidence-miss visual blocks earn bounded fresh-capture retries;
-    /// violations never reach this counter.
-    private var visualRetries = 0
-    private var rejectedHypotheses: [String: Int] = [:]
-    /// Completion claims are observation requests, not action failures —
-    /// bounded on their own streak so a model stuck re-checking still
-    /// terminates without spending the grounding budget. Real tasks
-    /// interleave claim picks with concrete operations — any non-claim
-    /// result resets the streak — so the bound only needs to catch
-    /// runs that never leave the re-check loop.
-    private var verifyClaims = 0
-    private let maxVerifyClaims = 5
-    /// Consecutive confidence misses before a task is called unverifiable —
-    /// the caller deadline is the real bound; this stops hopeless streaks
-    /// early without ending runs that still have honest budget left.
-    private let maxVisualRetries = 3
     /// The parked text hole — a needs-text pick whose question is out.
     /// The next observation resolves it on the recorded answer rather
     /// than spending another model call on an identical pick.
@@ -97,10 +74,8 @@ actor JevDecider: Decider {
          windowOnly: Bool = false,
          extras: (@Sendable (TaskObservation) async -> DriveCandidates.RoundExtras)? = nil,
          gaze: (@Sendable () async -> GazeSample?)? = nil,
-         context: (@Sendable () -> String?)? = nil,
-         visualChoose: VisualChoose? = nil) {
+         context: (@Sendable () -> String?)? = nil) {
         self.choose = choose
-        self.visualChoose = visualChoose
         self.confidenceFloor = confidenceFloor
         self.maxInvalidPicks = maxInvalidPicks
         self.maxLowConfidence = maxLowConfidence
@@ -112,111 +87,34 @@ actor JevDecider: Decider {
         self.contextProvider = context
     }
 
-    func needsScreenshot(for observation: TaskObservation) async -> Bool {
-        guard visualChoose != nil else { return false }
-        guard let snapshot = observation.axSnapshot else { return true }
-        if TaskLoop.successEvidence(in: snapshot, task: observation.task) { return false }
-        let elements = snapshot.elements.map(DriveCandidates.axToDrive).filter {
-            !["window", "application", "menubar"].contains(DriveCandidates.role($0))
-        }
-        let pendingPixels = requestedPixels && activeTask == observation.task
-            && (pendingProposal?.matches(observation) ?? true)
-        return pendingPixels || DriveCandidates.actionable(
-            elements, goal: observation.task.goal, cap: nil).isEmpty
-    }
-
     func nextStep(_ observation: TaskObservation) async throws -> DecideResult {
         try Task.checkCancellation()
-        let staleProposal = pendingProposal.map { !$0.matches(observation) } ?? false
         if activeTask != observation.task {
             observedGoal = nil
             pendingTextHole = nil
-            pendingProposal = nil
-            requestedPixels = false
             invalidPicks = 0
             lowConfidenceStreak = 0
-            visualRetries = 0
-            verifyClaims = 0
             lastFingerprint = nil
             staleStreak = 0
-            rejectedHypotheses = [:]
         }
         if observation.stepIndex == 0 { observedGoal = nil }
         activeTask = observation.task
-        if staleProposal {
-            pendingProposal = nil
-            requestedPixels = false
-            return .act(.init(effect: .reobserve, tool: "",
-                summary: "the proposed step is stale — re-observing"))
-        }
-        do {
-            let result = try await decideStep(observation)
-            try Task.checkCancellation()
-            if case .act(let request) = result, request.effect == .reobserve {
-                return result
-            }
-            pendingProposal = nil
-            requestedPixels = false
-            switch result {
-            case .done, .blocked, .escalate:
-                activeTask = nil
-                pendingTextHole = nil
-                observedGoal = nil
-            default: break
-            }
+        let result = try await decideStep(observation)
+        try Task.checkCancellation()
+        if case .act(let request) = result, request.effect == .reobserve {
             return result
-        } catch {
-            pendingProposal = nil
-            requestedPixels = false
-            throw error
         }
+        switch result {
+        case .done, .blocked, .escalate:
+            activeTask = nil
+            pendingTextHole = nil
+            observedGoal = nil
+        default: break
+        }
+        return result
     }
 
     private func decideStep(_ observation: TaskObservation) async throws -> DecideResult {
-        if let image = observation.screenshot, let frame = image.frame, let visualChoose,
-           !TaskLoop.successEvidence(in: observation.axSnapshot, task: observation.task) {
-            guard frame.window == observation.task.window,
-                  image.captureID == frame.captureID, image.data == frame.asset.data else {
-                return .blocked(reason: .safety("The image does not belong to the current task window."))
-            }
-            requestedPixels = false
-            var groundedObservation = observation
-            groundedObservation.semanticProposal = pendingProposal
-            pendingProposal = nil
-            let result = try await visualChoose(groundedObservation)
-            // A completion claim is an observation request — the pick's own
-            // goal evidence already judged the outcome incomplete, so the
-            // retry loop's fresh look is exactly what it asked for. It does
-            // not spend the grounding budget; only a streak of claims with
-            // no concrete operation in between is terminal.
-            if case .blocked(.safety(let message)) = result,
-               message == JevVisualDecision.completionClaimVisualReason {
-                verifyClaims += 1
-                guard verifyClaims <= maxVerifyClaims,
-                      let retry = requestPixels(observation, completionClaim: true)
-                else { return result }
-                return retry
-            }
-            verifyClaims = 0
-            // A dispatch is progress — the retry bound counts consecutive
-            // unproductive misses, not a cumulative task error budget.
-            if case .act = result { visualRetries = 0 }
-            // A confidence miss is not a violation — one bounded retry with
-            // a fresh capture gets the same gates a second honest look. When
-            // the miss followed a bound hypothesis, history should name what
-            // the visual check did not confirm so the next pick weighs it.
-            if case .blocked(.safety(let message)) = result,
-               message == JevVisualDecision.unverifiableVisualReason,
-               visualRetries < maxVisualRetries,
-               let retry = requestPixels(observation, rejected: groundedObservation.semanticProposal) {
-                if let proposal = groundedObservation.semanticProposal {
-                    rejectedHypotheses[proposal.summaryDescription, default: 0] += 1
-                }
-                visualRetries += 1
-                return retry
-            }
-            return result
-        }
         // A degraded observation is an honest escalate — never a pick
         // made blind.
         guard let snap = observation.axSnapshot else {
@@ -353,12 +251,6 @@ actor JevDecider: Decider {
                     return .act(ActuationRequest(effect: .verifyState, tool: "",
                         verification: proof, summary: "verify the observed goal outcome"))
                 }
-                // A done claim no native fact can prove — view/mode
-                // outcomes leave nothing in the value/label fact set —
-                // still deserves adjudication: the visual lane reads the
-                // screen the fact model can't. Bare decide(done) would
-                // only earn an evidence rejection.
-                if let fallback = requestPixels(observation) { return fallback }
             }
             return decide(done, observation: observation)
         }
@@ -366,22 +258,7 @@ actor JevDecider: Decider {
             candidate = candidates.first(where: { $0.id == "reobserve" }) ?? candidate
         }
 
-        if picked.model != nil, (picked.applicability ?? 1) < 0.3,
-           picked.actionSupport.count == actionCount,
-           picked.actionSupport.values.allSatisfy({ $0 < 0.9 }),
-           let fallback = requestPixels(observation) {
-            return fallback
-        }
-
-        if let rejection = picked.actionRejection {
-            let proposed = picked.proposedActionID
-                .flatMap { id in candidates.first(where: { $0.id == id }) } ?? candidate
-            if rejection == .selection, !snap.goalContextComplete,
-               let fallback = requestPixels(observation, candidate: proposed) {
-                return fallback
-            }
-            if lowConfidenceStreak >= 1,
-               let fallback = requestPixels(observation, candidate: proposed) { return fallback }
+        if picked.actionRejection != nil {
             lowConfidenceStreak += 1
             guard lowConfidenceStreak < maxLowConfidence else {
                 return .escalate(reason: .lowConfidenceTwice)
@@ -402,11 +279,6 @@ actor JevDecider: Decider {
             uncertain = picked.confidence.map { $0 < confidenceFloor } ?? false
         }
         if uncertain {
-            if !snap.goalContextComplete || lowConfidenceStreak >= 1,
-               let fallback = requestPixels(observation, candidate:
-                    picked.proposedActionID
-                        .flatMap { id in candidates.first(where: { $0.id == id }) } ?? candidate)
-            { return fallback }
             lowConfidenceStreak += 1
             guard lowConfidenceStreak < maxLowConfidence else {
                 return .escalate(reason: .lowConfidenceTwice)
@@ -416,27 +288,6 @@ actor JevDecider: Decider {
         }
         lowConfidenceStreak = 0
 
-        if ["stuck", "reobserve"].contains(candidate.id),
-           (!snap.goalContextComplete || DriveCandidates.actionable(
-                snap.elements.map(DriveCandidates.axToDrive), goal: observation.task.goal, cap: nil).isEmpty),
-           let fallback = requestPixels(observation) { return fallback }
-        // A re-picked target-less action the loop already actuated means
-        // the decider can't confirm its effect from AX state — keys and
-        // menus change pixels, not facts. Re-dispatching blind repeats a
-        // possibly-completed step; scoped visual evidence adjudicates the
-        // outcome and can still re-issue the same tool if the goal
-        // genuinely isn't there. Scrolls are different: each dispatch is
-        // incremental progress, never a possibly-completed step, so a
-        // re-pick is the legitimate "keep going" the goal asked for —
-        // the declared postcondition and the stale stop still bound it.
-        // Element picks keep normal repeat semantics — "Add" twice is
-        // legitimate.
-        if case .request(let request) = candidate.kind,
-           request.effect == .tool, candidate.element == nil,
-           request.tool != "scroll",
-           observation.history.contains(where: {
-               $0.actuated && $0.summary == request.summary }),
-           let fallback = requestPixels(observation) { return fallback }
         let decision = decide(candidate, observation: observation)
         if case .act(var request) = decision, let model = picked.model {
             let selection = picked.probabilities[picked.id] ?? picked.confidence ?? 0
@@ -448,46 +299,6 @@ actor JevDecider: Decider {
         return decision
     }
 
-    private static let diagnostics = Logger(subsystem: "com.karanvirkang.jarvis",
-                                            category: "jev-decision")
-
-    private func requestPixels(_ observation: TaskObservation, candidate: Candidate? = nil,
-                               rejected: JevActionProposal? = nil,
-                               completionClaim: Bool = false) -> DecideResult? {
-        guard visualChoose != nil else { return nil }
-        if let candidate {
-            guard let proposal = JevActionProposal(candidate: candidate.draft,
-                observation: observation, advisory: true) else {
-                Self.diagnostics.notice("Pixel request unbound candidate=\(candidate.id, privacy: .public) window=\(observation.task.window == nil ? "none" : "set", privacy: .public)")
-                return nil
-            }
-            // A hypothesis already disproven twice by the scoped check is not
-            // bound again — the next decide runs unbound instead of forcing
-            // the same guess through grounding another round. Nothing about
-            // the element itself is suppressed.
-            pendingProposal = (rejectedHypotheses[proposal.summaryDescription] ?? 0) >= 2
-                ? nil : proposal
-        } else {
-            pendingProposal = nil
-        }
-        requestedPixels = true
-        // Reaching this path already proves the visual call's goal_evidence
-        // stayed under the done bar — the done lane fires earlier when the
-        // outcome is visibly complete — so naming the outcome's status is a
-        // proven fact, not a claim.
-        let note: String
-        if let rejected {
-            note = " — the scoped check did not confirm the proposed "
-                + "\(rejected.summaryDescription), and the outcome was not yet visibly complete"
-        } else if completionClaim {
-            note = " — a completion claim fell short on its own goal evidence; "
-                + "re-observing rather than acting"
-        } else {
-            note = ""
-        }
-        return .act(ActuationRequest(effect: .reobserve, tool: "",
-            summary: "AX did not ground the next step; requesting scoped visual evidence" + note))
-    }
     /// Picked candidate → DecideResult. The request carries the element
     /// addressing the snapshot minted (token, or index+snapshot_id) —
     /// pid/window_id are the loop's to stamp.

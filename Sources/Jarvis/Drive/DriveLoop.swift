@@ -131,9 +131,6 @@ actor DriveLoop {
         return try await call(tool, args)
     }
     private let choose: Choose
-    private let scopedCall: CuaScopedCall?
-    private let visualChoose: JevDecider.VisualChoose?
-    private let verifyVisual: TaskLoop.VisualVerify?
     private let resurrector: SessionResurrector
     /// On-device chooser — answers a round before the hosted `choose`;
     /// nil/unusable falls through. The pick's evidence gates apply
@@ -271,9 +268,6 @@ actor DriveLoop {
          /// wire). Nil keeps every read on `call` — the serialized
          /// behavior tests and agent loops already have.
          callRead: Call? = nil,
-         scopedCall: CuaScopedCall? = nil,
-         visualChoose: JevDecider.VisualChoose? = nil,
-         verifyVisual: TaskLoop.VisualVerify? = nil,
          /// The session label direct (single deterministic dispatch)
          /// fast-lane work runs under — the coordinator supplies
          /// "voice-direct" so its transport can suppress the agent
@@ -424,9 +418,6 @@ actor DriveLoop {
             }
         }
         self.choose = choose; self.ask = ask
-        self.scopedCall = scopedCall
-        self.visualChoose = visualChoose
-        self.verifyVisual = verifyVisual
         self.resurrector = resurrector
         self.nativeReadOnly = nativeReadOnly
         self.nativeScrollRead = nativeScrollRead
@@ -619,7 +610,6 @@ actor DriveLoop {
     }
 
     func run(_ task: DriveTask, session: String) async -> DriveResult {
-        let session = scopedCall == nil ? session : await resurrector.effectiveLabel(session)
         var history: [String] = []
         /// A per-task approval granted this run — one `ask` covers every
         /// later consent prompt, including the bind-phase launch gate.
@@ -935,8 +925,7 @@ actor DriveLoop {
             let taskLoop = TaskLoop(
                 source: DriveCaptureSource(
                     observe: { try await self.observe($0, $1) },
-                    window: bound, session: session, nativeRead: nativeReadOnly,
-                    observeImage: imageObservation),
+                    window: bound, session: session, nativeRead: nativeReadOnly),
                 decider: JevDecider(
                     choose: choose,
                     maxInvalidPicks: config.maxInvalidChoices,
@@ -955,7 +944,7 @@ actor DriveLoop {
                         return box.contextIsClipboard && !grantCheck()
                             ? "[clipboard: \(context.count) chars — withheld; no standing grant]"
                             : context
-                    }, visualChoose: visualChoose),
+                    }),
                 actuate: { [weak self] request in
                     guard let self else { throw DriverConnectionError.closed }
                     return try await self.actuate(request, box: box, task: task,
@@ -968,7 +957,6 @@ actor DriveLoop {
                                                     pid: pid, windowID: windowID,
                                                     box: box)
                 },
-                verifyVisual: verifyVisual,
                 ask: askFn.map { askFn in
                     { prompt, options in
                         await askFn(options.isEmpty
@@ -1094,7 +1082,6 @@ actor DriveLoop {
     /// `suggest_action` — one resolve→observe→choose pass, no dispatch. The
     /// app must already be running; launching it would itself be an effect.
     func preview(_ task: DriveTask, session: String) async throws -> String {
-        let session = scopedCall == nil ? session : await resurrector.effectiveLabel(session)
         if config.windowOnly, task.windowID == nil { return "An exact target window is required." }
         let apps = await resolver.resolveDetailed(task.application ?? task.goal)
         guard let resolved = try await resolveTargetApp(apps, task: task, session: session),
@@ -1120,9 +1107,6 @@ actor DriveLoop {
         let snap = try await DriveCaptureSource(
             observe: { try await self.observe($0, $1) }, window: window,
             session: session, nativeRead: nativeReadOnly).axTree(of: window, depth: .standard)
-        if visualChoose != nil {
-            return try await previewDecision(task, window: window, session: session, snapshot: snap)
-        }
         let elements = snap.elements.map(DriveCandidates.axToDrive).map { element in
             var element = element
             if DriveCandidates.isSecure(role: element.role, label: element.label) {
@@ -1172,59 +1156,6 @@ actor DriveLoop {
             return "The goal may be complete; drive_until must verify it."
         }
         return "Next step: \(candidate.description)."
-    }
-
-    private func previewDecision(_ task: DriveTask, window: WindowRef, session: String,
-                                 snapshot: AXSnapshot) async throws -> String {
-        let box = RoundBox(browser: nil)
-        let source = DriveCaptureSource(observe: { try await self.observe($0, $1) },
-            window: window, session: session, nativeRead: nativeReadOnly, observeImage: imageObservation)
-        let decider = JevDecider(choose: choose, maxInvalidPicks: config.maxInvalidChoices,
-            maxStaleRounds: config.maxStaleRounds, elementCap: config.elementCap,
-            windowOnly: config.windowOnly,
-            extras: { [weak self] observation in
-                guard let self else { return .init() }
-                return await self.roundExtras(pid: window.pid, windowID: window.windowID,
-                    box: box, session: session, windowTitle: observation.axSnapshot?.windowTitle)
-            }, gaze: { [gaze] in try? await gaze?() },
-            context: { task.previousContext }, visualChoose: visualChoose)
-        var observation = TaskObservation(stepIndex: 0, axSnapshot: snapshot,
-            task: TaskBrief(goal: task.goal, window: window, application: task.application,
-                values: task.values, deny: task.deny, successContains: task.successContains,
-                context: task.previousContext), history: [],
-            budget: .init(roundsRemaining: nil, millisecondsRemaining: nil))
-        for attempt in 0..<2 {
-            try Task.checkCancellation()
-            if observation.screenshot == nil, await decider.needsScreenshot(for: observation) {
-                let captured = try await source.observation(
-                    of: window, depth: .standard, includeScreenshot: true)
-                observation.axSnapshot = captured.snapshot
-                observation.screenshot = captured.image
-            }
-            switch try await decider.nextStep(observation) {
-            case .done:
-                return "The goal may be complete; drive_until must verify it."
-            case .act(let request):
-                if request.effect == .reobserve, attempt == 0,
-                   await decider.needsScreenshot(for: observation) { continue }
-                if request.effect == .verifyState {
-                    return "The goal may be complete; drive_until must verify it."
-                }
-                if request.effect == .tool {
-                    if let target = request.visualTarget,
-                       !target.validates(request, observation: observation) {
-                        return "No confident next step."
-                    }
-                    return "Next step: \(request.summary)."
-                }
-                return "No confident next step."
-            case .askUser(let prompt, _):
-                return prompt
-            case .blocked, .escalate:
-                return "No confident next step."
-            }
-        }
-        return "No confident next step."
     }
 
     /// `list_apps` on the observation lane — roster reads never mutate,
@@ -1786,12 +1717,10 @@ extension DriveLoop {
     /// never consumed (the Jev lane is AX-only, and the driver's own
     /// `effect` word is this lane's settle).
     struct DriveCaptureSource: CaptureSource {
-        typealias ImageCall = @Sendable (String, [String: JSONValue]) async throws -> CuaToolResult
         let observe: Call
         let window: WindowRef
         let session: String
         var nativeRead: NativeWindowObservation.Read = NativeWindowObservation.live
-        var observeImage: ImageCall? = nil
         func frontmostWindow() async throws -> WindowRef { window }
         func axTree(of window: WindowRef, depth: AXDepth) async throws -> AXSnapshot {
             try Task.checkCancellation()
@@ -1817,45 +1746,10 @@ extension DriveLoop {
             try Task.checkCancellation()
             return snapshot
         }
-        func screenshot(of window: WindowRef?, region: CGRect?) async throws -> CapturedImage {
-            guard window == self.window, region == nil,
-                  let image = try await observation(of: self.window,
-                    depth: .init(maxElements: 600, maxDepth: 20), includeScreenshot: true).image
-            else { throw VisualCaptureError.unavailable }
-            return image
-        }
-        func observation(of window: WindowRef, depth: AXDepth,
-                         includeScreenshot: Bool) async throws -> CapturedObservation {
-            guard includeScreenshot else {
-                return CapturedObservation(snapshot: try await axTree(of: window, depth: depth),
-                                           image: nil)
-            }
-            try Task.checkCancellation()
-            guard window == self.window, let observeImage else { throw VisualCaptureError.unavailable }
-            let result = try await observeImage("get_window_state", [
-                "pid": .number(Double(window.pid)), "window_id": .number(Double(window.windowID)),
-                "session": .string(session), "include_screenshot": .bool(true),
-                "include_accessibility_tree": .bool(true), "max_image_dimension": .number(1568),
-                "max_elements": .number(Double(depth.maxElements)),
-                "max_depth": .number(Double(depth.maxDepth)), "tree_format": .string("both"),
-            ])
-            let frame = try VisualFrame.decode(result, window: window, session: session)
-            let snapshot = NativeWindowObservation.applying(
-                await nativeRead(window, depth),
-                to: try DriveCandidates.axSnapshot(from: result.structured), window: window)
-            try Task.checkCancellation()
-            return CapturedObservation(snapshot: snapshot,
-                image: CapturedImage(captureID: frame.captureID, data: frame.asset.data, frame: frame))
-        }
         func domSnapshot(of window: WindowRef) async throws -> DOMSnapshot {
             DOMSnapshot(url: "", title: "", indexedText: "", elements: [])
         }
         func settled(within timeout: Duration) async -> Bool { true }
-    }
-
-    var imageObservation: DriveCaptureSource.ImageCall? {
-        guard let scopedCall else { return nil }
-        return { try await scopedCall($0, $1, nil) }
     }
 
     /// Per-round candidates the AX tree can't mint — the traffic-light
@@ -1893,11 +1787,11 @@ extension DriveLoop {
         args["pid"] = .number(Double(pid))
         args["window_id"] = .number(Double(windowID))
         switch CuaPolicy.decide(tool: request.tool, args: args,
-                                elementText: request.pressText,
+                                elementText: request.elementText,
                                 standingGrant: granted() || box.confirmed,
                                 scopedGrant: consentScopedGrant(for: request.tool),
                                 consequenceConfirmed: spokenCoverage(CuaPolicy.consequentialPress(
-                                    tool: request.tool, args: args, elementText: request.pressText)) != nil) {
+                                    tool: request.tool, args: args, elementText: request.elementText)) != nil) {
         case .allow:
             return .allow
         case .askFirst:
@@ -1956,29 +1850,6 @@ extension DriveLoop {
         let element = args.removeValue(forKey: "_element")
             .flatMap(DriveCandidates.element(fromJSON:))
         args["session"] = .string(session)
-        if let target = request.visualTarget {
-            guard let scopedCall, let origin = target.binding.origin,
-                  target.binding.session == session,
-                  (args["capture_id"]?.string == target.binding.captureID
-                    || (request.tool == "set_value"
-                        && args["element_token"]?.string == target.nativeElement?.token)),
-                  args["pid"]?.integer == pid, args["window_id"]?.integer == windowID else {
-                throw Abort.refused("The visual input lost its original capture scope.")
-            }
-            try await consentGate(tool: request.tool, args: args, elementText: request.pressText,
-                                  denied: task.deny, confirmed: &box.confirmed)
-            do {
-                let result = try await focusLeased {
-                    try await scopedCall(request.tool, args, origin).structured
-                }
-                let effect = result["effect"]?.string ?? "unverifiable"
-                return .init(effect: effect, verified: effect == "confirmed")
-            } catch is CuaUncertainOutcome {
-                return .init(effect: "partial", verified: false,
-                    detail: "An effect may have occurred. The captured input was not retried.",
-                    dispatched: true)
-            }
-        }
         switch request.tool {
         case "switch_tab":
             guard let tabID = args["tab_id"]?.string else {

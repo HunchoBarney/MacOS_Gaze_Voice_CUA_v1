@@ -1133,18 +1133,6 @@ extension DriveLoop {
                     arguments["post_action_wait"] = .string("none")
                     regionBound = true
                     usesToken = true
-                } else if let read = imageObservation,
-                          let result = try? await read("get_window_state", [
-                            "pid": .number(Double(window.pid)), "window_id": .number(Double(window.windowID)),
-                            "session": .string(session), "include_screenshot": .bool(true),
-                            "include_accessibility_tree": .bool(true), "max_image_dimension": .number(1568),
-                            "max_elements": .number(600), "max_depth": .number(20), "tree_format": .string("both"),
-                          ]),
-                          let frame = try? VisualFrame.decode(result, window: window, session: session),
-                          frame.bounds.contains(before.point), frame.bounds == before.windowFrame {
-                    arguments["x"] = .number((before.point.x - frame.bounds.minX) / frame.bounds.width * frame.driverSize.width)
-                    arguments["y"] = .number((before.point.y - frame.bounds.minY) / frame.bounds.height * frame.driverSize.height)
-                    regionBound = true
                 }
                 guard regionBound else {
                     return unverified("I couldn't bind a supported scroll action to this viewport. No further input was sent.", history)
