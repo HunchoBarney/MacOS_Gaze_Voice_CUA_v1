@@ -10,7 +10,9 @@ import os
 /// events ride the "oai-events" data channel.
 final class WebRTCLiveTransport: NSObject, LiveTransport, @unchecked Sendable {
     private static let log = Logger(subsystem: "com.karanvirkang.jarvis", category: "live")
-    private static let factory: LKRTCPeerConnectionFactory = {
+    /// One per process. The paid tests reach its audio device module to
+    /// feed rendered speech or watch the shared engine.
+    static let factory: LKRTCPeerConnectionFactory = {
         LKRTCInitializeSSL()
         return LKRTCPeerConnectionFactory(audioDeviceModuleType: .audioEngine, bypassVoiceProcessing: false,
                                           encoderFactory: nil, decoderFactory: nil, audioProcessingModule: nil)

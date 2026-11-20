@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Jarvis
 
@@ -8,7 +9,7 @@ import XCTest
 @MainActor
 final class LiveConnectTests: XCTestCase {
     /// Stands in for the credential Worker's route, with the same fixed fields.
-    private struct DirectLiveSessions: LiveSessionCreating {
+    struct DirectLiveSessions: LiveSessionCreating {
         let key: String
         func createSession(offer: String, config: LiveSessionConfig) async throws -> LiveSessionAnswer {
             var request = URLRequest(url: URL(string: "https://api.openai.com/v1/live/sessions")!)
@@ -68,37 +69,70 @@ final class LiveConnectTests: XCTestCase {
         XCTAssertNotNil(ending.usage)
     }
 
-    /// One minute of conversation with a person at the Mac: talk to it, go
-    /// quiet long enough for Standby, talk again. Audible and about 10 cents,
-    /// so it needs the owner present. It logs counts and timings only, never
-    /// transcript text.
+    /// About a minute of conversation with the owner at the Mac, over the
+    /// real mic: wake it twice with "Hey Jarvis", with Standby in between.
+    /// The wake word listens to a tap on Live's own engine the whole time,
+    /// as L3 would share the mic. Audible and about 10 cents; it waits up to
+    /// 15 minutes in Standby for the owner. It logs counts and timings only,
+    /// never transcript text.
     func testAOneMinuteTalkPausesAndResumes() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard environment["JARVIS_LIVE_TALK"] == "1", environment["JARVIS_LIVE_MIC"] == "1" else {
             throw XCTSkip("Set JARVIS_LIVE_TALK=1 and JARVIS_LIVE_MIC=1, with someone at the Mac, for one minute of paid talk")
         }
-        let live = try directSession("You are Jarvis, a Mac assistant being tested. Answer in one short sentence.")
+        #if canImport(LiveKitWebRTC)
+        let rig = try LiveAudioRig(.microphone)
+        let wake = VoskWakeWordDetector()
         let began = ContinuousClock.now
         func at() -> String { "\((ContinuousClock.now - began).components.seconds)s" }
+        var wakes = 0
+        try wake.start(name: "Jarvis") { _ in
+            wakes += 1
+            print("live_talk wake_word at=\(at())")
+        }
+        rig.onInput = { buffer, time in wake.hear(buffer, at: time) }
+        let live = try directSession("You are Jarvis, a Mac assistant being tested. Answer in one short sentence.")
         var counts: [String: Int] = [:]
+        var pausedAfterSecondWake = false
         live.onEvent = { event in
             switch event {
             case .resumed: counts["resumed", default: 0] += 1; print("live_talk resumed at=\(at())")
-            case .paused: counts["paused", default: 0] += 1; print("live_talk paused at=\(at())")
+            case .paused:
+                counts["paused", default: 0] += 1
+                if counts["resumed", default: 0] >= 2 { pausedAfterSecondWake = true }
+                print("live_talk paused at=\(at())")
             case .inputTranscript: counts["heard", default: 0] += 1
             case .outputTranscript: counts["spoke", default: 0] += 1
             case .error(let error): print("live_talk error type=\(error.type) code=\(error.code ?? "-")")
             default: break
             }
         }
+        let appRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.karanvirkang.jarvis").isEmpty
         try await live.start(timeout: .seconds(15))
-        print("live_talk started: speak now, pause for ten seconds, then speak again")
-        try await Task.sleep(for: .seconds(60))
+        print("live_talk armed jarvis_app_running=\(appRunning)")
+        let deadline = ContinuousClock.now + .seconds(15 * 60)
+        while !pausedAfterSecondWake, ContinuousClock.now < deadline {
+            if case .ended = live.phase { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
         let ending = await live.close(timeout: .seconds(10))
-        print("live_talk ending=\(ending) counts=\(counts.sorted { $0.key < $1.key })")
+        wake.stop()
+        let elapsed = ContinuousClock.now - began
+        let stats = rig.inputStats
+        let seconds = Double(elapsed.components.seconds)
+        print("""
+        live_talk ending=\(ending) counts=\(counts.sorted { $0.key < $1.key }) wake_words=\(wakes) \
+        input_frames_per_s=\(Int(Double(stats.frames) / max(seconds, 1))) input_buffers=\(stats.buffers) \
+        largest_input_gap_s=\(String(format: "%.3f", stats.largestGap)) config_changes=\(stats.configChanges) \
+        engines=\(stats.engines) jarvis_app_running=\(appRunning)
+        """)
         XCTAssertGreaterThanOrEqual(counts["resumed", default: 0], 2, "speech should wake it, twice")
-        XCTAssertGreaterThanOrEqual(counts["paused", default: 0], 1, "silence should return it to Standby")
+        XCTAssertTrue(pausedAfterSecondWake, "silence should return it to Standby")
         XCTAssertGreaterThan(counts["spoke", default: 0], 0, "Live should answer aloud")
+        XCTAssertGreaterThanOrEqual(wakes, 2, "the wake word should hear both wakes through Live's engine")
         XCTAssertTrue(ending.confirmed)
+        #else
+        throw XCTSkip("WebRTC isn't fetched: run python3 -I ThirdParty/WebRTC/fetch.py first")
+        #endif
     }
 }
