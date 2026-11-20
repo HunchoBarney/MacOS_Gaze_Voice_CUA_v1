@@ -13,7 +13,14 @@ LOCAL_APP = $(HOME)/jarvis-local/Jarvis.app
 # build is for the owner's Mac and testers.
 PUBLIC ?= 0
 
+# Local CI: a launchd agent runs scripts/local-ci.sh poll every 5 minutes.
+LOCAL_CI_HOME ?= $(HOME)/.capy/work/local-ci
+LOCAL_CI_LABEL = com.karanvirkang.jarvis.local-ci
+LOCAL_CI_PLIST = $(HOME)/Library/LaunchAgents/$(LOCAL_CI_LABEL).plist
+LOCAL_CI_JOB = gui/$(shell id -u)/$(LOCAL_CI_LABEL)
+
 .PHONY: setup build test tracker release install local run clean
+.PHONY: local-ci-install local-ci-pause local-ci-resume local-ci-uninstall
 
 setup:
 	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
@@ -97,3 +104,30 @@ run: local
 
 clean:
 	rm -rf build .build
+
+# launchd can't read ~/Documents, so the agent runs an installed copy of the
+# script. Rerun this target after changing scripts/local-ci.sh.
+local-ci-install:
+	mkdir -p "$(LOCAL_CI_HOME)/bin" "$(LOCAL_CI_HOME)/logs" "$(dir $(LOCAL_CI_PLIST))"
+	install -m 755 scripts/local-ci.sh "$(LOCAL_CI_HOME)/bin/local-ci.sh"
+	sed 's|@CI_HOME@|$(LOCAL_CI_HOME)|g' scripts/local-ci.plist > "$(LOCAL_CI_PLIST)"
+	plutil -lint "$(LOCAL_CI_PLIST)"
+	launchctl bootout $(LOCAL_CI_JOB) 2>/dev/null || true
+	launchctl enable $(LOCAL_CI_JOB)
+	launchctl bootstrap gui/$$(id -u) "$(LOCAL_CI_PLIST)"
+	@echo "local CI polls every 5 minutes; log $(LOCAL_CI_HOME)/logs/poll.log"
+
+# Pausing stops a running job too; its head is retried after resume.
+local-ci-pause:
+	launchctl disable $(LOCAL_CI_JOB)
+	launchctl bootout $(LOCAL_CI_JOB) 2>/dev/null || true
+
+local-ci-resume:
+	launchctl enable $(LOCAL_CI_JOB)
+	launchctl bootstrap gui/$$(id -u) "$(LOCAL_CI_PLIST)"
+
+local-ci-uninstall:
+	launchctl bootout $(LOCAL_CI_JOB) 2>/dev/null || true
+	launchctl enable $(LOCAL_CI_JOB)
+	rm -f "$(LOCAL_CI_PLIST)"
+	@echo "removed the agent; checkout and logs remain in $(LOCAL_CI_HOME)"
