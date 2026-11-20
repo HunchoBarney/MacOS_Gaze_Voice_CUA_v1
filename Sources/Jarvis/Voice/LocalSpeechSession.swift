@@ -344,7 +344,7 @@ enum VoiceAdmissionPolicy {
         return VoiceProposal(route: .remote, intent: intent, slots: slots, targetIDs: targets, replyTo: binding)
     }
 
-    private static func explicitNewRequest(_ text: String) -> Bool {
+    static func explicitNewRequest(_ text: String) -> Bool {
         if let parsed = FastAction.parse(text), case .overlay = parsed.action.body { return false }
         let first = normalized(text).split(separator: " ").first.map(String.init) ?? ""
         if ["open", "launch", "show", "new", "close", "scroll", "type", "undo", "redo", "copy", "paste", "cut",

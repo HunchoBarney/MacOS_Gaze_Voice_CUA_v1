@@ -756,6 +756,7 @@ final class VoiceTaskCoordinator {
                         scrollContinuation: NativeWindowObservation.ScrollViewport? = nil,
                         continuousScroll: Bool = false,
                         onConversationScroll: (@MainActor (NativeWindowObservation.VerifiedScroll) -> Void)? = nil,
+                        speakerVerified: Bool = true,
                         admissionIsCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) async -> String {
         let started = ProcessInfo.processInfo.systemUptime
         onCommandStage?(captureID, nil, .coordinatorBegin, nil)
@@ -796,6 +797,7 @@ final class VoiceTaskCoordinator {
                                         allowParsedScroll: allowParsedScroll,
                                         scrollContinuation: scrollContinuation,
                                         continuousScroll: continuousScroll, onConversationScroll: onConversationScroll,
+                                        speakerVerified: speakerVerified,
                                         admissionIsCurrent: admissionIsCurrent)
         }
         if Self.recapPhrases.contains(phrase) {
@@ -886,9 +888,10 @@ final class VoiceTaskCoordinator {
                                 routed.map { "Intent lane: \($0.lane.rawValue) — \($0.reason)" }]
             .compactMap { $0 })
             .joined(separator: "\n") : ""
-        let spec = Self.voiceTaskSpec(trimmed, app: app, frontmostHint: frontmostHint,
+        var spec = Self.voiceTaskSpec(trimmed, app: app, frontmostHint: frontmostHint,
             previousContext: previousContext.isEmpty ? nil : previousContext,
             values: values, windowID: pinnedWindowID)
+        spec.speakerVerified = speakerVerified
 
         let label = Self.gerundPhrase(for: trimmed) ?? trimmed
         guard !Task.isCancelled, admissionIsCurrent() else {
