@@ -66,8 +66,8 @@ enum JevChooser {
     /// `jev-latest` alias would change behaviour whenever TypeSafe moves it.
     static let model = "jev-1.14.0"
 
-    static func make(apiKey: String) -> DriveLoop.Choose {
-        make(client: JevClient(apiKey: apiKey, model: model))
+    static func make(apiKey: String, baseURL: URL = JevClient.systemOneURL) -> DriveLoop.Choose {
+        make(client: JevClient(apiKey: apiKey, baseURL: baseURL, model: model))
     }
 
     static func make(client: JevClient) -> DriveLoop.Choose {
@@ -363,7 +363,6 @@ enum JevChooser {
                 model: response.model,
                 latencyMs: latencyMs)
             initial.primaryCompletionProbability = completion
-            initial.proposedActionID = picked?.id
             initial.actionSupport = Dictionary(uniqueKeysWithValues: actions.enumerated().compactMap {
                 index, action -> (String, Double)? in
                 guard case .noul(let support) = response.answers["action_support_\(index)"],

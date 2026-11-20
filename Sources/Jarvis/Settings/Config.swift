@@ -1,11 +1,16 @@
 import Foundation
 import Combine
+import JarvisCore
 import ServiceManagement
 
 final class Config: ObservableObject {
     static let shared: Config = {
         Config(keyStore: KeychainAPIKeyStore(allowUserInteraction: true),
-               openAIKeyStore: KeychainAPIKeyStore(account: "openAIAPIKey", allowUserInteraction: true))
+               openAIKeyStore: KeychainAPIKeyStore(account: "openAIAPIKey", allowUserInteraction: true),
+               hosted: HostedCredentials.serviceURL(
+                   environment: ProcessInfo.processInfo.environment,
+                   infoValue: Bundle.main.object(forInfoDictionaryKey: "JarvisCredentialsURL")
+               ).map { HostedCredentials(baseURL: $0, tokenStore: KeychainAPIKeyStore(account: "installToken")) })
     }()
 
     private let defaults: UserDefaults
@@ -14,16 +19,59 @@ final class Config: ObservableObject {
     @Published private(set) var apiKeyError: String?
 
     @Published private(set) var apiKey: String
-    /// OpenAI credential for the realtime duplex lane — env `OPENAI_API_KEY`
-    /// first, Keychain `openAIAPIKey` second. ChatGPT sign-in cannot mint
-    /// realtime sessions; this lane requires an API key.
+    /// A developer's own OpenAI key — env `OPENAI_API_KEY` first, Keychain
+    /// `openAIAPIKey` second. When set it replaces Jarvis's service for
+    /// Realtime.
     @Published private(set) var openAIAPIKey: String
-    /// True once Jarvis signs in to hosted credentials (KAR-38). Until
-    /// then the keys above are typed into Settings → Advanced.
-    var hostedCredentialsConfigured: Bool { false }
+    /// Jarvis's credential service (KAR-38), when this build names one.
+    /// People then never handle a key; the two above are a developer
+    /// override.
+    let hosted: HostedCredentials?
+    var hostedCredentialsConfigured: Bool { hosted != nil }
     /// A key Jarvis needs is missing and can only be typed into Settings →
-    /// Advanced, until hosted credentials exist.
+    /// Advanced, because this build has no credential service.
     var needsKeys: Bool { !hostedCredentialsConfigured && (openAIAPIKey.isEmpty || apiKey.isEmpty) }
+    /// Settings shows the key fields: always without the service, and with
+    /// it only as a developer override — a key is already set, or
+    /// `defaults write com.karanvirkang.jarvis developerKeys -bool YES`.
+    var showsKeyFields: Bool {
+        !hostedCredentialsConfigured || !openAIAPIKey.isEmpty || !apiKey.isEmpty
+            || defaults.bool(forKey: "developerKeys")
+    }
+
+    /// The credential for the next Realtime socket: the developer key when
+    /// set, else a fresh client secret from the service, else nil.
+    func realtimeCredential() async throws -> RealtimeCredential? {
+        let key = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty { return RealtimeCredential(key: key, model: nil) }
+        return try await hosted?.realtimeCredential()
+    }
+
+    /// Where Jev calls go: TypeSafe with the developer key when set, else
+    /// the service's Jev proxy with this Mac's install token, else nil.
+    func jevRoute() async throws -> ServiceRoute? {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty { return ServiceRoute(url: JevClient.systemOneURL, bearer: key) }
+        guard let hosted else { return nil }
+        return ServiceRoute(url: hosted.jevURL, bearer: try await hosted.installToken())
+    }
+
+    /// Where Terra calls go, chosen the same way with the OpenAI key.
+    func responsesRoute() async throws -> ServiceRoute? {
+        let key = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty { return ServiceRoute(url: TerraClient.endpoint, bearer: key) }
+        guard let hosted else { return nil }
+        return ServiceRoute(url: hosted.responsesURL, bearer: try await hosted.installToken())
+    }
+
+    /// The Jev credential an agent's drive server gets in its environment.
+    /// Agents spawn without waiting on the network, so this reads only a
+    /// token already registered.
+    var jevEnvironment: [String: String] {
+        if !apiKey.isEmpty { return ["TYPESAFE_API_KEY": apiKey] }
+        guard let hosted, let token = hosted.storedToken else { return [:] }
+        return ["TYPESAFE_API_KEY": token, "TYPESAFE_BASE_URL": hosted.jevURL.absoluteString]
+    }
 
     @Published var microphoneUID: String {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
@@ -158,9 +206,11 @@ final class Config: ObservableObject {
         keyStore: APIKeyStore = KeychainAPIKeyStore(),
         openAIKeyStore: APIKeyStore = KeychainAPIKeyStore(account: "openAIAPIKey"),
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        codexAuth: CodexAuth = .shared
+        codexAuth: CodexAuth = .shared,
+        hosted: HostedCredentials? = nil
     ) {
         self.defaults = defaults
+        self.hosted = hosted
         self.keyStore = keyStore
         self.openAIKeyStore = openAIKeyStore
         self.codexAuth = codexAuth
