@@ -22,8 +22,8 @@ in your login keychain, so macOS permission grants survive rebuilds.
 
 GitHub Actions is off, so CI runs on the owner's Mac. `make local-ci-install`
 loads a launchd agent that every 5 minutes runs `make test` on the newest
-open PR head or main commit without a result, one at a time and only when no
-other Swift build is running, then posts a `local-ci` commit status through
+open PR head or main commit without a result, one at a time, queued ahead of
+normal jobs in the crew's build lane, then posts a `local-ci` commit status through
 the Mac's `gh` login. `scripts/local-ci.sh <pr|sha>` tests one head now.
 Checkout and logs live in `~/.capy/work/local-ci`. Stop it with
 `make local-ci-pause` / `local-ci-resume` / `local-ci-uninstall`.
