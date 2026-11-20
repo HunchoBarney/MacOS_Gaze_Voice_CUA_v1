@@ -275,7 +275,7 @@ extension DriveLoop {
                           pid: pending.pid, windowID: pending.windowID, bundleID: pending.bundleID,
                           blockedReason: "undo failed")
         }
-        guard await undo.undoItem(pending.pid) != pending.item else {
+        guard let after = await undo.undoItem(pending.pid), after != pending.item else {
             history.append("chose \(pending.item.title), but the undo item didn't change")
             return settle(.blocked("I chose Undo in \(name), but couldn't tell that it worked."), task, history,
                           pid: pending.pid, windowID: pending.windowID, bundleID: pending.bundleID,

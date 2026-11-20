@@ -324,6 +324,17 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertEqual(result.blockedReason, "undo unverified")
     }
 
+    func testUndoWithNoReadbackIsNotCalledDone() async {
+        let script = Script([trashItem, nil])
+        let offers = UndoOffers()
+        offered(offers, at: script.now.value)
+        let loop = await makeLoop(script, offers: offers)
+        let result = await loop.run(DriveTask(goal: "undo"), session: "s")
+        XCTAssertEqual(script.calls.value.filter { $0.0 == "invoke_menu" }.count, 1)
+        guard case .blocked = result.status else { return XCTFail("\(result.status)") }
+        XCTAssertEqual(result.blockedReason, "undo unverified", "an unreadable menu is no evidence the undo took")
+    }
+
     func testAnOfferNeverOutlivesItsWindow() {
         let offers = UndoOffers()
         let now = Date(timeIntervalSince1970: 5_000)
