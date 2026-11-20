@@ -956,7 +956,8 @@ export class AppearanceChannel {
   constructor(
     private readonly periodMs: number = APPEARANCE_PERIOD_MS,
     private readonly ema: number = 0.45,
-    private readonly staleMs: number = APPEARANCE_STALE_MS
+    private readonly staleMs: number = APPEARANCE_STALE_MS,
+    private readonly clock: () => number = () => performance.now()
   ) {}
 
   get disabled(): boolean {
@@ -985,7 +986,7 @@ export class AppearanceChannel {
     this.pending = true;
     this.pendingSince = now;
     this.lastRunAt = now;
-    const runStart = performance.now();
+    const runStart = this.clock();
     let result: Promise<AppearanceAngles>;
     try {
       result = estimate();
@@ -998,7 +999,7 @@ export class AppearanceChannel {
     }
     result
       .then((angles) => {
-        this.lastDurationMs = performance.now() - runStart;
+        this.lastDurationMs = this.clock() - runStart;
         // Reject non-finite output rather than poisoning the EMA — one NaN
         // frame would otherwise stick in `smoothed` permanently.
         if (angles === null || ![angles.yawDeg, angles.pitchDeg, angles.confidence].every(Number.isFinite)) {
