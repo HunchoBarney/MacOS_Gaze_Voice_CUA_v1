@@ -138,6 +138,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Composition seams: gaze-tap commit and the universal stop.
         wireLocalIntelligence()
 
+        // Register with Jarvis's credential service on first launch, so the
+        // first command doesn't wait on it and agents find a token.
+        if let hosted = controller.config.hosted {
+            Task { _ = try? await hosted.installToken() }
+        }
+
         agentRuntime = Self.makeAgentRuntime()
         // The agents runtime boots after the controller exists — the voice
         // delegation seam is wired late, never guessed at init time. A user
@@ -391,9 +397,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Each agent's codex gets a stdio MCP server entry — the same
         // binary re-execed as `Jarvis --mcp-stdio --agent <slug>`, told
         // where the private daemon socket directory is — plus
-        // TYPESAFE_API_KEY in its environment so codex's `env_vars`
+        // the Jev credential in its environment so codex's `env_vars`
         // pass-through hands it to the MCP child without touching disk.
-        // The key is read live at spawn so a mid-session key set works.
+        // It is read live at spawn so a mid-session key set works.
         runtime.start(
             mcpServersFor: { agent in
                 [CodexMCPServer(name: "jev-drive",
@@ -401,10 +407,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     ?? ProcessInfo.processInfo.arguments[0],
                                 args: ["--mcp-stdio", "--agent", agent.slug]
                                     + (CuaSocketDirectory.current.map { ["--cua-dir", $0] } ?? []),
-                                envVars: ["TYPESAFE_API_KEY"],
+                                envVars: ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL"],
                                 cwd: agent.workspacePath)]
             },
-            environmentFor: { _ in ["TYPESAFE_API_KEY": Config.shared.apiKey] })
+            environmentFor: { _ in Config.shared.jevEnvironment })
         // The runtime owns the single event-stream consumer, fanning
         // events out to the UI here.
         windows.agents.bind(roster: runtime.store, runtime: runtime)

@@ -300,6 +300,9 @@ final class RealtimeVoiceClient {
         /// item ids, deletes of gone items, shape nits. Log-worthy, never
         /// worth killing the turn over.
         case warning(String)
+        /// The client event with this `event_id` was rejected; the session
+        /// survived.
+        case rejected(eventID: String)
     }
 
     struct WireEnvelope: Sendable {
@@ -452,7 +455,9 @@ final class RealtimeVoiceClient {
 
     /// Connect and configure. Resolves once the server confirms the session
     /// update — the socket is then warm for immediate audio streaming.
-    func connect(apiKey: String, model: String = "gpt-realtime-2.1",
+    static let defaultModel = "gpt-realtime-2.1"
+
+    func connect(apiKey: String, model: String = RealtimeVoiceClient.defaultModel,
                  voice: String = "marin", inputMode: InputMode = .conversation) async throws {
         teardown()
         connectionID = UUID()
@@ -624,7 +629,11 @@ final class RealtimeVoiceClient {
         try await socket.send(.string(frame))
     }
 
-    func commitAudio() async throws { try await send(["type": "input_audio_buffer.commit"]) }
+    func commitAudio(eventID: String? = nil) async throws {
+        var frame: [String: Any] = ["type": "input_audio_buffer.commit"]
+        if let eventID { frame["event_id"] = eventID }
+        try await send(frame)
+    }
     func clearAudio() async throws { try await send(["type": "input_audio_buffer.clear"]) }
     func requestResponse(allowTools: Bool = true, requireTool: Bool = false) async throws {
         if allowTools, requireTool {
@@ -902,7 +911,9 @@ final class RealtimeVoiceClient {
             let type = error["type"] as? String ?? ""
             let code = error["code"] as? String ?? ""
             let fatal = type.contains("session") || code.contains("session")
-            return [fatal ? .failure(text) : .warning(text)]
+            guard !fatal else { return [.failure(text)] }
+            guard let eventID = error["event_id"] as? String, !eventID.isEmpty else { return [.warning(text)] }
+            return [.warning(text), .rejected(eventID: eventID)]
         default:
             return []
         }
