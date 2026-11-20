@@ -26,12 +26,17 @@ import os
 ///      driver state — allow-list, installs — which is a consent bypass
 ///      vector. Nothing calls them today; the table stands so the
 ///      contract is honest, not aspirational.
-///   3. **The deny-list scan** runs twice, once per shape: the phrase
+///   3. **The never list** (`neverReason`) refuses first: wipes, remote-access
+///      tools, gift cards, scam links and popup phone numbers. Typing
+///      into a password box refuses next. Then **the deny-list scan**
+///      runs twice, once per shape: the phrase
 ///      corpus over element label/value + url-ish args, then the
 ///      command-shaped corpus (`deniedInTypedPayload`) over every string
 ///      arg — `type_text`'s payload included. Both refuse before the
 ///      grant, so a standing "always allow" never rubber-stamps
-///      "empty trash" or a typed `rm -rf`.
+///      "empty trash" or a typed `rm -rf`. A phrase hit that names a
+///      `Consequence` passes only with `consequenceConfirmed:`, the
+///      caller's record of a clear spoken yes for that one control.
 ///   4. **Everything else needs the standing grant, a scoped
 ///      "Always for this app" grant (`scopedGrant:`), or a per-task
 ///      approval.** A request that is none of the above lands here too —
@@ -93,10 +98,68 @@ enum CuaPolicy {
         "confirm purchase", "pay now", "reply all", "delete account",
         "close account", "remove device", "allow remote access",
         "share my screen", "sign out", "log out", "turn off filevault",
-        "disable sip", "enter recovery", "checkout", "submit",
+        "disable sip", "enter recovery",
+        "anydesk", "teamviewer", "screenconnect", "connectwise control", "quick assist",
+        "logmein", "gotoassist", "ultraviewer", "rustdesk", "request remote control",
+        "give control", "gift card", "bitcoin atm", "crypto atm", "western union",
+        "checkout", "submit",
         "delete", "send", "reply", "allow", "erase", "format", "reset",
         "rm -rf", "mkfs", ":(){",
     ]
+
+    /// The part of the protected list no confirmation unlocks: wiping the
+    /// Mac or its data, account closure, money moved where it can't come
+    /// back, and the tools and payment shapes that tech-support scams use.
+    /// Everything else on the list is a `Consequence` that a clear spoken
+    /// yes for that one control can allow once. Every entry is also in
+    /// `deniedPatterns`, so lanes that can't ask still refuse it.
+    static let hardDeniedPatterns: [String] = [
+        "empty trash", "erase all content", "erase disk", "erase this mac",
+        "delete permanently", "permanently delete", "format disk", "factory reset",
+        "reset all settings", "transfer money", "wire transfer", "delete account",
+        "close account", "allow remote access", "share my screen", "turn off filevault",
+        "disable sip", "enter recovery", "anydesk", "teamviewer", "screenconnect",
+        "connectwise control", "quick assist", "logmein", "gotoassist", "ultraviewer",
+        "rustdesk", "request remote control", "give control", "gift card", "bitcoin atm",
+        "crypto atm", "western union", "rm -rf", "mkfs", ":(){",
+    ]
+
+    private static let normalizedHardDenied: [(match: String, display: String)] =
+        hardDeniedPatterns.compactMap { raw in
+            let match = normalize(raw)
+            return match.isEmpty ? nil : (match: match, display: raw)
+        }
+
+    /// The hard half of the deny scan: a hit here refuses even after the
+    /// person said yes.
+    static func hardDeniedPhrase(in text: String) -> String? {
+        let normalized = normalize(text.lowercased())
+        return normalizedHardDenied.first { normalized.contains($0.match) }?.display
+    }
+
+    /// Why a dispatch is refused no matter who agreed, or nil: a never-list
+    /// phrase, a link whose words name a different site than it opens, or
+    /// a call to a number shown on a scare popup. `text` is what the
+    /// control shows; `url` is where it goes, when the caller knows.
+    static func neverReason(text: String, url: String? = nil) -> String? {
+        let corpus = text + " " + (url ?? "")
+        if let hit = hardDeniedPhrase(in: corpus) {
+            return "Refused: '\(hit)' is never done for you, even with a yes"
+        }
+        if let link = ScamSignals.linkMismatch(text: text, url: url) {
+            return "Refused: this link says \(link.shown) but opens \(link.actual). That's a common trick, so I won't open it."
+        }
+        let dials = Consequence.classify(text) == .call
+            || ["tel:", "facetime:", "facetime-audio:"].contains { url?.lowercased().hasPrefix($0) == true }
+        if dials, let number = ScamSignals.alarmPhoneNumber(in: corpus) {
+            return "Refused: \(number) is on a warning popup. Real companies don't ask you to call from a popup. I can close it instead."
+        }
+        return nil
+    }
+
+    /// Typing tools never touch a password box: Jarvis doesn't type,
+    /// read or remember passwords, and says so instead.
+    static let typingTools: Set<String> = ["type_text", "set_value", "browser_type"]
 
     /// Separator-normalized text matching: "force-quit" and "force quit"
     /// are the same word. Non-alphanumeric becomes a single space.
@@ -160,18 +223,22 @@ enum CuaPolicy {
     /// first, so no grant rubber-stamps a protected phrase.
     static func decide(tool: String, args: [String: JSONValue],
                        elementText: String?, standingGrant: Bool,
-                       scopedGrant: Bool = false) -> Decision {
+                       scopedGrant: Bool = false, consequenceConfirmed: Bool = false) -> Decision {
         if observationTools.contains(tool) { return .allow }
         if deniedTools.contains(tool) {
             return .deny("'\(tool)' changes driver or session state — it is never dispatched through the policy path")
         }
         // Deny-list before the grant: consent answers "may the model
         // act", the deny list answers "may anyone do this".
-        var corpus = elementText?.lowercased() ?? ""
-        for key in ["url", "urls", "button"] {
-            if case .string(let v)? = args[key] { corpus += " \(v.lowercased())" }
+        let corpus = scanCorpus(args: args, elementText: elementText)
+        if let why = neverReason(text: elementText ?? "", url: args["url"]?.string) ?? neverReason(text: corpus) {
+            return .deny(why)
         }
-        if let hit = deniedPhrase(in: corpus) {
+        if typingTools.contains(tool), let elementText,
+           DriveCandidates.isSecure(role: "", label: elementText) {
+            return .deny("Refused: I never type passwords. Type it yourself; I don't read what goes in that box.")
+        }
+        if let hit = deniedPhrase(in: corpus), !consequenceConfirmed {
             return .deny("Refused: '\(hit)' is on the protected list — it requires the user's hands, not ours")
         }
         // Typed payloads were the audit's worst hole: `type_text` +
@@ -192,6 +259,17 @@ enum CuaPolicy {
         let target = elementText?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return .needsConfirm(OutcomeWording.consentQuestion(tool: tool, target: target))
+    }
+
+    /// The text the deny scans read: the element's label and value plus
+    /// the url-ish args. Typed text stays out; the typed-payload scan
+    /// reads it separately.
+    static func scanCorpus(args: [String: JSONValue], elementText: String?) -> String {
+        var corpus = elementText?.lowercased() ?? ""
+        for key in ["url", "urls", "button"] {
+            if case .string(let v)? = args[key] { corpus += " \(v.lowercased())" }
+        }
+        return corpus
     }
 
     /// Every string payload an arg carries — `.string` itself, or the
