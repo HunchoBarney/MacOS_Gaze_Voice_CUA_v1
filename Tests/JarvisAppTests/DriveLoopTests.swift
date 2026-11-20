@@ -6,6 +6,9 @@ import JarvisCore
 /// These tests drive the loop against a scripted driver and scripted
 /// judge — every assertion is about observable status, not internals.
 final class DriveLoopTests: XCTestCase {
+    override func setUp() {
+        usePrivateStandingGrants()
+    }
 
     /// A scripted driver: `responses` maps tool name → ordered results;
     /// `calls` records every (tool, args) pair the loop dispatched.
@@ -51,8 +54,11 @@ final class DriveLoopTests: XCTestCase {
         /// transport that dies mid-verify, not at bind time.
         var errorsAfterNCalls: [String: (after: Int, error: Error)] = [:]
         private var callCounts: [String: Int] = [:]
+        private let lock = NSLock()
 
         func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+            lock.lock()
+            defer { lock.unlock() }
             calls.append((tool, args))
             let n = (callCounts[tool] ?? 0) + 1
             callCounts[tool] = n

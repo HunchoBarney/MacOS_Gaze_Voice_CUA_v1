@@ -109,10 +109,6 @@ final class JevObservedGoalTests: XCTestCase {
                               elements: elements, treeMarkdown: "")
         }
 
-        func screenshot(of window: Jarvis.WindowRef?, region: CGRect?) async throws -> CapturedImage {
-            throw NSError(domain: "pixels-not-permitted", code: 1)
-        }
-
         func domSnapshot(of window: Jarvis.WindowRef) async throws -> DOMSnapshot {
             DOMSnapshot(url: "", title: "", indexedText: "", elements: [])
         }

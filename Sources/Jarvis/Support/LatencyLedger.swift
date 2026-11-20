@@ -100,7 +100,8 @@ final class LatencyLedger {
 
     /// Monotonic clock — tests drive marks deterministically.
     var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
-    /// Wall clock for the record's began/ended stamps.
+    /// Wall clock for the record's began/ended stamps and for placing feed
+    /// entries on the monotonic clock.
     var wall: () -> Date = { Date() }
     private let fileURL: URL
     /// Tests write inline so a record is on disk before the assert runs.
@@ -275,7 +276,7 @@ final class LatencyLedger {
     func record(_ entry: DecisionFeed.Entry) { ingest([entry]) }
 
     private func uptime(for date: Date) -> TimeInterval {
-        now() - Date().timeIntervalSince(date)
+        now() - wall().timeIntervalSince(date)
     }
 
     private func ensureInteraction(origin: Origin, at uptime: TimeInterval) {

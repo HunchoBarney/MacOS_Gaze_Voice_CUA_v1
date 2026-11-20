@@ -79,9 +79,9 @@ Settled choices, newest first. Change one only with a new entry here.
   request budgets, spend counter, `JARVIS_*` overrides in app code) left the
   app. Diagnostics are Export Logs plus MetricKit.
 - The `.agent/` phase harness was retired. It is preserved in the
-  `harness-archive-2026-11-19` tag. `make test` is `swift test` plus the
-  tracker typecheck and Vitest; end-to-end testing is being evaluated
-  separately.
+  `harness-archive-2026-11-19` tag. `make test` is `swift test --parallel`
+  plus the tracker typecheck and Vitest; end-to-end testing is being
+  evaluated separately.
 - The OpenAI and TypeSafe key fields stay in Settings until a hosted
   credentials service replaces them.
 

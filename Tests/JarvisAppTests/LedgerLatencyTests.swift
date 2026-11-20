@@ -26,10 +26,10 @@ final class LedgerLatencyTests: XCTestCase {
         super.tearDown()
     }
 
-    /// A feed entry stamped "right now" — `uptime(for:)` maps it onto
-    /// `fakeNow` because the wall clock difference is ~0.
+    /// A feed entry stamped at the ledger's wall clock — `uptime(for:)`
+    /// maps it onto exactly `fakeNow`, however long the test is preempted.
     private func feed(_ kind: DecisionFeed.Kind, _ text: String) {
-        ledger.record(DecisionFeed.Entry(at: Date(), kind: kind, text: text))
+        ledger.record(DecisionFeed.Entry(at: ledger.wall(), kind: kind, text: text))
     }
 
     /// The canonical hold→commit→transcript→dispatch→effect interaction

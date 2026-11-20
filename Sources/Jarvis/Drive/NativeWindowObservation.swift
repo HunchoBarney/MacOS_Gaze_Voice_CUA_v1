@@ -543,50 +543,6 @@ enum NativeWindowObservation {
             fingerprint: Data(SHA256.hash(data: Data(identifier.utf8))))
     }
 
-    /// Non-document subject identity: the window's attested static
-    /// structure as a sorted multiset — title plus every element's
-    /// role/label, with editable roles contributing identity only
-    /// (the task's own text edits legitimately change their values).
-    /// A read-only label that merely mirrors the element's live value
-    /// (a display readout, a clock) is likewise state, not structure,
-    /// and contributes role identity only. Pressable controls contribute
-    /// role identity only for the same reason — their labels legitimately
-    /// mutate on activation (Play↔Pause, Clear↔All Clear). Continuity
-    /// is subset, not
-    /// equality: parts may grow as the task adds elements. Requires a
-    /// goal-complete snapshot carrying at least one natively
-    /// provenanced element — an editable field or a native read-only
-    /// record — so driver-reported text alone cannot establish it.
-    /// Web windows are excluded: their content can swap under an
-    /// unchanged title and chrome.
-    static func windowSubject(_ snapshot: AXSnapshot, window: WindowRef) -> NativeWindowSubject? {
-        guard snapshot.goalContextComplete, window.pid > 0, window.windowID > 0,
-              snapshot.elements.contains(where: {
-                  $0.nativeValue != nil || $0.nativeIdentity != nil
-                      || $0.nativeReadOnlyValue != nil
-              }),
-              !snapshot.elements.contains(where: {
-                  let role = $0.role.lowercased().replacingOccurrences(of: " ", with: "")
-                  return role == "axbrowser" || role == "axwebarea"
-              }) else { return nil }
-        var parts = [snapshot.windowTitle ?? ""]
-        parts += snapshot.elements.map { element in
-            if editable(element.role) { return "edit|\(element.role.lowercased())" }
-            if let value = element.value, !value.isEmpty, element.label == value {
-                return "ro|\(element.role.lowercased())"
-            }
-            // Pressable controls carry task-mutable labels — activation
-            // legitimately relabels them (Play↔Pause, Clear↔All Clear,
-            // Show↔Hide), so like editable values and read-only displays
-            // they contribute role identity only, not label text.
-            if element.actions.contains("AXPress") {
-                return "press|\(element.role.lowercased())"
-            }
-            return "\(element.role)|\(element.label)"
-        }
-        return NativeWindowSubject(window: window, parts: parts.sorted())
-    }
-
     private static func documentIdentifier(_ window: AXUIElement) -> String? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, kAXDocumentAttribute as CFString, &value) == .success

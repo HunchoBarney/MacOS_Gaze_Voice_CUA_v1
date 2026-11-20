@@ -6,7 +6,7 @@ import JarvisCore
 @testable import Jarvis
 
 final class JevAdaptiveWorkflowTests: XCTestCase {
-    enum Failure: Error { case unexpectedMutation, pixelsNotPermitted }
+    enum Failure: Error { case unexpectedMutation }
 
     final class Source: CaptureSource, @unchecked Sendable {
         let search: Bool
@@ -44,10 +44,6 @@ final class JevAdaptiveWorkflowTests: XCTestCase {
             }
             return AXSnapshot(windowTitle: "Synthetic workflow", snapshotID: "workflow-\(stage)",
                               elements: elements, treeMarkdown: "")
-        }
-
-        func screenshot(of window: Jarvis.WindowRef?, region: CGRect?) async throws -> CapturedImage {
-            throw Failure.pixelsNotPermitted
         }
 
         func domSnapshot(of window: Jarvis.WindowRef) async throws -> DOMSnapshot {

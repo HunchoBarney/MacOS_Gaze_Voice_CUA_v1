@@ -7,13 +7,20 @@ import JarvisCore
 /// a frozen preview can't hold the menu at "Tracking", and a deictic
 /// type refuses instead of typing into a window nobody looked at.
 final class GazeRefusalStateTests: XCTestCase {
+    override func setUp() {
+        useGazeTrackingOn()
+    }
 
     // MARK: - Fixtures
 
     private final class FakeDriver {
         var calls: [(tool: String, args: [String: JSONValue])] = []
         var responses: [String: [JSONValue]] = [:]
+        private let lock = NSLock()
+
         func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+            lock.lock()
+            defer { lock.unlock() }
             calls.append((tool, args))
             if var queue = responses[tool], !queue.isEmpty {
                 let first = queue.removeFirst()
