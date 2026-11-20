@@ -4,6 +4,7 @@
 #
 #   scripts/local-ci.sh <pr-number|sha|branch>   test one head now
 #   scripts/local-ci.sh poll                     test the newest untested head (launchd)
+#   scripts/local-ci.sh summary <log>            print the counts it would post for a log
 set -uo pipefail
 
 REPO=HunchoBarney/MacOS_Gaze_Voice_CUA_v1
@@ -13,13 +14,13 @@ CHECKOUT=$CI_HOME/checkout
 LOGS=$CI_HOME/logs
 LOCK=$CI_HOME/lock
 LANE_TIMEOUT=${LOCAL_CI_LANE_TIMEOUT:-3600}
+LANE_SH=${LOCAL_CI_LANE:-$HOME/.capy/work/lane/lane.sh}
 TEST_TIMEOUT=${LOCAL_CI_TEST_TIMEOUT:-5400}
 RETRY_ERROR_AFTER=3600
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 GH=${GH:-$(command -v gh || echo "$HOME/.local/bin/gh")}
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
-lane_busy() { pgrep -x 'swift-build|swift-test|swift-frontend|xcodebuild' >/dev/null; }
 
 post() {
     "$GH" api -X POST "repos/$REPO/statuses/$1" -f state="$2" -f context="$CONTEXT" \
@@ -53,38 +54,42 @@ resolve() {
     esac
 }
 
-# "swift <total>/<failed> fail · vitest <passed>/<all>". A parallel run's
+# "swift <total>/<failed> fail · vitest <passed>/<all>", with colour codes
+# stripped first and every vitest block (EyeTracking, CredentialService)
+# added up. A parallel run's
 # total is the last [N/N] progress line and counts only when every test ran;
 # a serial run's is XCTest's own summary.
 summary() {
-    local log=$1 part total=0 failed=0 skipped="" out=""
-    part=$(grep -aoE '^\[[0-9]+/[0-9]+\] Testing ' "$log" | tail -1)
+    local plain part total=0 failed=0 skipped="" out=""
+    plain=$(LC_ALL=C sed $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1")
+    part=$(grep -aoE '^\[[0-9]+/[0-9]+\] Testing ' <<<"$plain" | tail -1)
     if [ -n "$part" ]; then
         local ran listed
         ran=$(echo "$part" | sed -E 's/^\[([0-9]+)\/.*/\1/')
         listed=$(echo "$part" | sed -E 's/^\[[0-9]+\/([0-9]+)\].*/\1/')
         [ "$ran" = "$listed" ] && total=$listed
-        failed=$(grep -aoE "Test Case '-\[[^]]+\]' failed" "$log" | sort -u | wc -l | tr -d ' ')
+        failed=$(grep -aoE "Test Case '-\[[^]]+\]' failed" <<<"$plain" | sort -u | wc -l | tr -d ' ')
     fi
-    part=$(grep -aoE 'Executed [0-9]+ tests?, with .*[0-9]+ failures?' "$log" | tail -1)
+    part=$(grep -aoE 'Executed [0-9]+ tests?, with .*[0-9]+ failures?' <<<"$plain" | tail -1)
     if [ "$total" -eq 0 ] && [ -n "$part" ]; then
         total=$(echo "$part" | sed -E 's/Executed ([0-9]+).*/\1/')
         failed=$(echo "$part" | grep -oE '[0-9]+ failures?' | grep -oE '^[0-9]+')
         skipped=$(echo "$part" | grep -oE '[0-9]+ tests? skipped' | grep -oE '^[0-9]+' || true)
     fi
-    part=$(grep -aoE 'Test run with [0-9]+ tests? .*' "$log" | tail -1)
+    part=$(grep -aoE 'Test run with [0-9]+ tests? .*' <<<"$plain" | tail -1)
     if [ -n "$part" ]; then
         total=$((total + $(echo "$part" | sed -E 's/Test run with ([0-9]+).*/\1/')))
         failed=$((failed + $(echo "$part" | grep -oE '[0-9]+ issues?' | grep -oE '^[0-9]+' || echo 0)))
     fi
     [ "$total" -gt 0 ] && out="swift $total/$failed fail${skipped:+ ($skipped skipped)}"
-    part=$(grep -aE '^ *Tests +.*\([0-9]+\)' "$log" | tail -1)
-    if [ -n "$part" ]; then
-        local passed all
-        passed=$(echo "$part" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo 0)
-        all=$(echo "$part" | grep -oE '\([0-9]+\)' | tr -d '()')
-        out="${out:+$out · }vitest ${passed:-0}/$all"
-    fi
+    local passed=0 all=0 blocks=0 line
+    while read -r line; do
+        [ -n "$line" ] || continue
+        blocks=$((blocks + 1))
+        passed=$((passed + $(echo "$line" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo 0)))
+        all=$((all + $(echo "$line" | grep -oE '\([0-9]+\)' | tr -d '()')))
+    done <<<"$(grep -aE '^ *Tests +.*\([0-9]+\)' <<<"$plain")"
+    [ "$blocks" -gt 0 ] && out="${out:+$out · }vitest $passed/$all"
     echo "$out"
 }
 
@@ -112,17 +117,7 @@ run_sha() {
     local log=$LOGS/$sha.log short=${1:0:12}
     mkdir -p "$LOGS"
     : >"$log"
-    post "$sha" pending "waiting for the build lane" || { say "could not post status for $sha"; return 1; }
-
-    local waited=0
-    while lane_busy; do
-        if [ "$waited" -ge "$LANE_TIMEOUT" ]; then
-            say "build lane busy for $LANE_TIMEOUT s" | tee -a "$log"
-            post "$sha" error "build lane busy for $((LANE_TIMEOUT / 60)) min; will retry"
-            return 1
-        fi
-        sleep 30; waited=$((waited + 30))
-    done
+    post "$sha" pending "checking out" || { say "could not post status for $sha"; return 1; }
 
     say "checking out $sha" | tee -a "$log"
     if [ ! -d "$CHECKOUT/.git" ]; then
@@ -136,15 +131,23 @@ run_sha() {
         post "$sha" error "checkout failed · log $short.log"; return 1
     fi
 
-    post "$sha" pending "running make test"
+    if [ ! -x "$LANE_SH" ]; then
+        say "no build lane at $LANE_SH" | tee -a "$log"
+        post "$sha" error "no build lane at $LANE_SH; will retry"
+        return 1
+    fi
+    # The build lane serves local CI ahead of every normal job, in this
+    # checkout rather than the lane's mirror.
+    post "$sha" pending "queued in the build lane for make test"
     say "make test at $sha" | tee -a "$log"
     local start=$SECONDS rc
     set -m
-    (cd "$CHECKOUT" && exec nice -n 10 make test) >>"$log" 2>&1 &
+    (cd "$CHECKOUT" && LANE_PRIORITY=high LANE_NO_MIRROR=1 JARVIS_LANE_TIMEOUT=$LANE_TIMEOUT \
+        exec nice -n 10 "$LANE_SH" make test) >>"$log" 2>&1 &
     test_pid=$!
     set +m
     rm -f "$CI_HOME/timed-out"
-    (sleep "$TEST_TIMEOUT" && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
+    (sleep $((LANE_TIMEOUT + TEST_TIMEOUT)) && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$test_pid"; rc=$?
     test_pid=""
@@ -154,6 +157,11 @@ run_sha() {
         pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
     fi
     local minutes=$(((SECONDS - start + 59) / 60)) counts
+    if grep -aq '^lane: gave up after' "$log"; then
+        say "the build lane did not free up in $LANE_TIMEOUT s" | tee -a "$log"
+        post "$sha" error "build lane busy for $((LANE_TIMEOUT / 60)) min; will retry"
+        return 1
+    fi
     counts=$(summary "$log")
     if [ "$rc" -eq 0 ] && ! [[ $counts == swift* && $counts == *vitest* ]]; then
         say "make test exited 0 but the log has no complete swift and vitest count" | tee -a "$log"
@@ -192,7 +200,6 @@ needs_run() {
 }
 
 poll() {
-    if lane_busy; then say "build lane busy; next tick"; return 0; fi
     take_lock || { say "another local-ci job is running"; return 0; }
     trap release_lock EXIT
     local list ts sha label
@@ -211,8 +218,9 @@ poll() {
 trap on_signal TERM INT HUP
 
 case ${1:-} in
-    "" | -h | --help) sed -n '2,6p' "$0"; exit 2 ;;
+    "" | -h | --help) sed -n '2,7p' "$0"; exit 2 ;;
     poll) poll ;;
+    summary) summary "${2:?usage: local-ci.sh summary <log>}" ;;
     *)
         target=$(resolve "$1") && [ -n "$target" ] || { echo "cannot resolve $1" >&2; exit 2; }
         [ "$target" = fork ] && { echo "refusing PR #$1: its head is in a fork" >&2; exit 2; }
