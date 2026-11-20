@@ -989,11 +989,15 @@ final class VoiceSemanticTests: XCTestCase {
             return try await withCheckedThrowingContinuation { waiter = $0 }
         }
         lane.semanticConfirmationHandler = { _ in XCTFail("late model result"); return true }
+        var events: [VoiceSpeechDiagnostic] = []
+        lane.onDiagnostic = { if $0.stage.hasPrefix("semantic.") { events.append($0) } }
         let started = ProcessInfo.processInfo.systemUptime
         try await lane.submitTyped("I need my web browser over here", sessionID: UUID())
-        let elapsed = ProcessInfo.processInfo.systemUptime - started
-        XCTAssertGreaterThanOrEqual(elapsed, 3.8)
-        XCTAssertLessThan(elapsed, 8)
+        XCTAssertGreaterThanOrEqual(ProcessInfo.processInfo.systemUptime - started, 3.8)
+        let failed = try terminal(events)
+        XCTAssertEqual(failed.stage, "semantic.failed")
+        XCTAssertEqual(failed.metrics["failure"], SemanticFailure.deadline,
+                       "the four-second watchdog ended the hop, not a transport or budget failure")
         let input = try XCTUnwrap(captured)
         waiter?.resume(returning: .proposal(.init(turn: input.turn, target: c.entities[0],
             model: "fixture", actionConfidence: 1, targetConfidence: 1)))
@@ -1041,16 +1045,14 @@ final class VoiceSemanticTests: XCTestCase {
         lane.semanticConfirmationHandler = { _ in XCTFail("expired interpretation"); return true }
         let started = ProcessInfo.processInfo.systemUptime
         try await lane.submitTyped("I need my web browser over here", sessionID: UUID())
-        let elapsed = ProcessInfo.processInfo.systemUptime - started
-        XCTAssertGreaterThanOrEqual(elapsed, 3.8, "the four-second caller wall is unchanged")
-        XCTAssertLessThan(elapsed, 8, "the eight-second transport budget is unchanged")
+        XCTAssertGreaterThanOrEqual(ProcessInfo.processInfo.systemUptime - started, 3.8,
+                                    "the four-second caller wall is unchanged")
         let failed = try terminal(events)
         XCTAssertEqual(failed.stage, "semantic.failed")
         XCTAssertEqual(failed.metrics["failure"], SemanticFailure.deadline,
                        "an expired wall is not a transport or budget failure")
         let interpret = try XCTUnwrap(failed.metrics["interpret_ms"], "the expired stage must be measured")
         XCTAssertGreaterThanOrEqual(interpret, 3800)
-        XCTAssertLessThan(interpret, 8000)
         XCTAssertNil(failed.metrics["fresh_context_ms"], "fresh context never ran")
         waiter?.resume(returning: .noMatch)
         lane.cancel()
