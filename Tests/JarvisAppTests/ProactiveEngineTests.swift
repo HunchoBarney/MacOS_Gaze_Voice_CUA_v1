@@ -361,6 +361,11 @@ final class ProactiveEngineTests: XCTestCase {
         XCTAssertEqual(engine.handleReply("yes"), .accepted([first, second]))
     }
 
+    func testACurlyApostropheStillDeclines() {
+        engine.submit([alert(.meetingNow)])
+        XCTAssertEqual(engine.handleReply("Don\u{2019}t"), .declined)
+    }
+
     func testALateReplyIsIgnored() {
         engine.submit([alert(.meetingNow)])
         advance(8)
