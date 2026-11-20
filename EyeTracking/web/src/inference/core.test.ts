@@ -1684,9 +1684,12 @@ describe("decodeBinnedAngle", () => {
 
 describe("AppearanceChannel", () => {
   const angles = { yawDeg: 10, pitchDeg: -5, confidence: 0.6 };
+  // Inference takes no time on this clock, so the adaptive period never
+  // stretches with how loaded the test machine is.
+  const frozen = () => 0;
 
   it("rate-limits runs and returns smoothed estimates", async () => {
-    const channel = new AppearanceChannel(200, 0.5, 500);
+    const channel = new AppearanceChannel(200, 0.5, 500, frozen);
     const estimate = vi.fn().mockResolvedValue(angles);
     channel.maybeRun(1000, estimate);
     channel.maybeRun(1001, estimate); // pending — skipped
@@ -1701,14 +1704,14 @@ describe("AppearanceChannel", () => {
   });
 
   it("reports stale results as null", async () => {
-    const channel = new AppearanceChannel(200, 0.5, 300);
+    const channel = new AppearanceChannel(200, 0.5, 300, frozen);
     channel.maybeRun(1000, () => Promise.resolve(angles));
     await vi.waitFor(() => expect(channel.latest(1000)).not.toBeNull());
     expect(channel.latest(1401)).toBeNull();
   });
 
   it("disables itself after repeated failures", async () => {
-    const channel = new AppearanceChannel(10, 0.5, 500);
+    const channel = new AppearanceChannel(10, 0.5, 500, frozen);
     const failing = () => Promise.reject(new Error("boom"));
     for (let i = 0; i < 4; i += 1) {
       channel.maybeRun(i * 20, failing);
@@ -1721,7 +1724,7 @@ describe("AppearanceChannel", () => {
   });
 
   it("recovers when estimate throws synchronously", () => {
-    const channel = new AppearanceChannel(10, 0.5, 500);
+    const channel = new AppearanceChannel(10, 0.5, 500, frozen);
     channel.maybeRun(0, () => {
       throw new Error("sync boom");
     });
@@ -1732,7 +1735,7 @@ describe("AppearanceChannel", () => {
   });
 
   it("clears a pending run whose promise never settles", () => {
-    const channel = new AppearanceChannel(10, 0.5, 500);
+    const channel = new AppearanceChannel(10, 0.5, 500, frozen);
     const never = vi.fn().mockImplementation(() => new Promise<never>(() => {}));
     channel.maybeRun(0, never);
     const ok = vi.fn().mockResolvedValue(angles);
@@ -1743,7 +1746,7 @@ describe("AppearanceChannel", () => {
   });
 
   it("rejects non-finite angle estimates without poisoning the EMA", async () => {
-    const channel = new AppearanceChannel(10, 0.5, 500);
+    const channel = new AppearanceChannel(10, 0.5, 500, frozen);
     channel.maybeRun(0, () => Promise.resolve({ yawDeg: Number.NaN, pitchDeg: 0, confidence: 0.5 }));
     await new Promise((r) => setTimeout(r, 0));
     expect(channel.latest(100)).toBeNull();
@@ -1754,7 +1757,7 @@ describe("AppearanceChannel", () => {
   });
 
   it("reset re-enables a failure-disabled channel", async () => {
-    const channel = new AppearanceChannel(10, 0.5, 500);
+    const channel = new AppearanceChannel(10, 0.5, 500, frozen);
     const failing = () => Promise.reject(new Error("boom"));
     for (let i = 0; i < 4; i += 1) {
       channel.maybeRun(i * 20, failing);
@@ -1771,12 +1774,14 @@ describe("AppearanceChannel", () => {
 
 describe("AppearanceChannel adaptive duty cycle", () => {
   it("backs off when inference is slow (single-threaded ORT)", async () => {
-    // Real timers: a ≥50ms inference forces period ≥200ms, so a call inside
-    // that window is skipped and one outside it runs.
-    const channel = new AppearanceChannel(200, 0.5, 2000);
-    const slow = vi.fn().mockImplementation(
-      () => new Promise((r) => setTimeout(() => r({ yawDeg: 0, pitchDeg: 0, confidence: 0.5 }), 50))
-    );
+    // A 50ms inference on the injected clock forces the period to 200ms, so a
+    // call inside that window is skipped and one outside it runs.
+    let clock = 0;
+    const channel = new AppearanceChannel(200, 0.5, 2000, () => clock);
+    const slow = vi.fn().mockImplementation(() => {
+      clock += 50;
+      return Promise.resolve({ yawDeg: 0, pitchDeg: 0, confidence: 0.5 });
+    });
     channel.maybeRun(0, slow);
     await vi.waitFor(() => expect(channel.latest(200)).not.toBeNull());
     channel.maybeRun(199, slow);

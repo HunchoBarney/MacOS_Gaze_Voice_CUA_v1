@@ -368,7 +368,4 @@ case "$DEST" in
 esac
 
 log "staged $(du -sh "$DEST" | cut -f1) at $DEST"
-if [[ -z "$NODE_BIN" ]]; then
-	warn "no node binary found — payload relies on TrackerHost finding system node"
-fi
 exit 0
