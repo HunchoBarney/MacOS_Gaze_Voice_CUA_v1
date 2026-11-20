@@ -21,6 +21,7 @@ LOCAL_CI_JOB = gui/$(shell id -u)/$(LOCAL_CI_LABEL)
 
 .PHONY: setup build test tracker release install local run clean bench-flows
 .PHONY: local-ci-install local-ci-pause local-ci-resume local-ci-uninstall
+.PHONY: e2e e2e-install e2e-uninstall
 
 setup:
 	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
@@ -153,3 +154,15 @@ local-ci-uninstall:
 	launchctl enable $(LOCAL_CI_JOB)
 	rm -f "$(LOCAL_CI_PLIST)"
 	@echo "removed the agent; checkout and logs remain in $(LOCAL_CI_HOME)"
+
+# End-to-end flows on a signed Jarvis (e2e/README.md), one desktop-lock owner
+# at a time. They launch Jarvis, speak to it and open Calculator, so run them
+# only when the owner says go. JARVIS_E2E_APP picks the build.
+e2e:
+	scripts/with-desktop-lock.py e2e/scripts/run.sh
+
+e2e-install:
+	e2e/scripts/install.sh
+
+e2e-uninstall:
+	e2e/scripts/uninstall.sh
