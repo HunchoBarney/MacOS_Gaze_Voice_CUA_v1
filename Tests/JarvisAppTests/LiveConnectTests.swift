@@ -81,6 +81,7 @@ final class LiveConnectTests: XCTestCase {
             throw XCTSkip("Set JARVIS_LIVE_TALK=1 and JARVIS_LIVE_MIC=1, with someone at the Mac, for one minute of paid talk")
         }
         #if canImport(LiveKitWebRTC)
+        let live = try directSession("You are Jarvis, a Mac assistant being tested. Answer in one short sentence.")
         let rig = try LiveAudioRig(.microphone)
         let wake = VoskWakeWordDetector()
         let began = ContinuousClock.now
@@ -91,18 +92,25 @@ final class LiveConnectTests: XCTestCase {
             print("live_talk wake_word at=\(at())")
         }
         rig.onInput = { buffer, time in wake.hear(buffer, at: time) }
-        let live = try directSession("You are Jarvis, a Mac assistant being tested. Answer in one short sentence.")
         var counts: [String: Int] = [:]
+        var awake = false
         var pausedAfterSecondWake = false
+        func woke(_ how: String) {
+            guard !awake else { return }
+            awake = true
+            counts["live_wakes", default: 0] += 1
+            print("live_talk live_wake by=\(how) at=\(at())")
+        }
         live.onEvent = { event in
             switch event {
-            case .resumed: counts["resumed", default: 0] += 1; print("live_talk resumed at=\(at())")
+            case .resumed: counts["resumed", default: 0] += 1; woke("resumed")
             case .paused:
                 counts["paused", default: 0] += 1
-                if counts["resumed", default: 0] >= 2 { pausedAfterSecondWake = true }
+                awake = false
+                if counts["live_wakes", default: 0] >= 2 { pausedAfterSecondWake = true }
                 print("live_talk paused at=\(at())")
-            case .inputTranscript: counts["heard", default: 0] += 1
-            case .outputTranscript: counts["spoke", default: 0] += 1
+            case .inputTranscript: counts["heard", default: 0] += 1; woke("speech")
+            case .outputTranscript: counts["spoke", default: 0] += 1; woke("speech")
             case .error(let error): print("live_talk error type=\(error.type) code=\(error.code ?? "-")")
             default: break
             }
@@ -110,6 +118,7 @@ final class LiveConnectTests: XCTestCase {
         let appRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.karanvirkang.jarvis").isEmpty
         try await live.start(timeout: .seconds(15))
         print("live_talk armed jarvis_app_running=\(appRunning)")
+        fflush(stdout)
         let deadline = ContinuousClock.now + .seconds(15 * 60)
         while !pausedAfterSecondWake, ContinuousClock.now < deadline {
             if case .ended = live.phase { break }
@@ -124,9 +133,11 @@ final class LiveConnectTests: XCTestCase {
         live_talk ending=\(ending) counts=\(counts.sorted { $0.key < $1.key }) wake_words=\(wakes) \
         input_frames_per_s=\(Int(Double(stats.frames) / max(seconds, 1))) input_buffers=\(stats.buffers) \
         largest_input_gap_s=\(String(format: "%.3f", stats.largestGap)) config_changes=\(stats.configChanges) \
+        loud_input_buffers=\(stats.loudInputBuffers) peak_input=\(String(format: "%.4f", stats.peakInput)) \
         engines=\(stats.engines) jarvis_app_running=\(appRunning)
         """)
-        XCTAssertGreaterThanOrEqual(counts["resumed", default: 0], 2, "speech should wake it, twice")
+        XCTAssertGreaterThanOrEqual(counts["live_wakes", default: 0], 2,
+                                    "speech should wake it twice; the first wake of a session sends no session.resumed")
         XCTAssertTrue(pausedAfterSecondWake, "silence should return it to Standby")
         XCTAssertGreaterThan(counts["spoke", default: 0], 0, "Live should answer aloud")
         XCTAssertGreaterThanOrEqual(wakes, 2, "the wake word should hear both wakes through Live's engine")

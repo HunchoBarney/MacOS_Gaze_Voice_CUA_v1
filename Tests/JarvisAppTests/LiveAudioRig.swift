@@ -21,6 +21,9 @@ final class LiveAudioRig: NSObject, LKRTCAudioDeviceModuleDelegate, LKRTCAudioRe
         var allManual = true
         var starts = 0
         var playoutBuffers = 0
+        /// Input buffers with speech-level sound, and the loudest RMS heard.
+        var loudInputBuffers = 0
+        var peakInput: Float = 0
         var remoteBuffers = 0
     }
 
@@ -118,6 +121,9 @@ final class LiveAudioRig: NSObject, LKRTCAudioDeviceModuleDelegate, LKRTCAudioRe
                     self.lastInputAt = now
                     self.stats.frames += Int(buffer.frameLength)
                     self.stats.buffers += 1
+                    let level = Self.rms(buffer)
+                    self.stats.peakInput = max(self.stats.peakInput, level)
+                    if level > 0.02 { self.stats.loudInputBuffers += 1 }
                 }
                 self.onInput?(buffer, time)
             }
@@ -138,19 +144,24 @@ final class LiveAudioRig: NSObject, LKRTCAudioDeviceModuleDelegate, LKRTCAudioRe
 
     /// Live's decoded voice, from `WebRTCLiveTransport.remoteAudio`.
     func render(pcmBuffer buffer: AVAudioPCMBuffer) {
-        guard buffer.frameLength > 0 else { return }
+        let level = Self.rms(buffer)
+        let now = ContinuousClock.now
+        lock.withLock {
+            stats.remoteBuffers += 1
+            if level > 0.01 { loud.append(now) }
+        }
+    }
+
+    static func rms(_ buffer: AVAudioPCMBuffer) -> Float {
         let count = Int(buffer.frameLength)
+        guard count > 0 else { return 0 }
         var sum: Float = 0
         if let samples = buffer.floatChannelData?[0] {
             for index in 0..<count { sum += samples[index] * samples[index] }
         } else if let samples = buffer.int16ChannelData?[0] {
             for index in 0..<count { let value = Float(samples[index]) / 32768; sum += value * value }
-        } else { return }
-        let now = ContinuousClock.now
-        lock.withLock {
-            stats.remoteBuffers += 1
-            if (sum / Float(count)).squareRoot() > 0.01 { loud.append(now) }
         }
+        return (sum / Float(count)).squareRoot()
     }
 
     func audioDeviceModuleDidUpdateDevices(_ module: LKRTCAudioDeviceModule) {}
