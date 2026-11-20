@@ -95,6 +95,8 @@ enum Consequence: String, CaseIterable, Sendable {
                                          "tell him", "tell her", "tell them"]
     /// "show me how to send Linda a photo" asks to be taught, so it names
     /// no press: if Jarvis does a step after all, a consequential one asks.
+    /// They count anywhere in the instructions ("can you show me how…"),
+    /// not inside quoted or dictated text.
     private static let learningOpeners = ["show me how", "how do i", "how do you", "how can i",
                                           "walk me through", "teach me"]
     /// "the button that says Send" names a control, not a message.
@@ -154,11 +156,11 @@ enum Consequence: String, CaseIterable, Sendable {
     /// coming"), don't count against it.
     static func covers(goal: String, control label: String) -> Bool {
         guard let (consequence, phrase) = match(control: label) else { return false }
-        let opening = " " + CuaPolicy.normalize(goal.lowercased()) + " "
-        if learningOpeners.contains(where: { opening.hasPrefix(" \($0) ") }) { return false }
         let names = ([phrase] + (sameControl[phrase] ?? [])).map { CuaPolicy.normalize($0) }
         let spoken = CuaPolicy.normalize(goal.lowercased()).split(separator: " ").map(String.init)
         let tokens = instructionWords(goal)
+        let instruction = " " + tokens.joined(separator: " ") + " "
+        if learningOpeners.contains(where: { instruction.contains(" \($0) ") }) { return false }
         let refusal = names.flatMap(forms).contains { form in
             spoken.indices.contains {
                 spoken[$0...].starts(with: form) && !closeRefusals.isDisjoint(with: spoken[max(0, $0 - 2)..<$0])

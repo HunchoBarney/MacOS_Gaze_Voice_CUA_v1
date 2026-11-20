@@ -146,6 +146,19 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertTrue(Consequence.covers(goal: "send Linda a photo", control: "Send"))
     }
 
+    /// Spoken requests rarely start with the opener: a polite or addressed
+    /// "show me how" is still a request to be taught.
+    func testAShowMeHowGoalCoversNoPressAfterAPreamble() {
+        for goal in ["can you show me how to send Linda a photo", "Jarvis, how do I send Linda a photo",
+                     "please walk me through sending Linda a photo", "could you teach me to delete that email"] {
+            XCTAssertFalse(Consequence.covers(goal: goal, control: "Send"), goal)
+            XCTAssertFalse(Consequence.covers(goal: goal, control: "Delete"), goal)
+        }
+        XCTAssertTrue(Consequence.covers(goal: "send Mom a message saying how do I get there", control: "Send"),
+                      "a dictated message isn't a request to be taught")
+        XCTAssertTrue(Consequence.covers(goal: "send Mom \"how do you feel\"", control: "Send"))
+    }
+
     func testNeverListAndPasswordsStayRefused() {
         let trash = UndoRegistry.Route(kind: .putBack, deadline: nil)
         for label in ["Empty Trash", "Delete Permanently", "Download AnyDesk", "Buy Gift Card"] {
