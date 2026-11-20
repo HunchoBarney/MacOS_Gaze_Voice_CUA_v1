@@ -1,10 +1,14 @@
 # Working in Jarvis
 
-Jarvis is a macOS menu-bar app: hold Fn (or speak hands-free), OpenAI
-Realtime hears you, and Jev plus the embedded Cua driver act on the desktop.
-Eye tracking runs locally in a bundled Electron tracker. Read
-[ARCHITECTURE.md](ARCHITECTURE.md) for the map, [DECISIONS.md](DECISIONS.md)
-for what is settled, and [RELEASE.md](RELEASE.md) before shipping a build.
+Jarvis is a macOS menu-bar app and a hands-free personal agent: say its
+wake phrase (heard on the Mac by Vosk) and talk. OpenAI voice converses
+(gpt-realtime-2.1 today; gpt-live-1.1 behind `voice.live` next), and every
+action runs on the Mac through FastLane, Jev and the embedded Cua driver,
+under consent. Fn and push-to-talk are being removed; don't build on
+them. Eye tracking is optional, off by default, and runs locally in a
+bundled Electron tracker. Read [ARCHITECTURE.md](ARCHITECTURE.md) for the
+map, [DECISIONS.md](DECISIONS.md) for what is settled, and
+[RELEASE.md](RELEASE.md) before shipping a build.
 
 ## Commands
 
@@ -35,8 +39,12 @@ Corepack. Run EyeTracking tests from `EyeTracking/`, where
   silent swap breaks the app.
 - Live and desktop tests sit behind `JARVIS_LIVE_*` / `JARVIS_P4_REAL_APPS`
   flags and mutate macOS. Run them through `scripts/with-desktop-lock.py`,
-  one owner at a time. Simulated tests never prove physical Fn, microphone
-  or packaged-app behaviour.
+  one owner at a time. Simulated tests never prove physical microphone,
+  wake-word, full-duplex or packaged-app behaviour; name those as owner
+  physical checks ([TESTING.md](TESTING.md)).
+- Unit tests never reach the real microphone: under XCTest it reads as
+  refused and never opens, whatever the launching app was granted. A live
+  test that needs it also sets `JARVIS_LIVE_MIC=1`.
 - `codesign --verify --deep --strict` fails spuriously inside a synced
   `~/Documents` checkout (com.apple.provenance). Verify a copy outside it.
 - `make test` runs each XCTest case in its own process, one per CPU core, and

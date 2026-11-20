@@ -110,4 +110,67 @@ if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a missing lane must not post failure"; failures=$((failures + 1))
 fi
 
+# poll tests the head it first listed longest ago, not the most recently
+# updated one, and skips heads that already have a status. gh is a fake that
+# lists the heads below; the checkout has no remote, so the chosen head fails
+# to fetch at once and nothing runs.
+poll_pick() {
+    "$here/local-ci.sh" poll 2>/dev/null </dev/null \
+        | sed -n 's/.* testing \([^ ]*\) .*/\1/p' | head -1
+}
+
+poll_setup() {
+    local home=$dir/poll-$1
+    mkdir -p "$home/seen"
+    git init -q "$home/checkout"
+    cat >"$dir/gh-poll-$1" <<EOF
+#!/bin/bash
+case "\$*" in
+    "pr list"*) cat "$home/heads" ;;
+    *commits/main\ *) echo "2026-11-20T00:00:00Z mmmm main" ;;
+    *commits/*/statuses*) args="\$*"; sha=\${args#*commits/}; sha=\${sha%%/*}
+        grep -qx "\$sha" "$home/done" 2>/dev/null && echo "success 2026-11-20T00:00:00Z" ;;
+esac
+exit 0
+EOF
+    chmod +x "$dir/gh-poll-$1"
+}
+
+pick_is() {
+    local got
+    got=$(LOCAL_CI_HOME=$dir/poll-$1 GH=$dir/gh-poll-$1 poll_pick)
+    if [ "$got" = "$2" ]; then
+        echo "ok   poll-$1 picks $2"
+    else
+        echo "FAIL poll-$1: expected $2, got '$got'"; failures=$((failures + 1))
+    fi
+}
+
+poll_setup starve
+printf '%s\n' \
+    "2026-11-20T05:00:00Z aaaa pr#562" \
+    "2026-11-20T06:00:00Z bbbb pr#570" \
+    "2026-11-20T07:00:00Z cccc pr#580" >"$dir/poll-starve/heads"
+echo 1000 >"$dir/poll-starve/seen/aaaa"
+echo 2000 >"$dir/poll-starve/seen/bbbb"
+pick_is starve "pr#562"
+echo aaaa >>"$dir/poll-starve/done"
+pick_is starve "pr#570"
+echo bbbb >>"$dir/poll-starve/done"
+pick_is starve "main"
+if [ -s "$dir/poll-starve/seen/cccc" ]; then
+    echo "ok   poll-starve records when it first saw a new head"
+else
+    echo "FAIL poll-starve didn't record a new head"; failures=$((failures + 1))
+fi
+
+poll_setup fresh
+printf '%s\n' \
+    "2026-11-20T09:00:00Z dddd pr#3" \
+    "2026-11-20T08:00:00Z eeee pr#2" >"$dir/poll-fresh/heads"
+for s in dddd eeee mmmm; do echo 3000 >"$dir/poll-fresh/seen/$s"; done
+pick_is fresh "main"
+echo mmmm >"$dir/poll-fresh/done"
+pick_is fresh "pr#2"
+
 exit $((failures > 0))

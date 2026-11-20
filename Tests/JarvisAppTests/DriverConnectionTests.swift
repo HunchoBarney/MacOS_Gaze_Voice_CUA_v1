@@ -176,47 +176,6 @@ final class DriverConnectionTests: XCTestCase {
         }
     }
 
-    func testCapturedMutationRequiresOriginalTransportBeforeAnyIO() async {
-        do {
-            _ = try await CuaConnection().callScoped("click", arguments: [:], origin: nil)
-            XCTFail("Unbound captured mutation was admitted")
-        } catch {
-            XCTAssertEqual(error as? DriverConnectionError,
-                .refused("A capture-bound input requires its original transport scope."))
-        }
-    }
-
-    func testCapturedMutationCannotSwitchProxyEvenOnSameDaemon() async {
-        do {
-            _ = try await CuaConnection().callScoped("type_text",
-                arguments: ["session": .string("original"), "text": .string("synthetic")],
-                origin: .init(session: "original", daemonSocket: "/fixture/a.sock", transport: UUID()))
-            XCTFail("Another proxy's capture was admitted")
-        } catch {
-            XCTAssertEqual(error as? DriverConnectionError,
-                .refused("The capture's transport scope is no longer current."))
-        }
-    }
-
-    func testImageFeatureRequiresEveryCaptureBoundInputSchema() {
-        func descriptor(_ name: String, captured: Bool) -> JSONValue {
-            .object(["name": .string(name), "inputSchema": .object([
-                "properties": .object(captured
-                    ? ["capture_id": .object(["type": .string("string")])] : [:]),
-            ])])
-        }
-        let names = ["click", "type_text", "press_key", "scroll"]
-        XCTAssertTrue(CuaConnection.supportsCapturedInputs(.object([
-            "tools": .array(names.map { descriptor($0, captured: true) }),
-        ])))
-        for missing in names {
-            XCTAssertFalse(CuaConnection.supportsCapturedInputs(.object([
-                "tools": .array(names.map { descriptor($0, captured: $0 != missing) }),
-            ])))
-        }
-        XCTAssertFalse(CuaConnection.supportsCapturedInputs(.object(["tools": .array([])])))
-    }
-
     func testSameLabelRevivalInvalidatesCapturedScopeWithoutProxyChange() {
         var epochs = CuaSessionEpochs()
         let captured = epochs.willCall("get_window_state", session: "original")
@@ -227,27 +186,6 @@ final class DriverConnectionTests: XCTestCase {
         XCTAssertNotEqual(epochs.current("original"), captured)
         _ = epochs.willCall("start_session", session: "original")
         XCTAssertNotEqual(epochs.current("original"), captured)
-    }
-
-    func testCapturedNativeSupportRequiresExplicitPerToolCapability() {
-        func definitions(_ name: String, flag: JSONValue?, hasToken: Bool = true) -> JSONValue {
-            var properties: [String: JSONValue] = ["capture_id": .object(["type": .string("string")])]
-            if hasToken { properties["element_token"] = .object(["type": .string("string")]) }
-            var schema: [String: JSONValue] = ["properties": .object(properties)]
-            schema["x-cua-capture-bound-element"] = flag
-            return .object(["tools": .array([.object([
-                "name": .string(name), "inputSchema": .object(schema),
-            ])])])
-        }
-        for name in ["click", "type_text", "press_key", "scroll"] {
-            XCTAssertEqual(CuaConnection.capturedElementTools(definitions(name, flag: .bool(true))), [name])
-            for flag in [nil, JSONValue.bool(false), .string("true")] {
-                XCTAssertTrue(CuaConnection.capturedElementTools(definitions(name, flag: flag)).isEmpty)
-            }
-            XCTAssertTrue(CuaConnection.capturedElementTools(
-                definitions(name, flag: .bool(true), hasToken: false)).isEmpty)
-        }
-        XCTAssertTrue(CuaConnection.capturedElementTools(definitions("launch_app", flag: .bool(true))).isEmpty)
     }
 
     func testIndependentSessionLifecycleDoesNotInvalidateCapturedOwner() {

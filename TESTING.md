@@ -61,6 +61,13 @@ Don't build in your own worktree as well: that adds a second cold `.build`
 checkout under `~/.capy/work/local-ci`. Never point either at the owner's
 checkout.
 
+## End-to-end flows
+
+`make e2e` runs five flows on a signed Jarvis through e2e's macOS engine
+(`e2e/README.md`). They launch Jarvis, speak aloud and use the owner's
+Realtime key, so they run only on the owner's go, under the desktop lock.
+They are not part of `make test` or local CI.
+
 ## Keeping tests parallel-safe
 
 `make test` runs `swift test --parallel`: every XCTest case runs in its own
@@ -73,3 +80,21 @@ A test must not depend on, or write to, state those processes share:
 - Fixed ports and paths: bind port 0, and use a fresh temporary directory.
 - Fakes behind the driver seam: serialise `call` with a lock, because the
   executor makes concurrent driver calls.
+
+## What only the owner can check
+
+Simulated and recorded tests never prove room acoustics, the wake word,
+full duplex, gaze or packaged-app behaviour. These are owner physical
+checks on a named signed build, run through `scripts/with-desktop-lock.py`
+when they drive the desktop, and reported separately from test results.
+Each passes only when the visible result below happens:
+
+- Wake: "Hey Jarvis" said in a normal room wakes it and the glow changes.
+- Standby: after a short silence the glow shows Standby; speaking again
+  without the name resumes; 90 s after the last turn it is Asleep.
+- "That's all" goes to Asleep at once; "stay with me" stays open.
+- Talking over Jarvis stops its speech, and a request said once is
+  carried out once.
+- Another person or a TV speaking after a Standby resume never sends,
+  deletes, buys or posts without a short question first.
+- With eye tracking on, "click this" acts on the element you look at.

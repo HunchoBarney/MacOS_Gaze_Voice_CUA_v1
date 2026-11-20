@@ -222,7 +222,7 @@ final class MemoryCommandsTests: MemoryTestCase {
                             keyStore: NoKeys(), openAIKeyStore: NoKeys(), environment: [:])
         config.voiceLive = true
         let c = VoiceTaskCoordinator(
-            config: config, jevAPIKey: { "" },
+            config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: TargetOverlay())
         defer { c.shutdown() }
