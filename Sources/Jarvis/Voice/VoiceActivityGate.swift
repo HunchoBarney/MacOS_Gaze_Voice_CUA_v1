@@ -89,12 +89,17 @@ final class SileroVoiceActivity {
 /// covering `endOfTurn` (three, 0.77 s, at the default 0.6 s). A pause
 /// shorter than `endOfTurn` can't hold that many chunks, so it never ends a
 /// turn unless the detector scores speech itself as quiet.
+///
+/// Speech that never pauses (a TV, a long dictation) ends its turn at
+/// `maxTurn`; if it keeps going, the next chunk opens a new turn with the
+/// audio heard since, so nothing is dropped or sent twice.
 actor VoiceActivityGate {
     struct Tuning: Sendable {
         var onset: Float = 0.5
         var offset: Float = 0.35
         var preRoll: TimeInterval = 1.0
         var endOfTurn: TimeInterval = 0.6
+        var maxTurn: TimeInterval = 30
     }
 
     /// What one microphone buffer produced, in wire order: audio to upload,
@@ -122,6 +127,7 @@ actor VoiceActivityGate {
     private let inputFormat: AVAudioFormat
     private let scoringFormat: AVAudioFormat
     private var phase = Phase.closed
+    private var turnChunks = 0
     private var preRoll: [Data] = []
     private var preRollBytes = 0
     private var pending: [Float] = []
@@ -177,12 +183,18 @@ actor VoiceActivityGate {
         case .closed:
             guard speech >= tuning.onset else { return [] }
             phase = .speaking
+            turnChunks = 0
             let flushed = preRoll
             usage.sentSpeech += Double(preRollBytes) / bytesPerSecond
             preRoll = []; preRollBytes = 0
             return [.turnStarted] + flushed.map(Event.audio)
         case .speaking: quiet = 0
         case .pausing(let chunks): quiet = chunks
+        }
+        turnChunks += 1
+        guard Double(turnChunks) * chunkSeconds < tuning.maxTurn - 1e-9 else {
+            phase = .closed
+            return [.turnEnded]
         }
         guard speech < tuning.offset else { phase = .speaking; return [] }
         guard Double(quiet + 1) * chunkSeconds < tuning.endOfTurn - 1e-9 else {
