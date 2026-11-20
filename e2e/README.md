@@ -1,6 +1,6 @@
 # End-to-end flows
 
-Four flows that run the signed Jarvis the way a person uses it, through
+Five flows that run the signed Jarvis the way a person uses it, through
 [e2e](https://github.com/e2e-inc/e2e) and its macOS engine
 (`@e2e-dev/desktop`, built on
 [agent-desktop](https://github.com/vercel-labs/agent-desktop)). They cover only
@@ -18,6 +18,7 @@ turns on the owner's key, so they run **only when the owner says go**
 | `show-names-click` | "Hey Jarvis, show names", then "Hey Jarvis, click Banana" on the fixture board | microphone, Realtime | Activity says the names showed; the board records exactly one Banana press |
 | `screen-question` | "Hey Jarvis, what is the code word in this window?" | microphone, Realtime | Activity shows an answer with "pelican", read from the board |
 | `wake-word` | Standby ignores "open Calculator", then runs "Hey Jarvis, open Calculator" | microphone, Realtime | no Calculator after the first line, one after the second |
+| `stop-scroll` | "Hey Jarvis, scroll down", "keep scrolling", then "stop" mid-scroll on the fixture list; all three are decided on the Mac, with no model call | microphone, Realtime transcription | the list's own record of its scroll offset: it moves on its own, stops after "stop" short of the end, and stays put for 5 s |
 
 The checks read the Mac (processes, the board's own record, saved settings)
 or Jarvis's ordinary windows (Set up Jarvis, Settings → Activity), never the
@@ -32,7 +33,7 @@ make e2e-uninstall                     # removes everything the two put on the M
 ```
 
 `make e2e` holds `scripts/with-desktop-lock.py` and runs `scripts/run.sh`,
-which takes about 4–5 minutes:
+which takes about 5–6 minutes:
 
 1. Checks the build's signature, the audio route and the install. Nothing
    changes until these pass.

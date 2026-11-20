@@ -2,6 +2,50 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — The Mac ends hands-free turns
+
+- Hands-free (and Standby once woken) no longer uses Realtime's
+  `semantic_vad`: `turn_detection` is null in every input mode. The Silero
+  gate ends the turn after `VoiceActivityGate.Tuning.endOfTurn` of quiet
+  (0.6 s, rounded up to whole 256 ms chunks: 0.77 s) and the lane sends
+  `input_audio_buffer.commit`; the server's `committed` names the item the
+  turn binds to. The gate sends no trailing silence. This supersedes the
+  hangover and silence tail in "Hands-free uploads only speech".
+- Measured before (JARA-41, 24 paid turns): semantic VAD cut 3 turns inside
+  450–500 ms pauses and committed at p90 3.3 s after speech. A pause shorter
+  than `endOfTurn` can't fill the quiet chunks the gate needs, so it no
+  longer splits a turn.
+
+## 2026-11-20 — Equivalent phrasings through a small command grammar
+
+- "get Safari open", "hop over to desktop 2", "label everything", "I can't
+  find Notes", "hit Save" and "read my screen" are read by
+  `CommandGrammar`: lead-ins ("I want to", "let's", "help me"), a verb
+  class, an object and a particle, rewritten to the canonical command the
+  fast lane already parses. A rewrite is used only when that canonical
+  command parses to the family's action, and a phrase that already parses
+  is left alone, so the grammar adds phrasings without changing existing
+  commands. Screen questions are classified, not rewritten, so the question
+  reaches the screen reader verbatim. Jev's semantic router stays the
+  fallback for what the grammar can't read.
+- No maintained intent grammar fits a Swift app: Home Assistant's hassil
+  (Apache-2.0) is the closest, but it is Python, and Apple's NaturalLanguage
+  framework tags words without matching intents. The grammar is about 250
+  lines over the existing parsers.
+- Measured in `CommandPhrasingTests` (pass = same admission and fast action
+  as the canonical command; "!" rows must differ): design set 40/86 on main
+  → 86/86; same-author held-out set 32/72 → 71/72; a blind set written by
+  an agent that never saw the parser 51/72 → 66/72.
+
+## 2026-11-20 — A fifth end-to-end flow: "stop" mid-scroll
+
+- `stop-scroll` says "Hey Jarvis, scroll down", "keep scrolling", then "stop"
+  while the scroll repeats, and checks that the fixture list stops and stays
+  put. The task is the ongoing scroll because its three commands are decided
+  on the Mac with no model call, so the flow is deterministic apart from
+  hearing the lines. A stop in the middle of a model-planned task is not
+  covered: when the stop lands would depend on the model's pace.
+
 ## 2026-11-20 — End-to-end flows run on e2e's macOS engine
 
 - Four flows on a signed build (`e2e/`, `make e2e`): the first run, "show

@@ -313,6 +313,39 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
         XCTAssertFalse(c.tasks.first?.awaitingAnswer == true)
     }
 
+    /// The hand-off to the first desktop call is timed once per work,
+    /// whichever call comes first: here the native launch, then the
+    /// driver's window reads.
+    func testFirstDesktopCallSpanFiresOncePerWork() async throws {
+        let config = Config(defaults: UserDefaults(suiteName: "first-call-\(UUID())")!,
+                            keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.sounds = false
+        let c = VoiceTaskCoordinator(config: config, jevRoute: { nil },
+            gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
+            overlay: TargetOverlay(), resolver: AppResolver(listApps: {
+                [.init(name: "AuditFixture", bundle: "fixture.audit")]
+            }), commandDriver: { tool, _ in
+                if tool == "bring_to_front" {
+                    return .object(["activated": .bool(true),
+                                    "exact_window_effect": .object(["verified": .bool(true)])])
+                }
+                return .object(["windows": .array([.object([
+                    "window_id": .number(7), "is_on_screen": .bool(true), "title": .string("Owned")
+                ])])])
+            }, foregroundAppLauncher: { _ in 424242 })
+        c.gazeContextProvider = { nil }
+        var spans: [(name: String, start: TimeInterval, end: TimeInterval)] = []
+        c.onLatencySpan = { spans.append(($0, $1, $2)) }
+        let before = ProcessInfo.processInfo.systemUptime
+        _ = await c.beginVoiceTask("open AuditFixture", app: "fixture.audit", captureID: UUID())
+        let settled = await waitFor { c.tasks.first?.active == false }
+        XCTAssertTrue(settled)
+        let first = spans.filter { $0.name == "task.first_desktop_call" }
+        XCTAssertEqual(first.count, 1)
+        XCTAssertGreaterThanOrEqual(first.first?.start ?? 0, before)
+        XCTAssertLessThanOrEqual(first.first?.start ?? 1, first.first?.end ?? 0)
+    }
+
     /// Direct and gaze sessions — and their rotated successors — are
     /// cursorless; model work and agent sessions keep a visible cursor.
     /// A bare prefix ("voice-gazer") is NOT the stem — the successor

@@ -77,32 +77,41 @@ final class SileroVoiceActivity {
     }
 }
 
-/// Decides which hands-free microphone audio leaves the Mac. Room audio is
-/// scored locally and uploaded only while someone is speaking, plus the
-/// second before the speech started so its first syllable isn't clipped.
+/// Decides which hands-free microphone audio leaves the Mac, and where
+/// each turn ends. Room audio is scored locally and uploaded only while
+/// someone is speaking, plus the second before the speech started so its
+/// first syllable isn't clipped.
 ///
-/// After speech ends the gate keeps sending real audio for `hangover`,
-/// then digital silence until the speech service reports the turn over
-/// (`speechServiceHeardStop`) or `silenceTail` runs out. The service's
-/// own turn detection runs on the audio it receives, so it needs that
-/// silence to close the turn; the silence carries nothing from the room.
+/// Once the speaker has been quiet for `endOfTurn` the gate ends the turn
+/// itself; the lane then commits the buffer, so no server voice detection
+/// and no trailing silence are involved. Silero scores 256 ms chunks, so the
+/// turn ends after the smallest whole number of consecutive quiet chunks
+/// covering `endOfTurn` (three, 0.77 s, at the default 0.6 s). A pause
+/// shorter than `endOfTurn` can't hold that many chunks, so it never ends a
+/// turn unless the detector scores speech itself as quiet.
 actor VoiceActivityGate {
     struct Tuning: Sendable {
         var onset: Float = 0.5
         var offset: Float = 0.35
         var preRoll: TimeInterval = 1.0
-        var hangover: TimeInterval = 0.8
-        var silenceTail: TimeInterval = 4.0
+        var endOfTurn: TimeInterval = 0.6
+    }
+
+    /// What one microphone buffer produced, in wire order: audio to upload,
+    /// and the turn's start (before its first audio) and end (after its last).
+    enum Event: Sendable, Equatable {
+        case turnStarted
+        case audio(Data)
+        case turnEnded
     }
 
     /// Seconds of microphone audio heard, and how much of it was uploaded.
     struct Usage: Sendable, Equatable {
         var heard: TimeInterval = 0
         var sentSpeech: TimeInterval = 0
-        var sentSilence: TimeInterval = 0
     }
 
-    private enum Phase { case closed, speaking, hangover(TimeInterval), tail(TimeInterval) }
+    private enum Phase { case closed, speaking, pausing(chunks: Int) }
 
     private(set) var usage = Usage()
     private let tuning: Tuning
@@ -113,7 +122,6 @@ actor VoiceActivityGate {
     private let inputFormat: AVAudioFormat
     private let scoringFormat: AVAudioFormat
     private var phase = Phase.closed
-    private var tailWaived = false
     private var preRoll: [Data] = []
     private var preRollBytes = 0
     private var pending: [Float] = []
@@ -136,84 +144,53 @@ actor VoiceActivityGate {
     }
 
     /// The gate the hands-free lane uses: Silero scoring on the Mac.
-    static func silero(sampleRate: Double = 24_000) throws -> VoiceActivityGate {
+    static func silero(sampleRate: Double = 24_000, tuning: Tuning = Tuning()) throws -> VoiceActivityGate {
         let detector = try SileroVoiceActivity()
-        return try VoiceActivityGate(sampleRate: sampleRate) { try detector.probability($0) }
+        return try VoiceActivityGate(sampleRate: sampleRate, tuning: tuning) { try detector.probability($0) }
     }
 
-    /// Takes the next microphone buffer and returns what to upload, in order.
-    func admit(_ pcm: Data) throws -> [Data] {
+    /// Takes the next microphone buffer and returns what to upload and where
+    /// turns start and end, in order.
+    func admit(_ pcm: Data) throws -> [Event] {
         guard !pcm.isEmpty else { return [] }
         let seconds = Double(pcm.count) / bytesPerSecond
         usage.heard += seconds
-        var upload: [Data] = []
-        switch phase {
-        case .speaking, .hangover:
-            upload.append(pcm)
-            usage.sentSpeech += seconds
-        case .closed, .tail:
+        var events: [Event] = []
+        if case .closed = phase {
             remember(pcm)
+        } else {
+            events.append(.audio(pcm))
+            usage.sentSpeech += seconds
         }
         pending += try resampled(pcm)
         while pending.count >= SileroVoiceActivity.chunkSamples {
             let speech = try score(pending[..<SileroVoiceActivity.chunkSamples])
             pending.removeFirst(SileroVoiceActivity.chunkSamples)
-            upload += decide(speech)
+            events += decide(speech)
         }
-        return upload + releaseScoredTail()
+        return events
     }
 
-    /// The speech service closed its turn, so no more silence is needed.
-    func speechServiceHeardStop() {
+    private func decide(_ speech: Float) -> [Event] {
+        let quiet: Int
         switch phase {
-        case .tail: phase = .closed
-        case .speaking, .hangover: tailWaived = true
-        case .closed: break
-        }
-    }
-
-    private func decide(_ speech: Float) -> [Data] {
-        switch phase {
-        case .closed, .tail:
+        case .closed:
             guard speech >= tuning.onset else { return [] }
             phase = .speaking
-            tailWaived = false
             let flushed = preRoll
             usage.sentSpeech += Double(preRollBytes) / bytesPerSecond
             preRoll = []; preRollBytes = 0
-            return flushed
-        case .speaking:
-            if speech < tuning.offset { phase = .hangover(tuning.hangover) }
-        case .hangover(let left):
-            if speech >= tuning.offset {
-                phase = .speaking
-            } else if left > chunkSeconds {
-                phase = .hangover(left - chunkSeconds)
-            } else {
-                phase = tailWaived || tuning.silenceTail <= 0 ? .closed : .tail(tuning.silenceTail)
-                tailWaived = false
-            }
+            return [.turnStarted] + flushed.map(Event.audio)
+        case .speaking: quiet = 0
+        case .pausing(let chunks): quiet = chunks
         }
+        guard speech < tuning.offset else { phase = .speaking; return [] }
+        guard Double(quiet + 1) * chunkSeconds < tuning.endOfTurn - 1e-9 else {
+            phase = .closed
+            return [.turnEnded]
+        }
+        phase = .pausing(chunks: quiet + 1)
         return []
-    }
-
-    /// In the tail a buffer goes out as silence only once it has been scored,
-    /// so speech that resumes there is sent once, as itself.
-    private func releaseScoredTail() -> [Data] {
-        guard case .tail(var left) = phase else { return [] }
-        let unscored = Int(Double(pending.count) / SileroVoiceActivity.sampleRate * bytesPerSecond)
-        var silence: [Data] = []
-        while let oldest = preRoll.first, preRollBytes - oldest.count >= unscored {
-            preRoll.removeFirst()
-            preRollBytes -= oldest.count
-            let seconds = Double(oldest.count) / bytesPerSecond
-            silence.append(Data(count: oldest.count))
-            usage.sentSilence += seconds
-            left -= seconds
-            if left <= 0 { phase = .closed; return silence }
-        }
-        phase = .tail(left)
-        return silence
     }
 
     /// Speech is scored up to two chunks after it starts, so the ring holds
