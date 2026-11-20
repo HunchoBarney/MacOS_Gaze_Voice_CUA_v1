@@ -75,6 +75,8 @@ release: setup tracker
 	cp "$(VENDOR)/Vosk/libvosk.dylib" "$(APP)/Contents/Resources/Vosk/libvosk.dylib"
 	ditto "$(VENDOR)/Vosk/model" "$(APP)/Contents/Resources/Vosk/model"
 	cp ThirdParty/Vosk/LICENSE ThirdParty/Vosk/README.md "$(APP)/Contents/Resources/ThirdParty/Vosk/"
+	mkdir -p "$(APP)/Contents/Resources/ThirdParty/GRDB"
+	cp ThirdParty/GRDB/LICENSE ThirdParty/GRDB/README.md "$(APP)/Contents/Resources/ThirdParty/GRDB/"
 	scripts/bundle-tracker.sh "$(APP)"
 	python3 scripts/check-packaged-tracker.py "$(APP)"
 	scripts/sign-app.sh "$(APP)"
