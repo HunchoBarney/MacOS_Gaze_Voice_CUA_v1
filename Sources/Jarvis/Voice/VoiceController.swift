@@ -432,6 +432,7 @@ final class VoiceController: ObservableObject {
     /// Every fixed line Jarvis hands to a voice, whichever voice speaks it.
     /// The flow bench counts spoken words here.
     var onSpokenLine: ((String) -> Void)?
+    private var fillerTurn: UUID?
 
     /// Spoken replies seam — nil or Config.ttsEnabled=false stays silent.
     var speaker: SpeechSynthesizing? {
@@ -781,6 +782,7 @@ final class VoiceController: ObservableObject {
                 }
             }.store(in: &subscriptions)
             lane.contextProvider = { [weak self] in await self?.turnContextNote() ?? "" }
+            lane.onFiller = { [weak self] id, line in self?.speakFiller(line, turn: id) }
             self.cua.taskEventSink = { [weak self, weak lane] capture, text, speak in
                 guard let self else { return }
                 if let capture, self.automaticCaptures.contains(capture) {
@@ -1757,12 +1759,14 @@ final class VoiceController: ObservableObject {
         // after Fn released and the status moved on to .executing.
         switch event {
         case .assistantDelta(let delta):
+            endFiller(turn: id)
             replyReceived = replyReceived || !delta.isEmpty
             replyDraft += delta
             detail = replyDraft
             if status == .finishing { status = .executing }
             return
         case .assistant(let text):
+            endFiller(turn: id)
             replyReceived = replyReceived || !text.isEmpty
             replyDraft = ""
             detail = text
@@ -1772,6 +1776,7 @@ final class VoiceController: ObservableObject {
             // second model turn, so the TTS seam voices `say` verbatim
             // and the card fills detail from it directly (no
             // assistantDone is coming to paint it).
+            endFiller(turn: id)
             detail = text
             replyReceived = replyReceived || !text.isEmpty
             speak(text)
@@ -1942,6 +1947,24 @@ final class VoiceController: ObservableObject {
         }
         onSpokenLine?(text)
         speaker?.speak(text)
+    }
+
+    /// The slow-answer filler, under the same guards as `speak`. It plays
+    /// on the local voice: the lane's response slot is busy with the very
+    /// answer it waits on, so a pushed line would play after that answer.
+    private func speakFiller(_ text: String, turn id: UUID) {
+        guard sessionID == id, config.ttsEnabled, microphoneEnabled,
+              !handsFreePaused || manualOverride else { return }
+        fillerTurn = id
+        onSpokenLine?(text)
+        speaker?.speak(text)
+    }
+
+    /// The answer has started: a filler still playing stops under it.
+    private func endFiller(turn id: UUID) {
+        guard fillerTurn == id else { return }
+        fillerTurn = nil
+        speaker?.stop()
     }
 
     /// `voiced: false` — the realtime lane already played the reply's audio;
