@@ -86,6 +86,19 @@ def member_bytes(remote, member):
     return data
 
 
+def member_path(work, name):
+    """Where a member goes, refusing any that would land outside work."""
+    if name.startswith("/") or ".." in name.split("/"):
+        raise SystemExit(f"unsafe member {name}")
+    path = os.path.join(work, name)
+    if not os.path.realpath(os.path.dirname(path)).startswith(work + os.sep):
+        raise SystemExit(f"unsafe member {name}")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.lexists(path):
+        raise SystemExit(f"duplicate member {name}")
+    return path
+
+
 def tree_hash(root):
     lines = []
     for folder, dirs, files in os.walk(root):
@@ -108,7 +121,7 @@ def main():
         return
     remote = Remote(URL)
     members = central_directory(remote)
-    work = tempfile.mkdtemp()
+    work = os.path.realpath(tempfile.mkdtemp())
     try:
         out = os.path.join(work, "LiveKitWebRTC.xcframework")
         for member in members:
@@ -116,8 +129,7 @@ def main():
             wanted = name.startswith(SLICE) or name in (ROOT + "LICENSE", ROOT + "Info.plist")
             if not wanted or name.endswith("/"):
                 continue
-            path = os.path.join(work, name)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            path = member_path(work, name)
             data = member_bytes(remote, member)
             if mode & 0o170000 == 0o120000:
                 os.symlink(data.decode(), path)

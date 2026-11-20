@@ -12,8 +12,8 @@ LiveKit's build of Google's libwebrtc:
   (`LKRTCPeerConnectionFactory`).
 - Pinned: the release zip's SHA-256 is
   `008dbf8187843ab708afa44b65b8041d8ce8da99e530608cd85aa6ea3551529a`
-  (verified on download). The zip is 687 MB for every Apple platform plus
-  dSYMs, so `fetch.py` reads only the macOS framework from it with HTTP range
+  (checked once, when the tree hash was taken). The zip is 687 MB for every
+  Apple platform plus dSYMs, so `fetch.py` reads only the macOS framework from it with HTTP range
   requests (about 30 MB) and checks the result against a tree hash taken from a
   copy extracted from the verified zip. It writes a macOS-only xcframework to
   `build/vendor/WebRTC`. `make test` and `make release` run it, and
