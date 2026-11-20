@@ -1456,8 +1456,6 @@ final class VoiceTaskCoordinator {
         }
 
         let traceTurn = work.captureID, traceWork = work.id
-        let imageClient = JevChooser.experimentalWindowImages
-            ? JevClient(apiKey: jevAPIKey(), model: "jev-1.14.0") : nil
         let loop = work.semanticDriverLoop ?? DriveLoop(
             call: { [weak self, weak work] tool, args in
                 guard let self else { throw DriverConnectionError.closed }
@@ -1475,15 +1473,6 @@ final class VoiceTaskCoordinator {
                 guard let self else { throw DriverConnectionError.closed }
                 return try await self.observedDriverCall(tool, args, turn: traceTurn, work: traceWork, readOnly: true)
             },
-            scopedCall: imageClient.map { _ in
-                { [weak self] tool, args, origin in
-                    guard let self else { throw DriverConnectionError.closed }
-                    return try await self.observedScopedDriverCall(
-                        tool, args, origin: origin, turn: traceTurn, work: traceWork)
-                }
-            },
-            visualChoose: imageClient.map { JevChooser.makeVisual(client: $0) },
-            verifyVisual: imageClient.map { JevChooser.makeVisualVerifier(client: $0) },
             // Spoken one-shots ride the cursorless direct session; the
             // model-driven rounds below keep `session` and its cursor.
             directSession: Self.directSession,
@@ -1588,25 +1577,6 @@ final class VoiceTaskCoordinator {
         onCommandStage?(turn, work, .driverBegin, .init(tool))
         do {
             let result = try await (readOnly ? callRead(tool, args) : call(tool, args))
-            onCommandStage?(turn, work, .driverEnd, .init(tool))
-            return result
-        } catch {
-            onCommandStage?(turn, work, .driverFailed, .init(tool))
-            throw error
-        }
-    }
-
-    private func observedScopedDriverCall(
-        _ tool: String, _ args: [String: JSONValue], origin: CuaResultOrigin?,
-        turn: UUID?, work: UUID
-    ) async throws -> CuaToolResult {
-        guard commandDriver == nil else { throw VisualCaptureError.unavailable }
-        onCommandStage?(turn, work, .driverBegin, .init(tool))
-        let started = ProcessInfo.processInfo.systemUptime
-        defer { onLatencySpan?("driver.\(tool)", started, ProcessInfo.processInfo.systemUptime) }
-        do {
-            let connection = try await transport()
-            let result = try await connection.callScoped(tool, arguments: args, origin: origin)
             onCommandStage?(turn, work, .driverEnd, .init(tool))
             return result
         } catch {

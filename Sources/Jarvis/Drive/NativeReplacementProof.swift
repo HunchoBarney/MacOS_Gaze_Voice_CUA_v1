@@ -47,7 +47,7 @@ struct NativeReplacementBinding: Sendable {
     var changesValue: Bool { !field.fact.content.utf8.elementsEqual(literal.utf8) }
 
     static func make(observation: TaskObservation, request: ActuationRequest) -> Self? {
-        guard request.effect == .tool, request.tool == "set_value", request.visualTarget == nil,
+        guard request.effect == .tool, request.tool == "set_value",
               observation.task.values.count == 1, let source = observation.task.values.first,
               let text = request.args["value"]?.string, text.utf8.elementsEqual(source.value.utf8),
               let snapshot = observation.axSnapshot, let sid = snapshot.snapshotID, !sid.isEmpty,

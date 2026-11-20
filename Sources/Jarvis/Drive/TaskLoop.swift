@@ -18,18 +18,12 @@ struct TaskObservation: Sendable {
     var stepIndex: Int                    // 0-based round number
     var axSnapshot: AXSnapshot?           // nil when degraded
     var domSnapshot: DOMSnapshot? = nil   // browsers only; nil elsewhere
-    var screenshot: CapturedImage? = nil  // nil unless the decider asked
     var task: TaskBrief                   // goal, constraints, gaze hint
     var history: [RoundRecord]            // prior picks + settle results
     var budget: RoundBudget               // rounds/ms remaining
-    var visualGoal: VerifiedVisualGoal? = nil
-    var visualAnchor: VisualFrame? = nil
-    var visualAnchorDocument: NativeDocumentSubject? = nil
-    var visualAnchorSubject: NativeWindowSubject? = nil
     var nativeDocumentAnchor: NativeDocumentSubject? = nil
     var replacementReceipt: NativeReplacementReceipt? = nil
     var deliveredReplacement: DeliveredReplacementObservation? = nil
-    var semanticProposal: JevActionProposal? = nil
 }
 
 /// What the decider returns — exactly one of these per round.
@@ -42,14 +36,7 @@ enum DecideResult: Sendable, Equatable {
 }
 
 protocol Decider: Sendable {
-    /// Pixels are opt-in: the loop captures only when this returns true.
-    var wantsScreenshot: Bool { get }
-    func needsScreenshot(for observation: TaskObservation) async -> Bool
     func nextStep(_ observation: TaskObservation) async throws -> DecideResult
-}
-
-extension Decider {
-    func needsScreenshot(for observation: TaskObservation) async -> Bool { wantsScreenshot }
 }
 
 enum EscalationReason: String, Sendable {
@@ -118,7 +105,6 @@ struct RoundRecord: Sendable {
     var askKind: AskKind? = nil
     var askQuestion: String? = nil
     var askAnswer: String? = nil
-    var visualCaptureID: String? = nil
 }
 
 struct RoundBudget: Sendable {
@@ -143,18 +129,11 @@ struct ActuationRequest: Sendable, Equatable {
     var tool: String
     var args: [String: JSONValue] = [:]
     var verification: ObservedGoalProof? = nil
-    var visualTarget: VisualTarget? = nil
-    var visualVerification: VisualGoalProof? = nil
-    var visualProgress: VisualProgressProof? = nil
     var replacement: NativeReplacementProposal? = nil
     /// The consent/deny-scan corpus — element label+value, dialog
     /// title. Typed text stays out, the same exclusion the policy
     /// applies to args["text"].
     var elementText: String? = nil
-    /// The text a press is judged by for consent. A vision-model click
-    /// uses the labels under its point, never the model's guess at the
-    /// control, so a point with no label asks.
-    var pressText: String? { visualTarget.map(\.pressLabel) ?? elementText }
     /// Ledger line — "press \"Save\" (button)".
     var summary: String
 }
@@ -185,29 +164,9 @@ protocol CaptureSource: Sendable {
     func frontmostWindow() async throws -> WindowRef
     func axTree(of window: WindowRef,
                 depth: AXDepth) async throws -> AXSnapshot
-    /// Expensive — call only when the acting decider set wantsScreenshot.
-    /// One capture per step; the loop reuses it for verify_state.
-    func screenshot(of window: WindowRef?,
-                    region: CGRect?) async throws -> CapturedImage
     func domSnapshot(of window: WindowRef) async throws -> DOMSnapshot // browsers
     /// Screen is quiet long enough to trust the observation.
     func settled(within timeout: Duration) async -> Bool
-    func observation(of window: WindowRef, depth: AXDepth,
-                     includeScreenshot: Bool) async throws -> CapturedObservation
-}
-
-extension CaptureSource {
-    func observation(of window: WindowRef, depth: AXDepth,
-                     includeScreenshot: Bool) async throws -> CapturedObservation {
-        let snapshot = try await axTree(of: window, depth: depth)
-        let image = includeScreenshot ? try await screenshot(of: window, region: nil) : nil
-        return CapturedObservation(snapshot: snapshot, image: image)
-    }
-}
-
-struct CapturedObservation: Sendable {
-    var snapshot: AXSnapshot?
-    var image: CapturedImage?
 }
 
 struct WindowRef: Sendable, Hashable {
@@ -226,28 +185,6 @@ struct AXDepth: Sendable, Equatable {
 struct NativeDocumentSubject: Sendable, Equatable {
     var window: WindowRef
     var fingerprint: Data
-}
-
-/// Non-document window subject identity: the sorted multiset of the
-/// window's attested structural parts. Continuity holds while every
-/// anchored part is still present — elements the task itself adds
-/// (a growing expression history, a newly disclosed row) are progress,
-/// not a new subject. Any loss or alteration of anchored structure
-/// fails closed to the model comparison.
-struct NativeWindowSubject: Sendable, Equatable {
-    var window: WindowRef
-    var parts: [String]
-
-    func preserved(in current: NativeWindowSubject?) -> Bool {
-        guard let current, window == current.window else { return false }
-        var remaining = [String: Int]()
-        for part in current.parts { remaining[part, default: 0] += 1 }
-        for part in parts {
-            guard let count = remaining[part], count > 0 else { return false }
-            remaining[part] = count - 1
-        }
-        return true
-    }
 }
 
 struct NativeFieldProvenance: Sendable, Equatable {
@@ -278,12 +215,6 @@ struct AXElement: Sendable {
     var nativeIdentity: NativeFieldIdentity? = nil
     var nativeAncestorRoles: [String]? = nil
     var nativeReadOnlyValue: NativeReadOnlyValue? = nil
-}
-
-struct CapturedImage: Sendable {
-    var captureID: String?
-    var data: Data?
-    var frame: VisualFrame? = nil
 }
 
 /// DOM-first browser control's snapshot shape — CONTRACTS §5.
@@ -405,8 +336,6 @@ actor TaskLoop {
     /// request claimed.
     private let actuate: (ActuationRequest) async throws -> ActOutcome
     private let consent: (ActuationRequest, TaskBrief) async -> ConsentRuling
-    typealias VisualVerify = @Sendable (VisualGoalProof, TaskObservation) async throws -> VerifiedVisualGoal?
-    private let verifyVisual: VisualVerify?
     /// ONE ask channel — decider `askUser` and consent confirms alike
     /// route through it. Nil means asks go unanswered honestly.
     private let ask: ((String, [String]) async -> String?)?
@@ -418,13 +347,11 @@ actor TaskLoop {
     init(source: any CaptureSource, decider: any Decider,
          actuate: @escaping (ActuationRequest) async throws -> ActOutcome,
          consent: @escaping (ActuationRequest, TaskBrief) async -> ConsentRuling,
-         verifyVisual: VisualVerify? = nil,
          ask: ((String, [String]) async -> String?)? = nil,
          config: Config = .default,
          feed: @escaping (String) -> Void = { _ in }) {
         self.source = source; self.decider = decider
         self.actuate = actuate; self.consent = consent; self.ask = ask
-        self.verifyVisual = verifyVisual
         self.config = config; self.feedOut = feed
     }
 
@@ -438,16 +365,10 @@ actor TaskLoop {
         var verifiedSettles = 0   // the gate every done claim must clear
         var verifiedEffects = 0   // dispatched AND verified — the report's done base
         var verifiedGoal: ObservedGoalProof?
-        var verifiedVisualGoal: VerifiedVisualGoal?
-        var visualAnchor: VisualFrame?
-        var visualAnchorDocument: NativeDocumentSubject?
-        var visualAnchorSubject: NativeWindowSubject?
         var nativeDocumentAnchor: NativeDocumentSubject?
         var replacementReceipt: NativeReplacementReceipt?
         var pendingDeliveredReplacement: NativeReplacementBinding?
         var deliveredReplacement: DeliveredReplacementObservation?
-        var pendingVisualGoal: (proof: VisualGoalProof, record: Int)?
-        var pendingVisualVerifyRounds = 0
         var rejectedDone = 0
         var lastFingerprint = ""
         var step = 0
@@ -494,8 +415,7 @@ actor TaskLoop {
                       detail: String? = nil, actuated: Bool = false,
                       settleVerified: Bool = false, stale: Bool = false,
                       askKind: RoundRecord.AskKind? = nil,
-                      question: String? = nil, answer: String? = nil,
-                      visualCaptureID: String? = nil) {
+                      question: String? = nil, answer: String? = nil) {
                 // An unchanged fingerprint on the round after a real
                 // dispatch is delivery in flight — the app's repaint/AX
                 // propagation can lag the actuator's word — not proof
@@ -512,26 +432,15 @@ actor TaskLoop {
                                            settleVerified: settleVerified,
                                            staleScreen: stale && !inFlight && !actuated,
                                            askKind: askKind,
-                                           askQuestion: question, askAnswer: answer,
-                                           visualCaptureID: visualCaptureID))
+                                           askQuestion: question, askAnswer: answer))
             }
 
             // OBSERVE — one tree per round grounds the round's decision.
             // An observation failure is degraded, not fatal: the decider
             // sees `axSnapshot == nil` and may escalate honestly.
             var snap: AXSnapshot?
-            var shot: CapturedImage?
-            var requestedPixels = false
             do {
-                if decider.wantsScreenshot || pendingVisualGoal != nil {
-                    requestedPixels = true
-                    let captured = try await source.observation(
-                        of: window, depth: config.depth, includeScreenshot: true)
-                    snap = captured.snapshot
-                    shot = captured.image
-                } else {
-                    snap = try await source.axTree(of: window, depth: config.depth)
-                }
+                snap = try await source.axTree(of: window, depth: config.depth)
             } catch is CancellationError {
                 return finish(.cancelled, history: history, rounds: step,
                               verifiedEffects: verifiedEffects)
@@ -553,55 +462,18 @@ actor TaskLoop {
                 nativeDocumentAnchor = subject
             }
             func observation() -> TaskObservation {
-                TaskObservation(stepIndex: step, axSnapshot: snap, screenshot: shot,
+                TaskObservation(stepIndex: step, axSnapshot: snap,
                     task: boundTask, history: history, budget: RoundBudget(
                         roundsRemaining: config.maxRounds.map { max(0, $0 - step) },
                         millisecondsRemaining: deadline.map {
                             Self.milliseconds($0 - ContinuousClock.now)
-                        }), visualGoal: verifiedVisualGoal, visualAnchor: visualAnchor,
-                    visualAnchorDocument: visualAnchorDocument,
-                    visualAnchorSubject: visualAnchorSubject,
+                        }),
                     nativeDocumentAnchor: nativeDocumentAnchor, replacementReceipt: replacementReceipt,
                     deliveredReplacement: deliveredReplacement)
-            }
-            if !requestedPixels, await decider.needsScreenshot(for: observation()) {
-                guard !Task.isCancelled else {
-                    return finish(.cancelled, history: history, rounds: step,
-                                  verifiedEffects: verifiedEffects)
-                }
-                do {
-                    requestedPixels = true
-                    let captured = try await source.observation(
-                        of: window, depth: config.depth, includeScreenshot: true)
-                    snap = captured.snapshot
-                    shot = captured.image
-                } catch is CancellationError {
-                    return finish(.cancelled, history: history, rounds: step,
-                                  verifiedEffects: verifiedEffects)
-                } catch {
-                    return finish(.blocked(.actuation("The target window could not be captured safely.")),
-                                  history: history, rounds: step, verifiedEffects: verifiedEffects,
-                                  failure: error)
-                }
             }
             guard !Task.isCancelled else {
                 return finish(.cancelled, history: history, rounds: step,
                               verifiedEffects: verifiedEffects)
-            }
-            if let frame = shot?.frame {
-                if let anchor = visualAnchor {
-                    guard frame.window == anchor.window, frame.session == anchor.session,
-                          frame.origin == anchor.origin else {
-                        return finish(.blocked(.safety("The visual capture session or target window changed.")),
-                                      history: history, rounds: step, verifiedEffects: verifiedEffects)
-                    }
-                } else {
-                    visualAnchor = frame
-                    visualAnchorDocument = snap?.nativeDocument
-                    visualAnchorSubject = snap.flatMap {
-                        NativeWindowObservation.windowSubject($0, window: window)
-                    }
-                }
             }
             if let pending = pendingDeliveredReplacement {
                 pendingDeliveredReplacement = nil
@@ -616,36 +488,6 @@ actor TaskLoop {
                    original: nativeDocumentAnchor) != nil }) != true {
                 deliveredReplacement = nil
                 verifiedGoal = nil
-            }
-            if let pending = pendingVisualGoal {
-                do {
-                    let verified = try await verifyVisual?(pending.proof, observation())
-                    try Task.checkCancellation()
-                    verifiedVisualGoal = verified?.matches(observation()) == true ? verified : nil
-                    if verifiedVisualGoal != nil {
-                        pendingVisualGoal = nil
-                        history[pending.record].settleVerified = true
-                        verifiedSettles += 1
-                        progressed = true
-                    } else if pendingVisualVerifyRounds < 1 {
-                        // Unproven evidence is not a violation — the proof
-                        // earns one bounded re-verification on the next fresh
-                        // capture, at the same thresholds.
-                        pendingVisualVerifyRounds += 1
-                    } else {
-                        pendingVisualGoal = nil
-                    }
-                } catch is CancellationError {
-                    return finish(.cancelled, history: history, rounds: step,
-                                  verifiedEffects: verifiedEffects)
-                } catch VisualGoalFailure.subjectUnverified {
-                    return finish(.blocked(.safety(VisualGoalFailure.subjectReason)),
-                                  history: history, rounds: step, verifiedEffects: verifiedEffects)
-                } catch {
-                    return finish(.blocked(.decider("The visual outcome could not be independently verified.")),
-                                  history: history, rounds: step, verifiedEffects: verifiedEffects,
-                                  failure: error)
-                }
             }
             let fingerprint = Self.fingerprint(of: snap)
             let stale = fingerprint == lastFingerprint && !history.isEmpty
@@ -664,7 +506,7 @@ actor TaskLoop {
                     progressHighWater[key] = value
                 }
             }
-            if idleRounds >= max(1, config.maxNoProgressRounds), !progressed, shot?.frame == nil {
+            if idleRounds >= max(1, config.maxNoProgressRounds), !progressed {
                 note(.escalate, "No verified progress; stopping repeated empty decisions.")
                 return finish(.escalated(.staleScreen), history: history,
                               rounds: step + 1, verifiedEffects: verifiedEffects)
@@ -689,27 +531,6 @@ actor TaskLoop {
                 return finish(.cancelled, history: history, rounds: step,
                               verifiedEffects: verifiedEffects)
             }
-            if case .act(let request) = decision, let proof = request.visualProgress {
-                guard proof.matches(currentObservation) else {
-                    return finish(.blocked(.safety(VisualProgressProof.refusalReason)),
-                                  history: history, rounds: step + 1, verifiedEffects: verifiedEffects)
-                }
-                progressed = true
-            }
-            if idleRounds >= max(1, config.maxNoProgressRounds), !progressed {
-                let freshVerification: Bool
-                if case .act(let request) = decision {
-                    freshVerification = request.effect == .verifyState
-                        && request.visualVerification?.matchesOrigin(currentObservation) == true
-                        && history.last?.echo != .verify
-                } else { freshVerification = false }
-                if !freshVerification {
-                    note(.escalate, "No verified progress; stopping repeated empty decisions.")
-                    return finish(.escalated(.staleScreen), history: history,
-                                  rounds: step + 1, verifiedEffects: verifiedEffects)
-                }
-            }
-
             switch decision {
             case .blocked(let reason):
                 note(.blocked, "blocked", detail: "\(reason)", stale: stale)
@@ -725,8 +546,7 @@ actor TaskLoop {
                 // gets a correction round; rejected again, the task blocks.
                 guard verifiedSettles > 0,
                       Self.successEvidence(in: snap, task: task)
-                        || verifiedGoal?.matches(task: boundTask, snapshot: snap) == true
-                        || verifiedVisualGoal?.matches(currentObservation) == true else {
+                        || verifiedGoal?.matches(task: boundTask, snapshot: snap) == true else {
                     rejectedDone += 1
                     note(.rejectedDone, summary,
                          detail: "done claimed without verified current goal evidence",
@@ -763,17 +583,6 @@ actor TaskLoop {
                     note(.reobserve, request.summary, stale: stale)
                     continue
                 case .verifyState:
-                    if let proof = request.visualVerification {
-                        guard verifyVisual != nil, proof.matchesOrigin(currentObservation) else {
-                            return finish(.blocked(.unverifiedDone), history: history,
-                                          rounds: step + 1, verifiedEffects: verifiedEffects)
-                        }
-                        verifiedVisualGoal = nil
-                        pendingVisualGoal = (proof, history.count)
-                        pendingVisualVerifyRounds = 0
-                        note(.verify, request.summary, settleVerified: false, stale: stale)
-                        continue
-                    }
                     let verified: Bool
                     if let proof = request.verification {
                         guard !Task.isCancelled else {
@@ -808,21 +617,13 @@ actor TaskLoop {
                     continue
                 case .tool:
                     verifiedGoal = nil
-                    verifiedVisualGoal = nil
                     pendingDeliveredReplacement = nil
                     deliveredReplacement = nil
                     break
                 }
 
-                if let target = request.visualTarget {
-                    guard target.validates(request, observation: currentObservation) else {
-                        note(.blocked, request.summary, detail: VisualTarget.refusalReason)
-                        return finish(.blocked(.safety(VisualTarget.refusalReason)),
-                                      history: history, rounds: step + 1,
-                                      verifiedEffects: verifiedEffects)
-                    }
-                } else if request.args["capture_id"] != nil {
-                    return finish(.blocked(.safety(VisualTarget.refusalReason)),
+                if request.args["capture_id"] != nil {
+                    return finish(.blocked(.safety("The visual input does not match the current task, capture, or authorized arguments.")),
                                   history: history, rounds: step + 1,
                                   verifiedEffects: verifiedEffects)
                 }
@@ -879,12 +680,6 @@ actor TaskLoop {
                 let outcome: ActOutcome
                 do {
                     try Task.checkCancellation()
-                    if let target = stamped.visualTarget,
-                       !target.validates(stamped, observation: observation()) {
-                        return finish(.blocked(.safety(VisualTarget.refusalReason)),
-                                      history: history, rounds: step + 1,
-                                      verifiedEffects: verifiedEffects)
-                    }
                     outcome = try await actuate(stamped)
                 } catch is CancellationError {
                     return finish(.cancelled, history: history, rounds: step,
@@ -918,8 +713,7 @@ actor TaskLoop {
                     if outcome.dispatched { verifiedEffects += 1 }
                 }
                 note(.act, request.summary, detail: outcome.detail,
-                     actuated: outcome.dispatched, settleVerified: verified, stale: stale,
-                     visualCaptureID: request.visualTarget?.binding.captureID)
+                     actuated: outcome.dispatched, settleVerified: verified, stale: stale)
                 feed("round \(step + 1): \(request.summary)")
             }
         }

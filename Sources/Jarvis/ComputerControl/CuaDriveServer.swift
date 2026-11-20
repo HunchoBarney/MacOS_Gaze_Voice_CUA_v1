@@ -314,17 +314,10 @@ enum CuaDriveServer {
             // command — `explicitConsent: false` puts every fast-lane and
             // bind-phase dispatch on the standing grant / per-task
             // confirm like the model-picked loop candidates.
-            let imageClient = JevChooser.experimentalWindowImages
-                ? JevClient(apiKey: apiKey, model: "jev-1.14.0") : nil
             let loop = DriveLoop(call: call, choose: JevChooser.make(apiKey: apiKey),
                                  ask: { await AgentAskChannel.request($0, agent: session.slug) },
                                  granted: { standingGrant() },
                                  explicitConsent: false,
-                                 scopedCall: imageClient.map { _ in
-                                     { try await driver.callScoped($0, arguments: $1, origin: $2) }
-                                 },
-                                 visualChoose: imageClient.map { JevChooser.makeVisual(client: $0) },
-                                 verifyVisual: imageClient.map { JevChooser.makeVisualVerifier(client: $0) },
                                  config: .init(windowOnly: task.windowID != nil))
             if name == "suggest_action" {
                 let text = try await loop.preview(task, session: session.label)

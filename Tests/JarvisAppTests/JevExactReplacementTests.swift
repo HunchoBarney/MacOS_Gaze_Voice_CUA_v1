@@ -69,9 +69,6 @@ final class JevExactReplacementTests: XCTestCase {
                 elements: elements, treeMarkdown: "",
                 goalContextComplete: !(executed && shape == "incomplete"), nativeDocument: doc)
         }
-        func screenshot(of window: Jarvis.WindowRef?, region: CGRect?) async throws -> CapturedImage {
-            throw NSError(domain: "no-images", code: 1)
-        }
         func domSnapshot(of window: Jarvis.WindowRef) async throws -> DOMSnapshot {
             DOMSnapshot(url: "", title: "", indexedText: "", elements: [])
         }
@@ -166,7 +163,6 @@ final class JevExactReplacementTests: XCTestCase {
     struct RecordingDecider: Decider {
         let inner: JevDecider
         let fixture: Fixture
-        var wantsScreenshot: Bool { false }
         func nextStep(_ observation: TaskObservation) async throws -> DecideResult {
             fixture.observations.append(observation)
             if fixture.shape == "later-input", fixture.executed, !fixture.laterInput {
