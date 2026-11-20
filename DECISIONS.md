@@ -2,6 +2,23 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — End-to-end flows run on e2e's macOS engine
+
+- Four flows on a signed build (`e2e/`, `make e2e`): the first run, "show
+  names" then a click, a question about the window, and the wake word. Every
+  turn starts with "Hey Jarvis"; nothing presses Fn. Only what Swift seam tests can't reach; they run only on the
+  owner's go, under the desktop lock, and put the Mac back afterwards.
+- Runner: e2e 0.24.0 (Apache-2.0). Engine: `@e2e-dev/desktop` from
+  e2e-inc/e2e#1953 at 7e0b7d2 (Apache-2.0, not yet released), built locally
+  against `@e2e-dev/core` 0.24.0. It drives agent-desktop 1.3.1 (Vercel Labs,
+  Apache-2.0), downloaded and checked against its SHA-256. Our code is the
+  adapter: the flows, a small native helper that counts and quits apps, a
+  fixture window, and the harness that saves and restores the Mac's state.
+- The checks read the Mac or Jarvis's ordinary windows, never Cua: Jarvis
+  acts through Cua, so testing it with Cua would share its failure modes.
+- Rejected: our own Cua engine for e2e (duplicates upstream's), XCUITest
+  (needs an Xcode UI-test target).
+
 ## 2026-11-20 — Local CI queues in the build lane
 
 - Local CI no longer skips a tick when the lane is busy. Each head's
