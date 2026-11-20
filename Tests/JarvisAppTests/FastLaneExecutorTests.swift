@@ -827,6 +827,28 @@ final class FastLaneExecutorTests: XCTestCase {
         XCTAssertTrue(driver.calls.isEmpty, "no SDK launch after a native request")
     }
 
+    /// An app that isn't installed is refused before any launch request,
+    /// so it is a plain failure, never an unconfirmed launch.
+    @MainActor
+    func testMissingAppIsNotReportedAsUnconfirmedLaunch() async throws {
+        let driver = FakeDriver(), observations = LockedBox(0)
+        let loop = coldFocusLoop(driver, observed: { _ in observations.set(observations.value + 1); return nil }) { _ in
+            throw DriveLoop.ApplicationNotInstalled()
+        }
+        var history: [String] = [], confirmed = false
+        let result = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: nil, openVerb: "open", name: "AuditFixture", bundle: "fixture.audit"),
+            task: DriveTask(goal: "open AuditFixture", foreground: true),
+            session: "native-missing", history: &history, confirmed: &confirmed)
+        let unwrapped = try XCTUnwrap(result)
+        XCTAssertNotEqual(unwrapped.blockedReason, DriveLoop.launchUnverifiedReason)
+        let (outcome, say) = VoiceTaskCoordinator.describe(unwrapped, request: "open AuditFixture")
+        XCTAssertEqual(say, "AuditFixture isn't installed on this Mac.")
+        guard case .blocked = outcome else { return XCTFail("a missing app is a failure, got \(outcome)") }
+        XCTAssertEqual(observations.value, 0)
+        XCTAssertTrue(driver.calls.isEmpty, "no SDK launch for a missing app")
+    }
+
     /// KAR-12: the driver's background launch came back "effect unknown"
     /// and no process appeared — one launch, one observation, the same
     /// plain unconfirmed line.

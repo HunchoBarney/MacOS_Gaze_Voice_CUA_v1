@@ -29,12 +29,15 @@ extension DriveLoop {
         return current
     }
 
+    /// Thrown before any launch request is made, so nothing reached macOS.
+    struct ApplicationNotInstalled: Error {}
+
     @MainActor
     static func openForegroundApplication(_ bundleID: String) async throws -> Int {
         try Task.checkCancellation()
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
               Bundle(url: url)?.bundleIdentifier == bundleID else {
-            throw DriverConnectionError.refused("The requested application is no longer installed.")
+            throw ApplicationNotInstalled()
         }
         return try await withVoiceDeadline(until: ProcessInfo.processInfo.systemUptime + 5) { @MainActor in
             try Task.checkCancellation()
@@ -492,6 +495,9 @@ extension DriveLoop {
                 }
             } catch is CancellationError {
                 throw CancellationError()
+            } catch is ApplicationNotInstalled {
+                return settle(.blocked("\(name) isn't installed on this Mac."), task, history,
+                              blockedReason: "app not installed")
             } catch {
                 // A native request may have reached LaunchServices. Never
                 // launch again through the background primitive after error.
