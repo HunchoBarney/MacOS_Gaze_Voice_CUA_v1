@@ -9,6 +9,24 @@ import JarvisCore
 /// reason-string sniffing.
 final class CuaDriveServerTests: XCTestCase {
 
+    func testTerraAgentsMustNameTheirCompletionEvidence() async {
+        let touched = LockedBox(false)
+        let drives = CuaDriveServer.Drives(
+            chooser: { { _, _ in nil } }, granted: { false }, requiresSuccessEvidence: { true },
+            socket: { touched.set(true); throw DriverConnectionError.unavailable })
+        let missing = await drives.run(agent: "scout", tool: "drive_until", arguments: .object(["goal": .string("Save")]))
+        XCTAssertEqual(missing["isError"]?.bool, true)
+        XCTAssertEqual(missing["content"]?.array?.first?["text"]?.string,
+                       CuaDriveServer.Drives.missingSuccessEvidence)
+        XCTAssertFalse(touched.value)
+        _ = await drives.run(agent: "scout", tool: "drive_until", arguments: .object([
+            "goal": .string("Save"), "success_contains": .array([.string("Saved")])]))
+        XCTAssertTrue(touched.value)
+        touched.set(false)
+        _ = await drives.run(agent: "scout", tool: "suggest_action", arguments: .object(["goal": .string("Save")]))
+        XCTAssertTrue(touched.value, "a suggestion claims nothing, so it needs no evidence")
+    }
+
     /// A deny refusal reports itself — the agent relays "this is on the
     /// protected list", not the enable-the-grant remedy.
     func testDescribeDenyRefusalIsNotAGrantHint() {

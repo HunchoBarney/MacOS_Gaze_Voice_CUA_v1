@@ -400,14 +400,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // call here, and the app runs the loop with its own keys and grant.
         let drives = CuaDriveServer.Drives(
             chooser: {
-                { state, candidates in
-                    let route = try await Config.shared.jevRoute()
-                    let choose = route.map { JevChooser.make(apiKey: $0.bearer, baseURL: $0.url) }
-                        ?? JevChooser.make(apiKey: "")
-                    return try await choose(state, candidates)
+                guard Config.shared.terraScreenAgents else {
+                    return { state, candidates in
+                        let route = try await Config.shared.jevRoute()
+                        let choose = route.map { JevChooser.make(apiKey: $0.bearer, baseURL: $0.url) }
+                            ?? JevChooser.make(apiKey: "")
+                        return try await choose(state, candidates)
+                    }
                 }
+                return TerraChooser.make(client: TerraClient(route: { try await Config.shared.responsesRoute() }))
             },
-            granted: { Config.shared.alwaysAllowComputerUse })
+            granted: { Config.shared.alwaysAllowComputerUse },
+            requiresSuccessEvidence: { Config.shared.terraScreenAgents })
         let host = agentDriveHost ?? AgentDriveHost { agent, tool, arguments in
             await drives.run(agent: agent, tool: tool, arguments: arguments)
         }

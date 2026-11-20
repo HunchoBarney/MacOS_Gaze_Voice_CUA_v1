@@ -1179,7 +1179,7 @@ actor DriveLoop {
             goal: task.goal, app: task.application ?? "", window: title ?? "",
             options: candidates.map { "\($0.id): \($0.description)" },
             recentSteps: [], context: task.previousContext,
-            snapshotID: snapID, fields: fields)
+            snapshotID: snapID, pid: pid, fields: fields)
         guard let picked = try await choose(state,
                                             candidates.map { ($0.id, $0.description) }),
               let candidate = candidates.first(where: { $0.id == picked.id }) else {

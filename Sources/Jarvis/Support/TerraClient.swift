@@ -45,7 +45,7 @@ struct TerraClient: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .missingKey: return "Add an OpenAI API key in Jarvis settings to ask about pictures on screen."
+            case .missingKey: return "Add an OpenAI API key in Jarvis settings to use GPT-6.1 Terra."
             case .http(let status, let message): return "OpenAI returned \(status): \(message)"
             case .refused(let why): return "The model declined: \(why)"
             case .incomplete(let reason): return "The answer was cut off (\(reason))."
@@ -54,9 +54,40 @@ struct TerraClient: Sendable {
         }
     }
 
+    /// Tokens one response billed, as OpenAI reported them. Cached input is
+    /// part of `input`; reasoning is part of `output`.
+    struct Usage: Sendable, Equatable {
+        var input = 0
+        var cached = 0
+        var output = 0
+
+        init(input: Int = 0, cached: Int = 0, output: Int = 0) {
+            self.input = input
+            self.cached = cached
+            self.output = output
+        }
+
+        init?(_ response: JSONValue) {
+            guard let usage = response["usage"] else { return nil }
+            input = usage["input_tokens"]?.integer ?? 0
+            cached = usage["input_tokens_details"]?["cached_tokens"]?.integer ?? 0
+            output = usage["output_tokens"]?.integer ?? 0
+        }
+
+        /// Dollars at Terra 6.1 list prices: $1 per million input tokens,
+        /// $0.05 cached and $5 output. Uncached input is priced at the
+        /// 1.25x cache-write rate, so this never undercounts.
+        var dollars: Double {
+            (Double(max(0, input - cached)) * 1.25 + Double(cached) * 0.05 + Double(output) * 5) / 1_000_000
+        }
+    }
+
     let route: @Sendable () async throws -> ServiceRoute?
     var transport: Transport = { try await URLSession.shared.data(for: $0) }
     var timeout: TimeInterval = 20
+    /// Called once per answered request with what it billed, before the
+    /// answer is read, so a refusal or a cut-off still counts.
+    var onUsage: (@Sendable (Usage) -> Void)?
 
     init(route: @escaping @Sendable () async throws -> ServiceRoute?) {
         self.route = route
@@ -86,6 +117,7 @@ struct TerraClient: Sendable {
                                message: json?["error"]?["message"]?.string ?? "no detail")
         }
         guard let json else { throw Failure.malformed }
+        if let usage = Usage(json) { onUsage?(usage) }
         return try Self.output(of: json)
     }
 

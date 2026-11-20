@@ -153,6 +153,11 @@ final class Config: ObservableObject {
     @Published var handsFreePaused: Bool {
         didSet { defaults.set(handsFreePaused, forKey: "handsFreePaused") }
     }
+    /// Agents pick each step with GPT-6.1 Terra instead of Jev. Off by
+    /// default until the owner's live test.
+    @Published var terraScreenAgents: Bool {
+        didSet { defaults.set(terraScreenAgents, forKey: "terraScreenAgents") }
+    }
     /// Core semantic assist defaults on; an explicit opt-out is retained.
     @Published var semanticAppSuggestions: Bool {
         didSet { defaults.set(semanticAppSuggestions, forKey: "semanticAppSuggestions") }
@@ -244,6 +249,7 @@ final class Config: ObservableObject {
         self.semanticAppSuggestions = defaults.object(forKey: "semanticAppSuggestions") == nil
             ? true : defaults.bool(forKey: "semanticAppSuggestions")
         self.latchMode = defaults.object(forKey: "latchMode") as? Bool ?? false
+        self.terraScreenAgents = defaults.object(forKey: "terraScreenAgents") as? Bool ?? false
         self.dictationHotkey = defaults.object(forKey: "dictationHotkey") as? Bool ?? true
         self.gazeTracking = defaults.object(forKey: "gazeTracking") as? Bool ?? false
         self.tapToGazeClick = defaults.object(forKey: "tapToGazeClick") as? Bool ?? true

@@ -94,6 +94,8 @@ enum JevChooser {
             let observedGoalAllowed = fields.removeValue(forKey: "_observed_goal_allowed")?.bool == true
             let goalFacts = fields.removeValue(forKey: "_goal_facts")?.object ?? [:]
             let replacementBinding = fields.removeValue(forKey: "_exact_replacement")?.object
+            fields.removeValue(forKey: "_rows")
+            fields.removeValue(forKey: "_app_identity")
             let typeActions = actions.filter {
                 ["type_text", "set_value", "browser_type"].contains(details[$0.id]?["tool"]?.string ?? "")
             }

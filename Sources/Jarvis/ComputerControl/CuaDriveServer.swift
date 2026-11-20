@@ -157,7 +157,7 @@ enum CuaDriveServer {
             "success_contains": .object([
                 "type": .string("array"),
                 "items": .object(["type": .string("string"), "minLength": .number(1)]),
-                "description": .string("Expected final-state text implied by the goal. Any one must be observed and verified. Available buttons and intermediate steps are not completion evidence.")
+                "description": .string("Expected final-state text implied by the goal. Any one must be observed and verified. Available buttons and intermediate steps are not completion evidence. Required for drive_until when agents use GPT-6.1 Terra.")
             ]),
             "deny": .object([
                 "type": .string("array"),
@@ -276,6 +276,11 @@ enum CuaDriveServer {
     /// own daemon connection and session label, so its cursor is its own.
     final class Drives: @unchecked Sendable {
         typealias Chooser = @Sendable () -> DriveLoop.Choose
+        /// GPT-6.1 Terra picks steps but can't prove a goal the way Jev's
+        /// observed-goal proofs do, so the loop's Done needs declared
+        /// evidence: without it a finished task could only end blocked.
+        static let missingSuccessEvidence = "With GPT-6.1 Terra, drive_until needs `success_contains`: "
+            + "text that is on screen only once the goal is done."
         private final class Drive {
             let session: AgentSession
             let driver = CuaConnection()
@@ -286,8 +291,10 @@ enum CuaDriveServer {
         private let granted: @Sendable () -> Bool
         private let ask: @Sendable (String, DriveLoop.Ask) async -> String?
         private let socket: @Sendable () async throws -> String
+        private let requiresSuccessEvidence: @Sendable () -> Bool
 
         init(chooser: @escaping Chooser, granted: @escaping @Sendable () -> Bool,
+             requiresSuccessEvidence: @escaping @Sendable () -> Bool = { false },
              ask: @escaping @Sendable (String, DriveLoop.Ask) async -> String? = {
                  await AgentAskChannel.request($1, agent: $0)
              },
@@ -296,6 +303,7 @@ enum CuaDriveServer {
             self.granted = granted
             self.ask = ask
             self.socket = socket
+            self.requiresSuccessEvidence = requiresSuccessEvidence
         }
 
         func run(agent slug: String, tool name: String, arguments args: JSONValue) async -> JSONValue {
@@ -305,6 +313,9 @@ enum CuaDriveServer {
                 task = try decodeTask(args)
             } catch {
                 return toolError(error.localizedDescription)
+            }
+            if name == "drive_until", task.successContains.isEmpty, requiresSuccessEvidence() {
+                return toolError(Self.missingSuccessEvidence)
             }
             let drive = drives.withLock { drives in
                 if let drive = drives[slug] { return drive }
