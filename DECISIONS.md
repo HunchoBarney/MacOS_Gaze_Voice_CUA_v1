@@ -2,6 +2,19 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
+
+- The owner: "the chimes and noises it makes are super annoying and not
+  good experience". Jarvis is always listening, so it plays no non-speech
+  sound by default. The glow, the indicator and the task row carry
+  success, failure, stalls and questions; speech is heard only where words
+  are needed, and spoken answers and the "Looking…" filler are unchanged.
+- One setting, Settings → Replies → Sounds (`soundsEnabled`), off by
+  default, brings back the Glass and Basso earcons. Installs that had it on
+  are moved to off once (`soundsQuietByDefault`); a later choice sticks.
+- New feedback, Live (L3+) included, follows the same rule: visual first,
+  speech only for words, never a new chime.
+
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
 - "Type this …" takes the exact span after the lead-in ("type this",

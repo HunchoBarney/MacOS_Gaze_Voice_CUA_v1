@@ -121,6 +121,8 @@ final class VoiceTaskCoordinator {
     var selectedID: UUID? { didSet { onChange() } }
     var onChange: () -> Void = {}
     var audioFeedbackAllowed: () -> Bool = { true }
+    /// Plays a named system sound; a seam so tests hear nothing.
+    var playSound: (String) -> Void = { NSSound(named: $0)?.play() }
     enum ConversationBoundary: Sendable, Equatable {
         case question
         case finished(Work.Outcome)
@@ -722,7 +724,7 @@ final class VoiceTaskCoordinator {
     /// all instead of each call site re-checking the setting.
     private func cue(_ name: String) {
         guard config.sounds, audioFeedbackAllowed() else { return }
-        NSSound(named: name)?.play()
+        playSound(name)
     }
 
     /// Jev choice — one System One call, validated against the candidate
@@ -1887,7 +1889,7 @@ final class VoiceTaskCoordinator {
     static let doneLine = "Done."
 
     /// What a settled task says out loud: nothing for a clean success,
-    /// which the Glass chime and the press glow already mark, and the
+    /// which the press glow and the task row already mark, and the
     /// headline of its line otherwise. A caveat or failure must still make
     /// sense heard alone. nil = silent.
     static func spokenOutcome(_ outcome: Work.Outcome, say: String) -> String? {

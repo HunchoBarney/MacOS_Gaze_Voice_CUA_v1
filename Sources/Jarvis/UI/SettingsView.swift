@@ -190,7 +190,8 @@ struct SettingsView: View {
     private var replies: some View {
         SettingsSection(title: "Replies", symbol: "speaker.wave.2") {
             Toggle("Say replies out loud", isOn: $config.ttsEnabled)
-            Toggle("Play sounds", isOn: $config.sounds)
+            Toggle("Sounds", isOn: $config.sounds)
+            Note("Chimes when a task finishes, fails or needs you. The glow and the indicator already show these, so they're off by default.")
         }
     }
 

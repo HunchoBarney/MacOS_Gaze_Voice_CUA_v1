@@ -105,11 +105,18 @@ final class Config: ObservableObject {
         didSet { defaults.set(agentCursorEnabled, forKey: "agentCursorEnabled") }
     }
 
-    /// Cue-tone gate — the chimes that mark hold start, task done and
-    /// refusals. On by default; off keeps the interface silent.
+    /// Cue-tone gate for every non-speech sound: the Glass and Basso
+    /// chimes for a finished task, a failure, a refusal, a stall, a
+    /// question waiting on you, and a lost outcome. Off by default:
+    /// Jarvis is always listening, so the glow and the indicator carry
+    /// these and only speech is heard. Settings → Replies → Sounds turns
+    /// them back on.
     @Published var sounds: Bool {
         didSet { defaults.set(sounds, forKey: "soundsEnabled") }
     }
+    /// Set once the quiet default has been applied, so installs that had
+    /// sounds on turn them off exactly once and a later choice sticks.
+    static let quietByDefaultKey = "soundsQuietByDefault"
 
     /// Aim number-chip persistence — on keeps the overlay's numbered
     /// targets painted until dismissed; off lets them fade with the
@@ -230,7 +237,11 @@ final class Config: ObservableObject {
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.alwaysAllowComputerUse = defaults.object(forKey: "cuaStandingGrant.computerUseInput") as? Bool ?? false
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? true
-        self.sounds = defaults.object(forKey: "soundsEnabled") as? Bool ?? true
+        if !defaults.bool(forKey: Self.quietByDefaultKey) {
+            defaults.set(false, forKey: "soundsEnabled")
+            defaults.set(true, forKey: Self.quietByDefaultKey)
+        }
+        self.sounds = defaults.bool(forKey: "soundsEnabled")
         self.persistentNumbers = defaults.object(forKey: "persistentNumbers") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
         let policy = ListeningPolicy.current
