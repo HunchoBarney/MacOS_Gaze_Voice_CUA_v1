@@ -137,7 +137,11 @@ run_sha() {
     local watchdog=$!
     wait "$test_pid"; rc=$?
     test_pid=""
-    pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
+    if [ -e "$CI_HOME/timed-out" ]; then
+        wait "$watchdog"
+    else
+        pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
+    fi
     local minutes=$(((SECONDS - start + 59) / 60)) counts
     counts=$(summary "$log")
     say "make test exited $rc after $minutes min: $counts" | tee -a "$log"
