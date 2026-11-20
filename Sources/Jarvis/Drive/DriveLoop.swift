@@ -152,11 +152,14 @@ actor DriveLoop {
     /// lane) so a consent ask can offer "Always for <app>" and a yes
     /// lands as a (tool, bundle) scoped grant, never a blanket one.
     var consentAppName: String?
-    /// The consequences the person's own words named for the running task
-    /// ("send it", "delete that email"). Those presses go ahead with a
-    /// glow; any other consequential press asks first. Empty when the goal
-    /// is model-authored (`explicitConsent` off).
-    private(set) var spokenConsequences: Set<Consequence> = []
+    /// The person's own words for the running task ("send it", "delete
+    /// that email"). A consequential press they name goes ahead with a
+    /// glow; any other asks first. Nil when the goal is model-authored
+    /// (`explicitConsent` off).
+    private(set) var spokenGoal: String?
+    /// Control phrases the words already pressed once this task: "click
+    /// Send" covers one Send, and a second one asks.
+    private var spentCoverage: Set<String> = []
     var consentAppBundleID: String?
     let ask: AskFn?
     let granted: () -> Bool
@@ -616,7 +619,7 @@ actor DriveLoop {
         /// A per-task approval granted this run — one `ask` covers every
         /// later consent prompt, including the bind-phase launch gate.
         var confirmedTask = false
-        spokenConsequences = explicitConsent ? Consequence.named(in: task.goal) : []
+        bindSpokenGoal(explicitConsent ? task.goal : nil)
         func step(_ s: String) { feed(s); history.append(s) }
 
         do {
@@ -1320,15 +1323,18 @@ actor DriveLoop {
             feed("denied by task rule: \(hit)")
             throw Abort.denied("Refused: '\(hit)' is blocked for this task.")
         }
+        let press = CuaPolicy.consequentialPress(tool: tool, args: args, elementText: elementText)
+        let covered = spokenCoverage(press)
         var decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
                                         standingGrant: granted() || confirmed,
                                         scopedGrant: consentScopedGrant(for: tool),
-                                        spokenConsequences: spokenConsequences)
+                                        consequenceConfirmed: covered != nil)
         if case .askFirst(let consequence) = decision {
-            try await confirmConsequence(consequence, label: elementText)
+            if let pressFrame { await glowPress(pressFrame, label: press?.label ?? "") }
+            try await confirmConsequence(consequence, label: press?.label)
             decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
                                         standingGrant: true, scopedGrant: consentScopedGrant(for: tool),
-                                        spokenConsequences: spokenConsequences, consequenceConfirmed: true)
+                                        consequenceConfirmed: true)
         }
         switch decision {
         case .deny(let why):
@@ -1367,10 +1373,25 @@ actor DriveLoop {
         case .allow:
             break
         }
-        if let pressFrame, CuaPolicy.pressTools.contains(tool),
-           Consequence.of(control: elementText ?? "") != nil {
-            await glowPress(pressFrame, label: elementText ?? "")
-        }
+        if let covered { spentCoverage.insert(covered) }
+        if let pressFrame, let press { await glowPress(pressFrame, label: press.label) }
+    }
+
+    /// Binds the person's words for a new task. Internal so tests can
+    /// stand in for `run`.
+    func bindSpokenGoal(_ goal: String?) {
+        spokenGoal = goal
+        spentCoverage = []
+    }
+
+    /// The control phrase when the person's words name this press and
+    /// haven't been spent on an earlier one, else nil.
+    private func spokenCoverage(_ press: (consequence: Consequence, label: String, coverage: String)?) -> String? {
+        guard let press, let spokenGoal,
+              let phrase = Consequence.match(control: press.coverage)?.phrase,
+              !spentCoverage.contains(phrase),
+              Consequence.covers(goal: spokenGoal, control: press.coverage) else { return nil }
+        return phrase
     }
 
     /// Ask-first for a consequential press Jarvis chose itself (one the
@@ -1870,7 +1891,8 @@ extension DriveLoop {
                                 elementText: request.elementText,
                                 standingGrant: granted() || box.confirmed,
                                 scopedGrant: consentScopedGrant(for: request.tool),
-                                spokenConsequences: spokenConsequences) {
+                                consequenceConfirmed: spokenCoverage(CuaPolicy.consequentialPress(
+                                    tool: request.tool, args: args, elementText: request.elementText)) != nil) {
         case .allow:
             return .allow
         case .askFirst:

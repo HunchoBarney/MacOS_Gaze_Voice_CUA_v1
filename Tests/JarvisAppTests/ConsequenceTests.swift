@@ -33,10 +33,10 @@ final class ConsequenceTests: XCTestCase {
         }
     }
 
-    private func decide(_ label: String, tool: String = "click", grant: Bool = true,
-                        spoken: Set<Consequence> = [], confirmed: Bool = false) -> CuaPolicy.Decision {
-        CuaPolicy.decide(tool: tool, args: [:], elementText: label, standingGrant: grant,
-                         spokenConsequences: spoken, consequenceConfirmed: confirmed)
+    private func decide(_ label: String, tool: String = "click", args: [String: JSONValue] = [:],
+                        grant: Bool = true, confirmed: Bool = false) -> CuaPolicy.Decision {
+        CuaPolicy.decide(tool: tool, args: args, elementText: label, standingGrant: grant,
+                         consequenceConfirmed: confirmed)
     }
 
     // MARK: - Words
@@ -60,11 +60,47 @@ final class ConsequenceTests: XCTestCase {
         XCTAssertEqual(Consequence.of(control: "aria-label=Share href=https://x.example/a"), .send)
     }
 
-    func testTheirWordsNameWhatTheyCover() {
-        XCTAssertEqual(Consequence.named(in: "click Send"), [.send])
-        XCTAssertEqual(Consequence.named(in: "reply to Mom saying I'm on my way and send it"), [.send])
-        XCTAssertEqual(Consequence.named(in: "delete that email"), [.delete])
-        XCTAssertEqual(Consequence.named(in: "open my email"), [])
+    func testTheirWordsCoverTheControlTheyName() {
+        XCTAssertTrue(Consequence.covers(goal: "click Send", control: "Send"))
+        XCTAssertTrue(Consequence.covers(goal: "reply to Mom saying I'm on my way and send it", control: "Send"))
+        XCTAssertTrue(Consequence.covers(goal: "delete that email", control: "Delete"))
+        XCTAssertTrue(Consequence.covers(goal: "delete that email", control: "Move to Trash"))
+        XCTAssertTrue(Consequence.covers(goal: "reply to Mom", control: "Reply"))
+        XCTAssertTrue(Consequence.covers(goal: "call Mom", control: "Call"))
+        XCTAssertTrue(Consequence.covers(goal: "click Allow", control: "Allow"))
+        XCTAssertFalse(Consequence.covers(goal: "open my email", control: "Send"))
+    }
+
+    /// The reviewer's blocker: a negated goal covers nothing.
+    func testNegatedGoalsCoverNothing() {
+        for goal in ["Draft a reply to Mom but don't send it", "write to Dad without sending it",
+                     "reply to Mom, do not send", "send it to Dad instead of Mom"] {
+            XCTAssertFalse(Consequence.covers(goal: goal, control: "Send"), goal)
+        }
+    }
+
+    /// Coverage is per control: one reply doesn't cover its neighbours.
+    func testReplyDoesNotCoverItsNeighbours() {
+        for control in ["Reply All", "Forward", "Post", "Submit"] {
+            XCTAssertFalse(Consequence.covers(goal: "reply to Mom", control: control), control)
+        }
+    }
+
+    /// Everyday words don't name the button that shares them.
+    func testEverydayPhrasesDoNotCoverButtons() {
+        XCTAssertFalse(Consequence.covers(goal: "check out this article", control: "Checkout"))
+        XCTAssertFalse(Consequence.covers(goal: "check out this article", control: "Check Out"))
+        XCTAssertFalse(Consequence.covers(goal: "install Zoom", control: "Allow"))
+        XCTAssertFalse(Consequence.covers(goal: "install Zoom", control: "Open Anyway"))
+        XCTAssertFalse(Consequence.covers(goal: "install Zoom", control: "Install"))
+        XCTAssertFalse(Consequence.covers(goal: "format the letter", control: "Erase"))
+        XCTAssertFalse(Consequence.covers(goal: "format the letter", control: "Format"))
+        XCTAssertFalse(Consequence.covers(goal: "remove the red-eye", control: "Move to Trash"))
+        XCTAssertFalse(Consequence.covers(goal: "remove the red-eye", control: "Remove"))
+        XCTAssertFalse(Consequence.covers(goal: "call it a day", control: "FaceTime"))
+        XCTAssertFalse(Consequence.covers(goal: "call it a day", control: "Call"))
+        XCTAssertFalse(Consequence.covers(goal: "allow me to see the photos", control: "Allow"),
+                       "a permission button needs its exact name after a press verb")
     }
 
     func testOnlyAClearYesCounts() {
@@ -79,6 +115,9 @@ final class ConsequenceTests: XCTestCase {
         XCTAssertFalse(Consequence.send.isClearYes("no"))
         XCTAssertFalse(Consequence.send.isClearYes(""))
         XCTAssertFalse(Consequence.delete.isClearYes("send it"))
+        XCTAssertFalse(Consequence.send.isClearYes("Send it to Dad instead"))
+        XCTAssertFalse(Consequence.send.isClearYes("send it to Dad"))
+        XCTAssertTrue(Consequence.send.isClearYes("send it now"))
     }
 
     /// The shared confirm parser no longer hears a yes inside a no.
@@ -110,28 +149,48 @@ final class ConsequenceTests: XCTestCase {
         }
     }
 
-    func testTheirWordsPressWithoutAQuestion() {
-        XCTAssertEqual(decide("Send", spoken: [.send]), .allow)
-        XCTAssertEqual(decide("Move to Trash", spoken: [.delete]), .allow)
-        guard case .needsConfirm = decide("Send", grant: false, spoken: [.send]) else {
+    func testCoveredPressSkipsTheQuestionButNotTheGrant() {
+        XCTAssertEqual(decide("Send", confirmed: true), .allow)
+        guard case .needsConfirm = decide("Send", grant: false, confirmed: true) else {
             return XCTFail("their words don't replace the computer-use grant on the model lane")
         }
     }
 
     func testAPressJarvisChoseAsksFirst() {
         XCTAssertEqual(decide("Send"), .askFirst(.send))
-        XCTAssertEqual(decide("Delete", spoken: [.send]), .askFirst(.delete),
-                       "\"send it\" doesn't cover a Delete")
-        XCTAssertEqual(decide("Send", confirmed: true), .allow)
         XCTAssertEqual(decide("Save"), .allow)
         XCTAssertEqual(CuaPolicy.decide(tool: "type_text", args: ["text": .string("hi")], elementText: "Reply",
                                         standingGrant: true), .allow, "typing isn't pressing")
     }
 
+    /// Keyboard sends Jarvis chose ask, even with "Don't ask before
+    /// changing things" on (the standing grant).
+    func testKeyboardSendsAskFirst() {
+        XCTAssertEqual(decide("", tool: "hotkey", args: ["keys": .array([.string("cmd"), .string("return")])]),
+                       .askFirst(.send))
+        XCTAssertEqual(decide("Message body", tool: "press_key", args: ["key": .string("return")]),
+                       .askFirst(.send))
+        XCTAssertEqual(decide("Search", tool: "press_key", args: ["key": .string("return")]), .allow,
+                       "Return in a search field isn't a send")
+        XCTAssertEqual(decide("Message body", tool: "hotkey", args: ["keys": .array([.string("shift"), .string("return")])]),
+                       .allow, "Shift-Return is a new line")
+        XCTAssertEqual(CuaPolicy.consequentialPress(tool: "hotkey", args: ["keys": .array([.string("cmd"), .string("return")])],
+                                                     elementText: nil)?.coverage, "send")
+    }
+
+    /// Unlabelled buttons and clicks at a spot on screen ask too.
+    func testUnnamedPressesAskFirst() {
+        XCTAssertEqual(decide(""), .askFirst(.unnamed))
+        XCTAssertEqual(decide("", args: ["x": .number(10), "y": .number(20)]), .askFirst(.unnamed))
+        XCTAssertEqual(decide("Send", args: ["x": .number(10), "y": .number(20)]), .askFirst(.send))
+        XCTAssertFalse(Consequence.covers(goal: "click it", control: ""))
+        XCTAssertTrue(Consequence.unnamed.question(target: "").contains("can't name"))
+    }
+
     func testNeverListRefusesEvenWithAYes() {
         for label in ["Empty Trash", "Download AnyDesk", "Open TeamViewer", "Buy Gift Card",
                       "Erase This Mac", "Wire Transfer"] {
-            guard case .deny(let why) = decide(label, spoken: Set(Consequence.allCases), confirmed: true) else {
+            guard case .deny(let why) = decide(label, confirmed: true) else {
                 return XCTFail(label)
             }
             XCTAssertTrue(why.contains("never"), why)
@@ -249,7 +308,34 @@ final class ConsequenceTests: XCTestCase {
                                    denied: [], confirmed: &confirmed, pressFrame: frame)
         try await loop.consentGate(tool: "click", args: [:], elementText: "Save",
                                    denied: [], confirmed: &confirmed, pressFrame: frame)
-        XCTAssertEqual(glows.value, [frame], "only the consequential press glows")
+        XCTAssertEqual(glows.value, [frame, frame],
+                       "the Send glows while Jarvis asks and as it presses; Save doesn't glow")
+    }
+
+    /// "click Send" covers one Send in the drive loop; a second Send asks.
+    func testTheirWordsCoverOnePress() async throws {
+        var asked = 0
+        let loop = makeLoop(ask: { _ in asked += 1; return "yes" }, grant: true)
+        await loop.bindSpokenGoal("click Send")
+        var confirmed = false
+        try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
+                                   denied: [], confirmed: &confirmed)
+        XCTAssertEqual(asked, 0)
+        try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
+                                   denied: [], confirmed: &confirmed)
+        XCTAssertEqual(asked, 1)
+    }
+
+    func testNegatedGoalStillAsksInTheLoop() async {
+        var asked = 0
+        let loop = makeLoop(ask: { _ in asked += 1; return "not yet" }, grant: true)
+        await loop.bindSpokenGoal("Draft a reply to Mom but don't send it")
+        var confirmed = false
+        await expectAbort("declined") {
+            try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
+                                       denied: [], confirmed: &confirmed)
+        }
+        XCTAssertEqual(asked, 1)
     }
 
     func testSpokenCommandPressesWithoutAsking() async throws {

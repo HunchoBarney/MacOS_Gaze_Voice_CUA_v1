@@ -34,9 +34,10 @@ import os
 ///      payload included. All refuse before the grant, so a standing
 ///      "always allow" never rubber-stamps "empty trash" or a typed `rm -rf`.
 ///   4. **A consequential press asks first** (`askFirst`): Send, Delete,
-///      Pay, Call, Sign out or Allow that the person's words didn't name
-///      (`spokenConsequences`) and that hasn't had its spoken yes
-///      (`consequenceConfirmed`).
+///      Pay, Call, Sign out or Allow, a keyboard send, or a press with no
+///      name (`consequentialPress`), unless the caller passes
+///      `consequenceConfirmed`: the person's words named that control, or
+///      they said yes to it.
 ///   5. **Everything else needs the standing grant, a scoped
 ///      "Always for this app" grant (`scopedGrant:`), or a per-task
 ///      approval.** A request that is none of the above lands here too —
@@ -122,10 +123,38 @@ enum CuaPolicy {
         return nil
     }
 
-    /// Tools that press a control. A consequential press among them asks
-    /// first unless the person's words named it (`spokenConsequences`)
-    /// or they already said yes (`consequenceConfirmed`).
+    /// Tools that press a control.
     static let pressTools: Set<String> = ["click", "double_click", "browser_click", "invoke_menu"]
+
+    private static let composeWords = ["message", "reply", "compose", "chat", "comment", "post",
+                                       "email", "mail", "subject", "imessage", "tweet"]
+
+    /// The consequential press a dispatch makes, or nil: a labelled
+    /// consequential control; a press with no label (`.unnamed`); or a
+    /// keyboard send, which is ⌘Return anywhere and Return in a compose or
+    /// reply field. A click at a spot on screen is judged by the label of
+    /// what it targets like any other press: the model loop never picks
+    /// bare pixels, and the no-op ladder's pixel retry re-presses an
+    /// element that was already identified. `coverage` is the control name
+    /// the person's words must use to cover it.
+    static func consequentialPress(tool: String, args: [String: JSONValue], elementText: String?)
+        -> (consequence: Consequence, label: String, coverage: String)? {
+        let label = elementText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if pressTools.contains(tool) {
+            if let consequence = Consequence.of(control: label) { return (consequence, label, label) }
+            return label.isEmpty ? (.unnamed, label, "") : nil
+        }
+        guard tool == "press_key" || tool == "hotkey" else { return nil }
+        let raw = [args["key"]?.string].compactMap { $0 } + (args["keys"]?.array ?? []).compactMap(\.string)
+        let keys = raw.flatMap { $0.lowercased().split(whereSeparator: { $0 == "+" || $0 == " " }).map(String.init) }
+        let returns: Set<String> = ["return", "enter", "kp_enter"]
+        guard keys.contains(where: returns.contains) else { return nil }
+        let modifiers = Set(keys).subtracting(returns)
+        let command = !modifiers.isDisjoint(with: ["cmd", "command", "meta"])
+        let field = " " + normalize(label.lowercased()) + " "
+        guard command || (modifiers.isEmpty && composeWords.contains { field.contains(" \($0) ") }) else { return nil }
+        return (.send, command ? "\u{2318}Return" : "Return", "send")
+    }
 
     /// Typing tools never touch a password box: Jarvis doesn't type,
     /// read or remember passwords, and says so instead.
@@ -193,8 +222,7 @@ enum CuaPolicy {
     /// first, so no grant rubber-stamps a protected phrase.
     static func decide(tool: String, args: [String: JSONValue],
                        elementText: String?, standingGrant: Bool,
-                       scopedGrant: Bool = false, spokenConsequences: Set<Consequence> = [],
-                       consequenceConfirmed: Bool = false) -> Decision {
+                       scopedGrant: Bool = false, consequenceConfirmed: Bool = false) -> Decision {
         if observationTools.contains(tool) { return .allow }
         if deniedTools.contains(tool) {
             return .deny("'\(tool)' changes driver or session state — it is never dispatched through the policy path")
@@ -223,9 +251,9 @@ enum CuaPolicy {
                 }
             }
         }
-        if pressTools.contains(tool), let consequence = Consequence.of(control: elementText ?? ""),
-           !spokenConsequences.contains(consequence), !consequenceConfirmed {
-            return .askFirst(consequence)
+        if !consequenceConfirmed,
+           let press = consequentialPress(tool: tool, args: args, elementText: elementText) {
+            return .askFirst(press.consequence)
         }
         if standingGrant || scopedGrant { return .allow }
         let target = elementText?

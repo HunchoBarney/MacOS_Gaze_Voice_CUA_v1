@@ -1645,7 +1645,7 @@ final class VoiceTaskCoordinator {
         work.ask = ask
         let prompt: String
         switch ask {
-        case .confirm(let p): prompt = p + " Say yes or no."
+        case .confirm(let p): prompt = p.contains("Say ") ? p : p + " Say yes or no."
         case .question(let p): prompt = p
         case .choice(let p, let options):
             // Spoken choices carry their numbering so a voice "two" and a

@@ -59,17 +59,19 @@ final class CuaPolicyTests: XCTestCase {
     // MARK: Desktop scope
 
     /// Desktop scope is not a policy denial: the (a)/(b) split handles it.
-    /// With the grant a scoped click is an ordinary effect; without one it
-    /// must still confirm — the consent question, never a refusal class.
+    /// With the grant a scoped click on a named control is an ordinary
+    /// effect; without one it must still confirm — the consent question,
+    /// never a refusal class. A click with no name asks first even under
+    /// the grant.
     func testDesktopScopeRidesGrant() {
-        XCTAssertEqual(decide("click",
-                              args: ["scope": .string("desktop")],
-                              grant: true), .allow)
-        guard case .needsConfirm = decide("click",
-                                          args: ["scope": .string("desktop")],
-                                          grant: false) else {
+        XCTAssertEqual(decide("click", args: ["scope": .string("desktop")],
+                              elementText: "Save", grant: true), .allow)
+        guard case .needsConfirm = decide("click", args: ["scope": .string("desktop")],
+                                          elementText: "Save", grant: false) else {
             return XCTFail("desktop scope without grant must confirm, not refuse")
         }
+        XCTAssertEqual(decide("click", args: ["scope": .string("desktop")], grant: true),
+                       .askFirst(.unnamed))
     }
 
     // MARK: deniedPhrase — the seam explicit-consent lanes call

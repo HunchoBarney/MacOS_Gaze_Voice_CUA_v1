@@ -3,17 +3,21 @@ import Foundation
 /// Consequential controls: presses that reach other people, money or
 /// accounts, or can't easily be taken back. The owner's rule:
 ///
-/// - **The person's words cover the press.** "click Send", "send it",
+/// - **The person's words name the press.** "click Send", "send it",
 ///   "reply to Mom saying I'm on my way and send it", "delete that email":
-///   Jarvis presses straight away and the button glows as it does.
-/// - **Jarvis chose the press itself** (a step it picked mid-task that the
-///   words didn't name): it asks one short question first, and only a
+///   Jarvis presses straight away and the button glows as it does. The
+///   words cover that one control (its own label phrase or a clear
+///   synonym), once, and only when they carry no "don't", "without" or
+///   "instead".
+/// - **Jarvis chose the press itself**: a step it picked mid-task that the
+///   words didn't name, a keyboard send, a button with no name or a click
+///   at a spot on screen. It asks one short question first, and only a
 ///   clear yes within 30 seconds presses that one control.
 /// - **The never list** (`CuaPolicy.neverReason`) refuses either way:
 ///   wiping the Mac, remote-access tools, gift cards, wire transfers, scam
 ///   links and numbers from warning popups.
 enum Consequence: String, CaseIterable, Sendable {
-    case pay, account, send, delete, call, permission
+    case pay, account, send, delete, call, permission, unnamed
 
     private static let phrases: [(Consequence, [String])] = [
         (.pay, ["send payment", "pay now", "buy now", "purchase now", "place order", "place your order",
@@ -25,31 +29,56 @@ enum Consequence: String, CaseIterable, Sendable {
         (.permission, ["allow", "install", "open anyway", "grant"]),
     ]
 
-    /// The consequence of pressing a control with this label, or nil. A
-    /// browser ref's `href=` is where the link goes, not what it says, so
-    /// it's left out.
-    static func of(control label: String) -> Consequence? {
-        classify(label.replacingOccurrences(of: #"(?i)\bhref=\S+"#, with: " ", options: .regularExpression))
-    }
-
-    /// Every consequence the person's own words name: "reply to Mom and
-    /// send it" covers `.send`, "delete that email" covers `.delete`.
-    static func named(in words: String) -> Set<Consequence> {
-        let text = " " + CuaPolicy.normalize(words.lowercased()) + " "
-        return Set(phrases.compactMap { consequence, list in
-            list.contains { text.contains(" " + CuaPolicy.normalize($0) + " ") } ? consequence : nil
-        })
-    }
-
-    /// The first consequence the text names, or nil.
-    static func classify(_ text: String) -> Consequence? {
+    /// The consequence of pressing a control with this label and the
+    /// phrase in the label that names it, or nil. A browser ref's `href=`
+    /// is where the link goes, not what it says, so it's left out.
+    static func match(control label: String) -> (consequence: Consequence, phrase: String)? {
+        let text = label.replacingOccurrences(of: #"(?i)\bhref=\S+"#, with: " ", options: .regularExpression)
         let words = " " + CuaPolicy.normalize(text.lowercased()) + " "
         for (consequence, list) in phrases {
             for phrase in list where words.contains(" " + CuaPolicy.normalize(phrase) + " ") {
-                return consequence
+                return (consequence, phrase)
             }
         }
         return nil
+    }
+
+    static func of(control label: String) -> Consequence? { match(control: label)?.consequence }
+
+    /// The first consequence the text names, or nil.
+    static func classify(_ text: String) -> Consequence? { match(control: text)?.consequence }
+
+    private static let pressVerbs = ["click", "press", "tap", "hit", "choose", "select", "pick"]
+    /// Everyday words that only name the control after a press verb:
+    /// "check out this article", "install Zoom", "format the letter" and
+    /// "remove the red-eye" don't ask for Checkout, Allow, Erase or
+    /// Move to Trash.
+    private static let pressVerbOnly: Set<String> = [
+        "check out", "format", "remove", "reset", "erase", "allow", "install", "open anyway", "grant",
+    ]
+    /// Other names for the same control.
+    private static let sameControl: [String: [String]] = [
+        "move to trash": ["delete", "trash"], "delete": ["trash"], "facetime": ["video call"],
+    ]
+
+    /// Whether the person's words name this control. Coverage is per
+    /// control: "reply to Mom" covers Reply, not Reply All, Forward or
+    /// Submit. Permission buttons need the exact control after a press
+    /// verb ("click Allow"). Any "don't", "without" or "instead" in the
+    /// words covers nothing.
+    static func covers(goal: String, control label: String) -> Bool {
+        guard !hasNegation(goal), let (consequence, phrase) = match(control: label) else { return false }
+        let words = " " + CuaPolicy.normalize(goal.lowercased()) + " "
+        let names = ([phrase] + (sameControl[phrase] ?? [])).map { CuaPolicy.normalize($0) }
+        let pressed = names.contains { name in
+            pressVerbs.contains { verb in
+                ["", "the ", "on "].contains { words.contains(" \(verb) \($0)\(name) ") }
+            }
+        }
+        if pressed { return true }
+        if consequence == .permission || pressVerbOnly.contains(phrase) { return false }
+        if phrase == "call", words.contains(" call it ") { return false }
+        return names.contains { words.contains(" \($0) ") }
     }
 
     /// What Jarvis says before acting, naming the control in its own words.
@@ -62,14 +91,19 @@ enum Consequence: String, CaseIterable, Sendable {
         case .delete: return "Pressing \(name) deletes or erases something. Do you want me to press it? Say \u{201C}yes\u{201D}, or \u{201C}not yet\u{201D}."
         case .call: return "Pressing \(name) starts a call. Call now? Say \u{201C}yes, call\u{201D}, or \u{201C}not yet\u{201D}."
         case .permission: return "Pressing \(name) gives an app new access to your Mac. Do you want me to press it? Say \u{201C}yes\u{201D}, or \u{201C}not yet\u{201D}."
+        case .unnamed:
+            let near = target.isEmpty ? "" : ", near \(name)"
+            return "I'm about to press something on screen I can't name for sure\(near). Do you want me to press it? Say \u{201C}yes\u{201D}, or \u{201C}not yet\u{201D}."
         }
     }
 
     private static let negations = ["no", "not", "don t", "dont", "do not", "wait", "stop", "cancel",
-                                    "hold on", "hang on", "later", "never", "nope", "nah"]
+                                    "hold on", "hang on", "later", "never", "nope", "nah",
+                                    "without", "instead", "but", "except", "rather"]
 
-    /// Any word of doubt or refusal anywhere in the reply: "yes, but not
-    /// yet" and "okay, wait" are not a yes.
+    /// Any word of doubt, refusal or redirection anywhere: "yes, but not
+    /// yet", "okay, wait" and "send it to Dad instead" are not a yes, and
+    /// a goal with "don't send it" covers nothing.
     static func hasNegation(_ reply: String) -> Bool {
         let words = " " + CuaPolicy.normalize(reply.lowercased()) + " "
         return negations.contains { words.contains(" \($0) ") }
@@ -81,16 +115,18 @@ enum Consequence: String, CaseIterable, Sendable {
         case .send: return ["send it", "send", "post it", "share it"]
         case .delete: return ["delete it", "trash it", "remove it"]
         case .call: return ["call"]
-        case .account, .permission: return []
+        case .account, .permission, .unnamed: return []
         }
     }
 
-    /// A clear yes for this consequence: a plain affirmation or the
-    /// action's own verb first, and no negation anywhere.
+    /// A clear yes for this consequence: a plain affirmation, or the
+    /// action's own verb as the whole reply ("send it", "send it now"),
+    /// and no negation anywhere.
     func isClearYes(_ reply: String) -> Bool {
         guard !Self.hasNegation(reply) else { return false }
-        let words = CuaPolicy.normalize(reply.lowercased()) + " "
-        return DriveLoop.affirmative(words) || verbs.contains { words.hasPrefix($0 + " ") }
+        let words = CuaPolicy.normalize(reply.lowercased())
+        return DriveLoop.affirmative(words)
+            || verbs.contains { [$0, $0 + " now", $0 + " please"].contains(words) }
     }
 }
 
@@ -104,8 +140,9 @@ struct ConsequenceConfirmation: Sendable, Equatable {
 
     init(consequence: Consequence, label: String?, now: Date = Date()) {
         let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let target = trimmed.isEmpty && consequence != .unnamed ? consequence.rawValue : String(trimmed.prefix(60))
         self.consequence = consequence
-        self.question = consequence.question(target: trimmed.isEmpty ? consequence.rawValue : String(trimmed.prefix(60)))
+        self.question = consequence.question(target: target)
         self.expiresAt = now.addingTimeInterval(Self.lifetime)
     }
 
