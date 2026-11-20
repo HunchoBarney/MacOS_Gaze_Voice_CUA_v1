@@ -289,7 +289,7 @@ final class FlowBenchTests: XCTestCase {
         config.alwaysAllowComputerUse = true
         let overlay = TargetOverlay()
         let coordinator = VoiceTaskCoordinator(
-            config: config, jevAPIKey: { "" },
+            config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: overlay,
             resolver: AppResolver(exactBundleApps: { _ in [] }, listApps: {

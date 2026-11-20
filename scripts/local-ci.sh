@@ -3,7 +3,7 @@
 # the CI test job (make test) and posts the result as a "local-ci" commit status.
 #
 #   scripts/local-ci.sh <pr-number|sha|branch>   test one head now
-#   scripts/local-ci.sh poll                     test the newest untested head (launchd)
+#   scripts/local-ci.sh poll                     test the untested head that has waited longest (launchd)
 #   scripts/local-ci.sh summary <log>            print the counts it would post for a log
 set -uo pipefail
 
@@ -178,8 +178,8 @@ run_sha() {
     return "$rc"
 }
 
-# Open same-repository PRs (Dependabot only with the local-ci label) and main,
-# newest first: "<timestamp> <sha> <label>".
+# Open same-repository PRs (Dependabot only with the local-ci label) and main:
+# "<timestamp> <sha> <label>".
 candidates() {
     "$GH" pr list -R "$REPO" --state open --limit 100 \
         --json number,headRefOid,updatedAt,author,labels,isCrossRepository \
@@ -199,19 +199,30 @@ needs_run() {
     esac
 }
 
+# When poll first listed a head, in epoch seconds. Heads are tested oldest
+# first by this, so a busy stream of new pushes can't starve an older one.
+first_seen() {
+    local f=$CI_HOME/seen/$1
+    [ -s "$f" ] || { mkdir -p "$CI_HOME/seen" && date +%s >"$f"; }
+    cat "$f"
+}
+
 poll() {
     take_lock || { say "another local-ci job is running"; return 0; }
     trap release_lock EXIT
-    local list ts sha label
+    local list seen ts sha label
     list=$(candidates) || { say "could not list heads"; return 1; }
-    while read -r ts sha label; do
+    find "$CI_HOME/seen" -type f -mtime +30 -delete 2>/dev/null
+    while read -r seen ts sha label; do
         [ -n "$sha" ] || continue
         if needs_run "$sha"; then
             say "testing $label $sha"
             run_sha "$sha"
             return
         fi
-    done <<<"$(echo "$list" | sort -r)"
+    done <<<"$(while read -r ts sha label; do
+                   [ -n "$sha" ] && echo "$(first_seen "$sha") $ts $sha $label"
+               done <<<"$list" | sort -k1,1n -k2,2)"
     say "every head has a $CONTEXT status"
 }
 

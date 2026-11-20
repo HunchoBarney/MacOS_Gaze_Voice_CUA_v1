@@ -757,7 +757,7 @@ final class VoiceSemanticTests: XCTestCase {
         let resolver = AppResolver(listApps: {
             [.init(name: "Google Chrome", bundle: "fixture.chrome", pid: 42)]
         })
-        let coordinator = VoiceTaskCoordinator(config: config, jevAPIKey: { "SensitiveSentinelValue" },
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { ServiceRoute(url: JevClient.systemOneURL, bearer: "SensitiveSentinelValue") },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: TargetOverlay(), resolver: resolver, commandDriver: { tool, _ in
                 if capturedWindow != nil { throw CancellationError() }
@@ -1160,7 +1160,7 @@ final class VoiceSemanticTests: XCTestCase {
             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         XCTAssertTrue(config.semanticAppSuggestions)
         config.semanticAppSuggestions = true; config.alwaysAllowComputerUse = true; config.sounds = false
-        let c = VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        let c = VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: TargetOverlay())
         return (c, config)
