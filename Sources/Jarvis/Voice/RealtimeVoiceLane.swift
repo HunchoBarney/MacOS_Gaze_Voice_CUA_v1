@@ -1759,8 +1759,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
-    /// A question about the screen speaks while it reasons ("Let me look"),
-    /// like a plain question; every other turn speaks only its outcome.
+    /// A question about the screen may speak while it reasons (a clarifying
+    /// question with no tool call), like a plain question; every other turn
+    /// speaks only its outcome.
     private var speaksDuringReasoning: Bool {
         ["question", "screen_question"].contains(speechSession.gate.admission?.intent ?? "")
     }
