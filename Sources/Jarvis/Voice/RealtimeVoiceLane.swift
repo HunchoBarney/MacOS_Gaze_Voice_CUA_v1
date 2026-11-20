@@ -1406,6 +1406,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         let cancel = responseInFlight
         let response = responseAuthority.interruptConversation()
         if cancel { cancelledResponsePending = true }
+        discardScreenItems(); toolRelayOwed = false
         finishRemoteReply(error: CancellationError())
         pendingReasoning = nil; pendingInput = nil
         awaitingTurnEnd = false; turnResponseOutstanding = false
@@ -1586,7 +1587,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // The done must belong to THIS turn's response.create — one
             // carried by a cancelled response (barge-in) or a queued push
             // that outraced release must not close the interaction.
-            if turnResponseOutstanding, let id = turnID, awaitingTurnEnd, pendingCalls.isEmpty {
+            // A screen result that settled before this done still owes its
+            // spoken answer — the relay response ends the turn, not this one.
+            if turnResponseOutstanding, let id = turnID, awaitingTurnEnd, pendingCalls.isEmpty, !toolRelayOwed {
                 awaitingTurnEnd = false
                 discardScreenItems()
                 if player.playbackIdle {
