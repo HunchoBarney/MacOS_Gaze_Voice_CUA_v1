@@ -52,10 +52,9 @@ final class AgentRuntime: ObservableObject {
         }
     }
 
-    /// Wires the per-agent config hooks the bridge reads at spawn. The MCP
-    /// server entries come from `CuaDriveServer` config (stdio mode) — see
-    /// `CuaDriveServers.config(for:)`; environment carries TYPESAFE_API_KEY
-    /// so no key lands in a config file.
+    /// Wires the per-agent config hooks the bridge reads at spawn: the
+    /// jev-drive MCP server entry and the environment that carries the
+    /// agent's `AgentDriveHost` token, so no secret lands in a config file.
     func start(mcpServersFor: @escaping @Sendable (CompanionAgent) -> [CodexMCPServer] = { _ in [] },
                environmentFor: @escaping @Sendable (CompanionAgent) -> [String: String] = { _ in [:] }) {
         hooksTask = Task {

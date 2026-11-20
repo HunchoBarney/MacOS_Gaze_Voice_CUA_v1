@@ -3,10 +3,10 @@ import JarvisCore
 
 /// Where the daemon's sockets live: one directory per app run, made by
 /// mkdtemp (mode 0700, random name) in the per-user temp folder. Nothing
-/// publishes its path in a well-known file; the app hands it to its own
-/// agent MCP children as `--cua-dir`. This is obscurity, not access
-/// control: any same-user process can still find the socket (lsof, a proxy's
-/// argv, a directory scan) and the daemon checks only the peer's uid.
+/// publishes its path in a well-known file, and agent MCP children never
+/// learn it: they reach the app through `AgentDriveHost` instead. This is
+/// obscurity, not access control: any same-user process can still find the
+/// socket (lsof, a proxy's argv, a directory scan).
 enum CuaSocketDirectory {
     static let current: String? = create(in: NSTemporaryDirectory())
 
