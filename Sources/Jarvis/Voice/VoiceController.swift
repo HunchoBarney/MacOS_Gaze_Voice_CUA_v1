@@ -796,6 +796,11 @@ final class VoiceController: ObservableObject {
             }
             config.$ttsEnabled.sink { [weak lane] in lane?.audioRepliesEnabled = $0 }
                 .store(in: &subscriptions)
+            config.$speechSpeed.combineLatest(config.$replyLength)
+                .map { RealtimeVoiceClient.ReplyStyle(speed: $0, length: $1) }
+                .removeDuplicates()
+                .sink { [weak lane] in lane?.setReplyStyle($0) }
+                .store(in: &subscriptions)
         }
         Self.shared = self
         wire(self.speech)

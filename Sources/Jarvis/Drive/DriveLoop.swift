@@ -1175,14 +1175,14 @@ actor DriveLoop {
     /// Whether the fast-lane resolution for this goal could ever consult
     /// the app roster. The app-free bodies — gaze referents, tracker
     /// control, media/system chords, overlay verbs, repeat/locate,
-    /// dictation, and the URL/web-search lanes — dispatch without it, so
+    /// dictation, comfort preferences, and the URL/web-search lanes — dispatch without it, so
     /// a spoken "click" never waits on `list_apps`. Everything else
     /// (qualifier resolution, `parseOpen`, the appHint merge) reads it.
     static func fastLaneNeedsInventory(goal: String, appHint: String? = nil) -> Bool {
         if let parsed = FastAction.parse(goal) {
             switch parsed.action.body {
             case .gaze, .tracker, .mediaKey, .systemHotkey, .overlay,
-                 .repeatLast, .locate, .locatePointer, .dictation, .webSearch, .navigateURL, .desktop:
+                 .repeatLast, .locate, .locatePointer, .dictation, .webSearch, .navigateURL, .desktop, .comfort:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,
                  .menu, .windowFrame, .clickNamed, .showNamed, .exitFullScreen:

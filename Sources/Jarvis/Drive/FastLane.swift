@@ -127,6 +127,10 @@ struct FastAction: Sendable {
         /// `onDictationRequest` seam, so dictated words reach
         /// DictationDelivery verbatim and never see a planner or model.
         case dictation(Bool)
+        /// A comfort preference — "talk slower", "shorter answers",
+        /// "bigger labels". Stored in Config; the voice lane and the overlay
+        /// read it, so it applies from the next reply or label.
+        case comfort(ComfortChange)
     }
 
     /// Snap/tile verbs — fractions of the window's containing screen.
@@ -338,6 +342,9 @@ struct FastAction: Sendable {
         // qualifier ("mute in zoom") can't scope system volume, so it drops
         // to the loop rather than pretending otherwise.
         if let media = mediaTable[normalized] { return (media, nil) }
+        // Comfort preferences talk about Jarvis itself, never an app, so
+        // only the whole utterance counts.
+        if let comfort = comfortTable[normalized] { return (comfort, nil) }
         // "on this monitor"/"over there" name the screen under the user's
         // eyes, not an app — peel before the app split so the phrase can
         // never be read as a qualifier. The scope rides the qualifier slot
@@ -1849,6 +1856,52 @@ struct FastAction: Sendable {
              "cancel dictation", "turn dictation off", "disable dictation",
              "dictation off"],
             false, "Stopping dictation", "Dictation is off")
+        return t
+    }()
+
+    /// Whole-utterance comfort preferences for how Jarvis talks and labels.
+    /// "slow down" and "more detail about X" stay out: the first can mean a
+    /// video and the second is a question.
+    static let comfortTable: [String: FastAction] = {
+        var t: [String: FastAction] = [:]
+        func add(_ phrases: [String], _ change: ComfortChange, _ description: String, _ result: String) {
+            let action = FastAction(body: .comfort(change), generic: true,
+                                    description: description, result: result, effect: .delivered)
+            for phrase in phrases { t[phrase] = action }
+        }
+        add(["talk slower", "speak slower", "talk more slowly", "speak more slowly", "talk slowly",
+             "speak slowly", "slower voice", "talk a bit slower", "speak a bit slower",
+             "talk a little slower", "speak a little slower"],
+            .speech(.down), "Talking slower", "Talking slower")
+        add(["talk faster", "speak faster", "talk more quickly", "speak more quickly", "talk quicker",
+             "speak quicker", "faster voice", "talk a bit faster", "speak a bit faster",
+             "talk a little faster", "speak a little faster"],
+            .speech(.up), "Talking faster", "Talking faster")
+        add(["normal speed", "talk at normal speed", "speak at normal speed", "talk at your normal speed",
+             "speak at your normal speed", "talk normally", "speak normally", "normal talking speed",
+             "normal voice speed"],
+            .speech(.reset), "Talking at normal speed", "Talking at normal speed")
+        add(["shorter answers", "give shorter answers", "give me shorter answers", "short answers",
+             "keep it short", "keep it shorter", "keep your answers short", "keep your answers shorter",
+             "be brief", "be more brief", "less detail", "use fewer words"],
+            .replies(.shorter), "Keeping answers short", "Keeping answers short")
+        add(["more detail", "more details", "give more detail", "give me more detail",
+             "give me more details", "longer answers", "give longer answers", "give me longer answers",
+             "more detailed answers", "be more detailed"],
+            .replies(.detailed), "Giving more detail", "Giving more detail")
+        add(["normal answers", "normal length answers", "normal answer length", "usual answers",
+             "normal detail"],
+            .replies(.standard), "Answering at normal length", "Answering at normal length")
+        add(["bigger labels", "larger labels", "make the labels bigger", "make labels bigger",
+             "make the labels larger", "make labels larger", "make the numbers bigger",
+             "bigger numbers"],
+            .labels(.up), "Making labels bigger", "Making labels bigger")
+        add(["smaller labels", "make the labels smaller", "make labels smaller", "make the numbers smaller",
+             "smaller numbers"],
+            .labels(.down), "Making labels smaller", "Making labels smaller")
+        add(["normal labels", "normal label size", "normal size labels", "reset label size",
+             "reset the label size"],
+            .labels(.reset), "Resetting label size", "Resetting label size")
         return t
     }()
 }

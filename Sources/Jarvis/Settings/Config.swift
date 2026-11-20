@@ -64,6 +64,24 @@ final class Config: ObservableObject {
         didSet { defaults.set(persistentNumbers, forKey: "persistentNumbers") }
     }
 
+    /// How fast Jarvis talks — the Realtime `audio.output.speed`, kept
+    /// inside `SpeechSpeed.range`. The voice lane sends a change on the
+    /// live session, so it applies from the next reply.
+    @Published var speechSpeed: Double {
+        didSet { defaults.set(speechSpeed, forKey: "speechSpeed") }
+    }
+
+    /// How long spoken answers run; the session instructions carry it.
+    @Published var replyLength: ReplyLength {
+        didSet { defaults.set(replyLength.rawValue, forKey: "replyLength") }
+    }
+
+    /// The size of the overlay labels, a multiple of their designed size
+    /// inside `LabelScale.range`. Labels read it each time they are drawn.
+    @Published var labelScale: Double {
+        didSet { defaults.set(labelScale, forKey: "labelScale") }
+    }
+
     /// ChatGPT/codex login state for the planner UI and runtime — mirrors
     /// `codexAuth.chatGPTAuthStatus` so a Config handle alone is enough to
     /// observe it.
@@ -176,6 +194,11 @@ final class Config: ObservableObject {
         self.sounds = defaults.object(forKey: "soundsEnabled") as? Bool ?? true
         self.persistentNumbers = defaults.object(forKey: "persistentNumbers") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
+        let speed = defaults.object(forKey: "speechSpeed") as? Double ?? SpeechSpeed.standard
+        self.speechSpeed = min(max(speed, SpeechSpeed.range.lowerBound), SpeechSpeed.range.upperBound)
+        self.replyLength = defaults.string(forKey: "replyLength").flatMap(ReplyLength.init(rawValue:)) ?? .standard
+        let scale = defaults.object(forKey: "labelScale") as? Double ?? LabelScale.standard
+        self.labelScale = min(max(scale, LabelScale.range.lowerBound), LabelScale.range.upperBound)
         let policy = ListeningPolicy.current
         let storedMode = defaults.string(forKey: "listeningMode").flatMap(ListeningMode.init(rawValue:))
         let legacyHandsFree = defaults.object(forKey: "handsFreeEnabled") as? Bool
