@@ -3,8 +3,9 @@ import Combine
 import SwiftUI
 
 /// A floating, borderless panel that never takes focus from the app you're
-/// using. It hosts the listening tab under the menu bar.
-private final class IndicatorPanel: NSPanel {
+/// using. It hosts the listening tab under the menu bar and stays out of
+/// screenshots, recordings and screen shares.
+final class IndicatorPanel: NSPanel {
     init() {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: true)
@@ -13,6 +14,7 @@ private final class IndicatorPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
+        sharingType = .none
         hidesOnDeactivate = false
         animationBehavior = .none
         isReleasedWhenClosed = false

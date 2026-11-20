@@ -97,7 +97,7 @@ final class AgentShelfOverlay {
         return screen.map { ScreenGeometry.topLeftFrame(of: $0) } ?? .zero
     }
 
-    private static func makePanel(for entry: Entry) -> NSPanel {
+    static func makePanel(for entry: Entry) -> NSPanel {
         let panel = NSPanel(contentRect: .zero,
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
@@ -108,6 +108,7 @@ final class AgentShelfOverlay {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
+        panel.sharingType = .none
         panel.contentView = NSHostingView(rootView: AgentShelfChip(entry: entry))
         return panel
     }
