@@ -12,8 +12,8 @@ final class VoiceFirstTests: XCTestCase {
     func testClickAndShowNameParse() {
         let cases: [(String, String, Bool)] = [
             ("click send", "send", true), ("click on send", "send", true),
-            ("press the send button", "send", true), ("tap reply all", "reply all", true),
-            ("show me send", "send", false), ("point to the save link", "save", false),
+            ("press the send button", "send button", true), ("tap reply all", "reply all", true),
+            ("show me send", "send", false), ("point to the save link", "save link", false),
         ]
         for (phrase, name, clicks) in cases {
             guard let parsed = FastAction.parse(phrase) else {
@@ -64,6 +64,28 @@ final class VoiceFirstTests: XCTestCase {
         XCTAssertEqual(NamedTargetMatch.matches("reply", in: [candidate("Reply All", x: 0)]), [0])
         XCTAssertEqual(NamedTargetMatch.matches("all", in: [candidate("Reply All", x: 0)]), [0])
         XCTAssertEqual(NamedTargetMatch.matches("ply", in: [candidate("Reply All", x: 0)]), [])
+    }
+
+    /// The whole name wins; a trailing role word is dropped only when
+    /// nothing matches it.
+    func testRoleWordIsDroppedOnlyWhenTheWholeNameMisses() {
+        let finder = [candidate("Open", x: 0), candidate("Open in New Tab", x: 100, w: 120)]
+        XCTAssertEqual(NamedTargetMatch.matches("open in new tab", in: finder), [1])
+        XCTAssertEqual(NamedTargetMatch.matches("settings tab", in: [candidate("Settings", x: 0)]), [0])
+        XCTAssertEqual(NamedTargetMatch.matches("save button", in: [candidate("Save", x: 0)]), [0])
+        XCTAssertEqual(NamedTargetMatch.matches("tab", in: [candidate("Settings", x: 0)]), [])
+    }
+
+    /// The front-window check for a name ending in an app accepts only an
+    /// exact or starts-with label.
+    func testStrictMatchIgnoresLabelsThatOnlyContainTheName() {
+        let help = [candidate("How to save in Pages documents", x: 0, w: 200)]
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages", in: help), [0])
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages", in: help, anywhere: false), [])
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages",
+                                                in: [candidate("Save in Pages…", x: 0)], anywhere: false), [0])
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages",
+                                                in: [candidate("Save in Pages", x: 0)], anywhere: false), [0])
     }
 
     func testTwoButtonsWithTheSameNameAreAmbiguous() {

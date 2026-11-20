@@ -34,7 +34,7 @@ enum ListeningMode: String, CaseIterable, Sendable {
     var disclosure: String {
         switch self {
         case .conversation:
-            return "When you speak, your voice goes to OpenAI and your words go to TypeSafe, so Jarvis can understand you. Silence and room noise stay on your Mac."
+            return "When you speak, your voice goes to OpenAI and your words go to TypeSafe, so Jarvis can understand you. Long silences and room noise stay on your Mac."
         case .standby:
             return "Nothing leaves your Mac until you say its name. Then your voice goes to OpenAI and your words go to TypeSafe, so Jarvis can understand you."
         case .pushToTalk:

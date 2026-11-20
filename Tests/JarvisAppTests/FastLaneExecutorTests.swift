@@ -814,6 +814,64 @@ final class FastLaneExecutorTests: XCTestCase {
             "nativeForegroundReadBegin", "nativeForegroundReadEnd", "nativeForegroundVerified"])
     }
 
+    /// "click open in maps": a control called Open in Maps in the front
+    /// window is clicked there, and Maps is never launched.
+    func testWholeNameInTheFrontWindowBeatsTheAppScope() async throws {
+        guard FastAction.isAppOnThisMac("maps") else { throw XCTSkip("Maps isn't installed") }
+        let parsed = try XCTUnwrap(FastAction.parse("click open in maps"))
+        let driver = FakeDriver()
+        driver.responses["get_window_state"] = [.object([
+            "pid": .number(4242), "window_id": .number(9),
+            "elements": .array([.object([
+                "element_index": .number(1), "role": .string("AXButton"),
+                "label": .string("Open in Maps"), "element_token": .string("front-open"),
+                "actions": .array([.string("AXPress")]),
+                "frame": .object(["x": .number(10), "y": .number(10), "w": .number(120), "h": .number(30)]),
+            ])]),
+        ])]
+        let loop = DriveLoop(call: { try driver.call($0, $1) },
+            choose: { _, _ in XCTFail("a named click needs no model"); return nil },
+            ask: nil, granted: { true },
+            frontmostBundleID: { "fixture.front" }, frontmostPID: { 4242 }, frontmostWindowID: { 9 })
+        var history: [String] = [], confirmed = false
+        let result = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: parsed.action, openVerb: nil, name: "Maps", bundle: "com.apple.Maps"),
+            task: DriveTask(goal: "click open in maps"), session: "whole-name", history: &history,
+            confirmed: &confirmed)
+        XCTAssertEqual(result?.status, .done)
+        let click = try XCTUnwrap(driver.calls.first { $0.tool == "click" })
+        XCTAssertEqual(click.args["element_token"], .string("front-open"))
+        XCTAssertEqual(click.args["pid"], .number(4242))
+        XCTAssertFalse(driver.calls.contains { $0.tool == "launch_app" })
+    }
+
+    /// "click Save in Pages": a front-window link that only mentions the
+    /// phrase ("How to save in Pages documents") is never clicked for it.
+    func testWholeNameNeedsAnExactOrLeadingLabel() async throws {
+        var action = try XCTUnwrap(FastAction.parse("click save")).action
+        action.wholeName = "save in pages"
+        let driver = FakeDriver()
+        driver.responses["get_window_state"] = [.object([
+            "pid": .number(4242), "window_id": .number(9),
+            "elements": .array([.object([
+                "element_index": .number(1), "role": .string("AXLink"),
+                "label": .string("How to save in Pages documents"), "element_token": .string("front-help"),
+                "actions": .array([.string("AXPress")]),
+                "frame": .object(["x": .number(10), "y": .number(10), "w": .number(240), "h": .number(20)]),
+            ])]),
+        ])]
+        let loop = DriveLoop(call: { try driver.call($0, $1) },
+            choose: { _, _ in nil }, ask: nil, granted: { true },
+            frontmostBundleID: { "fixture.front" }, frontmostPID: { 4242 }, frontmostWindowID: { 9 })
+        var history: [String] = [], confirmed = false
+        _ = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: action, openVerb: nil, name: "Pages", bundle: "com.apple.iWork.Pages"),
+            task: DriveTask(goal: "click save in pages"), session: "whole-name-strict", history: &history,
+            confirmed: &confirmed)
+        XCTAssertFalse(driver.calls.contains { $0.tool == "click" && $0.args["element_token"] == .string("front-help") })
+        XCTAssertTrue(history.contains("No control called save in pages in this window."))
+    }
+
     func testNativeProofCannotBypassNamedOrPinnedWindowInventory() async throws {
         for named in [false, true] {
             let driver = FakeDriver(), proofs = LockedBox(0)

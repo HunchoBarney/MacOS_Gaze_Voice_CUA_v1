@@ -245,6 +245,9 @@ struct FastAction: Sendable {
     /// gaze when the tracker is live, the existing insertion point when it
     /// isn't. Set by the deictic suffix peel in `parseType`.
     var deictic = false
+    /// "click open in maps" split off an app: the whole spoken name, which
+    /// a control in the frontmost window takes before the app does.
+    var wholeName: String?
 
     /// Display-scope qualifier sentinel — "on this monitor"/"over there"
     /// peels into a qualifier carrying this marker instead of an app name;
@@ -329,6 +332,11 @@ struct FastAction: Sendable {
         if let split = splitAppQualifier(command), gazeTable[split.command] == nil,
            table[split.command] == nil, parseNamed(command) != nil {
             if let app = splitKnownApp(command) {
+                if var named = parseNamed(app.command), case .clickNamed = named.body,
+                   case .clickNamed(let whole)? = parseNamed(command)?.body {
+                    named.wholeName = whole
+                    return (named, app.qualifier)
+                }
                 command = app.command
                 qualifier = app.qualifier
             }
@@ -937,8 +945,6 @@ struct FastAction: Sendable {
         guard let verb = verbs.first(where: { command.hasPrefix($0.prefix) }) else { return nil }
         var words = command.dropFirst(verb.prefix.count).split(separator: " ").map(String.init)
         if let first = words.first, ["the", "a", "an"].contains(first) { words.removeFirst() }
-        if words.count > 1, let last = words.last,
-           ["button", "link", "tab", "checkbox", "item"].contains(last) { words.removeLast() }
         let name = words.joined(separator: " ")
         guard !name.isEmpty, words.count <= 6,
               !["this", "that", "it", "here", "there", "them", "me", "something"].contains(name),
@@ -1820,16 +1826,32 @@ enum NamedTargetMatch {
         return String(scalars).split(separator: " ").joined(separator: " ")
     }
 
-    /// Indices into `candidates` of the controls the name matches.
-    static func matches(_ name: String, in candidates: [Candidate]) -> [Int] {
-        let query = normalize(name)
+    /// Words people add after a control's name ("the Settings tab").
+    static let roleWords: Set<String> = ["button", "link", "tab", "checkbox", "item"]
+
+    /// Indices into `candidates` of the controls the name matches. The
+    /// whole name is tried first, so "open in new tab" finds Open in New
+    /// Tab; a trailing role word is dropped only when nothing matches.
+    /// `anywhere: false` accepts only labels that are or start with the
+    /// name, never a longer label that merely contains it.
+    static func matches(_ name: String, in candidates: [Candidate], anywhere: Bool = true) -> [Int] {
+        let hits = tieredMatches(normalize(name), in: candidates, anywhere: anywhere)
+        var words = normalize(name).split(separator: " ")
+        guard hits.isEmpty, words.count > 1, let last = words.last, roleWords.contains(String(last))
+        else { return hits }
+        words.removeLast()
+        return tieredMatches(words.joined(separator: " "), in: candidates, anywhere: anywhere)
+    }
+
+    private static func tieredMatches(_ query: String, in candidates: [Candidate],
+                                      anywhere: Bool) -> [Int] {
         guard !query.isEmpty else { return [] }
         let labels = candidates.map { normalize($0.label) }
-        let tiers: [(String) -> Bool] = [
+        var tiers: [(String) -> Bool] = [
             { $0 == query },
-            { $0.hasPrefix(query + " ") },
-            { (" " + $0 + " ").contains(" " + query + " ") }
+            { $0.hasPrefix(query + " ") }
         ]
+        if anywhere { tiers.append { (" " + $0 + " ").contains(" " + query + " ") } }
         for tier in tiers {
             let hits = labels.indices.filter { !labels[$0].isEmpty && tier(labels[$0]) }
             if !hits.isEmpty { return collapse(hits, in: candidates) }

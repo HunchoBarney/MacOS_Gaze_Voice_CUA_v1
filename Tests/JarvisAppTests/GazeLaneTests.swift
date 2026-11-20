@@ -54,7 +54,7 @@ final class GazeLaneTests: XCTestCase {
         let resolved = DriveLoop.resolveFastLane(goal: "click the save button",
                                                  apps: [notes],
                                                  frontmostBundle: "com.apple.Notes")
-        guard case .clickNamed("save") = resolved?.action?.body else {
+        guard case .clickNamed("save button") = resolved?.action?.body else {
             return XCTFail("'click the save button' names a control, got \(String(describing: resolved?.action?.body))")
         }
     }
@@ -94,8 +94,9 @@ final class GazeLaneTests: XCTestCase {
             XCTAssertEqual(got, name, phrase)
             XCTAssertNil(parsed?.appQualifier, phrase)
         }
-        // A trailing "tab" is dropped as a control noun, like "button".
-        guard case .clickNamed("open in new") = FastAction.parse("click open in new tab")?.action.body else {
+        // The role word stays in the name; the matcher drops it only when
+        // nothing matches the whole name.
+        guard case .clickNamed("open in new tab") = FastAction.parse("click open in new tab")?.action.body else {
             return XCTFail("'click open in new tab' names a control")
         }
         XCTAssertNil(FastAction.parse("click open in new tab")?.appQualifier)
@@ -104,8 +105,27 @@ final class GazeLaneTests: XCTestCase {
             return XCTFail("'click sign in in safari' clicks Sign in, got \(String(describing: scoped?.action.body))")
         }
         XCTAssertEqual(scoped?.appQualifier, "safari")
+        XCTAssertEqual(scoped?.action.wholeName, "sign in in safari")
         XCTAssertTrue(FastAction.isAppOnThisMac("Safari"))
         XCTAssertFalse(FastAction.isAppOnThisMac("new tab"))
+    }
+
+    /// "click open in maps" keeps the whole name for a control in the
+    /// frontmost window, with Maps as the fallback scope.
+    func testNameEndingInAnAppKeepsTheWholeName() {
+        for (phrase, short, app, whole) in [("click open in maps", "open", "maps", "open in maps"),
+                                            ("click log in with passwords", "log in", "passwords",
+                                             "log in with passwords")] {
+            guard FastAction.isAppOnThisMac(app) else { continue }
+            let parsed = FastAction.parse(phrase)
+            guard case .clickNamed(let got) = parsed?.action.body else {
+                XCTFail("'\(phrase)' names a control, got \(String(describing: parsed?.action.body))")
+                continue
+            }
+            XCTAssertEqual(got, short, phrase)
+            XCTAssertEqual(parsed?.appQualifier, app, phrase)
+            XCTAssertEqual(parsed?.action.wholeName, whole, phrase)
+        }
     }
 
     // MARK: - Dispatch
