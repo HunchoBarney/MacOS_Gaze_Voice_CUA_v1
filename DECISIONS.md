@@ -187,6 +187,22 @@ Settled choices, newest first. Change one only with a new entry here.
   → 86/86; same-author held-out set 32/72 → 71/72; a blind set written by
   an agent that never saw the parser 51/72 → 66/72.
 
+## 2026-11-20 — The owner's physical checks run as e2e flows
+
+- The owner's checklist items for #548, #560 (25–29), #562 (24), #583 and L7
+  (#595) are flows in `e2e/`, so the owner grants permissions and the run
+  does the rest. They speak with `say`, act on fixture windows that record
+  what happens to them, and read other apps through Accessibility from the
+  native helper. They never ask for a permission: `run.sh` checks the
+  grants and stops with what to grant.
+- What stays with the owner: a keyboard Escape (#583 deliberately ignores a
+  posted one, and a flow checks that), putting the Mac to sleep, and spoken
+  checks only meaningful in his voice. Those run with `JARVIS_E2E_OWNER=1`.
+  The agent turn and the reply draft spend on paid calls beyond Realtime and
+  run with `JARVIS_E2E_PAID=1`.
+- A held Fn is posted at the HID event tap, which is where Jarvis read Fn
+  before #583, so a build that still listens for Fn fails the check.
+
 ## 2026-11-20 — A fifth end-to-end flow: "stop" mid-scroll
 
 - `stop-scroll` says "Hey Jarvis, scroll down", "keep scrolling", then "stop"
@@ -245,6 +261,8 @@ Settled choices, newest first. Change one only with a new entry here.
 - Realtime spend is an estimate per minted secret, because the socket goes
   straight to OpenAI. A relay through the Worker would measure it exactly
   but adds a hop to every audio frame.
+- The Live broker sends `delegation: {type: "client"}` because the API
+  rejects the documented `null` (seen in a real connect test, 2026-11-20).
 
 ## 2026-11-20 — Standby opens a session on the wake word
 
