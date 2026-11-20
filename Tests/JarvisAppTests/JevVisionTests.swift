@@ -1409,6 +1409,21 @@ final class JevVisionTests: XCTestCase {
                                         standingGrant: true), .askFirst(.pay))
     }
 
+    /// JARA-38: a vision-model click on a point where nothing has a label
+    /// is judged with an empty label, so it asks, whatever the model
+    /// guessed the control was and whatever the person said.
+    func testVisualClickOnAnUnlabelledPointAsks() async throws {
+        let decision = try await visualDecision(VisualModel(.purchase), visualObservation())
+        guard case .act(let request) = decision else { return XCTFail("\(decision)") }
+        XCTAssertEqual(request.pressText, "")
+        let press = try XCTUnwrap(CuaPolicy.consequentialPress(tool: request.tool, args: request.args,
+                                                               elementText: request.pressText))
+        XCTAssertEqual(press.consequence, .unnamed)
+        XCTAssertFalse(Consequence.covers(goal: "click purchase now", control: press.coverage))
+        XCTAssertEqual(CuaPolicy.decide(tool: request.tool, args: request.args, elementText: request.pressText,
+                                        standingGrant: true), .askFirst(.unnamed))
+    }
+
     func testEditableVoteCannotOverrideContradictoryControlIdentity() async throws {
         var observation = try visualObservation()
         observation.task.values = ["a": "first", "b": "second", "z": "exact text"]

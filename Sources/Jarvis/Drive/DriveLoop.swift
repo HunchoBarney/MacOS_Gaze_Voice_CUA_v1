@@ -1888,11 +1888,11 @@ extension DriveLoop {
         args["pid"] = .number(Double(pid))
         args["window_id"] = .number(Double(windowID))
         switch CuaPolicy.decide(tool: request.tool, args: args,
-                                elementText: request.elementText,
+                                elementText: request.pressText,
                                 standingGrant: granted() || box.confirmed,
                                 scopedGrant: consentScopedGrant(for: request.tool),
                                 consequenceConfirmed: spokenCoverage(CuaPolicy.consequentialPress(
-                                    tool: request.tool, args: args, elementText: request.elementText)) != nil) {
+                                    tool: request.tool, args: args, elementText: request.pressText)) != nil) {
         case .allow:
             return .allow
         case .askFirst:
@@ -1960,7 +1960,7 @@ extension DriveLoop {
                   args["pid"]?.integer == pid, args["window_id"]?.integer == windowID else {
                 throw Abort.refused("The visual input lost its original capture scope.")
             }
-            try await consentGate(tool: request.tool, args: args, elementText: request.elementText,
+            try await consentGate(tool: request.tool, args: args, elementText: request.pressText,
                                   denied: task.deny, confirmed: &box.confirmed)
             do {
                 let result = try await focusLeased {

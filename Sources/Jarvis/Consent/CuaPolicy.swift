@@ -44,8 +44,8 @@ import os
 ///      unknown tool names fail safe.
 /// Raw desktop scope is handled by the (a)/(b) split rather than a rule
 /// here: spoken deictic clicks carry their own consent and are
-/// deny-scanned, while no autonomous candidate addresses bare pixels —
-/// so a scoped dispatch in the model loop would still need the grant.
+/// deny-scanned, while an autonomous vision-model click at a point is
+/// judged by the labels under that point, and asks when there are none.
 enum CuaPolicy {
 
     enum Decision: Equatable {
@@ -132,11 +132,13 @@ enum CuaPolicy {
     /// The consequential press a dispatch makes, or nil: a labelled
     /// consequential control; a press with no label (`.unnamed`); or a
     /// keyboard send, which is ⌘Return anywhere and Return in a compose or
-    /// reply field. A click at a spot on screen is judged by the label of
-    /// what it targets like any other press: the model loop never picks
-    /// bare pixels, and the no-op ladder's pixel retry re-presses an
-    /// element that was already identified. `coverage` is the control name
-    /// the person's words must use to cover it.
+    /// reply field. A click at a spot on screen is judged by the labels
+    /// of what sits under it, never by a model's guess at the control: a
+    /// vision-model click passes only the labels at its point
+    /// (`ActuationRequest.pressText`), so a point with no label asks as
+    /// `.unnamed`, and the no-op ladder's pixel retry re-presses an element
+    /// that was already identified. `coverage` is the control name the
+    /// person's words must use to cover it.
     static func consequentialPress(tool: String, args: [String: JSONValue], elementText: String?)
         -> (consequence: Consequence, label: String, coverage: String)? {
         let label = elementText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

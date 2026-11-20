@@ -7,8 +7,8 @@ import Foundation
 ///   "reply to Mom saying I'm on my way and send it", "delete that email":
 ///   Jarvis presses straight away and the button glows as it does. The
 ///   words cover that one control (its own label phrase or a clear
-///   synonym), once, and only when they carry no "don't", "without" or
-///   "instead".
+///   synonym), once, and not when a refusal attaches to its verb ("don't
+///   send", "send it later"). A dictated message is not an instruction.
 /// - **Jarvis chose the press itself**: a step it picked mid-task that the
 ///   words didn't name, a keyboard send, a button with no name or a click
 ///   at a spot on screen. It asks one short question first, and only a
@@ -61,15 +61,80 @@ enum Consequence: String, CaseIterable, Sendable {
         "move to trash": ["delete", "trash"], "delete": ["trash"], "facetime": ["video call"],
     ]
 
+    /// Refusals that sit just before the control's own verb in the same
+    /// clause: "don't send", "without sending", "rather than deleting".
+    private static let refusalsBefore = ["don t", "dont", "do not", "not", "never", "no", "without",
+                                         "instead of", "rather than", "won t", "stop", "hold off"]
+    /// Words that put the control's verb off or redirect it when they
+    /// follow it closely: "send it later", "send it to Dad instead",
+    /// "send it but not yet", "delete everything except the photos".
+    private static let refusalsAfter = ["later", "not", "yet", "instead", "tomorrow", "never", "wait", "except"]
+    private static let clauseBreaks: Set<String> = ["and", "then", "but", "so", "or"]
+    /// Where a dictated message starts. It runs to the last "and" or
+    /// "then" after it, or to the end: "reply to Mom saying I'm not
+    /// coming and send it" dictates "I'm not coming".
+    private static let messageMarkers = ["that says", "which says", "saying", "says", "to say",
+                                         "telling him", "telling her", "telling them",
+                                         "tell him", "tell her", "tell them"]
+    /// "the button that says Send" names a control, not a message.
+    private static let controlNouns: Set<String> = ["button", "link", "one", "option", "icon", "box"]
+    private static let irregularForms = ["send": ["sent"], "pay": ["paid"]]
+
+    /// The person's instructions: their words without quoted text or a
+    /// dictated message, which are what to write, not what to press.
+    static func instructionWords(_ goal: String) -> [String] {
+        let unquoted = goal.replacingOccurrences(of: "[\"\u{201C}\u{201D}\u{00AB}\u{00BB}][^\"\u{201C}\u{201D}\u{00AB}\u{00BB}]*[\"\u{201C}\u{201D}\u{00AB}\u{00BB}]",
+                                                 with: " ", options: .regularExpression)
+        var words = CuaPolicy.normalize(unquoted.lowercased()).split(separator: " ").map(String.init)
+        for marker in messageMarkers.map({ $0.split(separator: " ").map(String.init) }) {
+            guard let start = words.indices.first(where: {
+                words[$0...].starts(with: marker)
+                    && !controlNouns.contains(words[..<$0].last { $0 != "that" && $0 != "which" } ?? "")
+            }) else { continue }
+            let end = words[(start + marker.count)...].lastIndex { $0 == "and" || $0 == "then" } ?? words.endIndex
+            words.removeSubrange(start..<end)
+        }
+        return words
+    }
+
+    /// The control name and its inflections as word runs: "send",
+    /// "sending", "sent"; "move to trash", "moving to trash".
+    private static func forms(of name: String) -> [[String]] {
+        var words = name.split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return [] }
+        let head = words.removeFirst()
+        let stem = head.hasSuffix("e") ? String(head.dropLast()) : head
+        let heads = Set([head, head + "s", head + "d", stem + "ing", stem + "ed"] + (irregularForms[head] ?? []))
+        return heads.map { [$0] + words }
+    }
+
+    /// Whether a refusal attaches to the control's verb at this spot.
+    private static func refused(_ words: [String], at start: Int, length: Int) -> Bool {
+        let clause = words[max(0, start - 4)..<start].reversed().prefix { !clauseBreaks.contains($0) }
+        let after = words[(start + length)..<min(words.count, start + length + 4)]
+            .prefix { $0 != "and" && $0 != "then" }
+        let before = " " + clause.reversed().joined(separator: " ") + " "
+        let following = " " + after.joined(separator: " ") + " "
+        return refusalsBefore.contains { before.contains(" \($0) ") }
+            || refusalsAfter.contains { following.contains(" \($0) ") }
+    }
+
     /// Whether the person's words name this control. Coverage is per
     /// control: "reply to Mom" covers Reply, not Reply All, Forward or
     /// Submit. Permission buttons need the exact control after a press
-    /// verb ("click Allow"). Any "don't", "without" or "instead" in the
-    /// words covers nothing.
+    /// verb ("click Allow"). A refusal attached to the control's own verb
+    /// ("don't send", "send it later", "without sending") covers nothing;
+    /// words elsewhere, or inside a dictated message ("saying I'm not
+    /// coming"), don't count against it.
     static func covers(goal: String, control label: String) -> Bool {
-        guard !hasNegation(goal), let (consequence, phrase) = match(control: label) else { return false }
-        let words = " " + CuaPolicy.normalize(goal.lowercased()) + " "
+        guard let (consequence, phrase) = match(control: label) else { return false }
+        let tokens = instructionWords(goal)
         let names = ([phrase] + (sameControl[phrase] ?? [])).map { CuaPolicy.normalize($0) }
+        let refusal = names.flatMap(forms).contains { form in
+            tokens.indices.contains { tokens[$0...].starts(with: form) && refused(tokens, at: $0, length: form.count) }
+        }
+        if refusal { return false }
+        let words = " " + tokens.joined(separator: " ") + " "
         let pressed = names.contains { name in
             pressVerbs.contains { verb in
                 ["", "the ", "on "].contains { words.contains(" \(verb) \($0)\(name) ") }
@@ -101,9 +166,9 @@ enum Consequence: String, CaseIterable, Sendable {
                                     "hold on", "hang on", "later", "never", "nope", "nah",
                                     "without", "instead", "but", "except", "rather"]
 
-    /// Any word of doubt, refusal or redirection anywhere: "yes, but not
-    /// yet", "okay, wait" and "send it to Dad instead" are not a yes, and
-    /// a goal with "don't send it" covers nothing.
+    /// Any word of doubt, refusal or redirection anywhere in a reply:
+    /// "yes, but not yet", "okay, wait" and "send it to Dad instead" are
+    /// not a yes.
     static func hasNegation(_ reply: String) -> Bool {
         let words = " " + CuaPolicy.normalize(reply.lowercased()) + " "
         return negations.contains { words.contains(" \($0) ") }

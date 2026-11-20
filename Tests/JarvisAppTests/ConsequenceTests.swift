@@ -79,6 +79,23 @@ final class ConsequenceTests: XCTestCase {
         }
     }
 
+    /// JARA-38: a refusal counts only when it attaches to the control's
+    /// own verb. Other words in the goal, and the dictated message, don't.
+    func testOnlyARefusalOnTheControlsVerbCountsAgainstIt() {
+        for goal in ["click Send but make it quick", "reply to Mom saying I'm not coming and send it",
+                     "saying no worries and send it", "text Bob wait for me and send it",
+                     "reply to Mom saying \u{201C}don't wait up\u{201D} and send it",
+                     "click the button that says Send"] {
+            XCTAssertTrue(Consequence.covers(goal: goal, control: "Send"), goal)
+        }
+        XCTAssertTrue(Consequence.covers(goal: "reply to Mom saying I'm not coming and send it", control: "Reply"))
+        for goal in ["draft a reply but don't send it", "send it later", "send it but not yet",
+                     "never send that", "reply to Mom saying I'll send it later"] {
+            XCTAssertFalse(Consequence.covers(goal: goal, control: "Send"), goal)
+        }
+        XCTAssertFalse(Consequence.covers(goal: "delete everything except the photos", control: "Delete"))
+    }
+
     /// Coverage is per control: one reply doesn't cover its neighbours.
     func testReplyDoesNotCoverItsNeighbours() {
         for control in ["Reply All", "Forward", "Post", "Submit"] {
@@ -336,6 +353,16 @@ final class ConsequenceTests: XCTestCase {
                                        denied: [], confirmed: &confirmed)
         }
         XCTAssertEqual(asked, 1)
+    }
+
+    func testNegationInTheDictatedMessageDoesNotAsk() async throws {
+        var asked = 0
+        let loop = makeLoop(ask: { _ in asked += 1; return "yes" }, grant: true)
+        await loop.bindSpokenGoal("reply to Mom saying I'm not coming and send it")
+        var confirmed = false
+        try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
+                                   denied: [], confirmed: &confirmed)
+        XCTAssertEqual(asked, 0)
     }
 
     func testSpokenCommandPressesWithoutAsking() async throws {

@@ -363,6 +363,9 @@ struct VisualTarget: Sendable, Equatable {
     let boxConfidence: Double?
     let distributions: [String: [String: Double]]
     let elementText: String
+    /// The on-screen labels under the click point, and nothing the model
+    /// guessed: a press is judged by what is really there.
+    let pressLabel: String
     let subjectAnchor: UUID
     let subjectProbability: Double?
     let nativeElement: VisualNativeElement?
@@ -454,6 +457,7 @@ struct VisualTarget: Sendable, Equatable {
             $0.frame?.contains(global) == true
         }.map(\.label) ?? []
         elementText = ((control.map { [$0.policyText] } ?? []) + labels).joined(separator: " ")
+        pressLabel = labels.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: " ")
     }
 
     var request: ActuationRequest {
