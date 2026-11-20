@@ -543,7 +543,8 @@ final class DesktopSwitchPhraseTests: XCTestCase {
     func testNearMissesStayWithTheirOwnLanes() {
         for phrase in ["don't go to Desktop 2", "go to Desktop 2 then click", "type go to Desktop 2",
                        "go to Desktop 2 on the other monitor", "next window", "go to desktop 40",
-                       "full screen safari", "go to full screen", "remove the photo"] {
+                       "full screen safari", "go to full screen", "remove the photo",
+                       "remove the extra spaces", "delete extra spaces", "remove the empty spaces"] {
             XCTAssertNil(verb(phrase), phrase)
         }
         guard let showDesktop = FastAction.parse("show desktop"), case .systemHotkey = showDesktop.action.body else {

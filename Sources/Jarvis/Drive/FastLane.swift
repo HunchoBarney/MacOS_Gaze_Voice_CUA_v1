@@ -1086,7 +1086,7 @@ struct FastAction: Sendable {
             rest = strip(rest, ["extra ", "other ", "spare ", "empty "]) ?? rest
             let named: Bool
             if case .number? = desktopTarget(rest, fullScreen: false) { named = true } else { named = false }
-            if named || ["desktop", "desktops", "space", "spaces"].contains(rest) {
+            if named || ["desktop", "desktops"].contains(rest) {
                 return action(.removeExtra, "Showing how to tidy up your desktops", "Showed how to tidy up desktops")
             }
         }
