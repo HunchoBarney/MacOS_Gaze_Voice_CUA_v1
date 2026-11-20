@@ -159,6 +159,14 @@ final class ProactiveSourceRulesTests: XCTestCase {
                                          onCall: false, now: now).isEmpty)
     }
 
+    func testRegionalOutlookSafeLinksAreNotFlagged() {
+        let mail = page([.init(ref: "e1", kind: "text", text: "Sign in"),
+                         .init(ref: "e2", kind: "link", text: "nytimes.com",
+                               url: "https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fnytimes.com")])
+        XCTAssertTrue(SafetyRules.alerts(page: mail, frontBundleID: "com.apple.Safari", frontAppName: "Safari",
+                                         onCall: false, now: now).isEmpty)
+    }
+
     // MARK: Banners
 
     func testBannersRankByWatchesAndImportantPeople() {
