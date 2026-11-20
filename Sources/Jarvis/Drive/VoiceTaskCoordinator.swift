@@ -326,6 +326,29 @@ final class VoiceTaskCoordinator {
         configureGazeService()
     }
 
+    /// L7 writing by instruction, asked first by `beginVoiceTask` while
+    /// `Config.voiceLive` is on. Drafts go to the Responses API through
+    /// `Config.responsesRoute`; "send it" presses Send through this same spine.
+    lazy var writingByInstruction = WritingByInstruction(
+        enabled: { [config] in config.voiceLive },
+        compose: { [config] referent in
+            let route = try await config.responsesRoute()
+            let reply = try await TerraClient(route: { route })
+                .respond(WritingByInstruction.composeRequest(for: referent))
+            guard let text = reply["reply"]?.string else { throw TerraClient.Failure.malformed }
+            return text
+        },
+        send: { [weak self] draft in
+            guard let self else {
+                return VoiceToolResult(status: VoiceToolResult.Status.refused, say: "Nothing was sent.").encoded()
+            }
+            return await self.beginVoiceTask("click Send", app: draft.bundleID)
+        },
+        show: { [overlay] lines in
+            if lines.isEmpty { overlay.hideSheet() } else { overlay.showSheet(lines: lines) }
+        },
+        note: { [feed] in feed.add(.note, $0) })
+
     /// The overlay surface for chips/radials/rings — `.shared` in
     /// production, a fresh instance in tests so arms/disarms are
     /// observable without panels.
@@ -778,6 +801,7 @@ final class VoiceTaskCoordinator {
                         continuousScroll: Bool = false,
                         onConversationScroll: (@MainActor (NativeWindowObservation.VerifiedScroll) -> Void)? = nil,
                         speakerVerified: Bool = true,
+                        writing: WritingInput? = nil,
                         admissionIsCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) async -> String {
         let started = ProcessInfo.processInfo.systemUptime
         onCommandStage?(captureID, nil, .coordinatorBegin, nil)
@@ -786,6 +810,14 @@ final class VoiceTaskCoordinator {
         guard !Task.isCancelled, admissionIsCurrent(), !trimmed.isEmpty else {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
                                    say: "I didn't catch a task.").encoded()
+        }
+        if windowScroll == nil {
+            let words = [transcriptHint, trimmed].compactMap { $0 }.first {
+                WritingInstruction.intent($0) != nil || WritingInstruction.confirmation($0) != nil
+            } ?? trimmed
+            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput()) {
+                return written
+            }
         }
         let normalized = trimmed.lowercased()
         if let windowScroll {
