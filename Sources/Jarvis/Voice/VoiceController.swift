@@ -330,6 +330,7 @@ final class VoiceController: ObservableObject {
         if usesRealtimeVoice {
             if let say = RealtimeVoiceLane.deterministicSay(text) { detail = say }
             guard microphoneEnabled, !handsFreePaused || manualOverride else { return }
+            if speak, config.ttsEnabled, let say = RealtimeVoiceLane.deterministicSay(text) { onSpokenLine?(say) }
             lane?.pushTaskEvent(text, speak: speak && config.ttsEnabled)
             return
         }
@@ -428,6 +429,10 @@ final class VoiceController: ObservableObject {
 
     private var speech: SpeechCapturing
     private let dictation: DictationDelivering
+    /// Every fixed line Jarvis hands to a voice, whichever voice speaks it.
+    /// The flow bench counts spoken words here.
+    var onSpokenLine: ((String) -> Void)?
+
     /// Spoken replies seam — nil or Config.ttsEnabled=false stays silent.
     var speaker: SpeechSynthesizing? {
         didSet {
@@ -1931,9 +1936,11 @@ final class VoiceController: ObservableObject {
         guard config.ttsEnabled, !text.isEmpty else { return }
         if usesRealtimeVoice {
             guard microphoneEnabled, !handsFreePaused || manualOverride else { return }
+            onSpokenLine?(text)
             (speech as? RealtimeVoiceLane)?.speakFeedback(text)
             return
         }
+        onSpokenLine?(text)
         speaker?.speak(text)
     }
 

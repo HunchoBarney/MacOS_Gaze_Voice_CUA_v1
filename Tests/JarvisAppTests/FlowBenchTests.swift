@@ -195,10 +195,19 @@ final class FlowBenchTests: XCTestCase {
                         print("bench \(profileName) \(flow.name) run \(run): action \(desk.actionTool ?? "-") at \(actionAt.map { String(format: "%.1f", ($0 - start) * 1000) } ?? "none") ms; outcome \(outcome ?? "-")")
                         print("bench calls " + desk.calls.map { "\($0.tool)@\(String(format: "%.1f", ($0.at - start) * 1000))" }.joined(separator: " "))
                     }
+                    let spoken = world.voice.lines
+                    world.voice.lines = []
                     world.overlay.hideAll()
                     world.coordinator.stopAll()
                     try await Task.sleep(for: .milliseconds(150))
+                    world.voice.lines = []
                     guard run >= 0 else { continue }
+                    if profileName == "modeled" {
+                        var speech = Self.speechRow(spoken.map(\.text))
+                        speech.merge(["v": 1, "kind": "speech", "label": label, "flow": flow.name, "run": run]) { $1 }
+                        if let first = spoken.first { speech["first_spoken_ms"] = max(0, (first.at - start) * 1000) }
+                        rows.append(speech)
+                    }
                     var row: [String: Any] = ["v": 1, "kind": "flow", "label": label, "profile": profileName,
                                               "flow": flow.name, "run": run,
                                               "reads_before_action": desk.calls.filter { $0.at <= (actionAt ?? .infinity) && !(flow.actions?.contains($0.tool) ?? false) }.map(\.tool)]
@@ -208,6 +217,11 @@ final class FlowBenchTests: XCTestCase {
                 }
                 await world.controller.shutdown()
             }
+        }
+        for (name, text) in Self.representativeReplies() {
+            var reply = Self.speechRow(text.isEmpty ? [] : [text])
+            reply.merge(["v": 1, "kind": "reply", "label": label, "reply": name]) { $1 }
+            rows.append(reply)
         }
         if let out {
             let text = try rows.map { String(decoding: try JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]), as: UTF8.self) }
@@ -227,13 +241,50 @@ final class FlowBenchTests: XCTestCase {
         let controller: VoiceController
         let coordinator: VoiceTaskCoordinator
         let overlay: TargetOverlay
+        let voice: Voice
+    }
+
+    /// Every line the controller hands to a voice, timed. No audio plays:
+    /// the Realtime lane never connects, so its pushes only queue.
+    final class Voice {
+        var lines: [(text: String, at: Double)] = []
+    }
+
+    /// Listening pace (JARA-41): about 150 words a minute.
+    static let listeningWPM = 150.0
+
+    static func speechRow(_ lines: [String]) -> [String: Any] {
+        let words = lines.reduce(0) { $0 + $1.split(whereSeparator: \.isWhitespace).count }
+        return ["spoken_lines": lines, "spoken_words": words,
+                "spoken_s": (Double(words) / listeningWPM * 60 * 100).rounded() / 100]
+    }
+
+    /// Replies the flows above never reach, worded by the production code
+    /// that settles them. A screen answer is the model's, so it stands in
+    /// as a sample of the length the Realtime instructions ask for.
+    static func representativeReplies() -> [(String, String)] {
+        func settle(_ result: DriveResult) -> String {
+            VoiceToolResult.spoken(VoiceTaskCoordinator.describe(result, request: "click Reply").1, words: 30)
+        }
+        let instructions = RealtimeVoiceClient.instructions
+        let filler = instructions.contains("\"Let me look.\"") ? "Let me look. " : ""
+        let answer = instructions.contains("one or two short sentences")
+            ? "The Reply button is in the toolbar, second from the left, next to Archive."
+            : "Reply is in the toolbar, highlighted now."
+        return [
+            ("screen_answer", filler + answer),
+            ("screen_failure", filler + ScreenQuestion.failure),
+            ("success", settle(DriveResult(status: .done, history: ["pressed Reply"], dispatchedEffect: true))),
+            ("failure_not_found", settle(DriveResult(status: .handedBack(.noCandidate)))),
+            ("failure_lost_touch", settle(DriveResult(status: .blocked("transport failure")))),
+        ]
     }
 
     private func makeWorld(_ desk: Desk) -> World {
         let config = Config(defaults: UserDefaults(suiteName: "flow-bench-\(UUID())")!,
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
-        config.ttsEnabled = false
+        config.ttsEnabled = true
         config.alwaysAllowComputerUse = true
         let overlay = TargetOverlay()
         let coordinator = VoiceTaskCoordinator(
@@ -258,7 +309,9 @@ final class FlowBenchTests: XCTestCase {
                                          frontmost: { "Mail" },
                                          focusedWindow: { (Desk.mailPID, "com.apple.mail", 11) },
                                          cuaRuntime: coordinator)
-        return World(controller: controller, coordinator: coordinator, overlay: overlay)
+        let voice = Voice()
+        controller.onSpokenLine = { voice.lines.append(($0, ProcessInfo.processInfo.systemUptime)) }
+        return World(controller: controller, coordinator: coordinator, overlay: overlay, voice: voice)
     }
 
     /// The driver's `list_apps` and `list_windows` wrap these platform
