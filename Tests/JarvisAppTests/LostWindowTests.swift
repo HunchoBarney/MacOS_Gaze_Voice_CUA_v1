@@ -416,6 +416,42 @@ final class LostWindowLocateTests: XCTestCase {
         XCTAssertEqual(desk.steps.first, "launch com.apple.TextEdit")
     }
 
+    /// "chrome" is Google Chrome without its vendor: an exact alias.
+    func testChromeIsReopenedByItsShortName() async {
+        let desk = FakeDesk()
+        desk.onReopen = { desk, pid in
+            desk.windows.append(.init(id: 11, pid: pid, app: "Google Chrome", title: "New Tab",
+                                      frame: CGRect(x: 100, y: 100, width: 800, height: 600)))
+        }
+        let result = await run(desk, "where did chrome go",
+                               apps: [.init(name: "Google Chrome", bundle: "com.google.Chrome", pid: 42)])
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(said(result), "The window was closed, so I opened a new one.")
+        XCTAssertEqual(desk.steps.first, "reopen 42")
+    }
+
+    /// Several near matches keep the short list instead of one guess.
+    func testSeveralNearMatchesKeepTheShortList() async {
+        let desk = FakeDesk()
+        let result = await run(desk, "where did note go",
+                               apps: [.init(name: "Notes", bundle: "com.apple.Notes", pid: 41),
+                                      .init(name: "Microsoft OneNote", bundle: "com.microsoft.onenote.mac", pid: 42)])
+        guard case .blocked(let reason) = result.status else { return XCTFail("expected blocked, got \(result.status)") }
+        XCTAssertEqual(reason, "\u{201C}note\u{201D} could be a few things \u{2014} Microsoft OneNote, Notes. Which one?")
+        XCTAssertTrue(desk.steps.isEmpty, "\(desk.steps)")
+    }
+
+    /// "where is the cursor" is the pointer, even with Cursor.app open.
+    func testTheCursorIsThePointerNotTheApp() async {
+        let desk = FakeDesk()
+        desk.windows = [.init(id: 5, pid: 60, app: "Cursor", title: "main.swift", frame: normal, onScreen: false)]
+        let result = await run(desk, "where is the cursor",
+                               apps: [.init(name: "Cursor", bundle: "com.todesktop.cursor", pid: 60)])
+        XCTAssertEqual(result.status, .done)
+        XCTAssertTrue(said(result).hasPrefix("I can't circle it right now."), said(result))
+        XCTAssertTrue(desk.steps.isEmpty, "\(desk.steps)")
+    }
+
     /// A near name never opens anything: "curs" offers Cursor by name.
     func testNearNameOffersTheAppWithoutOpeningIt() async {
         let desk = FakeDesk()
@@ -434,6 +470,45 @@ final class LostWindowLocateTests: XCTestCase {
         XCTAssertFalse(DriveLoop.namesApp("curs", "Cursor"))
         XCTAssertFalse(DriveLoop.namesApp("chrome", "Google Chrome"))
         XCTAssertFalse(DriveLoop.namesApp("the app", "App Store"))
+        XCTAssertFalse(DriveLoop.namesApp("foo helper", "Foo.app Helper"), ".app only comes off the end")
+    }
+
+    func testAnAppAnswersToItsBundleNamesAndItsNameWithoutAVendor() {
+        let old = DriveLoop.bundleNames
+        defer { DriveLoop.bundleNames = old }
+        DriveLoop.bundleNames = { $0 == "com.microsoft.VSCode" ? ["Code"] : [] }
+        let word = DriveLoop.names(of: .init(name: "Microsoft Word", bundle: "com.microsoft.Word", pid: nil))
+        XCTAssertTrue(word.contains { DriveLoop.namesApp("word", $0) })
+        let teams = DriveLoop.names(of: .init(name: "Microsoft Teams", bundle: nil, pid: nil))
+        XCTAssertTrue(teams.contains { DriveLoop.namesApp("teams", $0) })
+        let code = DriveLoop.names(of: .init(name: "Visual Studio Code", bundle: "com.microsoft.VSCode", pid: nil))
+        XCTAssertTrue(code.contains { DriveLoop.namesApp("code", $0) })
+        XCTAssertFalse(DriveLoop.names(of: .init(name: "Google", bundle: nil, pid: nil)).contains(""))
+    }
+
+    func testPointerPhrasesNeverHuntAnApp() {
+        for phrase in ["where is the cursor", "where's my mouse", "where's the pointer", "I can't find my mouse",
+                       "where did my cursor go", "find my mouse pointer"] {
+            guard let parsed = FastAction.parse(phrase), case .locatePointer = parsed.action.body else {
+                return XCTFail("\(phrase) should circle the pointer")
+            }
+        }
+    }
+
+    func testThePointerIsCircledWhereItIs() async throws {
+        let old = DriveLoop.pointerLocation
+        defer { DriveLoop.pointerLocation = old }
+        DriveLoop.pointerLocation = { CGPoint(x: 500, y: 300) }
+        let shown = LockedBox<[CGRect]>([])
+        let loop = DriveLoop(call: { _, _ in .object([:]) }, choose: { _, _ in nil }, ask: nil, granted: { true },
+                             overlayDispatch: { verb, targets, _ in
+                                 if verb == .highlight { shown.set(shown.value + targets.map(\.frame)) }
+                                 return DriveResult(status: .done)
+                             })
+        let result = await loop.run(DriveTask(goal: "where's my mouse"), session: "t")
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(result.history.last, "There's your pointer. I've circled it.")
+        XCTAssertEqual(shown.value, [CGRect(x: 460, y: 260, width: 80, height: 80)])
     }
 
     func testStageManagerIsExplainedAndNothingIsChanged() async {

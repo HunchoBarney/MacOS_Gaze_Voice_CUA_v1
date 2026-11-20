@@ -102,6 +102,9 @@ struct FastAction: Sendable {
         /// empty query ("where did my window go", "everything
         /// disappeared") means the app in front.
         case locate(query: String)
+        /// "Where's my mouse?" / "where is the cursor": circle the mouse
+        /// pointer where it is. Never an app hunt — "cursor" is also an app.
+        case locatePointer
         /// Take the bound window out of macOS full screen: the AXFullScreen
         /// attribute, then the window's full-screen button, then View →
         /// Exit Full Screen, and only then ⌃⌘F — each rung read back.
@@ -342,9 +345,14 @@ struct FastAction: Sendable {
         // outranks it ("minimize in notes on this monitor" still names notes).
         let display = peelDisplayScope(normalized)
         var command = display.rest
-        // "the menu bar is gone" means full screen, not a menu called "the".
-        if let exit = table[command], case .exitFullScreen = exit.body {
-            return (exit, display.scoped ? Self.gazeDisplayQualifier : nil)
+        // "the menu bar is gone" means full screen, not a menu called "the";
+        // "where is the cursor" means the pointer, not an app called Cursor.
+        if let early = table[command] {
+            switch early.body {
+            case .exitFullScreen: return (early, display.scoped ? Self.gazeDisplayQualifier : nil)
+            case .locatePointer: return (early, nil)
+            default: break
+            }
         }
         // "put this window on desktop 2" names a desktop, not an app called
         // "desktop 2": desktops parse before the qualifier split. A named
@@ -1439,6 +1447,17 @@ struct FastAction: Sendable {
                        "where is the menu bar", "where did the menu bar go",
                        "i cant see the menu bar", "bring back the menu bar"] {
             t[phrase] = exitFullScreen
+        }
+        let locatePointer = FastAction(body: .locatePointer, generic: true,
+                                       description: "Finding your pointer",
+                                       result: "Circled your pointer", effect: .delivered)
+        for pointer in ["cursor", "mouse", "pointer", "mouse pointer", "mouse cursor"] {
+            for lead in ["where is the", "where is my", "wheres the", "wheres my", "find the", "find my",
+                         "i cant find the", "i cant find my", "i lost the", "i lost my",
+                         "i cant see the", "i cant see my", "show me the", "show me my"] {
+                t["\(lead) \(pointer)"] = locatePointer
+            }
+            for lead in ["where did the", "where did my"] { t["\(lead) \(pointer) go"] = locatePointer }
         }
         addKey(["press enter", "press return", "hit enter", "hit return",
                 "press the enter key", "press the return key"], "return", "Return")
