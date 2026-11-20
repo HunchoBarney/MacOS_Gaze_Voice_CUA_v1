@@ -30,13 +30,9 @@ def sh(cmd):
 
 support = os.path.expanduser("~/Library/Application Support/Jarvis")
 
-sock_path = os.environ.get("JEV_CUA_SOCKET") or None
-if not sock_path:
-    try:
-        sock_path = open(os.path.join(support, "cua.socket")) \
-            .read().strip() or None
-    except OSError:
-        sock_path = None
+import glob
+socks = glob.glob(os.path.join(os.environ.get("TMPDIR", "/tmp"), "jarvis-cua-*", "*.sock"))
+sock_path = max(socks, key=os.path.getmtime) if socks else None
 reachable = False
 if sock_path:
     try:

@@ -1,6 +1,42 @@
 import Foundation
 import JarvisCore
 
+/// Where the daemon's sockets live: one directory per app run, made by
+/// mkdtemp (mode 0700, random name) in the per-user temp folder. Nothing
+/// publishes its path in a well-known file; the app hands it to its own
+/// agent MCP children as `--cua-dir`. This is obscurity, not access
+/// control: any same-user process can still find the socket (lsof, a proxy's
+/// argv, a directory scan) and the daemon checks only the peer's uid.
+enum CuaSocketDirectory {
+    static let current: String? = create(in: NSTemporaryDirectory())
+
+    /// Unix socket paths are limited to ~104 bytes, so a long temp folder
+    /// falls back to /tmp.
+    static func create(in base: String) -> String? {
+        let parent = base.utf8.count < 60 ? base : "/tmp"
+        var template = Array(URL(fileURLWithPath: parent, isDirectory: true)
+            .appendingPathComponent("jarvis-cua-XXXXXXXXXX").path.utf8CString)
+        return template.withUnsafeMutableBufferPointer { buffer in
+            mkdtemp(buffer.baseAddress!).map { String(cString: $0) }
+        }
+    }
+
+    /// The live daemon socket in `directory`. A re-mint removes the old
+    /// socket before binding the next, so there is normally one; the
+    /// newest wins otherwise.
+    static func liveSocket(in directory: String) -> String? {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: directory) else { return nil }
+        return names.filter { $0.hasSuffix(".sock") }
+            .map { URL(fileURLWithPath: directory).appendingPathComponent($0).path }
+            .max { modified($0) < modified($1) }
+    }
+
+    private static func modified(_ path: String) -> Date {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
+    }
+}
+
 /// The `serve --embedded` daemon child — spawned as a direct descendant so
 /// the driver stays in this app's TCC responsibility chain (grants attribute
 /// to Jarvis, never a second CuaDriver identity). Owns the private socket
@@ -9,20 +45,22 @@ import JarvisCore
 /// embedding.mdx): spawn directly, never via LaunchServices.
 final class EmbeddedDaemon {
     private let executable: URL
+    private let directory: String
     private var daemon: Process?
     private var liveness: FileHandle?
     private(set) var socketPath: String?
     var isRunning: Bool { daemon?.isRunning == true }
 
-    init(executable: URL) {
+    init(executable: URL, directory: String) {
         self.executable = executable
+        self.directory = directory
     }
 
     /// Test seam: fabricates a non-running daemon already bound to `socket`
     /// so host lifecycle tests can observe teardown (`stop()` clears the
     /// bound path) without spawning a real driver process.
     convenience init(executable: URL, preboundSocket socket: String) {
-        self.init(executable: executable)
+        self.init(executable: executable, directory: (socket as NSString).deletingLastPathComponent)
         socketPath = socket
     }
 
@@ -72,7 +110,7 @@ final class EmbeddedDaemon {
     }
 
     func start() async throws {
-        let socket = Self.makeSocketPath()
+        let socket = Self.socketPath(in: directory)
         try? FileManager.default.removeItem(atPath: socket)
         let environment = Self.daemonEnvironment(host: ProcessInfo.processInfo.environment)
         let liveness = Pipe()
@@ -120,11 +158,11 @@ final class EmbeddedDaemon {
         }
     }
 
-    private static func makeSocketPath() -> String {
-        let name = "jev-cua-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(8).lowercased()).sock"
-        let preferred = NSTemporaryDirectory() + name
-        // Unix socket paths are limited to ~104 bytes.
-        return preferred.utf8.count < 96 ? preferred : "/tmp/" + name
+    /// A fresh name per mint, so a fault tagged with an old socket can't
+    /// match its successor (`CuaDaemonHost.invalidate(matching:)`).
+    static func socketPath(in directory: String) -> String {
+        URL(fileURLWithPath: directory)
+            .appendingPathComponent("d-\(UUID().uuidString.prefix(8).lowercased()).sock").path
     }
 }
 
@@ -170,11 +208,11 @@ actor CuaDaemonHost {
                 ? (CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
                 : CuaDependency.executableSHA256
             try CuaDependency.verify(executable, expectedSHA256: expected)
-            let daemon = EmbeddedDaemon(executable: executable)
+            guard let directory = CuaSocketDirectory.current else { throw DriverConnectionError.unavailable }
+            let daemon = EmbeddedDaemon(executable: executable, directory: directory)
             try await daemon.start()
             guard let socket = daemon.socketPath else { throw DriverConnectionError.unavailable }
             self.daemon = daemon
-            Self.publish(socket)
             return socket
         }
         minting = task
@@ -196,8 +234,7 @@ actor CuaDaemonHost {
     /// check (process running + socket file present is all it verifies), so
     /// callers holding dead-transport evidence force the cycle here:
     /// teardown, respawn, and the same socket-file readiness wait a normal
-    /// mint pays — `socket()` does the work, including republishing the
-    /// socket-hint file.
+    /// mint pays — `socket()` does the work.
     ///
     /// Prefer `invalidate(matching:)` when the fault came tagged with its
     /// generation (the sick-daemon hook) — it can't kill a healthy
@@ -215,16 +252,5 @@ actor CuaDaemonHost {
     func shutdown() {
         daemon?.stop()
         daemon = nil
-        try? FileManager.default.removeItem(at: CuaDriveServer.socketHintFile)
-    }
-
-    /// `--mcp-stdio` children find the live socket through this file —
-    /// never a baked-in path, since every re-mint moves it.
-    private static func publish(_ socket: String) {
-        let fm = FileManager.default
-        try? fm.createDirectory(at: CuaDriveServer.supportDir,
-                                withIntermediateDirectories: true)
-        try? socket.write(to: CuaDriveServer.socketHintFile,
-                          atomically: true, encoding: .utf8)
     }
 }
