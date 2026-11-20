@@ -363,7 +363,6 @@ enum JevChooser {
                 model: response.model,
                 latencyMs: latencyMs)
             initial.primaryCompletionProbability = completion
-            initial.proposedActionID = picked?.id
             initial.actionSupport = Dictionary(uniqueKeysWithValues: actions.enumerated().compactMap {
                 index, action -> (String, Double)? in
                 guard case .noul(let support) = response.answers["action_support_\(index)"],
