@@ -316,6 +316,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var conversationStartID = UUID()
     private var conversationMeter: Timer?
     private var conversationSender: Task<Void, Never>?
+    private var conversationGate: VoiceActivityGate?
     private var feedbackSuspended = true
     private var feedbackGeneration: UInt64 = 0
     private struct RemoteInput {
@@ -884,6 +885,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                     stopConversation(state: .unavailable(error.localizedDescription))
                 }
             case .speechStopped:
+                if let gate = conversationGate { Task { await gate.speechServiceHeardStop() } }
                 if remoteSpeakingItem == item {
                     remoteSpeakingItem = nil; holding = false
                     if remoteInputs[item] == nil { flushSpeech() }
@@ -1277,6 +1279,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 throw LocalSpeechError.unavailable
             }
             let feed = try ConvertedAudioFeed(input: hardware.format, output: format)
+            let speechGate = try VoiceActivityGate.silero()
             let session = UUID()
             try beginRealtimeConversation(session: session)
             let connection = client.connectionID
@@ -1288,8 +1291,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
                         guard let samples = buffer.int16ChannelData?[0] else {
                             throw VoiceError("The microphone audio format changed.")
                         }
-                        try await self.client.sendAudio(Data(bytes: samples, count: Int(buffer.frameLength) * 2),
-                                                        connection: connection)
+                        for pcm in try await speechGate.admit(Data(bytes: samples, count: Int(buffer.frameLength) * 2)) {
+                            try await self.client.sendAudio(pcm, connection: connection)
+                        }
                     }
                 } catch {
                     guard self.conversation.id == session, !Task.isCancelled else { return }
@@ -1302,6 +1306,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 throw CancellationError()
             }
             conversationFeed = feed
+            conversationGate = speechGate
             input.gate.open(feed, at: AVAudioTime.hostTime(forSeconds: since ?? ProcessInfo.processInfo.systemUptime))
             conversationMeter?.invalidate()
             conversationMeter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -1355,6 +1360,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private func closeConversationFeed() {
         conversationMeter?.invalidate(); conversationMeter = nil
         conversationSender?.cancel(); conversationSender = nil
+        if let gate = conversationGate {
+            conversationGate = nil
+            Task {
+                let usage = await gate.usage
+                Self.log.notice("voice gate heard_s=\(usage.heard, format: .fixed(precision: 1)) speech_s=\(usage.sentSpeech, format: .fixed(precision: 1)) silence_s=\(usage.sentSilence, format: .fixed(precision: 1))")
+            }
+        }
         guard let feed = conversationFeed else { return }
         conversationFeed = nil
         input.gate.close(ifCurrent: feed)?.finish()

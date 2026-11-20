@@ -2,6 +2,18 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Hands-free uploads only speech
+
+- Hands-free audio is scored on the Mac by Silero VAD v6.2.1 (MIT, Core ML,
+  `ThirdParty/SileroVAD`) and sent to Realtime only while someone is
+  speaking, with one second of pre-roll and 0.8 s of hangover. After that
+  the lane sends digital silence until Realtime reports the end of speech
+  (at most 4 s), because `semantic_vad` closes turns on the audio it
+  receives. If the model can't load, hands-free doesn't start.
+- Wake-word work builds on this gate. On-device Apple speech recognition
+  costs 10–21 % of an M1 core while speech is present, so it can only
+  verify candidate windows, never run on every utterance.
+
 ## 2026-11-19 — Reset to one build from source
 
 - One command, `make release`, builds the app from source: pinned runtimes,

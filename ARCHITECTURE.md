@@ -23,7 +23,8 @@ flowchart LR
 
 `VoiceController` owns the capsule state and the Fn / hands-free input.
 `RealtimeVoiceLane` streams microphone audio to OpenAI Realtime; the
-committed input transcript is the final text. `LocalSpeechSession` admits
+committed input transcript is the final text. In hands-free listening,
+`VoiceActivityGate` scores the audio on the Mac and lets only speech through. `LocalSpeechSession` admits
 each turn exactly once and decides whether it is dictation, a direct
 operation, or work for the task loop. `VoiceSemanticRouter` asks Jev when a
 turn needs a semantic decision.
