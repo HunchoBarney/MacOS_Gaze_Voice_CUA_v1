@@ -51,6 +51,13 @@ Persistent agents run on the bundled `CodexRuntime/codex`. They reach the
 same task loop through `Jarvis --mcp-stdio --agent <slug>`, an MCP server
 mode of the app binary.
 
+## Credential service (`CredentialService/`)
+
+A Cloudflare Worker holds the owner's OpenAI and TypeSafe keys. Installs
+register for a token, mint short-lived Realtime client secrets and send
+Terra and Jev calls through it, under per-install and global limits kept
+in one Durable Object. See its README.
+
 ## Diagnostics (`Support/`)
 
 `DiagnosticsReporter` subscribes to MetricKit and keeps the last 20 crash
