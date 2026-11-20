@@ -271,12 +271,12 @@ final class FnInputMonitor: ObservableObject {
             guard let context else { return Unmanaged.passUnretained(event) }
             return Unmanaged<FnTapCore>.fromOpaque(context).takeUnretainedValue().onTap(type, event)
         }, userInfo: Unmanaged.passUnretained(core).toOpaque())
+        core.tap.withLock { $0 = tap }
         guard let tap, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             teardown()
             message = "Could not register Fn. Check Accessibility and relaunch."
             return
         }
-        core.tap.withLock { $0 = tap }
         self.source = source
         runOnOwnThread(source)
         CGEvent.tapEnable(tap: tap, enable: true)
