@@ -131,6 +131,11 @@ run_sha() {
         post "$sha" error "checkout failed · log $short.log"; return 1
     fi
 
+    if [ ! -x "$LANE_SH" ]; then
+        say "no build lane at $LANE_SH" | tee -a "$log"
+        post "$sha" error "no build lane at $LANE_SH; will retry"
+        return 1
+    fi
     # The build lane serves local CI ahead of every normal job, in this
     # checkout rather than the lane's mirror.
     post "$sha" pending "queued in the build lane for make test"

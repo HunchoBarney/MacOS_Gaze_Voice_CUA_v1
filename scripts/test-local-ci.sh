@@ -101,4 +101,13 @@ if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a lane that never freed up must not post failure"; failures=$((failures + 1))
 fi
 
+home=$(ci_run no-lane 0)
+rm -f "$dir/lane-no-lane"
+LOCAL_CI_HOME=$home GH=$dir/gh-no-lane LOCAL_CI_LANE=$dir/lane-no-lane \
+    "$here/local-ci.sh" "$(git -C "$dir/origin-no-lane" rev-parse HEAD)" >/dev/null 2>&1
+check "$home" gh.log "state=error -f context=local-ci -f description=no build lane at"
+if grep -q state=failure "$home/gh.log"; then
+    echo "FAIL a missing lane must not post failure"; failures=$((failures + 1))
+fi
+
 exit $((failures > 0))
