@@ -46,13 +46,14 @@ enum WindowControls {
     /// that don't publish them (genuinely absent, not a parse failure).
     /// Injectable `element` factory so tests never open a real AX session.
     static func buttons(on windowElement: AXUIElement) -> [Button] {
-        Kind.allCases.compactMap { kind in
+        let windowElement = bounded(windowElement)
+        return Kind.allCases.compactMap { kind in
             var ref: CFTypeRef?
             guard AXUIElementCopyAttributeValue(windowElement,
                                                 attributes[kind]! as CFString,
                                                 &ref) == .success,
                   let ref else { return nil }
-            let button = ref as! AXUIElement
+            let button = bounded(ref as! AXUIElement)
             guard let frame = frame(of: button) else { return nil }
             return Button(kind: kind, frame: frame)
         }
@@ -101,17 +102,17 @@ enum WindowControls {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, attributes[kind]! as CFString, &ref) == .success,
               let ref else { return false }
-        return AXUIElementPerformAction(ref as! AXUIElement, kAXPressAction as CFString) == .success
+        return AXUIElementPerformAction(bounded(ref as! AXUIElement), kAXPressAction as CFString) == .success
     }
 
     /// The app's AXWindow whose frame matches `target` within ~4pt —
     /// larger tolerances risk sibling windows of identical size.
     private static func windowElement(pid: pid_t, matching target: CGRect) -> AXUIElement? {
         guard !target.isEmpty else { return nil }
-        let app = AXUIElementCreateApplication(pid)
+        let app = bounded(AXUIElementCreateApplication(pid))
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
-              let windows = ref as? [AXUIElement] else { return nil }
+              let windows = (ref as? [AXUIElement])?.map(bounded) else { return nil }
         return windows.first { window in
             guard let f = frame(of: window) else { return false }
             return abs(f.minX - target.minX) < 4 && abs(f.minY - target.minY) < 4
@@ -121,10 +122,10 @@ enum WindowControls {
 
     private static func windowElement(pid: pid_t, windowID: Int) -> AXUIElement? {
         guard pid > 0, let expected = UInt32(exactly: windowID), expected > 0 else { return nil }
-        let app = AXUIElementCreateApplication(pid)
+        let app = bounded(AXUIElementCreateApplication(pid))
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
-              let windows = ref as? [AXUIElement] else { return nil }
+              let windows = (ref as? [AXUIElement])?.map(bounded) else { return nil }
         let matches = windows.filter { FocusedTextBinding.windowNumber($0) == expected }
         guard matches.count == 1, let window = matches.first else { return nil }
         var owner: pid_t = 0
@@ -133,15 +134,26 @@ enum WindowControls {
     }
 
     private static func frontWindow(pid: pid_t) -> AXUIElement? {
-        let app = AXUIElementCreateApplication(pid)
+        let app = bounded(AXUIElementCreateApplication(pid))
         var ref: CFTypeRef?
         // AXFocusedWindow first; AXWindows[0] for the un-focused-but-real
         // window (backgrounded app — the whole point of this lane).
         if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &ref) == .success,
-           let ref { return (ref as! AXUIElement) }
+           let ref { return bounded(ref as! AXUIElement) }
         if AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
-           let windows = ref as? [AXUIElement], let first = windows.first { return first }
+           let windows = ref as? [AXUIElement], let first = windows.first { return bounded(first) }
         return nil
+    }
+
+    /// These calls run on the main actor, and an unresponsive app would
+    /// otherwise hold it for the AX default of about six seconds, delaying
+    /// every keystroke behind Jarvis's event tap. Each element gets a short
+    /// timeout before it is messaged.
+    private static let messagingTimeout: Float = 0.25
+
+    private static func bounded(_ element: AXUIElement) -> AXUIElement {
+        AXUIElementSetMessagingTimeout(element, messagingTimeout)
+        return element
     }
 
     private static func frame(of element: AXUIElement) -> CGRect? {
