@@ -150,6 +150,8 @@ enum GuideVerdict: Sendable, Equatable {
     case consequential(Consequence, label: String, undoSend: Bool)
     case changedElsewhere
     case wentElsewhere(String?, rebind: Bool)
+    /// On the target of a typing step, before the text is all there.
+    case typing
     case ignored
 }
 
@@ -230,9 +232,11 @@ struct GuideMachine: Sendable {
             named = true
         }
         if met, onTarget || step.target == nil || named { return .success(rebind: false) }
-        if onTarget, step.target.map(StepPhrasing.isTextEntry) == true, !named,
-           action.kind == .focusChanged || isClick(action) {
-            return .success(rebind: false)
+        if onTarget, step.target.map(StepPhrasing.isTextEntry) == true {
+            if named, action.kind == .focusChanged || action.kind == .valueChanged || isClick(action) {
+                return .typing
+            }
+            if !named, action.kind == .focusChanged || isClick(action) { return .success(rebind: false) }
         }
         let opened = after.transientRoles.filter { !baseline.transientRoles.contains($0) }
         if detourOpen, opened.isEmpty { return .detourClosed }
@@ -294,7 +298,7 @@ struct GuideMachine: Sendable {
         -> (effects: [GuideEffect], transition: GuideTransition?) {
         if verdict != .ignored { lastActivity = now }
         switch verdict {
-        case .ignored:
+        case .ignored, .typing:
             return ([], nil)
         case .success(let rebind):
             return ([.clear, .say(Self.praise)], .advance(rebind: rebind))

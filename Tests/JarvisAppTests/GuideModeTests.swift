@@ -175,6 +175,25 @@ final class GuideModeTests: XCTestCase {
         XCTAssertFalse(machine.offerPending)
     }
 
+    func testTypingIntoTheTargetIsProgressNotAMiss() {
+        let typing = StepPhrasing.step(number: 1, action: .element(Self.body, typing: "Hello"),
+                                       window: Self.window, scene: [], hint: nil)
+        XCTAssertEqual(judge(click(Self.body), step: typing, after: scene()), .typing)
+        var partial = Self.body
+        partial.value = "Hel"
+        let keystroke = UserAction(kind: .valueChanged, pid: 42, element: Self.body, at: 101)
+        let verdict = judge(keystroke, step: typing, after: scene([Self.attach, Self.format, partial]))
+        XCTAssertEqual(verdict, .typing)
+        var machine = GuideMachine(step: typing, at: 100)
+        XCTAssertEqual(machine.judged(verdict, at: 108).effects, [])
+        XCTAssertEqual(machine.misses, 0)
+        XCTAssertEqual(machine.tick(at: 117), [], "typing counts as activity for patience")
+        var done = Self.body
+        done.value = "Hello"
+        XCTAssertEqual(judge(keystroke, step: typing, after: scene([Self.attach, Self.format, done])),
+                       .success(rebind: false))
+    }
+
     // MARK: - Patience
 
     func testPatienceRepeatsWithDetailThenOffersAndNeverAThirdTime() {
