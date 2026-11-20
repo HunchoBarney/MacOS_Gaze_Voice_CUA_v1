@@ -2,7 +2,7 @@ import XCTest
 @testable import Jarvis
 
 /// Real GPT-Live sessions over WebRTC, paid and on the microphone, so each
-/// runs only behind its flags and JARVIS_LIVE_MIC=1, under
+/// runs only behind its flags, JARVIS_LIVE_MIC=1 and JARVIS_LIVE_KEYCHAIN=1, under
 /// scripts/with-desktop-lock.py. The OpenAI key is read from Keychain into
 /// this process and never printed; the app itself only uses the broker.
 @MainActor
@@ -34,6 +34,9 @@ final class LiveConnectTests: XCTestCase {
 
     private func directSession(_ instructions: String) throws -> LiveSession {
         #if canImport(LiveKitWebRTC)
+        guard ProcessInfo.processInfo.environment["JARVIS_LIVE_KEYCHAIN"] == "1" else {
+            throw XCTSkip("Also set JARVIS_LIVE_KEYCHAIN=1 so the test can read the OpenAI key from Keychain")
+        }
         let store = KeychainAPIKeyStore(service: "com.chriswozniczek.jevvoice", account: "openAIAPIKey",
                                         allowUserInteraction: false)
         let key = try XCTUnwrap(try store.read(), "no OpenAI key in Keychain")
