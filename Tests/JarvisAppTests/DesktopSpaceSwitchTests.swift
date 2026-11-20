@@ -335,8 +335,6 @@ private func said(_ result: DriveResult) -> String {
     return result.history.last ?? ""
 }
 
-/// The whole lane: phrase in, Mission Control or ⌃ arrow through the seam,
-/// and words only after the arrival reads back.
 /// A cancelled step must not leave its desktop-change observer behind.
 final class SpaceChangeWatchTests: XCTestCase {
     private final class CountingCenter: NotificationCenter, @unchecked Sendable {
@@ -374,6 +372,8 @@ final class SpaceChangeWatchTests: XCTestCase {
     }
 }
 
+/// The whole lane: phrase in, Mission Control or ⌃ arrow through the seam,
+/// and words only after the arrival reads back.
 final class DesktopSwitchLaneTests: XCTestCase {
     func testSwitchOpensMissionControlPressesOnceAndConfirmsArrival() async {
         let desk = FakeSpaces()
