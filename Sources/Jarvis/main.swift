@@ -236,6 +236,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.refreshPermissions()
         if ProcessInfo.processInfo.arguments.contains("--settings") {
             windows.show(.voice)
+        } else if ProcessInfo.processInfo.arguments.contains("--first-run") {
+            windows.showFirstRun()
         } else if !controller.config.firstRunCompleted {
             if Permission.microphone.isGranted && Permission.accessibility.isGranted {
                 controller.config.firstRunCompleted = true
@@ -374,7 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // thing. Push as a task_outcome so the lane voices `say` verbatim
             // instead of answering bare text as if it were a question.
             let lead = String((text.split(separator: ".").first.map(String.init) ?? text).prefix(200))
-            let say = VoiceToolResult.spoken(lead, words: 30)
+            let say = OutcomeWording.headline(lead)
             let payload = VoiceToolResult(
                 kind: VoiceToolResult.Kind.taskOutcome,
                 status: VoiceToolResult.Status.ok,

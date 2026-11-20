@@ -19,8 +19,9 @@ LOCAL_CI_LABEL = com.karanvirkang.jarvis.local-ci
 LOCAL_CI_PLIST = $(HOME)/Library/LaunchAgents/$(LOCAL_CI_LABEL).plist
 LOCAL_CI_JOB = gui/$(shell id -u)/$(LOCAL_CI_LABEL)
 
-.PHONY: setup build test tracker release install local run clean
+.PHONY: setup build test tracker release install local run clean bench-flows
 .PHONY: local-ci-install local-ci-pause local-ci-resume local-ci-uninstall
+.PHONY: e2e e2e-install e2e-uninstall
 
 setup:
 	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
@@ -110,6 +111,18 @@ local: install
 	    (echo "Jarvis exited right after launch — run \"$(LOCAL_APP)/Contents/MacOS/Jarvis\" to see why" >&2; exit 1)
 	@echo "Jarvis is running"
 
+# Phase 0 flow benchmark (Tests/JarvisAppTests/FlowBenchTests.swift): typed transcripts through
+# the production path against a fixture desk, no model call, no desktop
+# change. Rows append to bench/results/flows.jsonl under BENCH_LABEL.
+BENCH_LABEL ?= $(COMMIT)
+BENCH_RUNS ?= 15
+bench-flows:
+	@mkdir -p bench/results
+	JARVIS_BENCH_FLOWS=1 JARVIS_BENCH_RUNS=$(BENCH_RUNS) JARVIS_BENCH_LABEL=$(BENCH_LABEL) \
+	    JARVIS_BENCH_OUT=$(CURDIR)/bench/results/flows.jsonl \
+	    scripts/lane-test.sh swift test --filter FlowBenchTests
+	python3 bench/flows/report.py bench/results/flows.jsonl $(wildcard bench/results/realtime.jsonl)
+
 run: local
 
 clean:
@@ -141,3 +154,15 @@ local-ci-uninstall:
 	launchctl enable $(LOCAL_CI_JOB)
 	rm -f "$(LOCAL_CI_PLIST)"
 	@echo "removed the agent; checkout and logs remain in $(LOCAL_CI_HOME)"
+
+# End-to-end flows on a signed Jarvis (e2e/README.md), one desktop-lock owner
+# at a time. They launch Jarvis, speak to it and open Calculator, so run them
+# only when the owner says go. JARVIS_E2E_APP picks the build.
+e2e:
+	scripts/with-desktop-lock.py e2e/scripts/run.sh
+
+e2e-install:
+	e2e/scripts/install.sh
+
+e2e-uninstall:
+	e2e/scripts/uninstall.sh

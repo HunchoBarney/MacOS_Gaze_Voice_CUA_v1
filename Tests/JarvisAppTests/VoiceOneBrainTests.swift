@@ -905,3 +905,78 @@ extension VoiceOneBrainTests {
         lane.cancel(); client.teardown()
     }
 }
+
+/// #577: a turn that waits on the model says one short filler only when
+/// the answer is slow. The clock is scripted: `tick` fires the delay.
+extension VoiceOneBrainTests {
+    private func fillerLane(_ wire: RecordedVoiceWire, client: RealtimeVoiceClient,
+                            log: @escaping (String) -> Void) -> (RealtimeVoiceLane, () -> Void) {
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-key" }, client: client)
+        lane.admissionContextProvider = { self.context() }
+        var pending: [CheckedContinuation<Void, Never>] = []
+        var delays: [Duration] = []
+        lane.fillerClock = { delay in
+            delays.append(delay)
+            await withCheckedContinuation { pending.append($0) }
+        }
+        lane.onFiller = { _, line in log("filler " + line) }
+        lane.onEvent = { _, event in if case .assistant(let text) = event { log("answer " + text) } }
+        let tick = {
+            XCTAssertEqual(delays, [RealtimeVoiceLane.fillerDelay])
+            pending.forEach { $0.resume() }; pending = []
+        }
+        return (lane, tick)
+    }
+
+    private func answer(_ wire: RecordedVoiceWire, _ text: String) async throws {
+        let ids = await wire.responseIDs()
+        try await wire.push(["type": .string("response.output_audio_transcript.done"),
+                             "response_id": .string(try XCTUnwrap(ids.last)), "transcript": .string(text)])
+    }
+
+    func testFastAnswerGetsNoFiller() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        var log: [String] = []
+        let (lane, tick) = fillerLane(wire, client: client) { log.append($0) }
+        try await lane.submitTyped("what is two plus two", sessionID: UUID())
+        await waitFor { await wire.responseIDs().count == 1 }
+        try await answer(wire, "Four.")
+        await waitFor { log == ["answer Four."] }
+        tick()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(log, ["answer Four."])
+        lane.cancel(); client.teardown()
+    }
+
+    func testSlowAnswerGetsOneFillerBeforeTheAnswer() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        var log: [String] = []
+        let (lane, tick) = fillerLane(wire, client: client) { log.append($0) }
+        try await lane.submitTyped("what is two plus two", sessionID: UUID())
+        await waitFor { await wire.responseIDs().count == 1 }
+        tick()
+        await waitFor { log == ["filler " + RealtimeVoiceLane.fillerLine] }
+        try await answer(wire, "Four.")
+        await waitFor { log.count == 2 }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(log, ["filler Looking…", "answer Four."])
+        lane.cancel(); client.teardown()
+    }
+
+    func testCancelledTurnGetsNoFiller() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        var log: [String] = []
+        let (lane, tick) = fillerLane(wire, client: client) { log.append($0) }
+        try await lane.submitTyped("what is two plus two", sessionID: UUID())
+        await waitFor { await wire.responseIDs().count == 1 }
+        lane.cancel()
+        tick()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(log, [])
+        client.teardown()
+    }
+}
+

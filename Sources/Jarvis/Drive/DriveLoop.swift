@@ -42,7 +42,6 @@ actor DriveLoop {
         var model: String? = nil
         var latencyMs: Double? = nil
         var requestCount = 1
-        var proposedActionID: String? = nil
         var actionSupport: [String: Double] = [:]
         var actionRejection: ActionRejection? = nil
         var goalFactID: String? = nil
@@ -193,6 +192,10 @@ actor DriveLoop {
     /// Host-side app activation — the reopen trigger the driver won't do.
     /// Injectable so tests never activate real processes.
     let activateApp: (Int) -> Void
+
+    static func activateRunningApp(_ pid: Int) {
+        _ = NSRunningApplication(processIdentifier: pid_t(pid))?.activate(options: [])
+    }
     /// Window restoration for an explicitly requested raise. Kept separate
     /// from activation: activate() alone does not unhide a running app.
     let appIsHidden: (Int) -> Bool
@@ -304,9 +307,7 @@ actor DriveLoop {
          nativeEvent: @escaping @Sendable (VoiceCommandTrace.Stage) async -> Void = { _ in },
          nativeTextEvent: @escaping @Sendable (FocusedTextBinding.Insertion) async -> Void = { _ in },
          postMediaKey: @escaping (MediaKeys.Key) -> Bool = { MediaKeys.post($0) },
-         activateApp: @escaping (Int) -> Void = { pid in
-             _ = NSRunningApplication(processIdentifier: pid_t(pid))?.activate(options: [])
-         },
+         activateApp: @escaping (Int) -> Void = DriveLoop.activateRunningApp,
          appIsHidden: @escaping (Int) -> Bool = { pid in
              NSRunningApplication(processIdentifier: pid_t(pid))?.isHidden == true
          },
