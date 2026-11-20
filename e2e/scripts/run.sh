@@ -7,8 +7,11 @@
 #   JARVIS_E2E_APP      the signed Jarvis.app to test (default ~/jarvis-local/Jarvis.app)
 #   JARVIS_E2E_AUDIO    speakers (default) plays the lines aloud into the built-in
 #                       microphone; blackhole routes them through BlackHole 2ch
-#   JARVIS_E2E_ONLY     run one flow: first-run, show-names-click, screen-question,
-#                       wake-word or stop-scroll
+#   JARVIS_E2E_ONLY     run one flow by name (the names are in the case below)
+#   JARVIS_E2E_PAID=1   also run the flows that make a paid call beyond Realtime:
+#                       an agent turn (Codex and Jev) and a reply draft
+#   JARVIS_E2E_OWNER=1  also run the steps that need the owner at the Mac:
+#                       pressing Escape and putting the Mac to sleep
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 bundle=com.karanvirkang.jarvis
@@ -26,8 +29,9 @@ die() { echo "e2e: $*" >&2; exit 2; }
     || die "$app is not $bundle"
 codesign --verify --strict "$app" || die "$app fails codesign --verify"
 case "$only" in
-"" | first-run | show-names-click | screen-question | wake-word | stop-scroll) ;;
-*) die "JARVIS_E2E_ONLY is first-run, show-names-click, screen-question, wake-word or stop-scroll" ;;
+"" | first-run | show-names-click | screen-question | wake-word | stop-scroll | hardened-runtime | daemon-host-only \
+    | agent-handoff | sleep-wake | stop-controls | writing) ;;
+*) die "JARVIS_E2E_ONLY names no flow: $only" ;;
 esac
 case "$audio" in
 speakers)
@@ -67,6 +71,8 @@ done
 volume=$(osascript -e 'output volume of (get volume settings)')
 muted=$(osascript -e 'output muted of (get volume settings)')
 calculator_was_open=0
+textedit_was_open=0
+safari_was_open=0
 staged=0
 
 restore() {
@@ -88,6 +94,8 @@ restore() {
         done
         osascript -e "set volume output volume $volume" -e "set volume output muted $muted"
         [ "$calculator_was_open" = 1 ] && open -g -b com.apple.calculator
+        if [ "$textedit_was_open" = 0 ]; then "$helper" discard com.apple.TextEdit; "$helper" quit com.apple.TextEdit 10; fi
+        [ "$safari_was_open" = 0 ] && "$helper" quit com.apple.Safari 10
         if [ -s "$tmp/owner-jarvis" ]; then
             while IFS= read -r path; do [ -n "$path" ] && open -g "$path"; done <"$tmp/owner-jarvis"
         fi
@@ -106,9 +114,19 @@ cp "$here/fixtures/Board-Info.plist" "$board/Contents/Info.plist"
 xcrun swiftc -O -o "$board/Contents/MacOS/Board" "$here/fixtures/Board.swift"
 codesign --force --sign - "$board" >/dev/null 2>&1
 
+# The helper and the engine act through the grants of the app running this
+# script. Only check them: asking would put a prompt on the owner's screen.
+grants=$("$helper" grants)
+case "$grants" in
+*"accessibility=true"*"screen-recording=true"*) ;;
+*) die "grant the app running make e2e (Capy or Terminal) Accessibility and Screen Recording in System Settings → Privacy & Security, then rerun ($grants)" ;;
+esac
+
 # --- Clear the stage: Jarvis allows one copy, and the flows open Calculator. --
 "$helper" paths "$bundle" >"$tmp/owner-jarvis"
 [ "$("$helper" count com.apple.calculator)" = 0 ] || calculator_was_open=1
+[ "$("$helper" count com.apple.TextEdit)" = 0 ] || textedit_was_open=1
+[ "$("$helper" count com.apple.Safari)" = 0 ] || safari_was_open=1
 staged=1
 if [ -s "$tmp/owner-jarvis" ]; then
     echo "e2e: quitting the running Jarvis; it reopens when the run ends"
@@ -133,5 +151,7 @@ flow() { # flow <target> <name>...
     node_modules/.bin/e2e run --target "$target" "${files[@]}" || failed=1
 }
 flow first-run first-run
-flow jarvis show-names-click screen-question wake-word stop-scroll
+flow jarvis show-names-click screen-question wake-word stop-scroll daemon-host-only stop-controls agent-handoff sleep-wake
+flow tracker hardened-runtime
+flow live writing
 exit "$failed"
