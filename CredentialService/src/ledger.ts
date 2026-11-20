@@ -1,4 +1,4 @@
-export type Route = "realtime" | "responses" | "jev";
+export type Route = "realtime" | "live" | "responses" | "jev";
 
 export interface Limits {
   perMinute: Record<Route, number>;
