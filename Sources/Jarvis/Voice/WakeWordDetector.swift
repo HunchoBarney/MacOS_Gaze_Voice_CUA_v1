@@ -11,6 +11,7 @@ final class Vosk: @unchecked Sendable {
     typealias Handle = OpaquePointer
 
     private let model: Handle
+    private let findWord: @convention(c) (Handle, UnsafePointer<CChar>) -> Int32
     private let newRecognizer: @convention(c) (Handle, Float, UnsafePointer<CChar>) -> Handle?
     private let setWords: @convention(c) (Handle, Int32) -> Void
     private let acceptWaveform: @convention(c) (Handle, UnsafePointer<Int16>, Int32) -> Int32
@@ -54,6 +55,7 @@ final class Vosk: @unchecked Sendable {
         }
         try symbol("vosk_set_log_level", (@convention(c) (Int32) -> Void).self)(-1)
         let newModel = try symbol("vosk_model_new", (@convention(c) (UnsafePointer<CChar>) -> Handle?).self)
+        findWord = try symbol("vosk_model_find_word", (@convention(c) (Handle, UnsafePointer<CChar>) -> Int32).self)
         newRecognizer = try symbol("vosk_recognizer_new_grm", (@convention(c) (Handle, Float, UnsafePointer<CChar>) -> Handle?).self)
         setWords = try symbol("vosk_recognizer_set_words", (@convention(c) (Handle, Int32) -> Void).self)
         acceptWaveform = try symbol("vosk_recognizer_accept_waveform_s", (@convention(c) (Handle, UnsafePointer<Int16>, Int32) -> Int32).self)
@@ -67,6 +69,9 @@ final class Vosk: @unchecked Sendable {
         }
         self.model = model
     }
+
+    /// Whether the model can hear `word`; a grammar silently drops any it can't.
+    func knows(_ word: String) -> Bool { findWord(model, word) >= 0 }
 
     /// A recognizer that may only hear the given phrases, or `[unk]`.
     final class Recognizer {
@@ -140,11 +145,14 @@ final class WakePhraseSpotter {
     init(name: String, vosk: Vosk) throws {
         let words = Self.words(name)
         guard !words.isEmpty else { throw VoiceError("The assistant needs a name.") }
+        if let unknown = words.first(where: { !vosk.knows($0) }) {
+            throw VoiceError("The wake word can't hear \"\(unknown)\". Pick another name.")
+        }
         phrase = ["hey"] + words
         let wake = phrase.joined(separator: " ")
         listener = try Vosk.Recognizer(vosk, sampleRate: Self.sampleRate, phrases: [wake])
         checker = try Vosk.Recognizer(vosk, sampleRate: Self.sampleRate,
-                                      phrases: [wake] + Self.rivals(excluding: Set(words)).map { "hey \($0)" }, words: true)
+                                      phrases: [wake] + Self.rivals(excluding: Set(words)).filter(vosk.knows).map { "hey \($0)" }, words: true)
     }
 
     /// Lowercased words of a typed name, as the model spells them.

@@ -31,6 +31,11 @@ final class WakeWordDetectorTests: XCTestCase {
         XCTAssertEqual(try wakes(spotter, "Hey Nova, open Mail."), 1)
     }
 
+    func testANameTheModelCantHearIsRefused() throws {
+        XCTAssertThrowsError(try WakePhraseSpotter(name: "Karanvir", vosk: try engine()))
+        XCTAssertNoThrow(try WakePhraseSpotter(name: "Jarvis", vosk: try engine()))
+    }
+
     private func engine() throws -> Vosk {
         guard Vosk.directory() != nil else { throw XCTSkip("Vosk isn't fetched: run ThirdParty/Vosk/fetch.sh") }
         return try Vosk.shared()
