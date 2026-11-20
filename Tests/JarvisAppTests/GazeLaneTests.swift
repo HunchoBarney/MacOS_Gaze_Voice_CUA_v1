@@ -79,6 +79,35 @@ final class GazeLaneTests: XCTestCase {
         }
     }
 
+    /// JARA-38: "in/on/with" inside a control's name stays in the name;
+    /// only a tail that is an app on this Mac scopes the click.
+    func testControlNamesKeepTheirPrepositions() {
+        for (phrase, name) in [("click log in with google", "log in with google"),
+                               ("click sign in with apple", "sign in with apple"),
+                               ("click turn on wifi", "turn on wifi"),
+                               ("click open in new window", "open in new window")] {
+            let parsed = FastAction.parse(phrase)
+            guard case .clickNamed(let got) = parsed?.action.body else {
+                XCTFail("'\(phrase)' names a control, got \(String(describing: parsed?.action.body))")
+                continue
+            }
+            XCTAssertEqual(got, name, phrase)
+            XCTAssertNil(parsed?.appQualifier, phrase)
+        }
+        // A trailing "tab" is dropped as a control noun, like "button".
+        guard case .clickNamed("open in new") = FastAction.parse("click open in new tab")?.action.body else {
+            return XCTFail("'click open in new tab' names a control")
+        }
+        XCTAssertNil(FastAction.parse("click open in new tab")?.appQualifier)
+        let scoped = FastAction.parse("click sign in in safari")
+        guard case .clickNamed("sign in") = scoped?.action.body else {
+            return XCTFail("'click sign in in safari' clicks Sign in, got \(String(describing: scoped?.action.body))")
+        }
+        XCTAssertEqual(scoped?.appQualifier, "safari")
+        XCTAssertTrue(FastAction.isAppOnThisMac("Safari"))
+        XCTAssertFalse(FastAction.isAppOnThisMac("new tab"))
+    }
+
     // MARK: - Dispatch
 
     private final class FakeDriver {

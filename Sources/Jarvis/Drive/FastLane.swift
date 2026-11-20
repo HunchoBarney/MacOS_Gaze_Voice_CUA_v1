@@ -323,7 +323,16 @@ struct FastAction: Sendable {
            let named = parseNamed(command) {
             return (named, display.scoped ? Self.gazeDisplayQualifier : nil)
         }
-        if let split = splitAppQualifier(command) {
+        // A named control keeps its own "in/on/with" words ("click Sign in
+        // with Apple", "click Turn on Wi-Fi"): the tail scopes the click to
+        // an app only when it names one on this Mac.
+        if let split = splitAppQualifier(command), gazeTable[split.command] == nil,
+           table[split.command] == nil, parseNamed(command) != nil {
+            if let app = splitKnownApp(command) {
+                command = app.command
+                qualifier = app.qualifier
+            }
+        } else if let split = splitAppQualifier(command) {
             command = split.command
             qualifier = split.qualifier
         }
@@ -1110,6 +1119,31 @@ struct FastAction: Sendable {
 
     /// Peel a trailing "in/on/with/using <app>" qualifier. Only peels when the
     /// remainder is non-empty, so "tab in" never degrades to a bare command.
+    /// The rightmost "in/on/with … <App>" split whose tail is an app that's
+    /// running or installed — "click sign in in safari" splits at the
+    /// second "in".
+    private static func splitKnownApp(_ words: String) -> (command: String, qualifier: String)? {
+        guard let expression = try? NSRegularExpression(pattern: #"\s(?:in|on|inside|with|using)(?=\s+\S)"#)
+        else { return nil }
+        for match in expression.matches(in: words, range: NSRange(words.startIndex..., in: words)).reversed() {
+            guard let range = Range(match.range, in: words) else { continue }
+            let command = words[..<range.lowerBound].trimmingCharacters(in: .whitespaces)
+            let app = words[range.upperBound...].trimmingCharacters(in: .whitespaces)
+            if !command.isEmpty, isAppOnThisMac(app) { return (command, app) }
+        }
+        return nil
+    }
+
+    static func isAppOnThisMac(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        if NSWorkspace.shared.runningApplications.contains(where: { $0.localizedName?.lowercased() == lower }) {
+            return true
+        }
+        return ["/Applications", "/System/Applications", "/System/Applications/Utilities",
+                NSHomeDirectory() + "/Applications"]
+            .contains { FileManager.default.fileExists(atPath: "\($0)/\(name).app") }
+    }
+
     private static func splitAppQualifier(_ words: String) -> (command: String, qualifier: String)? {
         guard let range = words.range(
             of: #"\s(?:in|on|inside|with|using)\s+([a-z0-9][a-z0-9 ]*)$"#,

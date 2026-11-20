@@ -21,6 +21,9 @@ final class FirstRunModel: ObservableObject {
     let policy: ListeningPolicy
     let steps: [Step]
     @Published private(set) var step: Step
+    /// The listening choice, held until the microphone step has explained
+    /// itself: saving Hands-free any earlier would open the mic at once.
+    @Published var listeningMode: ListeningMode
     @Published private(set) var microphone: Grant = .notAsked
     @Published private(set) var accessibility: Grant = .notAsked
     /// Calculator opened while the try-it step was showing.
@@ -32,9 +35,12 @@ final class FirstRunModel: ObservableObject {
     var requestMicrophone: () async -> Void = { await Permission.microphone.request() }
     var requestAccessibility: () async -> Void = { await Permission.accessibility.request() }
     var openSystemSettings: (Permission) -> Void = { $0.openSystemSettings() }
+    /// Saves the listening choice — once, on reaching the try-it step.
+    var saveListeningMode: (ListeningMode) -> Void = { _ in }
 
-    init(policy: ListeningPolicy = .current) {
+    init(policy: ListeningPolicy = .current, listeningMode: ListeningMode? = nil) {
         self.policy = policy
+        self.listeningMode = listeningMode ?? policy.defaultMode
         steps = Step.allCases.filter { $0 != .standbyIntro || policy.showsStandbyIntro }
         step = steps[0]
     }
@@ -72,6 +78,7 @@ final class FirstRunModel: ObservableObject {
     func advance() {
         guard let index = steps.firstIndex(of: step), index + 1 < steps.count else { return }
         step = steps[index + 1]
+        if step == .tryIt { saveListeningMode(listeningMode) }
     }
 
     func applicationLaunched(bundleID: String?) {
@@ -89,9 +96,17 @@ final class FirstRunModel: ObservableObject {
 }
 
 struct FirstRunView: View {
-    @StateObject private var model = FirstRunModel()
+    @StateObject private var model: FirstRunModel
     @ObservedObject var config: Config
     var finish: () -> Void
+
+    init(config: Config, finish: @escaping () -> Void) {
+        let model = FirstRunModel(listeningMode: config.listeningMode)
+        model.saveListeningMode = { config.listeningMode = $0 }
+        _model = StateObject(wrappedValue: model)
+        self.config = config
+        self.finish = finish
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -136,10 +151,10 @@ struct FirstRunView: View {
             VStack(spacing: 10) {
                 ForEach(model.policy.offeredModes, id: \.self) { mode in
                     ListeningChoice(mode: mode, recommended: mode == model.policy.defaultMode,
-                                    selected: config.listeningMode == mode) { config.listeningMode = mode }
+                                    selected: model.listeningMode == mode) { model.listeningMode = mode }
                 }
             }
-            Text("What you say to Jarvis goes to OpenAI so it can understand you. Silence and room noise stay on your Mac.")
+            Text(model.listeningMode.disclosure)
                 .font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 14)

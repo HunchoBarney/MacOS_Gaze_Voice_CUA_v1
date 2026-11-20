@@ -717,4 +717,17 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertTrue(config.saveAPIKey("ts-test"))
         XCTAssertFalse(config.needsKeys)
     }
+
+    /// JARA-38: Hands-free without its key puts the message on the card,
+    /// not only in the menu-bar tooltip, and never opens the microphone.
+    func testHandsFreeWithoutKeyShowsTheCard() async {
+        let config = testConfig()
+        let controller = VoiceController(config: config, speech: RealtimeVoiceLane(apiKey: { "" }),
+            authorize: { XCTFail("the microphone must stay closed"); return false },
+            cuaRuntime: testCoordinator(config))
+        addTeardownBlock { await controller.shutdown() }
+        controller.resumeHandsFree()
+        XCTAssertEqual(controller.status, .error(OutcomeWording.missingVoiceKey))
+        XCTAssertEqual(controller.handsFreeState, .unavailable(OutcomeWording.missingVoiceKey))
+    }
 }
