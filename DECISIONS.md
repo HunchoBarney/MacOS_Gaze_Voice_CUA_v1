@@ -31,6 +31,8 @@ Settled choices, newest first. Change one only with a new entry here.
 - Realtime spend is an estimate per minted secret, because the socket goes
   straight to OpenAI. A relay through the Worker would measure it exactly
   but adds a hop to every audio frame.
+- The Live broker sends `delegation: {type: "client"}` because the API
+  rejects the documented `null` (seen in a real connect test, 2026-11-20).
 
 ## 2026-11-20 — Standby opens a session on the wake word
 

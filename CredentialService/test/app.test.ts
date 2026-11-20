@@ -163,7 +163,7 @@ describe("realtime client secrets", () => {
 describe("Live sessions", () => {
   const fixed = (installHash: string) => ({
     model: "gpt-live-1.1",
-    delegation: null,
+    delegation: { type: "client" },
     store: false,
     idle_timeout_s: 8,
     wake_policy: { type: "speech" },

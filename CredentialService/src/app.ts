@@ -232,7 +232,7 @@ export function createApp(deps: Deps) {
     }
     const session: Record<string, unknown> = {
       model: config.liveModel,
-      delegation: null,
+      delegation: { type: "client" },
       store: false,
       idle_timeout_s: idleTimeout,
       wake_policy: vadThreshold === undefined ? { type: "speech" } : { type: "speech", vad_threshold: vadThreshold },
