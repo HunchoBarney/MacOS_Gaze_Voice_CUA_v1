@@ -234,6 +234,18 @@ final class ProactiveEngineTests: XCTestCase {
         XCTAssertEqual(voice.spoken.last, "Dana later. Want me to help?")
     }
 
+    func testASnoozeAlsoReachesAlertsAlreadyWaitingInABundle() {
+        engine.submit([alert(.urgentMessage, "Sam", sender: "Sam")])
+        advance(10)
+        engine.submit([alert(.urgentMessage, "Dana", sender: "Dana")])
+        XCTAssertEqual(engine.bundle.count, 1)
+        settings.learning.notNow([alert(.urgentMessage, sender: "Dana")], now: now)
+        advance(120)
+        engine.tick()
+        XCTAssertEqual(voice.spoken.count, 1)
+        XCTAssertEqual(engine.glow.map(\.headline), ["Dana"])
+    }
+
     func testNotNowWithoutASenderSnoozesTheSource() {
         engine.submit([alert(.meetingNow, source: .calendar)])
         _ = engine.handleReply("later")
@@ -345,6 +357,25 @@ final class ProactiveEngineTests: XCTestCase {
         }
         XCTAssertTrue(seed.contains("Standup starts now. Want me to help?"))
         XCTAssertTrue(seed.contains("who's in it?"))
+    }
+
+    func testTheReplyWindowStaysOpenWhileTheAlertIsStillBeingSpoken() {
+        let first = alert(.meetingNow, "A"), second = alert(.reminder, "B")
+        engine.submit([first, second])
+        situation.jarvisSpeaking = true
+        advance(7)
+        engine.tick()
+        advance(7)
+        engine.tick()
+        situation.jarvisSpeaking = false
+        advance(7)
+        engine.tick()
+        XCTAssertEqual(engine.handleReply("yes"), .accepted([first, second]))
+    }
+
+    func testACurlyApostropheStillDeclines() {
+        engine.submit([alert(.meetingNow)])
+        XCTAssertEqual(engine.handleReply("Don\u{2019}t"), .declined)
     }
 
     func testALateReplyIsIgnored() {

@@ -18,6 +18,7 @@ enum ProactiveReply: Equatable, Sendable {
 
     static func classify(_ text: String) -> ProactiveReply {
         let words = text.lowercased()
+            .replacingOccurrences(of: "\u{2019}", with: "'")
             .map { $0.isLetter || $0.isNumber || $0 == "'" || $0 == " " ? $0 : " " }
             .reduce(into: "") { $0.append($1) }
             .split(separator: " ").map(String.init)

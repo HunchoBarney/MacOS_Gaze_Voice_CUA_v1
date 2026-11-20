@@ -139,6 +139,26 @@ final class ProactiveSourceRulesTests: XCTestCase {
                                          onCall: false, now: now).isEmpty)
     }
 
+    func testRemoteAccessIsWarnedAgainAnHourLaterAndFoundByNameAlone() {
+        let first = SafetyRules.alerts(page: nil, frontBundleID: nil, frontAppName: "TeamViewer QuickSupport",
+                                       onCall: true, now: now)
+        let later = SafetyRules.alerts(page: nil, frontBundleID: nil, frontAppName: "TeamViewer QuickSupport",
+                                       onCall: true, now: now.addingTimeInterval(3_600))
+        XCTAssertEqual(first.map(\.offer), ["Want me to quit TeamViewer?"])
+        XCTAssertNotEqual(first.first?.key, later.first?.key)
+    }
+
+    func testAPhishingPageOnGoogleSitesIsFlaggedButGoogleRedirectsAreNot() {
+        let hosted = page([.init(ref: "e1", kind: "text", text: "Verify your account"),
+                           .init(ref: "e2", kind: "link", text: "paypal.com", url: "https://sites.google.com/view/paypal-verify")])
+        let redirect = page([.init(ref: "e1", kind: "text", text: "Sign in"),
+                             .init(ref: "e2", kind: "link", text: "nytimes.com", url: "https://www.google.com/url?q=nytimes.com")])
+        XCTAssertEqual(SafetyRules.alerts(page: hosted, frontBundleID: "com.apple.Safari", frontAppName: "Safari",
+                                          onCall: false, now: now).count, 1)
+        XCTAssertTrue(SafetyRules.alerts(page: redirect, frontBundleID: "com.apple.Safari", frontAppName: "Safari",
+                                         onCall: false, now: now).isEmpty)
+    }
+
     // MARK: Banners
 
     func testBannersRankByWatchesAndImportantPeople() {

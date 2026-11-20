@@ -1,7 +1,8 @@
 import Foundation
 
 /// What the person is doing right now, read fresh before every spoken
-/// alert. `focus` is nil when macOS won't say (no Focus permission).
+/// alert. `jarvisSpeaking` includes the one-way alert voice. `focus` is
+/// nil when macOS won't say (no Focus permission).
 struct ProactiveContext: Equatable, Sendable {
     var userTalking = false
     var jarvisSpeaking = false
