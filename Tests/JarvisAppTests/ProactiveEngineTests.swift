@@ -234,6 +234,18 @@ final class ProactiveEngineTests: XCTestCase {
         XCTAssertEqual(voice.spoken.last, "Dana later. Want me to help?")
     }
 
+    func testASnoozeAlsoReachesAlertsAlreadyWaitingInABundle() {
+        engine.submit([alert(.urgentMessage, "Sam", sender: "Sam")])
+        advance(10)
+        engine.submit([alert(.urgentMessage, "Dana", sender: "Dana")])
+        XCTAssertEqual(engine.bundle.count, 1)
+        settings.learning.notNow([alert(.urgentMessage, sender: "Dana")], now: now)
+        advance(120)
+        engine.tick()
+        XCTAssertEqual(voice.spoken.count, 1)
+        XCTAssertEqual(engine.glow.map(\.headline), ["Dana"])
+    }
+
     func testNotNowWithoutASenderSnoozesTheSource() {
         engine.submit([alert(.meetingNow, source: .calendar)])
         _ = engine.handleReply("later")

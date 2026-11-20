@@ -144,6 +144,11 @@ final class ProactiveEngine: ObservableObject {
         var speak: [ProactiveAlert] = []
         for alert in alerts {
             if isStale(alert, now) { file(alert); continue }
+            switch ProactiveRanker.tier(for: alert, level: settings.level, learning: settings.learning, now: now) {
+            case .digest: file(alert); continue
+            case .glow: glow.append(alert); continue
+            case .speakNow: break
+            }
             switch ProactiveSuppression.verdict(for: alert, in: situation) {
             case .hold: held.append(alert)
             case .card:

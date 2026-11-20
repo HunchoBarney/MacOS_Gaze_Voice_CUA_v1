@@ -16,12 +16,21 @@ enum SafetyRules {
         "com.connectwise.control": "ScreenConnect", "com.ultraviewer.UltraViewer": "UltraViewer",
     ]
     /// Link shorteners and mail trackers whose address never matches the
-    /// words they wrap.
-    private static let redirectors: Set<String> = [
+    /// words they wrap, by site.
+    private static let redirectorSites: Set<String> = [
         "t.co", "bit.ly", "lnkd.in", "ow.ly", "tinyurl.com", "goo.gl", "list-manage.com", "sendgrid.net",
-        "mandrillapp.com", "mailchi.mp", "hubspotlinks.com", "outlook.com", "google.com", "facebook.com",
-        "linkedin.com", "mcusercontent.com", "substack.com", "beehiiv.com", "mailgun.org", "awstrack.me",
+        "mandrillapp.com", "mailchi.mp", "hubspotlinks.com", "mcusercontent.com", "substack.com", "beehiiv.com",
+        "mailgun.org", "awstrack.me",
     ]
+    /// Redirect hosts on sites that also host pages anyone can make
+    /// (Google Sites and Forms), so only the exact redirect host is skipped.
+    private static let redirectorHosts: Set<String> = [
+        "www.google.com", "google.com", "l.facebook.com", "lm.facebook.com", "www.linkedin.com",
+        "safelinks.protection.outlook.com",
+    ]
+    /// One remote-access warning per tool per hour, so a second scam call
+    /// later the same day is warned again.
+    static let remoteWarningPeriod: TimeInterval = 3_600
     private static let signInWords = [
         "sign in", "log in", "login", "verify your", "confirm your", "account suspended", "unusual activity",
         "update your payment", "password",
@@ -30,9 +39,10 @@ enum SafetyRules {
     static func alerts(page digest: ScreenDigest?, frontBundleID: String?, frontAppName: String?,
                        onCall: Bool, now: Date) -> [ProactiveAlert] {
         var alerts: [ProactiveAlert] = []
-        if onCall, let bundleID = frontBundleID, let tool = remoteAccess[bundleID] ?? frontAppName.flatMap(remoteName) {
+        if onCall, let tool = frontBundleID.flatMap({ remoteAccess[$0] }) ?? frontAppName.flatMap(remoteName) {
+            let period = Int(now.timeIntervalSince1970 / remoteWarningPeriod)
             alerts.append(ProactiveAlert(
-                key: "safety.remote.\(tool)", source: .safety, category: .security,
+                key: "safety.remote.\(tool).\(period)", source: .safety, category: .security,
                 headline: "Careful: callers who ask you to open \(tool) are often scammers, so hang up if you don't know them",
                 offer: "Want me to quit \(tool)?", action: .request("quit \(tool)"), at: now))
         }
@@ -52,7 +62,8 @@ enum SafetyRules {
         if asksToSignIn {
             for item in digest.items where item.kind == "link" {
                 guard let mismatch = ScamSignals.linkMismatch(text: item.text, url: item.url),
-                      !redirectors.contains(ScamSignals.site(mismatch.actual)) else { continue }
+                      !redirectorSites.contains(ScamSignals.site(mismatch.actual)),
+                      !redirectorHosts.contains(mismatch.actual) else { continue }
                 alerts.append(ProactiveAlert(
                     key: "safety.link.\(page).\(mismatch.actual)", source: .safety, category: .security,
                     headline: "Careful: a link here says \(mismatch.shown) but goes to \(mismatch.actual)",
