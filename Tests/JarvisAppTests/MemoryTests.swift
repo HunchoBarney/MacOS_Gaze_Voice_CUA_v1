@@ -179,7 +179,8 @@ final class MemoryCommandsTests: MemoryTestCase {
         XCTAssertEqual(MemoryIntent.parse("Forget that."), .forgetLast)
         XCTAssertEqual(MemoryIntent.parse("don't remember this"), .forgetLast)
         for other in ["remember to buy milk", "remember when we met", "open Calculator",
-                      "do you remember Dana", "forget about the meeting", "remember", "who's"] {
+                      "do you remember Dana", "forget about the meeting", "remember", "who's",
+                      "who's that", "who is it", "who's there"] {
             XCTAssertNil(MemoryIntent.parse(other), other)
         }
     }
@@ -226,6 +227,7 @@ final class MemoryCommandsTests: MemoryTestCase {
             overlay: TargetOverlay())
         defer { c.shutdown() }
         c.memoryCommands = MemoryCommands(store: { s })
+        c.memoryStore = { s }
 
         let remembered = await c.beginVoiceTask("Remember my gate code is 4417")
         XCTAssertTrue(remembered.contains("I'll remember that"), remembered)

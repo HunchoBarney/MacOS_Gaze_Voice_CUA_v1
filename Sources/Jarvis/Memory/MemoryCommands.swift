@@ -33,6 +33,7 @@ enum MemoryIntent: Equatable {
                                    ("who's ", false), ("who is ", false)] where lower.hasPrefix(prefix) {
             var subject = String(text.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
             if subject.lowercased().hasPrefix("my ") { subject = String(subject.dropFirst(3)) }
+            guard explicit || MemoryStore.anyWordPattern(subject) != nil else { return nil }
             return subject.isEmpty ? nil : .recall(subject, explicit: explicit)
         }
         return nil
