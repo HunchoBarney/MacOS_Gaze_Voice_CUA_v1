@@ -28,6 +28,11 @@ die() { echo "e2e: $*" >&2; exit 2; }
     || die "$app is not $bundle"
 codesign --verify --strict "$app" || die "$app fails codesign --verify"
 case "$trigger" in fn | wake) ;; *) die "JARVIS_E2E_TRIGGER is fn or wake" ;; esac
+case "$only" in
+"" | first-run | show-names-click | screen-question | wake-word) ;;
+fn-command) [ "$trigger" = fn ] || die "fn-command runs only with JARVIS_E2E_TRIGGER=fn" ;;
+*) die "JARVIS_E2E_ONLY is first-run, fn-command, show-names-click, screen-question or wake-word" ;;
+esac
 case "$audio" in
 speakers)
     # The lines go out of the built-in speakers and into the built-in microphone.
