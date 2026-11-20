@@ -22,6 +22,8 @@ struct GuideHint: Sendable, Equatable {
     /// The more detailed repeat: "It's grey, with a paperclip picture, next to the smiley face."
     var detail: String? = nil
     /// What a consequential press does, after "This one": "sends it to Linda".
+    /// A recipe names it for presses the consequence words miss, such as
+    /// Update Now or Print.
     var effect: String? = nil
     /// What the step should change.
     var expect: GuideExpectation? = nil
@@ -214,8 +216,7 @@ enum StepPhrasing {
                 + (typing.map { " Then type \u{201C}\($0)\u{201D}." } ?? "")
             let consequence = Consequence.of(control: label)
             let effect = hint?.effect ?? consequence.flatMap(consequenceEffect)
-            let line = consequence != nil && effect != nil
-                ? "This one \(effect!). \(verb) \(name) when you're ready." : nil
+            let line = effect.map { "This one \($0). \(verb) \(name) when you're ready." }
             return GuideStep(number: number, total: total, action: action, target: element,
                              windowFrame: window, name: name,
                              instruction: "\(verb) \(name)\(at)\(typed).",
@@ -241,8 +242,7 @@ enum StepPhrasing {
             return GuideStep(number: number, total: total, action: action, target: nil,
                              windowFrame: window, name: path.last ?? first, instruction: instruction,
                              detail: hint?.detail ?? instruction, slow: slow,
-                             consequenceLine: consequence != nil && effect != nil
-                                ? "This one \(effect!). \(instruction.dropLast()) when you're ready." : nil,
+                             consequenceLine: effect.map { "This one \($0). \(instruction.dropLast()) when you're ready." },
                              consequence: consequence, expect: hint?.expect ?? .anyChange)
         case .scroll(let direction):
             let instruction = "Scroll \(direction) a little."

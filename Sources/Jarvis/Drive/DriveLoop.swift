@@ -792,6 +792,15 @@ actor DriveLoop {
                         args["urls"] = .array([.string(url)])
                         launchCorpus += " " + url
                     }
+                    // A guide recipe's System Settings link rides the same
+                    // launch; a refused link opens Settings without it and
+                    // the recipe's menu steps get there instead.
+                    let settingsURL = taskURL == nil && bundleID == SettingsLinks.appBundle
+                        ? guide?.settingsURL?.absoluteString : nil
+                    if let url = settingsURL {
+                        args["urls"] = .array([.string(url)])
+                        launchCorpus += " " + url
+                    }
                     // The named task consents to launching its own app —
                     // the name/URL still rides the deny scan; a
                     // model-authored goal rides the standing-grant gate.
@@ -799,7 +808,17 @@ actor DriveLoop {
                                            denied: task.deny, confirmed: &confirmedTask)
                     let launched: JSONValue
                     do {
-                        launched = try await call("launch_app", args)
+                        do {
+                            launched = try await call("launch_app", args)
+                        } catch let error as DriverConnectionError where settingsURL != nil {
+                            switch error {
+                            case .toolRefused, .remote, .refused: break
+                            default: throw error
+                            }
+                            step("the settings link was refused; opening \(appName) without it")
+                            args["urls"] = nil
+                            launched = try await call("launch_app", args)
+                        }
                     } catch let error as DriverConnectionError {
                         // A tool-level refusal is a definitive answer — surface
                         // the driver's reason ("No installed macOS app found…"),

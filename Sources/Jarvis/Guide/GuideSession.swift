@@ -431,7 +431,11 @@ actor GuideSession {
     }
 
     nonisolated let goal: String
+    nonisolated let recipe: Recipe?
     let hints: [GuideHint]
+    /// The recipe's System Settings link when it resolves on this Mac; a
+    /// link that doesn't leaves the recipe's menu steps to get there.
+    nonisolated let settingsURL: URL?
     private(set) var mode: DriveLoop.ExecutionMode = .show
     private(set) var completed: [GuideStep] = []
     private(set) var slow = false
@@ -445,9 +449,12 @@ actor GuideSession {
     private let clock: GuideClock
     private let present: @Sendable (GuideEffect) async -> Void
 
-    init(goal: String, hints: [GuideHint] = [], clock: GuideClock = .live,
+    init(goal: String, recipe: Recipe? = nil, hints: [GuideHint] = [], clock: GuideClock = .live,
+         linkProblem: (SettingsLink) -> String? = { SettingsLinks.problem(with: $0) },
          present: @escaping @Sendable (GuideEffect) async -> Void) {
-        self.goal = goal; self.hints = hints
+        self.goal = goal; self.recipe = recipe
+        self.hints = recipe?.hints ?? hints
+        self.settingsURL = recipe?.link.flatMap { linkProblem($0) == nil ? $0.url : nil }
         self.clock = clock; self.present = present
     }
 
@@ -455,8 +462,12 @@ actor GuideSession {
     var currentStep: GuideStep? { machine?.step }
     var stepNumber: Int { completed.count + 1 }
 
-    func hint(for number: Int) -> GuideHint? {
-        hints.indices.contains(number - 1) ? hints[number - 1] : nil
+    /// The hint whose control names the step Jev chose, the closest
+    /// match first. Hints never pick the step: Jev chose it from the live
+    /// window, and a step no hint names keeps plain guide words.
+    func hint(for action: GuideAction) -> GuideHint? {
+        let scored = hints.map { ($0, $0.score(action)) }.filter { $0.1 > 0 }
+        return scored.max { $0.1 < $1.1 }?.0
     }
 
     /// The recipe's step hints as Jev context, beside the spoken goal.
@@ -464,7 +475,8 @@ actor GuideSession {
         let lines = hints.enumerated().compactMap { index, hint -> String? in
             hint.control.map { "\(index + 1). \($0)" }
         }
-        return lines.isEmpty ? nil : "Guide steps: " + lines.joined(separator: "; ")
+        guard !lines.isEmpty else { return nil }
+        return (recipe.map { $0.context + "\n" } ?? "") + "Guide steps: " + lines.joined(separator: "; ")
     }
 
     /// One patience tick a second, on the session's clock. Tests leave it
@@ -514,7 +526,7 @@ actor GuideSession {
         self.observe = observe
         let scene = await observe()
         let step = StepPhrasing.step(number: stepNumber, action: action, window: scene?.windowFrame,
-                                     scene: scene?.elements ?? [], hint: hint(for: stepNumber))
+                                     scene: scene?.elements ?? [], hint: hint(for: action))
         guard mode == .show else {
             completed.append(step)
             return .act
