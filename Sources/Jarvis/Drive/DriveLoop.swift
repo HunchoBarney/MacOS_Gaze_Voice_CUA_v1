@@ -160,6 +160,10 @@ actor DriveLoop {
     /// The press this task made without asking because the app can take
     /// it back. One per task: a later consequential press asks again.
     private var pendingUndo: PendingUndo?
+    /// Set once this task presses without asking, whether or not the app
+    /// then showed an undo to offer, so a press that left no offer can't
+    /// open the door to another unasked one.
+    private var unaskedPressSpent = false
     let undo: UndoSupport
     var consentAppBundleID: String?
     let ask: AskFn?
@@ -1327,6 +1331,7 @@ actor DriveLoop {
             break
         }
         if let covered { spentCoverage.insert(covered) }
+        if plan != nil { unaskedPressSpent = true }
         if let pressFrame, let press { await glowPress(pressFrame, label: press.label) }
         return plan
     }
@@ -1343,12 +1348,12 @@ actor DriveLoop {
     }
 
     /// The undo route for a press Jarvis chose itself, or nil. It needs
-    /// someone to hear the offer, no earlier undo offer this task, a known
+    /// someone to hear the offer, no earlier unasked press this task, a known
     /// app and window, a registry route, and an app that has an undo
     /// command at all. Archive offers undo only when the person's words
     /// didn't ask for it.
     private func undoPlan(tool: String, args: [String: JSONValue], label: String) async -> UndoPlan? {
-        guard ask != nil, pendingUndo == nil,
+        guard ask != nil, !unaskedPressSpent,
               let pid = args["pid"]?.integer, let windowID = args["window_id"]?.integer,
               let bundleID = consentAppBundleID,
               let route = UndoRegistry.route(tool: tool, args: args, label: label, bundleID: bundleID,
@@ -1386,6 +1391,7 @@ actor DriveLoop {
         spokenGoal = goal
         spentCoverage = []
         pendingUndo = nil
+        unaskedPressSpent = false
     }
 
     /// The control phrase when the person's words name this press and

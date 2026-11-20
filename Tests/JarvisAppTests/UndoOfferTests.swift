@@ -186,6 +186,18 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertEqual(script.asks.value, 1, "a second trash in the same task asks")
     }
 
+    func testAPressThatLeftNoOfferStillSpendsTheTasksUnaskedPress() async throws {
+        let script = Script([trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        var confirmed = false
+        _ = try await loop.dispatch("click", target, elementText: "Move to Trash", denied: [], confirmed: &confirmed)
+        XCTAssertEqual(script.asks.value, 0)
+        _ = try await loop.dispatch("click", target, elementText: "Move to Trash", denied: [], confirmed: &confirmed)
+        XCTAssertEqual(script.asks.value, 1, "an unchanged undo item must not let every later delete skip its question")
+        XCTAssertNil(offers.current)
+    }
+
     func testNoNewUndoMeansNoOffer() async throws {
         let script = Script([copyItem])
         let offers = UndoOffers()
