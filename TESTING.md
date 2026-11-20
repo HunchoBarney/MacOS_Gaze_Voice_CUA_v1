@@ -47,6 +47,13 @@ to come back empty.
 `~/.capy/work/lane/lane.sh --status` shows the running job, how long it has
 run, and the queue in order.
 
+The installed queue is a copy of `scripts/lane.sh`. After changing it, run
+`scripts/test-lane.sh` (fake commands, no Swift) and install it with
+`install -m 755 scripts/lane.sh ~/.capy/work/lane/lane.sh`. A job that holds the
+lock keeps it until it has run, even when a high-priority ticket arrives
+while it waits for another build, and stopping the queue stops every process
+the job started.
+
 Don't build in your own worktree as well: that adds a second cold `.build`
 (400 MB–1.4 GB) and holds the lane for minutes. Local CI keeps its own
 checkout under `~/.capy/work/local-ci`. Never point either at the owner's
