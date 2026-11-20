@@ -11,9 +11,8 @@ import { desktop } from '@e2e-dev/desktop';
 const appPath = process.env.JARVIS_E2E_APP ?? (process.env.HOME ?? '') + '/jarvis-local/Jarvis.app';
 const engine = desktop({ binary: process.env.AGENT_DESKTOP_BINARY });
 
-/** Quiet and camera-free: no eye tracker, no spoken replies, no cue tones, no agent cursor. */
+/** Quiet: no spoken replies, no cue tones, no agent cursor. Each target says whether the eye tracker runs. */
 const quiet = [
-  '-gazeTracking', '<false/>',
   '-ttsEnabled', '<false/>',
   '-soundsEnabled', '<false/>',
   '-agentCursorEnabled', '<false/>',
@@ -22,21 +21,28 @@ const quiet = [
   '-microphoneUID', process.env.JARVIS_E2E_MICROPHONE ?? '',
 ];
 
+/** Set up, with Settings open, waiting for "Hey Jarvis". */
+const standby = ['--settings', '-firstRunCompleted', '<true/>', '-listeningMode', 'standby'];
+
 export default {
   projectId: 'jarvis-e2e',
   tests: 'tests/**/*.e2e.ts',
   targets: [
-    { name: 'first-run', engine, app: { appPath, launchArguments: ['--first-run', ...quiet] } },
+    { name: 'first-run', engine, app: { appPath, launchArguments: ['--first-run', '-gazeTracking', '<false/>', ...quiet] } },
+    { name: 'jarvis', engine, app: { appPath, launchArguments: [...standby, '-gazeTracking', '<false/>', ...quiet] } },
+    /** The eye tracker on: it needs Jarvis's own camera grant. */
+    { name: 'tracker', engine, app: { appPath, launchArguments: [...standby, '-gazeTracking', '<true/>', ...quiet] } },
+    /** GPT-Live work behind the voice.live flag, such as writing by instruction (L7). */
     {
-      name: 'jarvis',
+      name: 'live',
       engine,
-      app: { appPath, launchArguments: ['--settings', '-firstRunCompleted', '<true/>', '-listeningMode', 'standby', ...quiet] },
+      app: { appPath, launchArguments: [...standby, '-voice.live', '<true/>', '-gazeTracking', '<false/>', ...quiet] },
     },
   ],
   workers: 1,
   retries: 0,
   timeout: 120_000,
   launchTimeout: 60_000,
-  maxDuration: 360_000,
+  maxDuration: 900_000,
   output: '.e2e',
 } satisfies E2EConfig;

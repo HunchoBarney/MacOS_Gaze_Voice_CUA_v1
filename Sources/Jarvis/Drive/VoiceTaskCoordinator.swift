@@ -2920,9 +2920,11 @@ final class VoiceTaskCoordinator {
                 guideGlowing = true
                 overlay.showHalo(frame: frame)
             }
+            overlay.guideCallout.show(step)
             onChange()
         case .pulse(let frame):
             overlay.glowPress(frame: frame)
+            overlay.guideCallout.pulse()
         case .say(let line):
             feed.add(.note, line)
             taskEventSink(work.captureID,
@@ -2932,8 +2934,24 @@ final class VoiceTaskCoordinator {
         case .clear:
             work.guideStep = nil
             if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+            overlay.guideCallout.hide()
             onChange()
         }
+    }
+
+    /// A guide button in the indicator: the same control the spoken words
+    /// take, its line spoken the way the walkthrough's own lines are.
+    /// Stop is the universal cancel, as the spoken "stop" is.
+    func guideControl(_ control: GuideControl, workID: UUID) async {
+        guard let work = tasks.first(where: { $0.id == workID }), work.active, let guide = work.guide else { return }
+        feed.add(.route, "button → guide \(control)")
+        guard control != .stop else {
+            cancel(workID)
+            return
+        }
+        let say = await guide.hear(control)
+        guard !say.isEmpty else { return }
+        presentGuide(.say(say), workID: workID)
     }
 
     private func endGuide(_ guide: GuideSession, on work: Work) {
@@ -2941,6 +2959,7 @@ final class VoiceTaskCoordinator {
         work.guideObserver = nil
         work.guideStep = nil
         if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+        overlay.guideCallout.hide()
         Task { await guide.end() }
     }
 
