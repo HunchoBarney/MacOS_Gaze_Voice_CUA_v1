@@ -32,7 +32,7 @@ build:
 
 test:
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
-	swift test
+	swift test --parallel
 	cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts
 	cd EyeTracking && corepack pnpm run typecheck
 	cd EyeTracking && corepack pnpm test

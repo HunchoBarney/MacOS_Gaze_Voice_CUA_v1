@@ -583,7 +583,11 @@ final class TrackerCommandFlowTests: XCTestCase {
     /// pay a roster read, and nothing else should reach the driver.
     private final class FakeDriver {
         var calls: [String] = []
+        private let lock = NSLock()
+
         func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+            lock.lock()
+            defer { lock.unlock() }
             calls.append(tool)
             return .object(["apps": .array([])])
         }
