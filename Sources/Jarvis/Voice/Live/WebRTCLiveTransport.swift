@@ -57,9 +57,10 @@ final class WebRTCLiveTransport: NSObject, LiveTransport, @unchecked Sendable {
             group.addTask { try? await Task.sleep(for: .seconds(3)) }
             await group.next()
             group.cancelAll()
-        }
-        lock.withLock {
-            gathered?.resume(); gathered = nil
+            self.lock.withLock {
+                self.gatheringComplete = true
+                self.gathered?.resume(); self.gathered = nil
+            }
         }
         guard let sdp = peer.localDescription?.sdp else { throw VoiceError("The voice connection has no offer.") }
         return sdp
