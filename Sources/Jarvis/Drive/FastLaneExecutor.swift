@@ -1912,7 +1912,7 @@ extension DriveLoop {
                                   task, history, blockedReason: "locate no pid")
                 }
                 pid = found
-                bundle = nil
+                bundle = try await bundleID(forPID: found, session: session)
                 name = names.first ?? query
                 appRows = matches.filter { $0["pid"]?.integer == found }
             }

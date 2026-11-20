@@ -376,6 +376,20 @@ final class LostWindowLocateTests: XCTestCase {
         XCTAssertEqual(desk.steps.first, "reopen 42")
     }
 
+    /// Chrome keeps a 1×1 phantom row after its last window closes: the name
+    /// matches a row, so the bundle comes from the pid, and the app reopens.
+    func testClosedWindowBehindPhantomRowsIsReopened() async {
+        let desk = FakeDesk()
+        desk.windows = [.init(id: 3, pid: 42, app: "Google Chrome", title: "", frame: CGRect(x: 0, y: 0, width: 1, height: 1))]
+        desk.onReopen = { desk, pid in
+            desk.windows.append(.init(id: 11, pid: pid, app: "Google Chrome", title: "New Tab", frame: CGRect(x: 100, y: 100, width: 800, height: 600)))
+        }
+        let result = await run(desk, "where did chrome go")
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(said(result), "The window was closed, so I opened a new one.")
+        XCTAssertEqual(desk.steps.first, "reopen 42")
+    }
+
     /// TextEdit ships in /System/Applications on every Mac, so the resolver
     /// finds it installed and not running without anything launching.
     func testQuitAppIsOpenedAgain() async {
