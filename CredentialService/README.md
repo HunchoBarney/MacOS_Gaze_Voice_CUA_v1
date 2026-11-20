@@ -53,7 +53,8 @@ Variables (defaults in [src/config.ts](src/config.ts)):
 | `GLOBAL_DAILY_CENTS` | 2000 | Estimated spend across all installs per day ($20) |
 | `REALTIME_PER_MINUTE` / `RESPONSES_PER_MINUTE` / `JEV_PER_MINUTE` | 6 / 20 / 120 | Requests per install per minute |
 | `REGISTRATIONS_PER_IP_PER_DAY` / `REGISTRATIONS_PER_DAY` | 5 / 500 | New installs |
-| `REALTIME_SESSION_CENTS` | 25 | Charged per Realtime secret (the socket goes straight to OpenAI, so this is an estimate) |
+| `REALTIME_SESSION_CENTS` | 5 | Charged per Realtime secret (the socket goes straight to OpenAI, so this is an estimate) |
+| `RESPONSES_RESERVE_CENTS` | 5 | Held against the budgets while a Responses call runs, then settled to its `usage` |
 | `RESPONSES_INPUT_CENTS_PER_MTOK` / `RESPONSES_OUTPUT_CENTS_PER_MTOK` | 200 / 800 | Charged from each response's `usage` |
 | `JEV_CALL_CENTS` | 0.5 | Charged per Jev call |
 | `REALTIME_MODEL` | `gpt-realtime-2.1` | The only Realtime model a secret allows |

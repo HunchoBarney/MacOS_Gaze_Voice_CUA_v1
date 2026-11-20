@@ -93,8 +93,13 @@ export class Ledger {
     return null;
   }
 
-  admit(input: { tokenHash: string; route: Route; limits: Limits; now: number }): { installID: string } | Denial {
-    const { tokenHash, route, limits, now } = input;
+  /**
+   * Checks the kill switch, the install, its budget and its rate, then
+   * charges `reserveCents` at once, so requests in flight together can't
+   * spend past a cap. The caller settles the difference with `charge`.
+   */
+  admit(input: { tokenHash: string; route: Route; reserveCents: number; limits: Limits; now: number }): { installID: string } | Denial {
+    const { tokenHash, route, reserveCents, limits, now } = input;
     if (this.paused()) return PAUSED;
     const install = this.sql.all<{ id: string; revoked_at: number | null }>(
       "SELECT id, revoked_at FROM installs WHERE token_hash = ?", tokenHash)[0];
@@ -105,7 +110,11 @@ export class Ledger {
       return { status: 403, code: "revoked", message: "This Mac's access to Jarvis's service was turned off." };
     }
     const day = utcDay(now);
-    if (this.spent("global", day) >= limits.globalDailyCents) {
+    const overCap = (scope: string, cap: number) => {
+      const spent = this.spent(scope, day);
+      return spent >= cap || spent + reserveCents > cap;
+    };
+    if (overCap("global", limits.globalDailyCents)) {
       return {
         status: 503,
         code: "service_daily_limit",
@@ -113,7 +122,7 @@ export class Ledger {
         retryAfter: untilTomorrow(now),
       };
     }
-    if (this.spent(install.id, day) >= limits.installDailyCents) {
+    if (overCap(install.id, limits.installDailyCents)) {
       return {
         status: 429,
         code: "daily_limit",
@@ -129,11 +138,13 @@ export class Ledger {
         retryAfter: Math.ceil((MINUTE - (now % MINUTE)) / 1000),
       };
     }
+    this.charge({ installID: install.id, cents: reserveCents, now });
     return { installID: install.id };
   }
 
+  /** Adds `cents` to the install's and the global spend for the day; negative refunds. */
   charge(input: { installID: string; cents: number; now: number }): void {
-    if (!(input.cents > 0)) return;
+    if (!Number.isFinite(input.cents) || input.cents === 0) return;
     const day = utcDay(input.now);
     for (const scope of [input.installID, "global"]) {
       this.sql.all(

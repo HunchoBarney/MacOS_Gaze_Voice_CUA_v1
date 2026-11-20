@@ -17,6 +17,7 @@ export interface Config {
   limits: Limits;
   prices: {
     realtimeSessionCents: number;
+    responsesReserveCents: number;
     responsesInputCentsPerMTok: number;
     responsesOutputCentsPerMTok: number;
     jevCallCents: number;
@@ -68,7 +69,8 @@ export function loadConfig(env: Record<string, unknown>): Config {
       registrationsPerDay: number("REGISTRATIONS_PER_DAY", 500),
     },
     prices: {
-      realtimeSessionCents: number("REALTIME_SESSION_CENTS", 25),
+      realtimeSessionCents: number("REALTIME_SESSION_CENTS", 5),
+      responsesReserveCents: number("RESPONSES_RESERVE_CENTS", 5),
       responsesInputCentsPerMTok: number("RESPONSES_INPUT_CENTS_PER_MTOK", 200),
       responsesOutputCentsPerMTok: number("RESPONSES_OUTPUT_CENTS_PER_MTOK", 800),
       jevCallCents: number("JEV_CALL_CENTS", 0.5),

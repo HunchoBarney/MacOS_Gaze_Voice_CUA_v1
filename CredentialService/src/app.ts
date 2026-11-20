@@ -11,7 +11,7 @@ export interface Deps {
   now?: () => number;
 }
 
-type Env = { Variables: { installID: string } };
+type Env = { Variables: { installID: string; spentCents: number } };
 
 const TOKEN = /^jv1_[A-Za-z0-9_-]{43}$/;
 const RESPONSES_FIELDS_ALLOWED = new Set([
@@ -138,16 +138,28 @@ export function createApp(deps: Deps) {
     return c.json({ installID, token }, 201);
   });
 
-  const admitted = (route: Route): MiddlewareHandler<Env> => async (c, next) => {
+  /**
+   * Admits an install for one call: reserves `reserveCents` before the
+   * handler runs, then settles to what the handler recorded in
+   * `spentCents`. A call that fails or is refused is refunded in full.
+   */
+  const admitted = (route: Route, reserveCents: number): MiddlewareHandler<Env> => async (c, next) => {
     const token = bearer(c);
     if (!TOKEN.test(token)) return fail(c, UNKNOWN_INSTALL);
-    const result = await ledger.admit({ tokenHash: await sha256Hex(token), route, limits: config.limits, now: now() });
+    const result = await ledger.admit({
+      tokenHash: await sha256Hex(token), route, reserveCents, limits: config.limits, now: now(),
+    });
     if ("status" in result) return fail(c, result);
     c.set("installID", result.installID);
-    await next();
+    c.set("spentCents", 0);
+    try {
+      await next();
+    } finally {
+      await ledger.charge({ installID: result.installID, cents: c.get("spentCents") - reserveCents, now: now() });
+    }
   };
 
-  app.post("/v1/realtime/client_secret", admitted("realtime"), async (c) => {
+  app.post("/v1/realtime/client_secret", admitted("realtime", config.prices.realtimeSessionCents), async (c) => {
     const reply = await upstream(`${config.openAIBaseURL}/v1/realtime/client_secrets`, {
       method: "POST",
       headers: { authorization: `Bearer ${config.openAIKey}`, "content-type": "application/json" },
@@ -161,11 +173,11 @@ export function createApp(deps: Deps) {
     if (typeof secret?.value !== "string") {
       return fail(c, { status: 502, code: "upstream_error", message: "The model provider returned no client secret." });
     }
-    await ledger.charge({ installID: c.get("installID"), cents: config.prices.realtimeSessionCents, now: now() });
+    c.set("spentCents", config.prices.realtimeSessionCents);
     return c.json({ value: secret.value, expiresAt: secret.expires_at, model: config.realtimeModel });
   });
 
-  app.post("/v1/responses", admitted("responses"), async (c) => {
+  app.post("/v1/responses", admitted("responses", config.prices.responsesReserveCents), async (c) => {
     const parsed = await readJSON(c, config.maxResponsesBytes);
     if ("denial" in parsed) return fail(c, parsed.denial);
     const request = parsed.value;
@@ -191,12 +203,12 @@ export function createApp(deps: Deps) {
     try { usage = JSON.parse(text)?.usage; } catch {}
     const input = tokens(usage?.input_tokens);
     const output = usage ? tokens(usage.output_tokens) : (request.max_output_tokens as number);
-    const cents = (input * config.prices.responsesInputCentsPerMTok + output * config.prices.responsesOutputCentsPerMTok) / 1e6;
-    await ledger.charge({ installID: c.get("installID"), cents, now: now() });
+    c.set("spentCents",
+      (input * config.prices.responsesInputCentsPerMTok + output * config.prices.responsesOutputCentsPerMTok) / 1e6);
     return c.body(text, 200, { "content-type": "application/json" });
   });
 
-  app.post("/v1/jev", admitted("jev"), async (c) => {
+  app.post("/v1/jev", admitted("jev", config.prices.jevCallCents), async (c) => {
     const parsed = await readJSON(c, config.maxJevBytes);
     if ("denial" in parsed) return fail(c, parsed.denial);
     const request = parsed.value;
@@ -214,7 +226,7 @@ export function createApp(deps: Deps) {
       return c.body(text, reply.status, { "content-type": "application/json" });
     }
     if (!reply.ok) return fail(c, upstreamFailure(reply.status));
-    await ledger.charge({ installID: c.get("installID"), cents: config.prices.jevCallCents, now: now() });
+    c.set("spentCents", config.prices.jevCallCents);
     return c.body(text, 200, { "content-type": "application/json" });
   });
 

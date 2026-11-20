@@ -21,7 +21,7 @@ function harness(vars: Record<string, string> = {}) {
       .map((name) => [name, async (...args: any[]) => (local[name] as any)(...args)]),
   ) as LedgerClient;
   const calls: Call[] = [];
-  let reply: (call: Call) => Response = (call) => {
+  let reply: (call: Call) => Response | Promise<Response> = (call) => {
     if (call.url.endsWith("/v1/realtime/client_secrets")) {
       return Response.json({ value: "ek_fixture", expires_at: 1_900_000_000, session: {} });
     }
@@ -367,3 +367,49 @@ describe("configuration", () => {
     }
   });
 });
+
+describe("reservations", () => {
+  it("holds a reservation while calls run, so concurrent calls can't pass the daily cap", async () => {
+    const h = harness({ INSTALL_DAILY_CENTS: "10", RESPONSES_RESERVE_CENTS: "5" });
+    const { installID, token } = await h.register();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    h.setReply(async () => {
+      await held;
+      return Response.json({ output: [], usage: { input_tokens: 1_000, output_tokens: 1_000 } });
+    });
+    const first = h.request("/v1/responses", { token, body: terra });
+    const second = h.request("/v1/responses", { token, body: terra });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const third = await h.request("/v1/responses", { token, body: terra });
+    expect(third.status).toBe(429);
+    expect((await body(third)).error.code).toBe("daily_limit");
+    expect(h.calls).toHaveLength(2);
+    release();
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    const usage = await body(await h.admin("/admin/usage", "GET"));
+    expect(usage.top).toEqual([{ installID, cents: 2 }]);
+  });
+
+  it("refunds a call the provider fails or the service refuses", async () => {
+    const h = harness({ REALTIME_SESSION_CENTS: "25", RESPONSES_RESERVE_CENTS: "5" });
+    const { token } = await h.register();
+    h.setReply(() => new Response("down", { status: 500 }));
+    expect((await h.request("/v1/realtime/client_secret", { token })).status).toBe(502);
+    expect((await h.request("/v1/responses", { token, body: { ...terra, model: "gpt-6.2-astra" } })).status).toBe(400);
+    expect((await h.request("/v1/jev", { token, body: jev })).status).toBe(502);
+    const usage = await body(await h.admin("/admin/usage", "GET"));
+    expect(usage.globalCents).toBe(0);
+  });
+
+  it("refuses a call whose reservation would pass the cap", async () => {
+    const h = harness({ INSTALL_DAILY_CENTS: "30", REALTIME_SESSION_CENTS: "25" });
+    const { token } = await h.register();
+    expect((await h.request("/v1/realtime/client_secret", { token })).status).toBe(200);
+    const over = await h.request("/v1/realtime/client_secret", { token });
+    expect(over.status).toBe(429);
+    expect(h.calls).toHaveLength(1);
+  });
+});
+
