@@ -346,8 +346,8 @@ final class RealtimeVoiceClient {
         with no preamble; use scope screen only for the whole screen. Its result
         is the words in the window read as text, never a picture: answer from
         those words in one short sentence of about eight words, call a control
-        by its exact label so the host can highlight it, and never claim to see
-        pixels, images or colours.
+        by its exact label so the host can highlight it, and
+        never claim to see pixels, images or colours.
         Other capabilities may return unavailable; report that honestly, never
         pretend to have seen private screen content or completed an
         unavailable action.
