@@ -41,7 +41,9 @@ Local CI runs it again at every PR head and on main, and posts the
 When the crew's shared queue `~/.capy/work/lane/lane.sh` is installed,
 `lane-test.sh` hands over to it. It works the same way, but waiters run in
 the order they arrived instead of whichever polls first, and
-`LANE_PRIORITY=high` (local CI, main-blocking jobs) goes to the front.
+`LANE_PRIORITY=high` (main-blocking jobs) goes to the front. Local CI
+doesn't use the queue or the lane lock: it only waits for that `pgrep -x`
+to come back empty.
 `~/.capy/work/lane/lane.sh --status` shows the running job, how long it has
 run, and the queue in order.
 
