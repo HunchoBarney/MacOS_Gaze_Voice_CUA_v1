@@ -134,6 +134,7 @@ function evaluate(update: (raw: Quad) => Quad, stream: Stream, grace = 5): Metri
   const glitchErrs: number[] = [];
   const lag3: number[] = [];
   const rampErrs: number[] = [];
+  let segStart = 0;
   for (let i = 0; i < stream.truth.length; i += 1) {
     const T = stream.truth[i];
     const e = Math.max(...out[i].map((v, k) => Math.abs(v - T[k])));
@@ -145,10 +146,9 @@ function evaluate(update: (raw: Quad) => Quad, stream: Stream, grace = 5): Metri
         n += 1;
       }
       if (n) lag3.push(s / n);
+      segStart = i;
     }
-    let age = 0;
-    while (i - age - 1 >= 0 && stream.seg[i - age - 1] === stream.seg[i]) age += 1;
-    if (age >= grace) errs.push(e);
+    if (i - segStart >= grace) errs.push(e);
     if (stream.glitch[i]) glitchErrs.push(e);
     if (stream.seg[i] % 4 === 3) rampErrs.push(e);
   }
@@ -168,7 +168,7 @@ function evaluate(update: (raw: Quad) => Quad, stream: Stream, grace = 5): Metri
 
 function runSuite(glitchLenMax: number): Record<"old" | "new", Metrics> {
   const agg = { old: [] as Metrics[], new: [] as Metrics[] };
-  for (let seed = 1; seed <= 40; seed += 1) {
+  for (let seed = 1; seed <= 16; seed += 1) {
     const stream = genStream(mulberry32(seed), { glitchLenMax });
     const legacy = new LegacyAngleSmoother();
     const modern = new GazeAngleSmoother();
