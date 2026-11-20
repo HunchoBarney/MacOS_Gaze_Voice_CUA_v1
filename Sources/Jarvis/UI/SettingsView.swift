@@ -212,6 +212,8 @@ struct SettingsView: View {
             Note("Jarvis won't delete things or buy things for you.")
             Divider()
             AgentSignIn(auth: config.codexAuth)
+            Toggle("Agents use GPT-6.1 Terra", isOn: $config.terraScreenAgents)
+            Note("Agents that work on your Mac choose each step with OpenAI's GPT-6.1 Terra instead of Jev, using your OpenAI key. Only the window's text is sent, with passwords and card numbers hidden.")
             Divider()
             HStack {
                 Button("Forget what I've allowed") { CuaStandingGrants.reset() }

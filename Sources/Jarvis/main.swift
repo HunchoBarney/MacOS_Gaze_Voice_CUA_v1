@@ -391,7 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // the MCP child without touching disk. The child forwards every
         // call here, and the app runs the loop with its own keys and grant.
         let drives = CuaDriveServer.Drives(
-            chooser: { JevChooser.make(apiKey: Config.shared.apiKey) },
+            chooser: {
+                guard Config.shared.terraScreenAgents else { return JevChooser.make(apiKey: Config.shared.apiKey) }
+                return TerraChooser.make(client: TerraClient(apiKey: { Config.shared.openAIAPIKey }))
+            },
             granted: { Config.shared.alwaysAllowComputerUse })
         let host = agentDriveHost ?? AgentDriveHost { agent, tool, arguments in
             await drives.run(agent: agent, tool: tool, arguments: arguments)
