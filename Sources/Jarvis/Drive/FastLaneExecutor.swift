@@ -432,13 +432,15 @@ extension DriveLoop {
             }
         }
         // "click open in maps": a control called that in the frontmost
-        // window wins over the app the tail names.
+        // window wins over the app the tail names. Only a label that is or
+        // starts with the phrase counts: a link that merely mentions it
+        // ("How to save in Pages documents") must not win over Pages.
         if let action = resolved.action, case .clickNamed = action.body, let whole = action.wholeName,
            let frontBundle = frontmostBundleID(), let frontPID = frontmostPID(),
            let frontWindow = frontmostWindowID() {
             bindConsentIdentity(name: NSRunningApplication(processIdentifier: pid_t(frontPID))?.localizedName,
                                 bundleID: frontBundle)
-            if let clicked = try await runNamedTarget(whole, clicks: true, pid: frontPID,
+            if let clicked = try await runNamedTarget(whole, clicks: true, anywhere: false, pid: frontPID,
                                                       windowID: frontWindow, windowTitle: "",
                                                       task: task, session: session,
                                                       history: &history, confirmed: &confirmed) {
@@ -1768,7 +1770,7 @@ extension DriveLoop {
     /// labelled controls. One match clicks (or is highlighted); several get
     /// numbers and a question; none returns nil so the drive loop can try
     /// a description the labels don't carry.
-    private func runNamedTarget(_ spoken: String, clicks: Bool, pid: Int, windowID: Int,
+    private func runNamedTarget(_ spoken: String, clicks: Bool, anywhere: Bool = true, pid: Int, windowID: Int,
                                 windowTitle: String, task: DriveTask, session: String,
                                 history: inout [String], confirmed: inout Bool) async throws -> DriveResult? {
         let snap = try await observe("get_window_state",
@@ -1783,7 +1785,7 @@ extension DriveLoop {
             NamedTargetMatch.Candidate(label: e.label.isEmpty ? (e.value ?? "") : e.label,
                                        frame: frame, pressable: !e.actions.isEmpty)
         }
-        let hits = NamedTargetMatch.matches(spoken, in: candidates)
+        let hits = NamedTargetMatch.matches(spoken, in: candidates, anywhere: anywhere)
         guard !hits.isEmpty else {
             history.append("No control called \(spoken) in this window.")
             return nil

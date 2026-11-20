@@ -76,6 +76,18 @@ final class VoiceFirstTests: XCTestCase {
         XCTAssertEqual(NamedTargetMatch.matches("tab", in: [candidate("Settings", x: 0)]), [])
     }
 
+    /// The front-window check for a name ending in an app accepts only an
+    /// exact or starts-with label.
+    func testStrictMatchIgnoresLabelsThatOnlyContainTheName() {
+        let help = [candidate("How to save in Pages documents", x: 0, w: 200)]
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages", in: help), [0])
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages", in: help, anywhere: false), [])
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages",
+                                                in: [candidate("Save in Pages…", x: 0)], anywhere: false), [0])
+        XCTAssertEqual(NamedTargetMatch.matches("save in pages",
+                                                in: [candidate("Save in Pages", x: 0)], anywhere: false), [0])
+    }
+
     func testTwoButtonsWithTheSameNameAreAmbiguous() {
         let c = [candidate("Send", x: 0), candidate("Send", x: 300)]
         XCTAssertEqual(NamedTargetMatch.matches("Send!", in: c), [0, 1])

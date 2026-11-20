@@ -845,6 +845,33 @@ final class FastLaneExecutorTests: XCTestCase {
         XCTAssertFalse(driver.calls.contains { $0.tool == "launch_app" })
     }
 
+    /// "click Save in Pages": a front-window link that only mentions the
+    /// phrase ("How to save in Pages documents") is never clicked for it.
+    func testWholeNameNeedsAnExactOrLeadingLabel() async throws {
+        var action = try XCTUnwrap(FastAction.parse("click save")).action
+        action.wholeName = "save in pages"
+        let driver = FakeDriver()
+        driver.responses["get_window_state"] = [.object([
+            "pid": .number(4242), "window_id": .number(9),
+            "elements": .array([.object([
+                "element_index": .number(1), "role": .string("AXLink"),
+                "label": .string("How to save in Pages documents"), "element_token": .string("front-help"),
+                "actions": .array([.string("AXPress")]),
+                "frame": .object(["x": .number(10), "y": .number(10), "w": .number(240), "h": .number(20)]),
+            ])]),
+        ])]
+        let loop = DriveLoop(call: { try driver.call($0, $1) },
+            choose: { _, _ in nil }, ask: nil, granted: { true },
+            frontmostBundleID: { "fixture.front" }, frontmostPID: { 4242 }, frontmostWindowID: { 9 })
+        var history: [String] = [], confirmed = false
+        _ = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: action, openVerb: nil, name: "Pages", bundle: "com.apple.iWork.Pages"),
+            task: DriveTask(goal: "click save in pages"), session: "whole-name-strict", history: &history,
+            confirmed: &confirmed)
+        XCTAssertFalse(driver.calls.contains { $0.tool == "click" && $0.args["element_token"] == .string("front-help") })
+        XCTAssertTrue(history.contains("No control called save in pages in this window."))
+    }
+
     func testNativeProofCannotBypassNamedOrPinnedWindowInventory() async throws {
         for named in [false, true] {
             let driver = FakeDriver(), proofs = LockedBox(0)

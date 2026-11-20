@@ -1832,23 +1832,26 @@ enum NamedTargetMatch {
     /// Indices into `candidates` of the controls the name matches. The
     /// whole name is tried first, so "open in new tab" finds Open in New
     /// Tab; a trailing role word is dropped only when nothing matches.
-    static func matches(_ name: String, in candidates: [Candidate]) -> [Int] {
-        let hits = tieredMatches(normalize(name), in: candidates)
+    /// `anywhere: false` accepts only labels that are or start with the
+    /// name, never a longer label that merely contains it.
+    static func matches(_ name: String, in candidates: [Candidate], anywhere: Bool = true) -> [Int] {
+        let hits = tieredMatches(normalize(name), in: candidates, anywhere: anywhere)
         var words = normalize(name).split(separator: " ")
         guard hits.isEmpty, words.count > 1, let last = words.last, roleWords.contains(String(last))
         else { return hits }
         words.removeLast()
-        return tieredMatches(words.joined(separator: " "), in: candidates)
+        return tieredMatches(words.joined(separator: " "), in: candidates, anywhere: anywhere)
     }
 
-    private static func tieredMatches(_ query: String, in candidates: [Candidate]) -> [Int] {
+    private static func tieredMatches(_ query: String, in candidates: [Candidate],
+                                      anywhere: Bool) -> [Int] {
         guard !query.isEmpty else { return [] }
         let labels = candidates.map { normalize($0.label) }
-        let tiers: [(String) -> Bool] = [
+        var tiers: [(String) -> Bool] = [
             { $0 == query },
-            { $0.hasPrefix(query + " ") },
-            { (" " + $0 + " ").contains(" " + query + " ") }
+            { $0.hasPrefix(query + " ") }
         ]
+        if anywhere { tiers.append { (" " + $0 + " ").contains(" " + query + " ") } }
         for tier in tiers {
             let hits = labels.indices.filter { !labels[$0].isEmpty && tier(labels[$0]) }
             if !hits.isEmpty { return collapse(hits, in: candidates) }
