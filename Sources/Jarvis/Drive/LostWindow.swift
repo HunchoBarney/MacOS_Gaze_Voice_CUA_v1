@@ -70,7 +70,7 @@ enum LostWindow {
             return .minimized(window: docked.id)
         }
         if let full = facts.windows.first(where: {
-            $0.fullScreen == true || isDisplaySized($0.frame, on: facts.displays)
+            $0.fullScreen ?? isDisplaySized($0.frame, on: facts.displays)
         }) {
             return .fullScreen(window: full.id)
         }

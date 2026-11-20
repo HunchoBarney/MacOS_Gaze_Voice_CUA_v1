@@ -191,6 +191,8 @@ final class LostWindowDiagnosisTests: XCTestCase {
         let zoomed = CGRect(x: 0, y: 25, width: 1440, height: 800)
         XCTAssertEqual(LostWindow.diagnose(facts([.init(id: 9, frame: zoomed, onScreen: false)])),
                        .otherDesktop(window: 9), "a zoomed window isn't full screen")
+        XCTAssertEqual(LostWindow.diagnose(facts([.init(id: 10, frame: display, onScreen: false, fullScreen: false)])),
+                       .otherDesktop(window: 10), "AXFullScreen false outranks the display-sized guess")
     }
 
     func testOffscreenUnexplainedWindowIsOnAnotherDesktop() {
