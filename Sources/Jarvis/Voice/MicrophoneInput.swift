@@ -254,6 +254,9 @@ final class MicrophoneInput: @unchecked Sendable {
     func prepare(device: MicrophoneDevice, voiceProcessing: Bool = false,
                  interrupted: @escaping @Sendable () -> Void) async throws -> Ready {
         try Task.checkCancellation()
+        guard !MicrophoneTestGuard.blocksRealMicrophone else {
+            throw VoiceError("Unit tests don't open the microphone. Set JARVIS_LIVE_MIC=1 for a live test.")
+        }
         let generation = UUID()
         let cancelled = OSAllocatedUnfairLock(initialState: false)
         let result: Ready = try await withTaskCancellationHandler {
