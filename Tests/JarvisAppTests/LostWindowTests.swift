@@ -30,6 +30,9 @@ private final class FakeDesk {
     var unminimizeWorks = true
     var setFullScreen: (FakeDesk, Int) -> Bool = { _, _ in false }
     var pressFullScreen: (FakeDesk, Int) -> Bool = { _, _ in false }
+    /// A full-screen exit that lands only after this many more reads.
+    var lateExit: (id: Int, afterReads: Int)? = nil
+    var fullScreenReads = 0
     var menu: (FakeDesk, [String]) throws -> Void = { _, _ in
         throw DriverConnectionError.toolRefused(tool: "invoke_menu", code: "menu_not_found", detail: "")
     }
@@ -101,7 +104,14 @@ private final class FakeDesk {
                 self.windows[i].onScreen = !value
                 return true
             },
-            fullScreen: { _, id in self.index(id).flatMap { self.windows[$0].fullScreen } },
+            fullScreen: { _, id in
+                self.fullScreenReads += 1
+                if let late = self.lateExit, self.fullScreenReads >= late.afterReads {
+                    self.lateExit = nil
+                    self.exitFullScreen(late.id)
+                }
+                return self.index(id).flatMap { self.windows[$0].fullScreen }
+            },
             setFullScreen: { _, id, _ in
                 self.steps.append("AXFullScreen")
                 return self.setFullScreen(self, id)
@@ -406,6 +416,26 @@ final class LostWindowLocateTests: XCTestCase {
         XCTAssertEqual(desk.steps.first, "launch com.apple.TextEdit")
     }
 
+    /// A near name never opens anything: "curs" offers Cursor by name.
+    func testNearNameOffersTheAppWithoutOpeningIt() async {
+        let desk = FakeDesk()
+        let result = await run(desk, "where did curs go",
+                               apps: [.init(name: "Cursor", bundle: "com.todesktop.cursor", pid: 55)])
+        guard case .blocked(let reason) = result.status else { return XCTFail("expected blocked, got \(result.status)") }
+        XCTAssertEqual(reason, "I can't find a window called \u{201C}curs\u{201D}. The closest app I know is Cursor. Say \u{201C}open Cursor\u{201D} if that's the one.")
+        XCTAssertTrue(desk.steps.isEmpty, "\(desk.steps)")
+        XCTAssertFalse(result.dispatchedEffect)
+    }
+
+    func testOnlyAnExactAppNameCounts() {
+        XCTAssertTrue(DriveLoop.namesApp("cursor", "Cursor"))
+        XCTAssertTrue(DriveLoop.namesApp("the textedit app", "TextEdit"))
+        XCTAssertTrue(DriveLoop.namesApp("Mail", "Mail.app"))
+        XCTAssertFalse(DriveLoop.namesApp("curs", "Cursor"))
+        XCTAssertFalse(DriveLoop.namesApp("chrome", "Google Chrome"))
+        XCTAssertFalse(DriveLoop.namesApp("the app", "App Store"))
+    }
+
     func testStageManagerIsExplainedAndNothingIsChanged() async {
         let desk = FakeDesk()
         desk.stageManager = true
@@ -517,6 +547,18 @@ final class ExitFullScreenTests: XCTestCase {
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(desk.steps, ["AXFullScreen", "button fullscreen", "menu View > Exit Full Screen",
                                     "hotkey ctrl+cmd+f"])
+    }
+
+    /// The attribute write lands only after its own poll gave up: the next
+    /// rung waits for the state to settle and never toggles it back.
+    func testARungThatLandsLateIsNotToggledBack() async {
+        let desk = desk()
+        desk.setFullScreen = { desk, id in desk.lateExit = (id, desk.fullScreenReads + 12); return true }
+        desk.pressFullScreen = { _, _ in XCTFail("the button toggled a window that had already left full screen"); return true }
+        let result = await run(desk)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(result.history.last, "Safari is a normal window again.")
+        XCTAssertEqual(desk.steps, ["AXFullScreen"])
     }
 
     func testEveryRungFailingIsSaidPlainly() async {
