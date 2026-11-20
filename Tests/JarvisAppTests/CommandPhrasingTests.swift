@@ -52,6 +52,11 @@ final class CommandPhrasingTests: XCTestCase {
                                     failures.joined(separator: "\n"))
     }
 
+    func testALeadInKeepsTheLiteralAsSaid() {
+        XCTAssertEqual(VoiceAdmissionPolicy.commandText("I want to type Hello, World", context: Self.context),
+                       "type Hello, World")
+    }
+
     /// Runs one set, prints its pass rate by family, returns the failures.
     private func measure(_ set: String) throws -> [String] {
         let rows = try rows(set)

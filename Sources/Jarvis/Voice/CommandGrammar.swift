@@ -26,14 +26,14 @@ enum CommandGrammar {
         guard let first = original.first, !interrogatives.contains(first),
               !original.contains(where: negations.contains),
               !(original.starts(with: ["do", "not"])) else { return nil }
-        let core = strip(original)
+        let kept = strip(original)
+        let core = Array(kept)
         guard !core.isEmpty else { return nil }
         if let command = desktop(core) ?? names(core) ?? find(core, isApp: isApp)
             ?? click(core) ?? open(core, isApp: isApp) {
             return command == original.joined(separator: " ") ? nil : command
         }
-        guard core != original else { return nil }
-        let bare = core.joined(separator: " ")
+        guard core != original, let bare = said(text, words: kept.indices) else { return nil }
         if let open = FastAction.parseOpen(bare), isApp(open.query) { return bare }
         return FastAction.parse(bare) == nil ? nil : bare
     }
@@ -41,7 +41,7 @@ enum CommandGrammar {
     /// A question about what is on the screen, the page or the window in
     /// front of the person — answered from the screen, never acted on.
     static func asksAboutScreen(_ text: String) -> Bool {
-        let core = strip(words(text))
+        let core = Array(strip(words(text)))
         guard let first = core.first, !screenActions.contains(first) else { return false }
         let phrase = " " + core.joined(separator: " ") + " "
         guard screenNouns.contains(where: { phrase.contains(" \($0) ") }) else { return false }
@@ -170,10 +170,25 @@ enum CommandGrammar {
         return s.split(separator: " ").map(String.init)
     }
 
+    /// The words at `range` of `text` as they were said, case and
+    /// punctuation kept, so a typed or searched literal survives a lead-in;
+    /// nil when the range splits a spoken token.
+    private static func said(_ text: String, words range: Range<Int>) -> String? {
+        var start: Int?, end: Int?, count = 0
+        let tokens = text.split(whereSeparator: \.isWhitespace)
+        for (index, token) in tokens.enumerated() {
+            if count == range.lowerBound, start == nil { start = index }
+            count += words(String(token)).count
+            if count == range.upperBound, end == nil, start != nil { end = index + 1 }
+        }
+        guard let start, let end, start < end else { return nil }
+        return tokens[start..<end].joined(separator: " ")
+    }
+
     /// Drops lead-ins and politeness that carry no command: "go ahead
     /// and", "I want to", "let's", "please", "for me".
-    private static func strip(_ words: [String]) -> [String] {
-        var w = words
+    private static func strip(_ words: [String]) -> ArraySlice<String> {
+        var w = words[...]
         var changed = true
         while changed {
             changed = false
