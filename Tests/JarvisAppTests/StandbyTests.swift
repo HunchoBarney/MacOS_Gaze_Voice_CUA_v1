@@ -10,10 +10,14 @@ final class StandbyTests: XCTestCase {
     private final class FakeWakeWord: WakeWordDetecting, @unchecked Sendable {
         var starts = 0
         var stops = 0
+        var names: [String] = []
         var heard: (@MainActor (TimeInterval) -> Void)?
-        func start(heard: @escaping @MainActor (TimeInterval) -> Void) throws { starts += 1; self.heard = heard }
+        func start(name: String, heard: @escaping @MainActor (TimeInterval) -> Void) throws {
+            starts += 1; names.append(name); self.heard = heard
+        }
         func stop() { stops += 1; heard = nil }
         func hear(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) {}
+        func problem(with name: String) -> String? { nil }
     }
 
     private struct MemoryKeys: APIKeyStore {
@@ -89,8 +93,9 @@ final class StandbyTests: XCTestCase {
     func testTheTapFeedsTheWakeWordAndKeepsFiveSecondsForTheSession() throws {
         final class Counter: WakeWordDetecting, @unchecked Sendable {
             var frames = 0
-            func start(heard: @escaping @MainActor (TimeInterval) -> Void) throws {}
+            func start(name: String, heard: @escaping @MainActor (TimeInterval) -> Void) throws {}
             func stop() {}
+            func problem(with name: String) -> String? { nil }
             func hear(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) { frames += Int(buffer.frameLength) }
         }
         let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false))
@@ -125,7 +130,7 @@ final class StandbyTests: XCTestCase {
         guard Vosk.directory() != nil else { throw XCTSkip("Vosk isn't fetched: run ThirdParty/Vosk/fetch.sh") }
         let detector = VoskWakeWordDetector()
         var moments: [TimeInterval] = []
-        try detector.start { moments.append($0) }
+        try detector.start(name: "Jarvis") { moments.append($0) }
         defer { detector.stop() }
         let samples = try spoken("What's the weather like? Hey Jarvis, open Mail.") + [Float](repeating: 0, count: 96_000)
         let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false))
@@ -142,6 +147,69 @@ final class StandbyTests: XCTestCase {
         let moment = try XCTUnwrap(moments.first) - origin
         XCTAssertGreaterThan(moment, 1.0, "after the opening question")
         XCTAssertLessThan(moment, Double(samples.count) / 48_000 - 1.5, "while the phrase is still in the pre-roll")
+    }
+
+    func testTheChosenNameIsWhatStandbyListensFor() async {
+        let (controller, wake) = standby()
+        controller.config.assistantName = "Nova"
+        controller.armStandby()
+        XCTAssertEqual(wake.names, ["Nova"])
+        XCTAssertEqual(controller.handsFreeLabel, "Waiting for “Hey Nova”")
+        controller.config.assistantName = "Max"
+        await poll(seconds: 2) { wake.names.count == 2 }
+        XCTAssertEqual(wake.names, ["Nova", "Max"], "a new name restarts the wake word")
+        XCTAssertEqual(ListeningMode.standby.title(name: "Max"), "Wait for “Hey Max”")
+        XCTAssertTrue(ListeningMode.standby.disclosure(name: "Max").hasPrefix("Nothing leaves your Mac until you say “Hey Max”."))
+    }
+
+    func testTheTestButtonHearsTheNameWithoutOpeningASession() async {
+        let (controller, wake) = standby()
+        controller.armStandby()
+        var said: [String] = []
+        controller.testWakeWord { said.append($0) }
+        await poll(seconds: 2) { controller.wakeTest == .listening }
+        XCTAssertEqual(said, ["Hey Jarvis"])
+        wake.heard?(ProcessInfo.processInfo.systemUptime)
+        await poll(seconds: 2) { controller.wakeTest == .heard }
+        XCTAssertEqual(controller.wakeTest, .heard)
+        XCTAssertEqual(controller.handsFreeState, .standby, "the test hands the engine back to Standby")
+    }
+
+    func testStandbyRestsWhileJarvisSaysThePhrase() async {
+        let (controller, wake) = standby()
+        controller.armStandby()
+        var listeningWhileSpeaking: Bool?
+        controller.testWakeWord { _ in
+            listeningWhileSpeaking = wake.heard != nil
+            wake.heard?(ProcessInfo.processInfo.systemUptime)
+            controller.armStandby()
+        }
+        await poll(seconds: 2) { controller.wakeTest == .listening }
+        XCTAssertEqual(listeningWhileSpeaking, false, "Jarvis's own voice can't wake a session")
+        XCTAssertEqual(wake.starts, 2, "only the test starts the engine while it runs")
+        wake.heard?(ProcessInfo.processInfo.systemUptime)
+        await poll(seconds: 2) { controller.wakeTest == .heard }
+        XCTAssertEqual(controller.handsFreeState, .standby)
+    }
+
+    func testTypedNamesAreCheckedBeforeTheEngine() {
+        XCTAssertNil(AssistantName.problem(with: "  Nova  "))
+        XCTAssertNil(AssistantName.problem(with: "Mary-Jane O'Neil"))
+        XCTAssertEqual(AssistantName.cleaned("  Hey   You "), "Hey You")
+        XCTAssertNotNil(AssistantName.problem(with: "   "))
+        XCTAssertNotNil(AssistantName.problem(with: "R2-D2"))
+        XCTAssertNotNil(AssistantName.problem(with: "Aleksandra Wiśniewska"), "21 letters")
+    }
+
+    func testNamesTheModelCantHearAreRefusedWithAnAlternative() throws {
+        guard Vosk.directory() != nil else { throw XCTSkip("Vosk isn't fetched: run ThirdParty/Vosk/fetch.sh") }
+        let detector = VoskWakeWordDetector()
+        XCTAssertNil(detector.problem(with: "Jarvis"))
+        XCTAssertNil(detector.problem(with: "Nova"), "suggested")
+        XCTAssertNil(detector.problem(with: "Max"), "suggested")
+        let problem = try XCTUnwrap(detector.problem(with: "Karanvir"))
+        XCTAssertTrue(problem.contains("Karanvir"))
+        XCTAssertTrue(problem.contains("Nova"))
     }
 
     private func testCoordinator(_ config: Config) -> VoiceTaskCoordinator {

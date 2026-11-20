@@ -594,7 +594,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if !controller.listensWithoutFn {
             (symbol, description) = ("waveform", "Jarvis. Hold fn to talk.")
         } else if controller.handsFreeState == .standby {
-            (symbol, description) = ("ear", "Jarvis is waiting for “Hey Jarvis”")
+            (symbol, description) = ("ear", "Jarvis is waiting for “Hey \(controller.config.assistantName)”")
         } else if controller.handsFreeListening || controller.handsFreeState == .preparing {
             (symbol, description) = ("waveform", "Jarvis is listening")
         } else if case .unavailable = controller.handsFreeState {

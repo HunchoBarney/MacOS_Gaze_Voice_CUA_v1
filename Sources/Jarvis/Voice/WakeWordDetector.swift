@@ -208,27 +208,29 @@ final class WakePhraseSpotter {
 /// microphone tap (the chosen microphone), converts it to 16 kHz and
 /// spots on a background queue. Nothing leaves the Mac.
 final class VoskWakeWordDetector: WakeWordDetecting, @unchecked Sendable {
-    private let name: String
     private let queue = DispatchQueue(label: "com.karanvirkang.jarvis.wake-word", qos: .userInitiated)
     private let output = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: WakePhraseSpotter.sampleRate,
                                        channels: 1, interleaved: true)!
     private let listening = OSAllocatedUnfairLock(initialState: false)
     private var spotter: WakePhraseSpotter?
+    private var spotterName = ""
     private var converter: AVAudioConverter?
     private var heard: (@MainActor (TimeInterval) -> Void)?
     private var triggeredAt: TimeInterval = 0
 
-    init(name: String = "Jarvis") { self.name = name }
-
     /// The model loads on the detector's queue, so the first start returns
     /// before it's ready and audio heard meanwhile is skipped.
-    func start(heard: @escaping @MainActor (TimeInterval) -> Void) throws {
+    func start(name: String, heard: @escaping @MainActor (TimeInterval) -> Void) throws {
         guard Vosk.directory() != nil else { throw VoiceError("The wake-word engine is missing from this build.") }
         listening.withLock { $0 = true }
-        queue.async { [name] in
+        queue.async {
             do {
-                if let spotter = self.spotter { spotter.reset() }
-                else { self.spotter = try WakePhraseSpotter(name: name, vosk: try Vosk.shared()) }
+                if let spotter = self.spotter, self.spotterName == name { spotter.reset() }
+                else {
+                    self.spotter = nil
+                    self.spotter = try WakePhraseSpotter(name: name, vosk: try Vosk.shared())
+                    self.spotterName = name
+                }
                 self.converter = nil
                 self.heard = heard
             } catch {
@@ -238,6 +240,13 @@ final class VoskWakeWordDetector: WakeWordDetecting, @unchecked Sendable {
     }
 
     private static let log = Logger(subsystem: "com.karanvirkang.jarvis.voice", category: "wake-word")
+
+    func problem(with name: String) -> String? {
+        if let problem = AssistantName.problem(with: name) { return problem }
+        guard let vosk = try? Vosk.shared() else { return "The wake-word engine is missing from this build." }
+        guard let unknown = WakePhraseSpotter.words(name).first(where: { !vosk.knows($0) }) else { return nil }
+        return "Jarvis can't listen for “\(unknown.capitalized)” reliably yet. Pick a common name, like Nova or Max."
+    }
 
     func stop() {
         listening.withLock { $0 = false }
