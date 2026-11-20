@@ -3,7 +3,7 @@ import XCTest
 @testable import Jarvis
 
 final class CuaDependencyPinTests: XCTestCase {
-    private let expectedExecutable = "b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8"
+    private let expectedExecutable = "0bb686e1e44b5e80c26f6666b29e6a613621d25f4cc7dd407e19794193186b1c"
 
     func testRequestedReleasePinMatchesRuntimeAndPublisherManifest() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -12,14 +12,13 @@ final class CuaDependencyPinTests: XCTestCase {
         let manifest = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let binaries = try XCTUnwrap(manifest["vendored_binaries"] as? [String: [String: Any]])
         let driver = try XCTUnwrap(binaries["cua-driver"])
-        XCTAssertEqual(driver["version"] as? String, "0.38.0")
+        XCTAssertEqual(driver["version"] as? String, "0.54.0")
         XCTAssertEqual(driver["sha256"] as? String, expectedExecutable)
-        XCTAssertEqual(driver["tarball_sha256"] as? String,
-                       "5f71191c082ca07c9dfc13b7c9a6eec60a82818c245a93534cc0eb7911471d72")
-        XCTAssertEqual(driver["member"] as? String,
-                       "cua-driver-rs-0.38.0-darwin-arm64/CuaDriver.app/Contents/MacOS/cua-driver")
+        XCTAssertEqual(driver["commit"] as? String, "09dd7017fca72678fd707490f8d2913a55d97e72")
+        XCTAssertEqual(driver["patch_sha256"] as? String,
+                       "bdfa8510d58073199b507be00121979425e03c09b3ce3cf0c7ed45325f170e7a")
         XCTAssertEqual(CuaDependency.executableSHA256, expectedExecutable)
-        XCTAssertEqual(CuaDependency.sourceRevision, "85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19")
+        XCTAssertEqual(CuaDependency.sourceRevision, "09dd7017fca72678fd707490f8d2913a55d97e72")
     }
 
     func testWrongExecutableStillFailsClosed() throws {
