@@ -105,4 +105,41 @@ final class FnTapCoreTests: XCTestCase {
         XCTAssertEqual(latches, 1)
         XCTAssertTrue(monitor.core.state.withLock { $0.latched })
     }
+
+    @MainActor
+    func testReleaseDecidedBehindADroppedBeginNeverFinishesAnotherCapture() throws {
+        for interruptFirst in [true, false] {
+            var state = FnInputState()
+            state.latchMode = true
+            let monitor = FnInputMonitor(state: state)
+            var actions: [FnInputState.Action] = []
+            var latches = 0
+            monitor.onAction = { actions.append($0) }
+            monitor.onLatch = { latches += 1 }
+            monitor.canBegin = { interruptFirst }
+            let gates: (Bool) -> FnTapCore.Gates = { _ in FnTapCore.Gates(canBegin: true, active: false) }
+            let press = monitor.core.decide(.flagsChanged, try event(63, type: .flagsChanged, flags: .maskSecondaryFn), gates: gates)
+            let release = monitor.core.decide(.flagsChanged, try event(63, type: .flagsChanged), gates: gates)
+            XCTAssertEqual(release.result.action, .finish)
+            if interruptFirst { monitor.apply(FnTapCore.Decision(interrupted: true)) }
+            monitor.apply(press)
+            monitor.apply(release)
+            XCTAssertTrue(actions.isEmpty, "interruptFirst=\(interruptFirst)")
+            XCTAssertEqual(latches, 0)
+            XCTAssertFalse(monitor.core.state.withLock { $0.latched })
+        }
+    }
+
+    @MainActor
+    func testEscapeDecidedBeforeAnInterruptionStillCancels() throws {
+        let monitor = FnInputMonitor()
+        var actions: [FnInputState.Action] = []
+        monitor.onAction = { actions.append($0) }
+        let escape = monitor.core.decide(.keyDown, try event(53, type: .keyDown)) { _ in
+            FnTapCore.Gates(canBegin: false, active: true)
+        }
+        monitor.apply(FnTapCore.Decision(interrupted: true))
+        monitor.apply(escape)
+        XCTAssertEqual(actions, [.cancel])
+    }
 }

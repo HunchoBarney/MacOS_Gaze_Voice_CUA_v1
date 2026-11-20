@@ -329,8 +329,11 @@ final class FnInputMonitor: ObservableObject {
             reportPhysicalFn(decision.fnFlag)
             observedPhysicalHold = decision.heldWithPhysicalFn
         }
+        let stale = core.state.withLock({ $0.interruptions }) != decision.interruptions
+        // An interruption on main, including a dropped begin, clears the hold the
+        // tap decided from; only Escape's cancel outlives it.
+        guard !stale || decision.result.action == .cancel else { return }
         if decision.result.action == .begin {
-            guard core.state.withLock({ $0.interruptions }) == decision.interruptions else { return }
             guard canBegin() else {
                 core.state.withLock { $0.interrupt() }
                 publishGates()
