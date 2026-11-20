@@ -1,38 +1,5 @@
 import Foundation
 
-/// What Jarvis chooses for a Live session. The broker fixes everything else
-/// (model, client delegation, no tools, store off, the speech wake policy).
-struct LiveSessionConfig: Equatable, Sendable {
-    struct Message: Equatable, Sendable {
-        enum Role: String, Sendable { case developer, user, assistant }
-        let role: Role
-        let text: String
-    }
-
-    var instructions: String?
-    var input: [Message] = []
-    var voice = "marin"
-    /// Seconds without a transcript before Live pauses into Standby (5–60).
-    var idleTimeoutS = 8
-    /// How much speech evidence wakes a paused session (0–1); nil is OpenAI's 0.5.
-    var vadThreshold: Double?
-
-    /// The JSON the broker's `POST /v1/live/sessions` accepts (#582).
-    func brokerBody(sdp: String) throws -> Data {
-        var body: [String: Any] = ["sdp": sdp, "idle_timeout_s": idleTimeoutS, "voice": voice]
-        if let instructions { body["instructions"] = instructions }
-        if let vadThreshold { body["vad_threshold"] = vadThreshold }
-        if !input.isEmpty {
-            body["input"] = input.map { message in
-                let part = message.role == .assistant ? "output_text" : "input_text"
-                return ["type": "message", "role": message.role.rawValue,
-                        "content": [["type": part, "text": message.text]]] as [String: Any]
-            }
-        }
-        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-    }
-}
-
 /// A created session: its id and the SDP answer for the peer connection.
 struct LiveSessionAnswer: Equatable, Sendable {
     let id: String
@@ -53,7 +20,8 @@ struct LiveBrokerError: LocalizedError, Equatable {
 }
 
 /// \`POST /v1/live/sessions\` on the credential Worker (#582), authorised by the
-/// install token. The response is OpenAI's own creation body, passed through.
+/// install token. The response is OpenAI's own creation body, passed through,
+/// and OpenAI's own errors (an over-long prompt, say) come back the same way.
 struct HostedLiveSessions: LiveSessionCreating {
     let baseURL: URL
     let installToken: @Sendable () async throws -> String
@@ -64,7 +32,7 @@ struct HostedLiveSessions: LiveSessionCreating {
         request.httpMethod = "POST"
         request.setValue("Bearer \(try await installToken())", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try config.brokerBody(sdp: offer)
+        request.httpBody = try JSONSerialization.data(withJSONObject: config.brokerBody(sdp: offer), options: [.sortedKeys])
         request.timeoutInterval = 15
         let (data, response) = try await send(request)
         return try Self.answer(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)

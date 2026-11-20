@@ -18,30 +18,20 @@ enum LiveTransportEvent: Sendable, Equatable {
     case closed(String?)
 }
 
-/// How a session ended. Without session.closed the final usage is unconfirmed
-/// and the last usage report stands in for it.
+/// How a session ended. Only session.closed carries the final usage, so a nil
+/// usage means it never arrived: the connection dropped, or the close timed out.
 struct LiveSessionEnding: Equatable, Sendable {
-    let reason: LiveCloseReason?
+    let reason: LiveCloseReason
     let usage: LiveUsage?
-    var confirmed: Bool { reason != nil }
-}
-
-enum LiveSessionUpdate: Equatable, Sendable {
-    case started(sessionID: String)
-    case resumed
-    case paused
-    case usage(LiveUsage)
-    case inputTranscript(LiveTranscriptDelta)
-    case outputTranscript(LiveTranscriptDelta)
-    case error(LiveError)
-    case ended(LiveSessionEnding)
+    var confirmed: Bool { usage != nil }
 }
 
 /// One GPT-Live session over a transport: create it through the broker, wait
-/// for session.started, follow standby and resume, and close it gracefully so
-/// the final usage is confirmed. Nothing here acts on what is heard.
+/// for session.started, follow Standby and resume, and close it gracefully so
+/// the final usage is confirmed. Events reach \`onEvent\` on the main actor in
+/// arrival order. Nothing here acts on what is heard.
 @MainActor
-final class LiveSession {
+final class LiveSession: LiveSessionSending {
     enum Phase: Equatable {
         case idle, connecting
         /// Started, inference paused until someone speaks (the speech wake policy).
@@ -56,11 +46,13 @@ final class LiveSession {
 
     private(set) var phase: Phase = .idle
     private(set) var sessionID: String?
+    /// The latest usage the server reported, kept for when the connection
+    /// drops before session.closed confirms it.
     private(set) var lastUsage: LiveUsage?
     /// How long each step of the last start took: the offer (ICE gathered),
     /// the broker's session creation, applying the answer, and session.started.
     private(set) var startSteps: [(step: String, seconds: Double)] = []
-    var onUpdate: ((LiveSessionUpdate) -> Void)?
+    var onEvent: ((LiveSessionEvent) -> Void)?
 
     private let transport: LiveTransport
     private let broker: LiveSessionCreating
@@ -68,7 +60,6 @@ final class LiveSession {
     private var pump: Task<Void, Never>?
     private var startWaiter: CheckedContinuation<Void, Error>?
     private var endWaiters: [CheckedContinuation<LiveSessionEnding, Never>] = []
-    private var eventCount = 0
 
     init(transport: LiveTransport, broker: LiveSessionCreating, config: LiveSessionConfig) {
         self.transport = transport
@@ -84,10 +75,9 @@ final class LiveSession {
         let clock = ContinuousClock()
         var mark = clock.now
         func step(_ name: String) {
-            let now = clock.now
-            let elapsed = now - mark
+            let elapsed = clock.now - mark
+            mark = clock.now
             startSteps.append((name, Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18))
-            mark = now
         }
         do {
             let offer = try await transport.offer()
@@ -98,7 +88,7 @@ final class LiveSession {
             try await transport.accept(answer: answer.sdp)
             step("answer")
         } catch {
-            end(LiveSessionEnding(reason: nil, usage: nil))
+            end(LiveSessionEnding(reason: .connectionLost, usage: nil))
             throw error
         }
         let incoming = transport.incoming
@@ -109,93 +99,82 @@ final class LiveSession {
                 case .message(let data): self.receive(data)
                 case .closed(let why):
                     Self.log.notice("live_transport_closed \(why ?? "", privacy: .public)")
-                    self.end(LiveSessionEnding(reason: nil, usage: self.lastUsage))
+                    self.end(LiveSessionEnding(reason: .connectionLost, usage: nil))
                 }
             }
         }
-        if case .ended = phase { throw LiveSessionError.endedBeforeStart }
-        if phase != .connecting { step("started"); return }
         let deadline = Task { [weak self] in
             try? await Task.sleep(for: timeout)
             guard let self, !Task.isCancelled, self.phase == .connecting else { return }
             self.finishStart(.failure(LiveSessionError.startTimedOut))
-            self.end(LiveSessionEnding(reason: nil, usage: self.lastUsage))
+            self.end(LiveSessionEnding(reason: .connectionLost, usage: nil))
         }
         defer { deadline.cancel() }
         try await withCheckedThrowingContinuation { startWaiter = $0 }
         step("started")
     }
 
-    /// Sends a command on the data channel and returns its event id, which
-    /// errors and acknowledgements quote back as client_event_id.
-    @discardableResult
-    func send(_ command: LiveClientCommand) throws -> String {
-        guard phase == .standby || phase == .active else { throw LiveSessionError.notRunning }
-        eventCount += 1
-        let id = "jarvis_\(eventCount)"
-        try transport.send(command.json(eventID: id))
-        return id
+    /// Adds text to the conversation. Dropped once the session isn't running.
+    func send(_ append: LiveAppend) {
+        guard phase == .standby || phase == .active else { return }
+        do { try transport.send(append.json()) } catch {
+            Self.log.notice("live_append_failed \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Asks Live to finish and waits for session.closed, so the reason and the
     /// final usage are confirmed. On timeout the connection is dropped and the
-    /// ending is unconfirmed.
+    /// usage stays unconfirmed.
     func close(timeout: Duration = .seconds(5)) async -> LiveSessionEnding {
         switch phase {
         case .ended(let ending): return ending
         case .idle, .connecting:
-            finishStart(.failure(LiveSessionError.endedBeforeStart))
-            end(LiveSessionEnding(reason: nil, usage: lastUsage))
+            end(LiveSessionEnding(reason: .closeRequested, usage: nil))
         case .standby, .active:
-            do { try send(.close) } catch {
+            let command = ["type": "session.close", "event_id": "jarvis_close_" + UUID().uuidString]
+            do { try transport.send(JSONSerialization.data(withJSONObject: command)) } catch {
                 Self.log.notice("live_close_send_failed \(error.localizedDescription, privacy: .public)")
             }
             phase = .closing
             let deadline = Task { [weak self] in
                 try? await Task.sleep(for: timeout)
                 guard let self, !Task.isCancelled, self.phase == .closing else { return }
-                self.end(LiveSessionEnding(reason: nil, usage: self.lastUsage))
+                self.end(LiveSessionEnding(reason: .closeRequested, usage: nil))
             }
             defer { deadline.cancel() }
-            if case .ended(let ending) = phase { return ending }
             return await withCheckedContinuation { endWaiters.append($0) }
         case .closing:
             return await withCheckedContinuation { endWaiters.append($0) }
         }
         if case .ended(let ending) = phase { return ending }
-        return LiveSessionEnding(reason: nil, usage: lastUsage)
+        return LiveSessionEnding(reason: .closeRequested, usage: nil)
     }
 
     private func receive(_ data: Data) {
-        let event: LiveServerEvent
-        do { event = try LiveServerEvent(json: data) } catch {
+        let decoded: LiveSessionEvent?
+        do { decoded = try LiveSessionEvent.decode(data) } catch {
             Self.log.notice("live_event_undecodable \(String(describing: error), privacy: .public)")
             return
         }
+        guard let event = decoded else { return }
         if case .ended = phase { return }
         switch event {
         case .started(let id):
             sessionID = id
             if phase == .connecting { phase = .standby }
             finishStart(.success(()))
-            onUpdate?(.started(sessionID: id))
         case .resumed:
             if phase == .standby { phase = .active }
-            onUpdate?(.resumed)
         case .paused:
             if phase == .active { phase = .standby }
-            onUpdate?(.paused)
         case .usage(let usage):
             lastUsage = usage
-            onUpdate?(.usage(usage))
-        case .inputTranscript(let delta): onUpdate?(.inputTranscript(delta))
-        case .outputTranscript(let delta): onUpdate?(.outputTranscript(delta))
-        case .error(let error): onUpdate?(.error(error))
         case .closed(let reason, let usage):
-            lastUsage = usage
             end(LiveSessionEnding(reason: reason, usage: usage))
-        case .other: break
+            return
+        default: break
         }
+        onEvent?(event)
     }
 
     private func finishStart(_ result: Result<Void, Error>) {
@@ -206,6 +185,7 @@ final class LiveSession {
 
     private func end(_ ending: LiveSessionEnding) {
         if case .ended = phase { return }
+        let wasRunning = phase != .idle && phase != .connecting
         phase = .ended(ending)
         finishStart(.failure(LiveSessionError.endedBeforeStart))
         transport.close()
@@ -213,18 +193,17 @@ final class LiveSession {
         let waiters = endWaiters
         endWaiters = []
         waiters.forEach { $0.resume(returning: ending) }
-        onUpdate?(.ended(ending))
+        if wasRunning { onEvent?(.closed(reason: ending.reason, usage: ending.usage)) }
     }
 }
 
 enum LiveSessionError: LocalizedError, Equatable {
-    case startTimedOut, endedBeforeStart, notRunning
+    case startTimedOut, endedBeforeStart
 
     var errorDescription: String? {
         switch self {
         case .startTimedOut: return "The voice session didn't start in time."
         case .endedBeforeStart: return "The voice session ended before it started."
-        case .notRunning: return "The voice session isn't running."
         }
     }
 }
