@@ -368,7 +368,7 @@ actor TrackerHost {
             // Fail closed: without the tracker's own token every call
             // would get 401, and nothing a respawn does can fix that.
             guard let token = Self.storedToken(at: tokenFile()) else {
-                Self.log.error("tracker already serving on port \(port) but its API token is unreadable — not adopting")
+                Self.log.error("tracker already serving on port \(self.port) but its API token is unreadable — not adopting")
                 state = .failed(Self.foreignTrackerMessage)
                 return
             }
@@ -376,7 +376,7 @@ actor TrackerHost {
             guard await authorizationAccepted() else {
                 Self.adoptedToken.withLock { $0 = nil }
                 guard generation == startGeneration, state == .starting else { return }
-                Self.log.error("tracker on port \(port) refused its stored API token — not adopting")
+                Self.log.error("tracker on port \(self.port) refused its stored API token — not adopting")
                 state = .failed(Self.foreignTrackerMessage)
                 return
             }
@@ -384,7 +384,7 @@ actor TrackerHost {
                 Self.adoptedToken.withLock { $0 = nil }
                 return
             }
-            Self.log.notice("tracker already serving on port \(port) — adopted")
+            Self.log.notice("tracker already serving on port \(self.port) — adopted")
             adopted = true
             state = .running
             armAttemptReset()
@@ -511,7 +511,7 @@ actor TrackerHost {
                     return
                 }
                 state = .running
-                Self.log.notice("tracker API serving on port \(port)")
+                Self.log.notice("tracker API serving on port \(self.port)")
                 armAttemptReset()
                 armWedgeWatch()
                 return
