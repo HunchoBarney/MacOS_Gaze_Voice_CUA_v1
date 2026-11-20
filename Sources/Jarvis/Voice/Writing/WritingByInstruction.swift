@@ -139,7 +139,7 @@ final class WritingByInstruction {
             return Self.result(VoiceToolResult.Status.error, "I couldn't type into that field.")
         }
         guard let value = await readField()?.value else {
-            return Self.result(VoiceToolResult.Status.ok, "Typed it, but I couldn't read the field back to check.")
+            return Self.result(VoiceToolResult.Status.error, "I typed it, but I couldn't read the field back to check.")
         }
         guard Self.count(text, in: value) > Self.count(text, in: before.value ?? "") else {
             return Self.result(VoiceToolResult.Status.error, "I typed it, but it isn't showing in the field.")

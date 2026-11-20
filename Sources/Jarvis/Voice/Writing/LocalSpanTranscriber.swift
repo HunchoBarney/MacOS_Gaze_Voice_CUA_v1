@@ -4,15 +4,31 @@ import Speech
 
 /// The person's recent hands-free speech exactly as the lane sent it to
 /// Realtime: 24 kHz mono PCM16, the last 20 seconds. L7 transcribes it a
-/// second time on device to check a "type this" span. Memory only.
+/// second time on device to check a "type this" span. Memory only, and
+/// nothing is kept until `isRecording` is set, which only `voice.live` does.
 final class RecentSpeechAudio: @unchecked Sendable {
     static let sampleRate = 24_000.0
     static let limit = 20.0
     private let lock = NSLock()
     private var pcm = Data()
+    private var recording = false
+
+    init(isRecording: Bool = false) {
+        recording = isRecording
+    }
+
+    var isRecording: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return recording }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            recording = newValue
+            if !newValue { pcm = Data() }
+        }
+    }
 
     func append(_ chunk: Data) {
         lock.lock(); defer { lock.unlock() }
+        guard recording else { return }
         pcm.append(chunk)
         let cap = Int(Self.sampleRate * Self.limit) * 2
         if pcm.count > cap { pcm.removeFirst(pcm.count - cap) }
@@ -42,6 +58,7 @@ struct LocalSpanTranscriber: Sendable {
         SFSpeechRecognizer.requestAuthorization { _ in }
     }
     var timeout: Duration = .seconds(4)
+    var analyze: @Sendable (Data) async -> String? = { await LocalSpanTranscriber.analyze($0) }
 
     func transcribe(_ pcm: Data) async -> String? {
         guard pcm.count >= 2 else { return nil }
@@ -50,17 +67,46 @@ struct LocalSpanTranscriber: Sendable {
         case .notDetermined: requestAuthorization(); return nil
         default: return nil
         }
+        let race = Race()
+        let analyze = analyze
+        let work = Task { race.finish(await analyze(pcm)) }
         let timeout = timeout
-        return await withTaskGroup(of: String?.self) { group in
-            group.addTask { await Self.analyze(pcm) }
-            group.addTask { try? await Task.sleep(for: timeout); return nil }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+        let timer = Task { try? await Task.sleep(for: timeout); race.finish(nil) }
+        let text = await race.value()
+        work.cancel()
+        timer.cancel()
+        return text
+    }
+
+    /// First answer wins and nothing waits on the loser, so a wedged speech
+    /// service can't hold "type this" past the timeout.
+    private final class Race: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<String?, Never>?
+        private var settled = false
+        private var outcome: String?
+
+        func finish(_ text: String?) {
+            lock.lock()
+            guard !settled else { lock.unlock(); return }
+            settled = true
+            outcome = text
+            let waiting = continuation
+            continuation = nil
+            lock.unlock()
+            waiting?.resume(returning: text)
+        }
+
+        func value() async -> String? {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if settled { lock.unlock(); continuation.resume(returning: outcome) }
+                else { self.continuation = continuation; lock.unlock() }
+            }
         }
     }
 
-    private static func analyze(_ pcm: Data) async -> String? {
+    static func analyze(_ pcm: Data) async -> String? {
         guard SpeechTranscriber.isAvailable,
               let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { return nil }
         let installed = await SpeechTranscriber.installedLocales
@@ -71,7 +117,11 @@ struct LocalSpanTranscriber: Sendable {
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let collector = Task {
             var text = ""
-            for try await result in transcriber.results { text += String(result.text.characters) }
+            for try await result in transcriber.results {
+                let segment = String(result.text.characters)
+                let joins = text.isEmpty || text.last?.isWhitespace == true || segment.first?.isWhitespace == true
+                text += (joins ? "" : " ") + segment
+            }
             return text
         }
         let input = AsyncStream<AnalyzerInput> { continuation in

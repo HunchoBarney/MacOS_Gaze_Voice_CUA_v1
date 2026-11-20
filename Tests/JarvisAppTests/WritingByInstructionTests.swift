@@ -179,6 +179,34 @@ final class WritingByInstructionTests: XCTestCase {
         XCTAssertEqual(desk.inserts, ["hello"])
     }
 
+    func testAFieldThatCannotBeReadBackIsNotCountedAsTyped() async {
+        let desk = FakeDesk()
+        var reads = 0
+        let writing = writer(desk, local: "type this hello")
+        writing.readField = {
+            reads += 1
+            return .init(value: reads == 1 ? "" : nil, selectedText: nil, editable: true, appName: nil,
+                         bundleID: nil, windowTitle: nil, pid: desk.pid)
+        }
+        let payload = await writing.handle("type this hello")
+        XCTAssertEqual(field(payload, "status"), VoiceToolResult.Status.error)
+        XCTAssertEqual(desk.inserts, ["hello"])
+    }
+
+    func testTranscriberGivesUpAtItsTimeoutEvenIfSpeechIgnoresCancellation() async {
+        var transcriber = LocalSpanTranscriber()
+        transcriber.authorization = { .authorized }
+        transcriber.timeout = .milliseconds(20)
+        transcriber.analyze = { _ in
+            await Task.detached { try? await Task.sleep(for: .seconds(3)) }.value
+            return "type this too late"
+        }
+        let started = ContinuousClock.now
+        let text = await transcriber.transcribe(Data(count: 4_800))
+        XCTAssertNil(text)
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(1))
+    }
+
     func testNoEditableFieldTypesNothing() async {
         let desk = FakeDesk()
         desk.editable = false
@@ -303,10 +331,21 @@ final class WritingByInstructionTests: XCTestCase {
     // MARK: - On-device transcription seams
 
     func testRecentSpeechKeepsOnlyTheLastTwentySeconds() {
-        let ring = RecentSpeechAudio()
+        let ring = RecentSpeechAudio(isRecording: true)
         for _ in 0..<25 { ring.append(Data(count: 48_000)) }
         XCTAssertEqual(ring.snapshot().count, 20 * 48_000)
         ring.clear()
+        XCTAssertTrue(ring.snapshot().isEmpty)
+    }
+
+    func testRecentSpeechKeepsNothingUntilVoiceLiveTurnsItOn() {
+        let ring = RecentSpeechAudio()
+        ring.append(Data(count: 48_000))
+        XCTAssertTrue(ring.snapshot().isEmpty)
+        ring.isRecording = true
+        ring.append(Data(count: 48_000))
+        XCTAssertEqual(ring.snapshot().count, 48_000)
+        ring.isRecording = false
         XCTAssertTrue(ring.snapshot().isEmpty)
     }
 

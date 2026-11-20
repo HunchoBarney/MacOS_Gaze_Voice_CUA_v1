@@ -684,6 +684,7 @@ final class VoiceController: ObservableObject {
             }
             lane.audioRepliesEnabled = config.ttsEnabled
             let speech = lane.recentSpeech
+            speech.isRecording = config.voiceLive
             cua.writingByInstruction.localTranscript = {
                 await LocalSpanTranscriber().transcribe(speech.snapshot())
             }
