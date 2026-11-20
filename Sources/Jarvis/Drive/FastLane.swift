@@ -1123,7 +1123,7 @@ struct FastAction: Sendable {
     ]
 
     private static let anyDesktop: Set<String> = [
-        "another desktop", "a different desktop", "a new desktop", "a desktop", "desktop",
+        "another desktop", "a different desktop", "a new desktop", "a desktop",
         "another space", "a different space", "my other desktop", "the other desktop"
     ]
 
