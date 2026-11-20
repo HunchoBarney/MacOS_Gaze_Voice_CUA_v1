@@ -146,7 +146,7 @@ final class WakePhraseSpotter {
         let wake = phrase.joined(separator: " ")
         listener = try Vosk.Recognizer(vosk, sampleRate: Self.sampleRate, phrases: [wake])
         checker = try Vosk.Recognizer(vosk, sampleRate: Self.sampleRate,
-                                      phrases: [wake] + Self.rivals(excluding: Set(words)).map { "hey \($0)" }, words: true)
+                                      phrases: [wake] + Self.rivals(excluding: Set(words)).filter(vosk.knows).map { "hey \($0)" }, words: true)
     }
 
     /// Lowercased words of a typed name, as the model spells them.
