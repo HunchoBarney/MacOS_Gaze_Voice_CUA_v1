@@ -11,6 +11,7 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
     private var written: [JSONValue] = []
     private var responses: [String] = []
     private var failTextSends = false
+    private var commits = 0
     private let identity = UUID().uuidString
     private let acknowledgeUpdates: Bool
     private let sessionAcknowledgement: JSONValue?
@@ -39,7 +40,8 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
                 try push(["type": .string("conversation.item.created"), "item": .object(["id": .string(id)])])
             }
         case "input_audio_buffer.commit":
-            try push(["type": .string("input_audio_buffer.committed"), "item_id": .string("audio-" + identity)])
+            commits += 1
+            try push(["type": .string("input_audio_buffer.committed"), "item_id": .string(audioItemID())])
         case "response.create":
             let id = identity + "-\(responses.count + 1)"
             responses.append(id)
@@ -68,7 +70,9 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
 
     func responseIDs() -> [String] { responses }
     func frames() -> [JSONValue] { written }
-    func audioItemID() -> String { "audio-" + identity }
+    /// Each commit names a fresh input item, as the server does.
+    func audioItemID() -> String { "audio-\(identity)-\(commits)" }
+    func commitCount() -> Int { written.filter { $0["type"]?.string == "input_audio_buffer.commit" }.count }
     func setTextSendFailure(_ value: Bool) { failTextSends = value }
 }
 
@@ -99,7 +103,7 @@ final class VoiceOneBrainTests: XCTestCase {
                 "arguments": .string(String(decoding: data, as: UTF8.self))]
     }
 
-    func testC1RealtimeSessionUsesServerTurnsAndAuthoritativeInputTranscription() async throws {
+    func testC1RealtimeSessionLeavesTurnEndsToTheMacAndUsesAuthoritativeInputTranscription() async throws {
         let wire = RecordedVoiceWire()
         let client = RealtimeVoiceClient(wireFactory: { _ in wire })
         defer { client.teardown() }
@@ -107,10 +111,7 @@ final class VoiceOneBrainTests: XCTestCase {
         let frames = await wire.frames()
         let session = try XCTUnwrap(frames.first { $0["type"]?.string == "session.update" }?["session"])
         let input = try XCTUnwrap(session["audio"]?["input"])
-        XCTAssertEqual(input["turn_detection"]?["type"]?.string, "semantic_vad")
-        XCTAssertEqual(input["turn_detection"]?["eagerness"]?.string, "auto")
-        XCTAssertEqual(input["turn_detection"]?["create_response"]?.bool, false)
-        XCTAssertEqual(input["turn_detection"]?["interrupt_response"]?.bool, false)
+        XCTAssertEqual(input["turn_detection"], .null, "hands-free turns end on the Mac, not by server VAD")
         XCTAssertEqual(input["transcription"]?["model"]?.string, "gpt-4o-transcribe")
         XCTAssertNil(input["transcription"]?["language"])
         XCTAssertEqual(input["format"]?["rate"]?.integer, 24_000)
@@ -118,54 +119,63 @@ final class VoiceOneBrainTests: XCTestCase {
         XCTAssertFalse(frames.contains { $0["type"]?.string == "input_audio_buffer.append" })
     }
 
-    func testC1RealtimeConversationMatchesEitherFinalCommitOrderAndIgnoresForeignDuplicates() async throws {
-        for finalFirst in [true, false] {
-            let wire = RecordedVoiceWire()
-            let client = RealtimeVoiceClient(wireFactory: { _ in wire })
-            let lane = RealtimeVoiceLane(apiKey: { "fixture-not-a-real-key" }, client: client)
-            var context = self.context()
-            context.targetAppID = "fixture.editor"
-            var executed: [String] = [], finals = 0
-            lane.conversation.readContext = { context }
-            lane.conversation.interpret = { _, _, _ in
-                XCTFail("native scroll must not require remote reasoning")
-                return .init(kind: .clarify)
-            }
-            lane.conversation.execute = { command in
-                executed.append(command.text)
-                return .init(verified: true, waitingForAnswer: false, message: "")
-            }
-            lane.conversation.onControl = { _ in }
-            lane.onDiagnostic = { if $0.stage == "realtime.input.final" { finals += 1 } }
-            try await lane.prepareRealtimeTransport(.conversation)
-            try lane.beginRealtimeConversation(session: UUID())
-            let start: [String: JSONValue] = ["type": .string("input_audio_buffer.speech_started"),
-                                              "item_id": .string("owned")]
-            let commit: [String: JSONValue] = ["type": .string("input_audio_buffer.committed"),
-                                               "item_id": .string("owned")]
-            let final: [String: JSONValue] = ["type": .string("conversation.item.input_audio_transcription.completed"),
-                                              "item_id": .string("owned"), "transcript": .string("scroll down")]
-            try await wire.push(["type": .string("conversation.item.input_audio_transcription.completed"),
-                                 "item_id": .string("unowned"), "transcript": .string("open Calculator")])
-            try await wire.push(start)
-            if finalFirst {
-                try await wire.push(final)
-                await waitFor { finals == 1 }
-                XCTAssertTrue(executed.isEmpty)
-                try await wire.push(commit)
-            } else {
-                try await wire.push(commit)
-                try await wire.push(final)
-            }
-            await waitFor { executed.count == 1 }
-            try await wire.push(final)
-            try await wire.push(commit)
-            client.onWireEvent?(.init(connectionID: UUID(), kind: "input_audio_buffer.speech_started",
-                responseID: nil, inputItemID: "foreign", events: [.speechStarted]))
-            lane.stopConversation()
-            XCTAssertEqual(executed, ["scroll down"])
-            client.teardown()
+    /// Hands-free turns end on the Mac: each local end sends one commit, the
+    /// server's `committed` binds the oldest waiting turn to its fresh item,
+    /// and that item's transcript finishes the turn once, in speaking order.
+    func testC1RealtimeConversationCommitsEachLocalTurnOnceAndBindsTheServerItem() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-not-a-real-key" }, client: client)
+        var context = self.context()
+        context.targetAppID = "fixture.editor"
+        var executed: [String] = [], began = 0
+        lane.conversation.readContext = { context }
+        lane.conversation.interpret = { _, _, _ in
+            XCTFail("native scroll must not require remote reasoning")
+            return .init(kind: .clarify)
         }
+        lane.conversation.execute = { command in
+            executed.append(command.text)
+            return .init(verified: true, waitingForAnswer: false, message: "")
+        }
+        lane.conversation.onControl = { _ in }
+        lane.conversation.onEvent = { if case .began = $0 { began += 1 } }
+        try await lane.prepareRealtimeTransport(.conversation)
+        try lane.beginRealtimeConversation(session: UUID())
+        let connection = client.connectionID
+        func final(_ item: String, _ text: String) -> [String: JSONValue] {
+            ["type": .string("conversation.item.input_audio_transcription.completed"),
+             "item_id": .string(item), "transcript": .string(text)]
+        }
+
+        lane.localTurnStarted(connection: connection)
+        lane.localTurnStarted(connection: connection)
+        XCTAssertEqual(began, 1, "one utterance is one turn")
+        let commitsBefore = await wire.commitCount()
+        XCTAssertEqual(commitsBefore, 0, "nothing is committed while the person is speaking")
+        try await lane.localTurnEnded(connection: connection)
+        try await lane.localTurnEnded(connection: connection)
+        let first = await wire.audioItemID()
+        lane.localTurnStarted(connection: connection)
+        try await lane.localTurnEnded(connection: connection)
+        let second = await wire.audioItemID()
+        let commits = await wire.commitCount()
+        XCTAssertEqual(commits, 2, "exactly one commit per turn")
+        XCTAssertNotEqual(first, second)
+
+        try await wire.push(final(second, "scroll up"))
+        try await wire.push(final(first, "scroll down"))
+        await waitFor { executed.count == 2 }
+        try await wire.push(["type": .string("input_audio_buffer.committed"), "item_id": .string("stray")])
+        try await wire.push(final("stray", "open Calculator"))
+        try await wire.push(final(first, "scroll down"))
+        try await wire.push(["type": .string("input_audio_buffer.committed"), "item_id": .string(first)])
+        try await wire.push(final(second, "scroll up"))
+        try await Task.sleep(for: .milliseconds(150))
+        lane.stopConversation()
+        XCTAssertEqual(executed, ["scroll down", "scroll up"], "turns finish in speaking order, each once")
+        XCTAssertEqual(began, 2)
+        client.teardown()
     }
 
     func testC1RealtimeDictationUsesMatchingInputOnceWithoutCreatingResponseOrTool() async throws {
@@ -296,10 +306,10 @@ final class VoiceOneBrainTests: XCTestCase {
         try await lane.prepareRealtimeTransport(.conversation)
         let session = UUID(), connection = client.connectionID
         try lane.beginRealtimeConversation(session: session)
-        func say(_ item: String) async throws {
-            try await wire.push(["type": .string("input_audio_buffer.speech_started"), "item_id": .string(item)])
-            try await wire.push(["type": .string("input_audio_buffer.speech_stopped"), "item_id": .string(item)])
-            try await wire.push(["type": .string("input_audio_buffer.committed"), "item_id": .string(item)])
+        func say(_ turn: String) async throws {
+            lane.localTurnStarted(connection: connection)
+            try await lane.localTurnEnded(connection: connection)
+            let item = await wire.audioItemID()
             try await wire.push(["type": .string("conversation.item.input_audio_transcription.completed"),
                                  "item_id": .string(item), "transcript": .string("What is two plus two?")])
         }

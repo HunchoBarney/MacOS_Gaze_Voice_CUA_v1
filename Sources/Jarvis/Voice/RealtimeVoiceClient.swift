@@ -220,15 +220,15 @@ enum VoiceToolCatalog {
 final class RealtimeVoiceClient {
     private nonisolated static let log = Logger(subsystem: "com.karanvirkang.jarvis.voice", category: "realtime")
 
+    /// No mode runs server turn detection: Fn release, or the Mac's own
+    /// voice activity gate in hands-free, commits each turn.
     enum InputMode: Sendable {
         case conversation, manual, localFinal
 
         var configuration: [String: Any] {
             ["format": ["type": "audio/pcm", "rate": 24_000],
              "transcription": self == .localFinal ? NSNull() : ["model": "gpt-4o-transcribe"],
-             "turn_detection": self == .conversation
-                ? ["type": "semantic_vad", "eagerness": "auto",
-                   "create_response": false, "interrupt_response": false] : NSNull()]
+             "turn_detection": NSNull()]
         }
 
         func matches(_ session: JSONValue?) -> Bool {
@@ -240,12 +240,6 @@ final class RealtimeVoiceClient {
             } else {
                 guard input["transcription"]?["model"]?.string == "gpt-4o-transcribe",
                       input["transcription"]?["language"]?.string?.isEmpty != false else { return false }
-            }
-            if self == .conversation {
-                return input["turn_detection"]?["type"]?.string == "semantic_vad"
-                    && input["turn_detection"]?["eagerness"]?.string == "auto"
-                    && input["turn_detection"]?["create_response"]?.bool == false
-                    && input["turn_detection"]?["interrupt_response"]?.bool == false
             }
             return input["turn_detection"] == .null
         }
