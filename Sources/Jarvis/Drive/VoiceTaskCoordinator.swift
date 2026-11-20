@@ -189,7 +189,7 @@ final class VoiceTaskCoordinator {
     var hasForegroundAppLauncher: Bool { foregroundAppLauncher != nil }
     private var connection: CuaConnection?
     private var connectTask: Task<CuaConnection, Error>?
-    /// The read-only sibling transport — a second proxy on the same
+    /// The read-only sibling transport — a second connection on the same
     /// daemon socket. The daemon serializes every call per connection,
     /// so a slow mutation would starve any read queued behind it;
     /// `callRead` enforces `CuaConnection.isReadOnly` before the wire.
@@ -593,7 +593,7 @@ final class VoiceTaskCoordinator {
 
     // MARK: - Transport
 
-    /// One proxy connection to the shared embedded daemon; reconnects by
+    /// One connection to the shared embedded daemon; reconnects by
     /// wholesale replacement per the generation contract.
     private func transport() async throws -> CuaConnection {
         if let connection, await connection.connected { return connection }
@@ -636,7 +636,7 @@ final class VoiceTaskCoordinator {
             return try await conn.call(tool, arguments: args)
         } catch {
             // A daemon refusal (including an ended session) is a valid reply,
-            // not transport death. Dropping this live proxy tombstones its
+            // not transport death. Dropping this live connection tombstones its
             // other sessions and prevents DriveLoop reviving on the same owner.
             guard !(await conn.connected) else { throw error }
             // Mutations are never replayed — a closed connection may have
@@ -1410,7 +1410,7 @@ final class VoiceTaskCoordinator {
         Task { [weak self] in await self?.warmDriver() }
     }
 
-    /// The app slept or woke — re-probe both transports; a dead proxy is
+    /// The app slept or woke — re-probe both transports; a dead connection is
     /// replaced on next use, never repaired in place.
     func wakeDriverSession() {
         Task { [weak self] in
