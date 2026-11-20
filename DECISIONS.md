@@ -2,6 +2,27 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Writing by instruction checks words on device (L7)
+
+- "Type this …" takes the exact span after the lead-in ("type this",
+  "write this down", "type the following", or a bare "type"/"write" before
+  a quote) up to a closing quote, a spoken "end quote" or the end of speech.
+  Before typing, Apple's on-device `SpeechAnalyzer` (Speech framework,
+  macOS 26, no download or network) transcribes the last 20 s of the
+  hands-free speech the lane sent. Same words, ignoring case and
+  punctuation, types at once with the conversation transcript's formatting.
+  Different words, or no on-device transcript, shows the text and waits for
+  "type it". Every insert is read back through Accessibility.
+- Speech Recognition permission is requested at the first "type this"
+  (`NSSpeechRecognitionUsageDescription`); until it is granted, every
+  literal is shown before typing. L5 onboarding should cover the prompt.
+- "Come up with a reply for this" drafts with `TerraClient` (Responses API,
+  `store: false`), puts the draft in the focused field unsent and reads its
+  first line. Only "send it", with the draft still in the field of the same
+  app, sends, through the spine's own "click Send".
+- No library needed: span extraction is about 150 lines over string
+  matching, and the transcriber is Apple's.
+
 ## 2026-11-20 — The hands-free plan is approved (KAR-75)
 
 - The owner approved the hands-free GPT-Live plan and its eight
@@ -153,6 +174,22 @@ Settled choices, newest first. Change one only with a new entry here.
   → 86/86; same-author held-out set 32/72 → 71/72; a blind set written by
   an agent that never saw the parser 51/72 → 66/72.
 
+## 2026-11-20 — The owner's physical checks run as e2e flows
+
+- The owner's checklist items for #548, #560 (25–29), #562 (24), #583 and L7
+  (#595) are flows in `e2e/`, so the owner grants permissions and the run
+  does the rest. They speak with `say`, act on fixture windows that record
+  what happens to them, and read other apps through Accessibility from the
+  native helper. They never ask for a permission: `run.sh` checks the
+  grants and stops with what to grant.
+- What stays with the owner: a keyboard Escape (#583 deliberately ignores a
+  posted one, and a flow checks that), putting the Mac to sleep, and spoken
+  checks only meaningful in his voice. Those run with `JARVIS_E2E_OWNER=1`.
+  The agent turn and the reply draft spend on paid calls beyond Realtime and
+  run with `JARVIS_E2E_PAID=1`.
+- A held Fn is posted at the HID event tap, which is where Jarvis read Fn
+  before #583, so a build that still listens for Fn fails the check.
+
 ## 2026-11-20 — A fifth end-to-end flow: "stop" mid-scroll
 
 - `stop-scroll` says "Hey Jarvis, scroll down", "keep scrolling", then "stop"
@@ -211,6 +248,8 @@ Settled choices, newest first. Change one only with a new entry here.
 - Realtime spend is an estimate per minted secret, because the socket goes
   straight to OpenAI. A relay through the Worker would measure it exactly
   but adds a hop to every audio frame.
+- The Live broker sends `delegation: {type: "client"}` because the API
+  rejects the documented `null` (seen in a real connect test, 2026-11-20).
 
 ## 2026-11-20 — Standby opens a session on the wake word
 

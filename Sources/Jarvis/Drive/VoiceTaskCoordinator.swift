@@ -326,6 +326,29 @@ final class VoiceTaskCoordinator {
         configureGazeService()
     }
 
+    /// L7 writing by instruction, asked first by `beginVoiceTask` while
+    /// `Config.voiceLive` is on. Drafts go to the Responses API through
+    /// `Config.responsesRoute`; "send it" presses Send through this same spine.
+    lazy var writingByInstruction = WritingByInstruction(
+        enabled: { [config] in config.voiceLive },
+        compose: { [config] referent in
+            let route = try await config.responsesRoute()
+            let reply = try await TerraClient(route: { route })
+                .respond(WritingByInstruction.composeRequest(for: referent))
+            guard let text = reply["reply"]?.string else { throw TerraClient.Failure.malformed }
+            return text
+        },
+        send: { [weak self] draft in
+            guard let self else {
+                return VoiceToolResult(status: VoiceToolResult.Status.refused, say: "Nothing was sent.").encoded()
+            }
+            return await self.beginVoiceTask("click Send", app: draft.bundleID)
+        },
+        show: { [overlay] lines in
+            if lines.isEmpty { overlay.hideSheet() } else { overlay.showSheet(lines: lines) }
+        },
+        note: { [feed] in feed.add(.note, $0) })
+
     /// The overlay surface for chips/radials/rings — `.shared` in
     /// production, a fresh instance in tests so arms/disarms are
     /// observable without panels.
@@ -777,6 +800,7 @@ final class VoiceTaskCoordinator {
                         scrollContinuation: NativeWindowObservation.ScrollViewport? = nil,
                         continuousScroll: Bool = false,
                         onConversationScroll: (@MainActor (NativeWindowObservation.VerifiedScroll) -> Void)? = nil,
+                        writing: WritingInput? = nil,
                         admissionIsCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) async -> String {
         let started = ProcessInfo.processInfo.systemUptime
         onCommandStage?(captureID, nil, .coordinatorBegin, nil)
@@ -785,6 +809,14 @@ final class VoiceTaskCoordinator {
         guard !Task.isCancelled, admissionIsCurrent(), !trimmed.isEmpty else {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
                                    say: "I didn't catch a task.").encoded()
+        }
+        if windowScroll == nil {
+            let words = [transcriptHint, trimmed].compactMap { $0 }.first {
+                WritingInstruction.intent($0) != nil || WritingInstruction.confirmation($0) != nil
+            } ?? trimmed
+            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput()) {
+                return written
+            }
         }
         let normalized = trimmed.lowercased()
         if let windowScroll {
@@ -2872,9 +2904,11 @@ final class VoiceTaskCoordinator {
                 guideGlowing = true
                 overlay.showHalo(frame: frame)
             }
+            overlay.guideCallout.show(step)
             onChange()
         case .pulse(let frame):
             overlay.glowPress(frame: frame)
+            overlay.guideCallout.pulse()
         case .say(let line):
             feed.add(.note, line)
             taskEventSink(work.captureID,
@@ -2884,8 +2918,24 @@ final class VoiceTaskCoordinator {
         case .clear:
             work.guideStep = nil
             if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+            overlay.guideCallout.hide()
             onChange()
         }
+    }
+
+    /// A guide button in the indicator: the same control the spoken words
+    /// take, its line spoken the way the walkthrough's own lines are.
+    /// Stop is the universal cancel, as the spoken "stop" is.
+    func guideControl(_ control: GuideControl, workID: UUID) async {
+        guard let work = tasks.first(where: { $0.id == workID }), work.active, let guide = work.guide else { return }
+        feed.add(.route, "button → guide \(control)")
+        guard control != .stop else {
+            cancel(workID)
+            return
+        }
+        let say = await guide.hear(control)
+        guard !say.isEmpty else { return }
+        presentGuide(.say(say), workID: workID)
     }
 
     private func endGuide(_ guide: GuideSession, on work: Work) {
@@ -2893,6 +2943,7 @@ final class VoiceTaskCoordinator {
         work.guideObserver = nil
         work.guideStep = nil
         if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+        overlay.guideCallout.hide()
         Task { await guide.end() }
     }
 
