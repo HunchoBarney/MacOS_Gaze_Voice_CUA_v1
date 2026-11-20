@@ -284,12 +284,17 @@ enum CuaDriveServer {
         private let drives = Mutex<[String: Drive]>([:])
         private let chooser: Chooser
         private let granted: @Sendable () -> Bool
+        private let ask: @Sendable (String, DriveLoop.Ask) async -> String?
         private let socket: @Sendable () async throws -> String
 
         init(chooser: @escaping Chooser, granted: @escaping @Sendable () -> Bool,
+             ask: @escaping @Sendable (String, DriveLoop.Ask) async -> String? = {
+                 await AgentAskChannel.request($1, agent: $0)
+             },
              socket: @escaping @Sendable () async throws -> String = { try await CuaDaemonHost.shared.socket() }) {
             self.chooser = chooser
             self.granted = granted
+            self.ask = ask
             self.socket = socket
         }
 
@@ -307,7 +312,7 @@ enum CuaDriveServer {
                 drives[slug] = drive
                 return drive
             }
-            let session = drive.session, driver = drive.driver, socket = self.socket
+            let session = drive.session, driver = drive.driver, socket = self.socket, ask = self.ask
             do {
                 try await bindTransport(driver, session: session, socket: socket())
                 let call: DriveLoop.Call = { tool, callArgs in
@@ -335,7 +340,7 @@ enum CuaDriveServer {
                 // confirm like the model-picked loop candidates. A parked
                 // ask that times out is a decline, never silent approval.
                 let loop = DriveLoop(call: call, choose: chooser(),
-                                     ask: { await AgentAskChannel.request($0, agent: slug) },
+                                     ask: { await ask(slug, $0) },
                                      granted: granted,
                                      explicitConsent: false,
                                      config: .init(windowOnly: task.windowID != nil))
