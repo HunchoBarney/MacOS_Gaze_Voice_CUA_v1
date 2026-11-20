@@ -53,6 +53,23 @@ final class GuideRecipesTests: XCTestCase {
                       "two recipes match, so neither is used")
     }
 
+    func testNearMissGoalsDoNotStartASettingsOrKeyRecipe() {
+        for goal in ["connect my wireless headphones", "my wireless keyboard isn\u{2019}t working",
+                     "what\u{2019}s my wifi password", "share the wifi password with my daughter",
+                     "I can\u{2019}t connect to the network printer", "the network drive won\u{2019}t connect",
+                     "update my Apple ID password", "update my Apple Music subscription", "update the system font",
+                     "send a text with a big picture", "text my son a large photo", "print screen",
+                     "my mouse battery is low", "I lost my mouse connection", "I can\u{2019}t see the arrow keys",
+                     "make the video full screen", "full screen my video"] {
+            XCTAssertNil(Recipe.match(goal), goal)
+        }
+        for (goal, id) in ["turn the wifi off and on": "wifi", "I\u{2019}m stuck in full screen": "exit-full-screen",
+                           "leave full screen": "exit-full-screen", "install the macOS update": "updates",
+                           "I can\u{2019}t see my mouse": "pointer-size"] {
+            XCTAssertEqual(Recipe.match(goal)?.id, id, goal)
+        }
+    }
+
     func testEveryRecipeIsShortAndHandWorded() {
         XCTAssertEqual(Set(Recipe.all.map(\.id)).count, Recipe.all.count)
         for recipe in Recipe.all {

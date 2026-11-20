@@ -187,7 +187,7 @@ extension Recipe {
         id: "print", title: "How to print",
         patterns: [["print|printing"]],
         excludes: ["printer", "printers", "scan", "scanner", "ink", "jam", "jammed", "broken", "not working",
-                   "isnt working", "wont", "doesnt"],
+                   "isnt working", "wont", "doesnt", "screen", "screenshot"],
         steps: [
             GuideHint(control: "cmd+p",
                       detail: "Hold down the Command key, the one with \u{2318} on it next to the space bar. Then press P once."),
@@ -205,7 +205,7 @@ extension Recipe {
         patterns: [["text|writing|words|font|fonts|letters",
                     "bigger|larger|smaller|size|big|large|increase|easier to read|hard to read|cant read|too small|tiny"]],
         excludes: ["pointer", "cursor", "mouse", "print", "page", "website", "site", "web", "safari", "chrome",
-                   "email"],
+                   "email", "send", "sending", "message", "messages", "photo", "photos", "picture", "pictures"],
         app: SettingsLinks.appBundle, link: SettingsLinks.textSize, menuSteps: toDisplay,
         steps: [GuideHint(control: "Text size", detail: "It's under Text, with a small arrow on its right.",
                           windowNoun: settings)],
@@ -218,7 +218,7 @@ extension Recipe {
         id: "pointer-size", title: "How to make the pointer bigger",
         patterns: [["pointer|cursor|mouse|arrow",
                     "bigger|larger|size|big|find|see|lost|hard to see|too small|increase"]],
-        excludes: ["text", "writing", "font"],
+        excludes: ["text", "writing", "font", "battery", "bluetooth", "connect", "connected", "connection", "keys"],
         app: SettingsLinks.appBundle, link: SettingsLinks.pointerSize, menuSteps: toDisplay,
         steps: [GuideHint(control: "Pointer size", describe: "the Pointer size slider",
                           detail: "It's under Pointer. Drag the dot to the right to make the pointer bigger.",
@@ -230,9 +230,9 @@ extension Recipe {
 
     static let wifi = Recipe(
         id: "wifi", title: "How to turn Wi-Fi off and on again",
-        patterns: [["wifi|wi fi|wireless"],
+        patterns: [["wifi|wi fi"],
                    ["internet|network", "working|connected|connect|down|fix|broken|not|isnt|wont|cant"]],
-        excludes: ["forget"],
+        excludes: ["forget", "password", "share", "printer", "drive", "bluetooth"],
         app: SettingsLinks.appBundle, link: SettingsLinks.wifi,
         steps: [GuideHint(control: "Wi-Fi",
                           detail: "It's near the top. On the Wi-Fi page it's a switch: click it once to turn Wi-Fi off, wait a moment, then click it again.",
@@ -246,8 +246,8 @@ extension Recipe {
     static let updates = Recipe(
         id: "updates", title: "How to update your Mac",
         patterns: [["update|updates|updating|upgrade|upgrading",
-                    "mac|macos|software|system|computer|apple|install|installing|keeps asking"]],
-        excludes: ["app", "apps", "app store", "contact", "contacts", "address", "calendar"],
+                    "mac|macos|software|system|computer|install|installing|keeps asking"]],
+        excludes: ["app", "apps", "app store", "contact", "contacts", "address", "calendar", "font", "password"],
         app: SettingsLinks.appBundle, link: SettingsLinks.softwareUpdate,
         menuSteps: [GuideHint(control: "General", windowNoun: settings),
                     GuideHint(control: "Software Update", windowNoun: settings)],
@@ -264,7 +264,8 @@ extension Recipe {
 
     static let exitFullScreen = Recipe(
         id: "exit-full-screen", title: "How to leave full screen",
-        patterns: [["full screen|fullscreen"], ["menu bar", "gone|missing|disappeared|hidden|back"]],
+        patterns: [["full screen|fullscreen", "exit|leave|leaving|out|stop|stuck|close|escape|off|undo|normal|back"],
+                   ["menu bar", "gone|missing|disappeared|hidden|back"]],
         excludes: ["make it full screen", "enter full screen", "go full screen", "into full screen",
                    "to full screen"],
         steps: [
