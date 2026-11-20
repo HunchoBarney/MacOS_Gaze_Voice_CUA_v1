@@ -22,7 +22,7 @@ struct FnInputState: Sendable {
     var latchThreshold: TimeInterval = 0.4
     private(set) var held = false
     private(set) var latched = false
-    private var armed = false
+    private(set) var armed = false
     private var dictating = false
     private var escapeConsumed = false
     private var pressedKeys: Set<UInt16> = []
@@ -221,7 +221,7 @@ final class FnInputMonitor: ObservableObject {
         get { core.state.withLock { $0.latchMode } }
         set { core.state.withLock { $0.latchMode = newValue } }
     }
-    private let core: FnTapCore
+    let core: FnTapCore
     private var source: CFRunLoopSource?
     private var healthTimer: Timer?
     private var observedPhysicalHold = false
@@ -326,7 +326,14 @@ final class FnInputMonitor: ObservableObject {
             reportPhysicalFn(decision.fnFlag)
             observedPhysicalHold = decision.heldWithPhysicalFn
         }
-        if decision.result.action == .begin { beginHandlingMs = decision.beginHandlingMs }
+        if decision.result.action == .begin {
+            guard core.state.withLock({ $0.armed }), canBegin() else {
+                core.state.withLock { $0.interrupt() }
+                publishGates()
+                return
+            }
+            beginHandlingMs = decision.beginHandlingMs
+        }
         dispatch(decision.result)
         publishGates()
     }

@@ -40,4 +40,49 @@ final class FnTapCoreTests: XCTestCase {
         XCTAssertTrue(decision.interrupted)
         XCTAssertFalse(decision.result.consume)
     }
+
+    @MainActor
+    func testBeginOvertakenByAnInterruptionOnMainNeverStartsCapture() throws {
+        let monitor = FnInputMonitor()
+        var actions: [FnInputState.Action] = []
+        monitor.onAction = { actions.append($0) }
+        monitor.canBegin = { true }
+        let press = monitor.core.decide(.flagsChanged, try event(63, type: .flagsChanged, flags: .maskSecondaryFn)) { _ in
+            FnTapCore.Gates(canBegin: true, active: false)
+        }
+        XCTAssertEqual(press.result.action, .begin)
+        monitor.apply(FnTapCore.Decision(interrupted: true))
+        monitor.apply(press)
+        _ = monitor.handle(.flagsChanged, try event(63, type: .flagsChanged))
+        XCTAssertTrue(actions.isEmpty)
+        XCTAssertFalse(monitor.core.state.withLock { $0.armed })
+    }
+
+    @MainActor
+    func testBeginNoLongerAllowedOnMainNeverStartsCapture() throws {
+        let monitor = FnInputMonitor()
+        var actions: [FnInputState.Action] = []
+        monitor.onAction = { actions.append($0) }
+        monitor.canBegin = { false }
+        let press = monitor.core.decide(.flagsChanged, try event(63, type: .flagsChanged, flags: .maskSecondaryFn)) { _ in
+            FnTapCore.Gates(canBegin: true, active: false)
+        }
+        monitor.apply(press)
+        _ = monitor.handle(.flagsChanged, try event(63, type: .flagsChanged))
+        XCTAssertTrue(actions.isEmpty)
+    }
+
+    @MainActor
+    func testBeginStillBackedOnMainStartsAndReleaseFinishes() throws {
+        let monitor = FnInputMonitor()
+        var actions: [FnInputState.Action] = []
+        monitor.onAction = { actions.append($0) }
+        monitor.canBegin = { true }
+        let press = monitor.core.decide(.flagsChanged, try event(63, type: .flagsChanged, flags: .maskSecondaryFn)) { _ in
+            FnTapCore.Gates(canBegin: true, active: false)
+        }
+        monitor.apply(press)
+        _ = monitor.handle(.flagsChanged, try event(63, type: .flagsChanged))
+        XCTAssertEqual(actions, [.begin, .finish])
+    }
 }
