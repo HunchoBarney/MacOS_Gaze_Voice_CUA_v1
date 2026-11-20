@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// spawning duplicate driver daemons and overlays.
     private var instanceLock: FileHandle?
     private var statusItem: NSStatusItem!
-    private var windows: VoiceWindows!
+    private var windows: AppWindows!
     private let speechOutput = SpeechOutput()
     private lazy var controller = VoiceController(config: Config.shared, speaker: speechOutput)
     private let diagnostics = DiagnosticsReporter()
@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Config and can block on a keychain prompt.
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jarvis")
-        windows = VoiceWindows(controller: controller, microphones: microphones, input: input)
+        windows = AppWindows(controller: controller, microphones: microphones, input: input)
         let menu = NSMenu()
         let settings = menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self

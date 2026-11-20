@@ -122,24 +122,6 @@ struct ListeningIndicatorView: View {
     }
 }
 
-/// Five bars that follow the microphone level; Reduce Motion holds them.
-private struct LevelMeter: View {
-    let level: Float
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        let amp = reduceMotion ? 0.7 : CGFloat(max(0.15, min(1, level * 1.6)))
-        HStack(spacing: 2) {
-            ForEach(Array([0.35, 0.7, 1, 0.6, 0.3].enumerated()), id: \.offset) { _, k in
-                Capsule().fill(Color(red: 0.31, green: 0.84, blue: 0.64))
-                    .frame(width: 3, height: 4 + 12 * k * amp)
-            }
-        }
-        .frame(height: 16)
-        .accessibilityHidden(true)
-    }
-}
-
 /// What went wrong, in the words Jarvis said, with a way to fix it when
 /// the fix is a permission.
 private struct ProblemCard: View {

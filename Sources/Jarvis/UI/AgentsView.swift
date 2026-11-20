@@ -5,7 +5,7 @@ private enum OpenAgentsKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// Injected by VoiceWindows so any card can open the agents window.
+    /// Injected by AppWindows so any card can open the agents window.
     var openAgents: () -> Void {
         get { self[OpenAgentsKey.self] }
         set { self[OpenAgentsKey.self] = newValue }

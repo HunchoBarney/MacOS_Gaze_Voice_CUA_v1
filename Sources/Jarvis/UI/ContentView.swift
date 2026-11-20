@@ -5,7 +5,7 @@ struct CuaTasksView: View {
     @ObservedObject var controller: VoiceController
     var body: some View {
         if !controller.cuaTasks.isEmpty || !controller.pendingQuestions.isEmpty {
-            VoiceCard {
+            JarvisCard {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack { Text("What Jarvis is doing").font(.headline); Spacer(); Button("Stop everything", action: controller.stopAll) }
                     ForEach(controller.cuaTasks) { task in
@@ -61,7 +61,7 @@ struct ActivityView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VoiceCard {
+            JarvisCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Type a command", systemImage: "keyboard").font(.headline)
                     HStack {
@@ -76,7 +76,7 @@ struct ActivityView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            VoiceCard {
+            JarvisCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("What happened", systemImage: "list.bullet.rectangle").font(.headline)
                     if controller.cua.feed.entries.isEmpty {
@@ -101,7 +101,7 @@ struct ActivityView: View {
                 }
             }
             CuaTasksView(controller: controller)
-            VoiceCard {
+            JarvisCard {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Label("Agents", systemImage: "sparkles").font(.headline)
@@ -126,7 +126,7 @@ struct ActivityView: View {
                 }
                 .task { await agentsModel.refresh() }
             }
-            VoiceCard {
+            JarvisCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(controller.handsFreeEnabled ? controller.handsFreeLabel : controller.status.title,
                           systemImage: controller.status.symbol).font(.headline)
