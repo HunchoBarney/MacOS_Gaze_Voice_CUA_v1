@@ -3,6 +3,16 @@ import Foundation
 import JarvisCore
 import os
 
+/// Unit tests never read which app, process or window is in front on the
+/// Mac running them: under XCTest the live frontmost defaults read nil, so a
+/// fixture's outcome can't change with whatever the owner has open. A test
+/// that needs a front app injects one; a live test opts in with
+/// JARVIS_LIVE_DESKTOP=1.
+enum FrontmostTestGuard {
+    static let blocksRealFrontmost = NSClassFromString("XCTestCase") != nil
+        && ProcessInfo.processInfo.environment["JARVIS_LIVE_DESKTOP"] != "1"
+}
+
 /// The single observe → choose → dispatch loop for computer use.
 ///
 /// Contract (per `action-selection-policy.mdx`): one `get_window_state` per
@@ -338,15 +348,18 @@ actor DriveLoop {
                             [(frame: CGRect, label: String)],
                             CGPoint?) async -> DriveResult?)? = nil,
          frontmostBundleID: @escaping () -> String? = {
-             NSWorkspace.shared.frontmostApplication.flatMap {
+             guard !FrontmostTestGuard.blocksRealFrontmost else { return nil }
+             return NSWorkspace.shared.frontmostApplication.flatMap {
                  $0.bundleIdentifier != Bundle.main.bundleIdentifier
                      ? $0.bundleIdentifier : nil
              }
          },
          frontmostPID: @escaping () -> Int? = {
-             NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) }
+             guard !FrontmostTestGuard.blocksRealFrontmost else { return nil }
+             return NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) }
          },
          frontmostWindowID: @escaping () -> Int? = {
+             guard !FrontmostTestGuard.blocksRealFrontmost else { return nil }
              let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                    kCGNullWindowID) as? [[String: Any]]
              let front = rows?.first { ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 }
@@ -510,7 +523,8 @@ actor DriveLoop {
     static func observeForegroundWindow(
         pid: Int,
         frontmost: @MainActor () -> Int? = {
-            NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) }
+            guard !FrontmostTestGuard.blocksRealFrontmost else { return nil }
+            return NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) }
         },
         focusedWindow: @MainActor (Int) -> Int? = { FocusedTextBinding.capturedWindowID(pid: $0) },
         windows: @MainActor () -> [[String: Any]] = {
