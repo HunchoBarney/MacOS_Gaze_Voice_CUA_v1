@@ -1,0 +1,17 @@
+Copyright (c) 2026 Karanvir Kang and contributors. All rights reserved.
+
+No licence is granted to use, copy, modify or distribute this code, in whole
+or in part, except where GitHub's Terms of Service allow viewing and forking
+a public repository on GitHub.
+
+This notice does not cover third-party code, models or assets, which keep
+their own licences:
+
+- Everything under ThirdParty/.
+- Portions derived from jev-voice-control
+  (https://github.com/chris-wozniczek/jev-voice-control), the project Jarvis
+  started from, Copyright (c) 2026 Chris Wozniczek, under the MIT licence in
+  ThirdParty/jev-voice-control/LICENSE.
+- Any other vendored file that carries its own licence notice, such as the
+  upstream Cua source under development/ and MediaPipe under
+  EyeTracking/public/licenses/.
