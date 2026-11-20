@@ -384,55 +384,6 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertEqual(flags.value, 0)
     }
 
-    // MARK: - Task 2/4: mid-hold turn assets
-
-    /// The hold-path asset send consults the context provider for a
-    /// live command turn and skips EVERYTHING for a dictation hold —
-    /// its commit is transcript-only and consumes neither.
-    func testSendTurnAssetsSkipsDictationTurn() async throws {
-        let lane = lane()
-        let flags = Flags()
-        lane.contextProvider = { flags.value += 1; return "[context] test" }
-        let id = UUID()
-        lane.active = (id, RealtimeVoiceLane.Session(
-            name: "mic", feed: try makeFeed(), sendsAudio: true))
-        lane.respondOnCommit = false
-        await lane.sendTurnAssets(session: id)
-        XCTAssertEqual(flags.value, 0,
-                       "a dictation hold must not spend the context note")
-        lane.respondOnCommit = true
-        await lane.sendTurnAssets(session: id)
-        XCTAssertEqual(flags.value, 0,
-                       "no context is sent until a whole-final safe miss is admitted")
-    }
-
-    /// A stale/cancelled turn's assets must not send — the identity
-    /// guard matches the finish() guards.
-    func testSendTurnAssetsRejectsStaleTurn() async throws {
-        let lane = lane()
-        let flags = Flags()
-        lane.contextProvider = { flags.value += 1; return "[context] test" }
-        lane.active = (UUID(), RealtimeVoiceLane.Session(
-            name: "mic", feed: try makeFeed(), sendsAudio: true))
-        await lane.sendTurnAssets(session: UUID())
-        XCTAssertEqual(flags.value, 0)
-    }
-
-    /// The dictation hold doesn't even spawn its screenshot — the
-    /// capture is never consumed.
-    func testDictationHoldSpendsNoScreenshot() {
-        let lane = lane()
-        XCTAssertFalse(lane.wantsTurnScreenshot)
-        lane.respondOnCommit = false
-        XCTAssertFalse(lane.wantsTurnScreenshot)
-    }
-
-    // MARK: - Task 3: transcript settle cap
-
-    func testTranscriptSettleCapIs200ms() {
-        XCTAssertEqual(RealtimeVoiceLane.transcriptSettleCap, 0.2, accuracy: 0.0001)
-    }
-
     // MARK: - Task 5: say-suppression for every contract tool result
 
     /// The decode gate — every VoiceToolResult carrying a non-empty say

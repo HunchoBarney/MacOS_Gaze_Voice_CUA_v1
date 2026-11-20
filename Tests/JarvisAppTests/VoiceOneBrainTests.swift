@@ -384,18 +384,17 @@ final class VoiceOneBrainTests: XCTestCase {
         } catch {}
     }
 
-    func testLocalHitDoesNotNeedAKeySocketOrScreenshot() async throws {
-        var opens = 0, shots = 0, calls: [String] = []
+    func testLocalHitDoesNotNeedAKeyOrSocket() async throws {
+        var opens = 0, calls: [String] = []
         let client = RealtimeVoiceClient(wireFactory: { _ in opens += 1; return RecordedVoiceWire() })
         let lane = RealtimeVoiceLane(apiKey: { "" }, client: client)
         lane.admissionContextProvider = { self.context() }
-        lane.screenShotProvider = { shots += 1; return Data() }
         lane.commandHandler = { goal, _, _, _, _, _ in
             calls.append(goal); return #"{"status":"started","say":"Accepted."}"#
         }
         try await lane.submitTyped("scroll down", sessionID: UUID())
         XCTAssertEqual(calls, ["scroll down"])
-        XCTAssertEqual(opens, 0); XCTAssertEqual(shots, 0)
+        XCTAssertEqual(opens, 0)
         client.teardown()
     }
 

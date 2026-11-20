@@ -253,7 +253,7 @@ final class LocalSpeechTests: XCTestCase {
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
         let controller = VoiceController(config: config, speech: capture,
-            diagnosticTraceOnly: true, permissionStatusReader: { [.microphone, .camera] })
+            permissionStatusReader: { [.microphone, .camera] })
         controller.missingPermissions = [.microphone]
         let before = capture.cancels
         controller.refreshPermissionsInBackground(canPrepareMicrophone: { true }) {
@@ -280,7 +280,7 @@ final class LocalSpeechTests: XCTestCase {
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
         let controller = VoiceController(config: config, speech: capture,
-            diagnosticTraceOnly: true, permissionStatusReader: {
+            permissionStatusReader: {
                 reads.withLock { $0 += 1 }
                 return status.withLock { $0 }
             })

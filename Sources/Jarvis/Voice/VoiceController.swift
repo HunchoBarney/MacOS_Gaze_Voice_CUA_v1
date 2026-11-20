@@ -138,11 +138,9 @@ final class VoiceController: ObservableObject {
     }
 
     let config: Config
-    private let diagnosticTraceOnly: Bool
     let commandTrace = VoiceCommandTrace()
     let cua: VoiceTaskCoordinator
     var cuaTasks: [VoiceTaskCoordinator.Work] { cua.tasks }
-    var diagnosticTask: VoiceTaskCoordinator.Work? { cuaTasks.first { $0.id == cua.selectedID } }
     func stopAll() { cancel(); cua.stopAll() }
     func selectTask(_ id: UUID) { cua.select(id: id) }
     func cancelTask(_ id: UUID) { cua.cancel(id) }
@@ -607,13 +605,11 @@ final class VoiceController: ObservableObject {
          cuaRuntime: VoiceTaskCoordinator? = nil,
          dictation: DictationDelivering = DictationDelivery(),
          speaker: SpeechSynthesizing? = nil,
-         diagnosticTraceOnly: Bool = false,
          permissionStatusReader: @escaping @Sendable () -> [Permission] = { Permission.missing }) {
         let config = config ?? Config.shared
         self.config = config
         self.handsFreePaused = config.handsFreePaused
         self.permissionMonitor = PermissionStatusMonitor(read: permissionStatusReader)
-        self.diagnosticTraceOnly = diagnosticTraceOnly
         self.dictation = dictation
         self.speaker = speaker
         self.authorize = authorize ?? { await RealtimeVoiceLane.requestAuthorization() }
@@ -727,16 +723,15 @@ final class VoiceController: ObservableObject {
             }
             lane.admissionContextProvider = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
             lane.semanticEnabled = { [weak self] in
-                self?.config.semanticAppSuggestions == true && self?.diagnosticTraceOnly == false
+                self?.config.semanticAppSuggestions == true
             }
-            lane.remoteReasoningPermitted = !self.diagnosticTraceOnly
             lane.semanticContextProvider = { [weak self] in
                 guard let self else { return VoiceAdmissionContext() }
                 self.voiceEntityRefresh = .distantPast
                 return self.voiceAdmissionContext()
             }
             lane.semanticInterpretation = { [weak self] admission, context in
-                guard let self, !self.diagnosticTraceOnly, self.config.semanticAppSuggestions else {
+                guard let self, self.config.semanticAppSuggestions else {
                     throw CancellationError()
                 }
                 let key = self.config.apiKey
@@ -843,7 +838,7 @@ final class VoiceController: ObservableObject {
         }
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
         lane.conversation.interpret = { [weak self] text, context, memory in
-            guard let self, !self.diagnosticTraceOnly, !self.config.apiKey.isEmpty else {
+            guard let self, !self.config.apiKey.isEmpty else {
                 throw VoiceError("I can't connect right now. Check your internet and try again.")
             }
             return try await VoiceSemanticRouter.live(apiKey: self.config.apiKey)

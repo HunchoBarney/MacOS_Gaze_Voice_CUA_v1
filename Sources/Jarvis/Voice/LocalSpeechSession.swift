@@ -387,8 +387,6 @@ final class LocalSpeechSession {
     private(set) var gate = VoiceTurnGate()
     var context = VoiceAdmissionContext()
     private var capturedContext = VoiceAdmissionContext()
-    private var remoteFrames: [Data] = []
-    private var remoteBytes = 0
     private(set) var finalizedAt: TimeInterval?
     var boundContext: VoiceAdmissionContext { capturedContext }
     var execute: (VoiceAdmission) async -> Void
@@ -405,7 +403,6 @@ final class LocalSpeechSession {
                realtimeConnection: UUID? = nil) -> VoiceTurnToken {
         capturedContext = context
         finalizedAt = nil
-        remoteFrames = []; remoteBytes = 0
         return gate.begin(id: id, mode: mode, ready: ready, now: now, realtimeConnection: realtimeConnection)
     }
 
@@ -458,10 +455,8 @@ final class LocalSpeechSession {
 
     func cancelCapture(_ turn: VoiceTurnToken) async {
         guard gate.isCurrent(turn) else { return }
-        gate.cancel(turn); remoteFrames = []; remoteBytes = 0
+        gate.cancel(turn)
     }
-
-    func discardRemoteAudio() { remoteFrames = []; remoteBytes = 0 }
 
     func enterDictation() {
         guard let turn = gate.token else { return }

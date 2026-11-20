@@ -749,22 +749,6 @@ final class VoiceSemanticTests: XCTestCase {
         speech.cancel()
     }
 
-    func testTraceOnlyInterpretationCallbackRejectsBeforeCredentialOrNetworkUse() async throws {
-        let (c, config) = coordinator()
-        let speech = lane(context())
-        let controller = VoiceController(config: config, speech: speech, authorize: { false },
-            cuaRuntime: c, diagnosticTraceOnly: true)
-        XCTAssertFalse(speech.semanticEnabled())
-        XCTAssertFalse(speech.remoteReasoningPermitted)
-        let input = try await admission()
-        do {
-            _ = try await speech.semanticInterpretation?(input, context())
-            XCTFail("direct callback must reject even if the caller bypasses eligibility")
-        } catch is CancellationError {}
-        _ = controller
-        speech.cancel()
-    }
-
     private func tracedComposition(failing: Bool = false, capturedWindow: Int? = nil)
         -> (VoiceController, VoiceTaskCoordinator) {
         let config = Config(defaults: UserDefaults(suiteName: "composition-\(UUID())")!,
