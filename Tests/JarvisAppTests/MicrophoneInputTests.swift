@@ -1,9 +1,28 @@
 import AVFoundation
 import Foundation
 import XCTest
+import os
 @testable import Jarvis
 
 final class MicrophoneInputTests: XCTestCase {
+    func testTheFrameDeadlineStartsAfterASlowEngineStart() {
+        let queue = DispatchQueue(label: "test.microphone")
+        let events = OSAllocatedUnfairLock<[String]>(initialState: [])
+        let fired = expectation(description: "deadline fired")
+        let deadline = DispatchWorkItem {
+            events.withLock { $0.append("deadline") }
+            fired.fulfill()
+        }
+        queue.async {
+            MicrophoneInput.start({
+                Thread.sleep(forTimeInterval: 0.3)
+                queue.async { events.withLock { $0.append("frame") } }
+            }, thenArm: deadline, after: 0.05, on: queue)
+        }
+        wait(for: [fired], timeout: 2)
+        XCTAssertEqual(events.withLock { $0 }, ["frame", "deadline"])
+    }
+
     func testDuplexReceiptExpiresWhenOutputStopsAdvancingDespiteLiveInput() {
         var state = MicrophoneInput.DuplexReadiness()
         XCTAssertFalse(state.observe(inputFrames: 1024, outputSample: 100, healthy: true, now: 10))
