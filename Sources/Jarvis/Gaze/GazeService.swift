@@ -100,6 +100,9 @@ final class GazeService {
     /// Defaults observer token — a Settings write to the gaze keys
     /// re-reads the dwell policy instead of pinning the launch-time mode.
     private var defaultsObserver: NSObjectProtocol?
+    /// The last few seconds of fixations on the `now` clock — what
+    /// "this" meant when it was said.
+    private(set) var fixations = FixationRing()
 
     /// The pump runs on every new gaze sample, so the highlight follows the
     /// tracker within one frame; this is only the idle beat that keeps
@@ -203,6 +206,7 @@ final class GazeService {
         enumerateInFlight = false
         lastPoint = nil; lastFreshAt = -.greatestFiniteMagnitude
         dwell.reset()
+        fixations.reset()
         if reportedStale { reportedStale = false; staleSink(0) }
     }
 
@@ -319,6 +323,14 @@ final class GazeService {
         case .release, .none: liveCandidate = nil
         case .ambiguous: break
         }
+        var referent: GazeReferent?
+        if case .hold = event { referent = await scorer.currentReferent }
+        // stop() may have run during the await; a stale tick only ends a
+        // fixation, it never extends one on gaze nobody is reporting.
+        let ends: Bool = switch event { case .release, .none: true; default: false }
+        if running, dwellLive || ends {
+            fixations.record(event, focal: referent, at: now())
+        }
         // The dwell engine only reads scorer events — a release, a feed
         // stall, an ambiguity all end or pause the hold through it. On a
         // stale tick only TERMINAL events reach the engine — a hold that
@@ -332,7 +344,7 @@ final class GazeService {
         }
         let share: Double
         if case .hold = event {
-            share = await scorer.currentReferent?.confidence ?? 0.5
+            share = referent?.confidence ?? 0.5
         } else {
             share = 0
         }
@@ -400,6 +412,12 @@ final class GazeService {
         return candidates.filter { $0.id != candidate.id && IntentScorerCore.labelMatches(hint: hint, label: $0.label) }.isEmpty
     }
 
+    /// The fixation the eyes held when a deictic word was spoken —
+    /// `wordTime` on this service's `now` clock. nil while gaze is off.
+    func fixation(at wordTime: TimeInterval) -> GazeFixation? {
+        running ? fixations.fixation(at: wordTime) : nil
+    }
+
     /// Referents below this share are glances, not context.
     static let referentShareFloor = 0.3
     /// A referent older than this describes a screen that's already
@@ -426,6 +444,80 @@ final class GazeService {
                 + fresh.map(\.contextLine).joined(separator: " | "))
         }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - Fixation ring
+
+/// One fixation that crossed the scorer's focal gate, on the service's
+/// monotonic clock. `end` is the last fresh tick that held it.
+struct GazeFixation: Sendable, Equatable {
+    var candidate: IntentCandidate
+    var confidence: Double
+    var start: TimeInterval
+    var end: TimeInterval
+}
+
+/// A few seconds of timestamped fixations, so a spoken "this" binds to
+/// where the eyes were when the word was said, not where they are when the
+/// request arrives. People often look away before they finish a sentence.
+struct FixationRing: Sendable, Equatable {
+    /// Longer than the plan's ~3 s: the word is often a couple of seconds
+    /// old by the time the transcript and the delegation reach the bridge.
+    static let horizon: TimeInterval = 5
+    /// A blink or a short saccade between the fixation and the word.
+    static let gapTolerance: TimeInterval = 0.3
+
+    private struct Entry: Sendable, Equatable {
+        var fixation: GazeFixation
+        /// Crossed the focal gate — a glance never resolves "this".
+        var focal: Bool
+    }
+
+    private var entries: [Entry] = []
+    /// The newest entry is the incumbent's and still extends.
+    private var open = false
+
+    /// One scorer event at `t`. `focal` is the scorer's current
+    /// referent on a hold; it marks the incumbent as a real fixation.
+    mutating func record(_ event: IntentEvent, focal: GazeReferent?, at t: TimeInterval) {
+        switch event {
+        case .acquire(let c):
+            begin(c, at: t)
+        case .hold(let c, _):
+            if !open || entries.last?.fixation.candidate.id != c.id { begin(c, at: t) }
+            entries[entries.count - 1].fixation.end = t
+            if let focal, focal.candidateID == c.id {
+                entries[entries.count - 1].focal = true
+                entries[entries.count - 1].fixation.confidence =
+                    max(entries[entries.count - 1].fixation.confidence, focal.confidence)
+            }
+        case .release, .none:
+            open = false
+        case .ambiguous:
+            break
+        }
+        let newest = entries.last
+        entries.removeAll { $0.fixation.end < t - Self.horizon || (!$0.focal && $0 != newest) }
+    }
+
+    /// The fixation that overlapped `wordTime`, or the one the eyes had
+    /// just left. One that started after the word never counts.
+    func fixation(at wordTime: TimeInterval) -> GazeFixation? {
+        guard let hit = entries.last(where: { $0.focal && $0.fixation.start <= wordTime })?.fixation,
+              wordTime - hit.end <= Self.gapTolerance else { return nil }
+        return hit
+    }
+
+    mutating func reset() {
+        entries.removeAll()
+        open = false
+    }
+
+    private mutating func begin(_ c: IntentCandidate, at t: TimeInterval) {
+        entries.append(Entry(fixation: GazeFixation(candidate: c, confidence: 0, start: t, end: t),
+                             focal: false))
+        open = true
     }
 }
 

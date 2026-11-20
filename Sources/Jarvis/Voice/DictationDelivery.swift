@@ -239,6 +239,23 @@ struct DictationDelivery: DictationDelivering {
         throw VoiceError("No editable field is focused for dictation.")
     }
 
+    /// One literal insert with no editing vocabulary, for L7's "type this
+    /// …": a spoken "new line" inside the quote is typed as words. Same
+    /// lease and insert → paste path as `deliver`.
+    func deliverVerbatim(_ text: String) async throws {
+        guard !text.isEmpty else { return }
+        guard await Self.acquireSharedLease() else { throw CancellationError() }
+        var done = false
+        if !Task.isCancelled {
+            done = insertText(text)
+            if !done { done = await pasteText(text) }
+            if done { history.record(text, group: history.beginGroup()) }
+        }
+        await Self.sharedLease.release()
+        try Task.checkCancellation()
+        guard done else { throw VoiceError("No editable field is focused for dictation.") }
+    }
+
     /// Cancellation-aware acquire. AsyncLease hands a released lease to
     /// its oldest parked waiter regardless of that waiter's cancellation,
     /// so abandoning the await isn't enough — when cancel wins the race,

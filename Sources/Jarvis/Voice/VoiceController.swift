@@ -149,6 +149,7 @@ final class VoiceController: ObservableObject {
     func stopAll() { cancel(); cua.stopAll() }
     func selectTask(_ id: UUID) { cua.select(id: id) }
     func cancelTask(_ id: UUID) { cua.cancel(id) }
+    func guideControl(_ control: GuideControl, task id: UUID) { Task { await cua.guideControl(control, workID: id) } }
     func approveTask(_ id: UUID, approved: Bool) { cua.resolveApproval(id: id, approved: approved) }
     /// All parked confirm asks, oldest task first — every row's Run button
     /// is id-scoped (approveTask → resolveApproval), so it resolves its own.
@@ -660,6 +661,11 @@ final class VoiceController: ObservableObject {
                 self?.commandTrace.record(stage, turn: turn)
             }
             lane.audioRepliesEnabled = config.ttsEnabled
+            let speech = lane.recentSpeech
+            speech.isRecording = config.voiceLive
+            cua.writingByInstruction.localTranscript = {
+                await LocalSpanTranscriber().transcribe(speech.snapshot())
+            }
             lane.commandHandler = { [weak self, weak lane] instruction, app, literalText, transcript, steps, captureID in
                 guard let self else { return #"{"status":"refused","say":"Jev is not available right now."}"# }
                 let capturedWindow = lane?.capturedLocalWindowID(for: captureID)
