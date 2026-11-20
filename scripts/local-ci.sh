@@ -248,15 +248,17 @@ case ${1:-} in
         [ "$target" = fork ] && { echo "refusing PR #$1: its head is in a fork" >&2; exit 2; }
         # Queue it for poll rather than racing other callers for the lock. A
         # head that already has a result waits from now, not from when it was
-        # first seen, and its pending status makes poll test it again.
+        # first seen, and its pending status makes poll test it again. The
+        # status goes up before the request is recorded, so a poll that lists
+        # the request never sees the old result and drops it untested.
         read -r state _ <<<"$(latest_status "$target")"
+        post "$target" pending "queued for local CI" || { echo "could not post a status for $target" >&2; exit 1; }
         case $state in
             "" | pending) first_seen "$target" >/dev/null ;;
             *) mkdir -p "$CI_HOME/seen" && date +%s >"$CI_HOME/seen/$target" ;;
         esac
         mkdir -p "$CI_HOME/requested"
         date -u +%Y-%m-%dT%H:%M:%SZ >"$CI_HOME/requested/$target"
-        post "$target" pending "queued for local CI" || { echo "could not post a status for $target" >&2; exit 1; }
         say "queued $1 ($target); poll tests heads oldest first, so watch its $CONTEXT status"
         ;;
 esac
