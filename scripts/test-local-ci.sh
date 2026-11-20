@@ -62,6 +62,11 @@ ci_run() {
     local home=$dir/ci-$1 lane_exit=$2
     mkdir -p "$home"
     git init -q -b main "$dir/origin-$1"
+    if [ "${3:-guard}" = guard ]; then
+        mkdir -p "$dir/origin-$1/Sources"
+        echo 'let optIn = "JARVIS_LIVE_KEYCHAIN"' >"$dir/origin-$1/Sources/Guard.swift"
+        git -C "$dir/origin-$1" add Sources
+    fi
     git -C "$dir/origin-$1" -c user.name=ci -c user.email=ci@example.invalid commit -q --allow-empty -m fixture
     local sha; sha=$(git -C "$dir/origin-$1" rev-parse HEAD)
     git clone -q "$dir/origin-$1" "$home/checkout"
@@ -101,6 +106,12 @@ home=$(ci_run lane-busy 1)
 check "$home" gh.log "state=error -f context=local-ci -f description=build lane busy"
 if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a lane that never freed up must not post failure"; failures=$((failures + 1))
+fi
+
+home=$(ci_run no-guard 0 none)
+check "$home" gh.log "state=error -f context=local-ci -f description=merge main first"
+if [ -e "$home/lane.log" ]; then
+    echo "FAIL a head without the Keychain test guard must never reach the lane"; failures=$((failures + 1))
 fi
 
 home=$(ci_run no-lane 0)

@@ -131,6 +131,14 @@ run_sha() {
         post "$sha" error "checkout failed · log $short.log"; return 1
     fi
 
+    # Captain gate (2026-11-20): a head without #598's Keychain test guard
+    # would raise Keychain dialogs on the owner's screen. Refuse to test it.
+    if ! git -C "$CHECKOUT" grep -q JARVIS_LIVE_KEYCHAIN HEAD -- Sources; then
+        say "no Keychain test guard at $sha" | tee -a "$log"
+        post "$sha" error "merge main first: head lacks the #598 Keychain test guard"
+        return 1
+    fi
+
     if [ ! -x "$LANE_SH" ]; then
         say "no build lane at $LANE_SH" | tee -a "$log"
         post "$sha" error "no build lane at $LANE_SH; will retry"
