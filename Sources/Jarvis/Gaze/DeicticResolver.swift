@@ -111,6 +111,8 @@ final class DeicticResolver {
 
 /// The Accessibility fallbacks. Each call is synchronous AX IPC with a
 /// short messaging timeout, so the resolver runs them off the main actor.
+/// The timeout is per element and never set on the system-wide element,
+/// where it would become the whole process's AX timeout.
 enum DeicticAXProbe {
     static let messagingTimeout: Float = 0.2
 
@@ -140,7 +142,6 @@ enum DeicticAXProbe {
     /// `point` is the pointer in global top-left points.
     static func pointer(at point: CGPoint) -> DeicticResolver.Hit? {
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, messagingTimeout)
         var element: AXUIElement?
         guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element) == .success,
               let element else { return nil }
@@ -148,13 +149,18 @@ enum DeicticAXProbe {
     }
 
     private static func focusedElement() -> AXUIElement? {
-        let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, messagingTimeout)
-        return elementAttribute(system, kAXFocusedUIElementAttribute)
+        elementAttribute(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute).map(budgeted)
+    }
+
+    @discardableResult
+    private static func budgeted(_ element: AXUIElement) -> AXUIElement {
+        AXUIElementSetMessagingTimeout(element, messagingTimeout)
+        return element
     }
 
     /// Jarvis's own windows and the bare application element are never "this".
     private static func hit(_ element: AXUIElement, source: DeicticReferent.Source) -> DeicticResolver.Hit? {
+        budgeted(element)
         var pid: pid_t = 0
         guard AXUIElementGetPid(element, &pid) == .success, pid > 0,
               pid != ProcessInfo.processInfo.processIdentifier else { return nil }
@@ -163,7 +169,7 @@ enum DeicticAXProbe {
         let label = [kAXTitleAttribute, kAXDescriptionAttribute, kAXPlaceholderValueAttribute]
             .lazy.compactMap { attribute(element, $0) as? String }
             .first { !$0.isEmpty } ?? ""
-        let window = role == kAXWindowRole ? element : elementAttribute(element, kAXWindowAttribute)
+        let window = role == kAXWindowRole ? element : elementAttribute(element, kAXWindowAttribute).map(budgeted)
         let windowID = window.flatMap(FocusedTextBinding.windowNumber).map(Int.init)
         let referent = DeicticReferent(
             id: "axref:\(pid):\(windowID ?? 0):\(CFHash(element))",
