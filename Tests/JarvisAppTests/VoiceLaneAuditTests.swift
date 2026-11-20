@@ -534,6 +534,8 @@ final class VoiceLaneAuditTests: XCTestCase {
             spec: DriveTask(goal: "Scroll down.", application: "fixture.editor"))]
         XCTAssertTrue(controller.stoppable)
         XCTAssertFalse(escape.handle(keyCode: 0), "only Escape stops")
+        XCTAssertFalse(escape.handle(keyCode: EscapeStop.escapeKeyCode, physical: false),
+                       "an Escape the Cua driver posts inside the task doesn't stop it")
         XCTAssertTrue(escape.handle(keyCode: EscapeStop.escapeKeyCode))
         await poll(until: { flags.value == 1 })
         XCTAssertEqual(flags.value, 1)
