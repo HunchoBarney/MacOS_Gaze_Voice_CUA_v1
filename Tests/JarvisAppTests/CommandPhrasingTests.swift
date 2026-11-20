@@ -8,7 +8,9 @@ import XCTest
 /// executor receives. "!" rows guard against over-reading.
 ///
 /// `design.tsv` is the set the grammar was written against. `holdout.tsv`
-/// was written at the same time and is only measured, never tuned against.
+/// was written at the same time by the same author and is only measured,
+/// never tuned against. `blind.tsv` was written by a separate agent that
+/// never saw the parser or the other sets.
 final class CommandPhrasingTests: XCTestCase {
     private struct Row {
         let id, family, phrase, canonical: String
@@ -18,6 +20,7 @@ final class CommandPhrasingTests: XCTestCase {
     /// Held-out rows that must keep passing. Set once from the final
     /// measurement; raise it when the grammar improves, never lower it.
     private static let heldOutFloor = 0
+    private static let blindFloor = 0
 
     private static let context: VoiceAdmissionContext = {
         var context = VoiceAdmissionContext()
@@ -39,6 +42,13 @@ final class CommandPhrasingTests: XCTestCase {
         let rows = try rows("holdout")
         let failures = try measure("holdout")
         XCTAssertGreaterThanOrEqual(rows.count - failures.count, Self.heldOutFloor,
+                                    failures.joined(separator: "\n"))
+    }
+
+    func testBlindPhrasesMeanTheirCanonicalCommand() throws {
+        let rows = try rows("blind")
+        let failures = try measure("blind")
+        XCTAssertGreaterThanOrEqual(rows.count - failures.count, Self.blindFloor,
                                     failures.joined(separator: "\n"))
     }
 
