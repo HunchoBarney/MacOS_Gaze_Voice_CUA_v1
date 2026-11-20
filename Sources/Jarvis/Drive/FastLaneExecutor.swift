@@ -167,7 +167,7 @@ extension DriveLoop {
         // dictation verbs steer the capture lane. Peeled qualifiers are
         // emphasis, the same as the gaze referents above.
         switch parsed.action.body {
-        case .systemHotkey, .overlay, .repeatLast, .locate, .dictation:
+        case .systemHotkey, .overlay, .repeatLast, .locate, .dictation, .desktop:
             guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
             else { return .vetoed }
             return .resolved(FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: ""))
@@ -402,6 +402,11 @@ extension DriveLoop {
                                        denied: task.deny, confirmed: &confirmed)
                 return try await runLocate(query, task: task, session: session,
                                            history: &history)
+            case .desktop(let verb):
+                feed(action.description)
+                try await gateExplicit("desktop switch", corpus: action.description,
+                                       denied: task.deny, confirmed: &confirmed)
+                return try await runDesktop(verb, task: task, session: session, history: &history)
             default:
                 break
             }
@@ -689,7 +694,7 @@ extension DriveLoop {
                                                task: task, session: session, history: &history,
                                                confirmed: &confirmed)
         case .mediaKey, .systemHotkey, .navigateURL, .webSearch, .appControl,
-             .gaze, .tracker, .overlay, .repeatLast, .locate, .dictation:
+             .gaze, .tracker, .overlay, .repeatLast, .locate, .dictation, .desktop:
             return nil // handled above
         }
     }
@@ -2197,6 +2202,191 @@ extension DriveLoop {
                       task, history, pid: pid, windowID: windowID, blockedReason: "full screen exit unverified")
     }
 
+    // MARK: - Desktops
+
+    /// "go to Desktop 2", "my other desktop", "next desktop", "my full-screen
+    /// Safari", "which desktop am I on", "show me my desktops", and the
+    /// guide-only window move and desktop removal. A switch is one AXPress in
+    /// Mission Control or the system ⌃←/⌃→, and is only called done once the
+    /// arrival reads back.
+    private func runDesktop(_ verb: FastAction.DesktopVerb, task: DriveTask, session: String,
+                            history: inout [String]) async throws -> DriveResult {
+        let spaces = desktopSpaces
+        switch verb {
+        case .show:
+            guard await openMissionControl(spaces) else {
+                return settle(.blocked(DesktopSpaceSwitch.cantOpenLine), task, history,
+                              blockedReason: "mission control unavailable")
+            }
+            return done(DesktopSpaceSwitch.showLine, task, history, effect: true)
+        case .which:
+            if let layout = spaces.layout() {
+                return done(DesktopSpaceSwitch.whereLine(layout), task, history)
+            }
+            guard await openMissionControl(spaces) else {
+                return settle(.blocked(DesktopSpaceSwitch.cantOpenLine), task, history,
+                              blockedReason: "mission control unavailable")
+            }
+            return done(DesktopSpaceSwitch.whiteOutlineLine, task, history, effect: true)
+        case .moveWindow(let number):
+            let opened = await openMissionControl(spaces)
+            return done(DesktopSpaceSwitch.moveLine(to: number, opened: opened), task, history)
+        case .removeExtra:
+            let opened = await openMissionControl(spaces)
+            return done(DesktopSpaceSwitch.removeLine(opened: opened), task, history)
+        case .go(.number(let number)):
+            let layout = spaces.layout()
+            if let layout {
+                if layout.currentNumber == number {
+                    return done("You're already on Desktop \(number).", task, history)
+                }
+                guard number <= layout.desktops.count else {
+                    let count = layout.desktops.count
+                    return settle(.blocked("You have \(count) desktop\(count == 1 ? "" : "s"), so there's no Desktop \(number)."),
+                                  task, history, blockedReason: "no such desktop")
+                }
+            }
+            return try await switchInMissionControl(.desktop(number), expected: layout?.desktops[number - 1],
+                                                    spaces: spaces, task: task, history: &history)
+        case .go(.other):
+            guard let layout = spaces.layout() else {
+                _ = await openMissionControl(spaces)
+                return settle(.blocked(DesktopSpaceSwitch.sayNumberLine), task, history,
+                              blockedReason: "which desktop")
+            }
+            let others = layout.desktops.indices.map { $0 + 1 }.filter { $0 != layout.currentNumber }
+            if others.isEmpty { return done("You only have one desktop.", task, history) }
+            guard others.count == 1 else {
+                _ = await openMissionControl(spaces)
+                return settle(.blocked(DesktopSpaceSwitch.whichOneLine(others)), task, history,
+                              blockedReason: "which desktop")
+            }
+            return try await switchInMissionControl(.desktop(others[0]), expected: layout.desktops[others[0] - 1],
+                                                    spaces: spaces, task: task, history: &history)
+        case .go(.fullScreen(let app)):
+            return try await switchInMissionControl(.fullScreen(app), expected: nil,
+                                                    spaces: spaces, task: task, history: &history)
+        case .go(.step(let direction)):
+            return try await stepDesktop(direction, spaces: spaces, task: task, session: session,
+                                         history: &history)
+        }
+    }
+
+    private func openMissionControl(_ spaces: DesktopSpaceSwitch.System) async -> Bool {
+        do {
+            try await spaces.openMissionControl()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Mission Control's button for the space, pressed once, then the
+    /// arrival: the desktop-change notification within 1.5 s, Mission
+    /// Control closed, and — when SkyLight can be read — the active space
+    /// being the one asked for.
+    private func switchInMissionControl(_ space: DesktopSpaceSwitch.Space, expected: UInt64?,
+                                        spaces: DesktopSpaceSwitch.System, task: DriveTask,
+                                        history: inout [String]) async throws -> DriveResult {
+        guard let display = spaces.displayID() else {
+            _ = await openMissionControl(spaces)
+            return settle(.blocked(DesktopSpaceSwitch.severalScreensLine), task, history,
+                          blockedReason: "several displays")
+        }
+        guard let labels = spaces.labels() else {
+            return settle(.blocked("I couldn't read Mission Control's desktop names, so I didn't switch."),
+                          task, history, blockedReason: "desktop labels unavailable")
+        }
+        let inspect = { spaces.inspect(displayID: display, target: space, labels: labels) }
+        var arrival: ((Duration) async -> Bool)?
+        var pressed: AnyHashable?
+        var notes: [String] = []
+        let outcome = await DesktopSpaceSwitch.perform(
+            name: DesktopSpaceSwitch.name(of: space),
+            invalidation: { spaces.displayID() == display ? nil : .displayChanged },
+            inspect: inspect, open: spaces.openMissionControl, pause: spaces.pause,
+            press: { button in
+                arrival = spaces.watchSpaceChange()
+                pressed = button
+                return spaces.press(button)
+            },
+            note: { notes.append($0) })
+        history += notes
+        history.append(outcome.message)
+        guard outcome.code == .pressAcceptedUnverified, let arrival else {
+            if let arrival { _ = await arrival(.zero) }
+            return settle(.blocked(DesktopSpaceSwitch.notSwitchedLine(outcome, space)), task, history,
+                          blockedReason: "desktop switch \(outcome.code.rawValue)")
+        }
+        let arrived = await arrival(.milliseconds(1500))
+        let closed = try await pollDriver({ inspect() }, until: {
+            if case .closed = $0 { return true }
+            return false
+        }) != nil
+        var exact = true
+        if let expected, let after = spaces.layout() {
+            exact = after.active == expected
+        } else if case .fullScreen = space, let after = spaces.layout() {
+            exact = after.currentNumber == nil
+        }
+        history.append("Desktop switch: changed \(arrived), Mission Control closed \(closed), active space matches \(exact).")
+        guard arrived, closed, exact else {
+            return settle(.blocked(DesktopSpaceSwitch.unsureLine), task, history,
+                          confirmedAny: true, blockedReason: "desktop switch unverified")
+        }
+        let shown = pressed.flatMap { spaces.attr($0, kAXDescriptionAttribute) as? String }
+            .flatMap { DesktopSpaceSwitch.space($0, labels: labels) } ?? space
+        return done(DesktopSpaceSwitch.arrivedLine(shown), task, history, effect: true)
+    }
+
+    /// ⌃→ / ⌃← while System Settings still has them on, read back with the
+    /// same notification; otherwise Mission Control.
+    private func stepDesktop(_ direction: DesktopSpaceSwitch.Direction, spaces: DesktopSpaceSwitch.System,
+                             task: DriveTask, session: String,
+                             history: inout [String]) async throws -> DriveResult {
+        let layout = spaces.layout()
+        var expected: UInt64?
+        if let layout, let index = layout.currentIndex {
+            let target = direction == .next ? index + 1 : index - 1
+            guard layout.spaces.indices.contains(target) else {
+                return done(DesktopSpaceSwitch.edgeLine(direction), task, history)
+            }
+            expected = layout.spaces[target].id
+        }
+        guard spaces.shortcutEnabled(direction) else {
+            history.append("Desktop step: the ⌃ arrow shortcut is off.")
+            if let layout, let expected, let number = layout.number(of: expected) {
+                return try await switchInMissionControl(.desktop(number), expected: expected,
+                                                        spaces: spaces, task: task, history: &history)
+            }
+            guard await openMissionControl(spaces) else {
+                return settle(.blocked(DesktopSpaceSwitch.cantOpenLine), task, history,
+                              blockedReason: "mission control unavailable")
+            }
+            return settle(.blocked(DesktopSpaceSwitch.pickOneLine), task, history,
+                          blockedReason: "desktop step needs a pick")
+        }
+        let arrival = spaces.watchSpaceChange()
+        do {
+            _ = try await call("hotkey", ["keys": .array(["ctrl", direction == .next ? "right" : "left"].map { .string($0) }),
+                                          "scope": .string("desktop"),
+                                          "session": .string(session)])
+        } catch let error as DriverConnectionError {
+            _ = await arrival(.zero)
+            if case .toolRefused(_, _, let detail) = error { return settle(.blocked(detail), task, history) }
+            throw error
+        }
+        let arrived = await arrival(.milliseconds(1500))
+        let landed = layout == nil ? nil : spaces.layout()
+        let exact = expected == nil || landed?.active == expected
+        history.append("Desktop step: changed \(arrived), active space matches \(exact).")
+        guard arrived, exact else {
+            return settle(.blocked(DesktopSpaceSwitch.unsureLine), task, history,
+                          confirmedAny: true, blockedReason: "desktop step unverified")
+        }
+        return done(DesktopSpaceSwitch.stepLine(direction, landed: landed), task, history, effect: true)
+    }
+
     /// Bounded patience for a just-launched app's first window, then the
     /// host-side activate that fires the app's reopen handler — the one
     /// move the driver deliberately refuses to make on its own.
@@ -3274,6 +3464,7 @@ extension DriveLoop {
         case .overlay, .clickNamed, .showNamed: return "click"
         case .repeatLast: return "repeat last action"
         case .locate: return "list_windows"
+        case .desktop: return "desktop switch"
         case .dictation: return "dictation"
         }
     }
