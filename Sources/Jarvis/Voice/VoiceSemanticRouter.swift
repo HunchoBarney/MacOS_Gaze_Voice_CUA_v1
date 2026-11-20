@@ -76,7 +76,9 @@ struct VoiceSemanticRouter: Sendable {
                 Self.stageTimings?.record("infer_ms",
                     milliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000)
             }
-            return try await client.systemOne(state: state, questions: questions).response
+            let response = try await client.systemOne(state: state, questions: questions).response
+            guard response.model == client.model else { throw Failure.invalidResponse }
+            return response
         }
     }
 
