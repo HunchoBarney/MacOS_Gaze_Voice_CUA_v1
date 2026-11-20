@@ -23,6 +23,20 @@ Settled choices, newest first. Change one only with a new entry here.
 - No library needed: span extraction is about 150 lines over string
   matching, and the transcriber is Apple's.
 
+## 2026-11-20 — The Mac ends hands-free turns
+
+- Hands-free (and Standby once woken) no longer uses Realtime's
+  `semantic_vad`: `turn_detection` is null in every input mode. The Silero
+  gate ends the turn after `VoiceActivityGate.Tuning.endOfTurn` of quiet
+  (0.6 s, rounded up to whole 256 ms chunks: 0.77 s) and the lane sends
+  `input_audio_buffer.commit`; the server's `committed` names the item the
+  turn binds to. The gate sends no trailing silence. This supersedes the
+  hangover and silence tail in "Hands-free uploads only speech".
+- Measured before (JARA-41, 24 paid turns): semantic VAD cut 3 turns inside
+  450–500 ms pauses and committed at p90 3.3 s after speech. A pause shorter
+  than `endOfTurn` can't fill the quiet chunks the gate needs, so it no
+  longer splits a turn.
+
 ## 2026-11-20 — Equivalent phrasings through a small command grammar
 
 - "get Safari open", "hop over to desktop 2", "label everything", "I can't

@@ -21,6 +21,7 @@ from klm import baselines  # noqa: E402
 
 FLOWS = ["open_app", "click_named", "show_names", "lost_window", "switch_desktop"]
 CITED_TRANSCRIPT_MS = [440.0] * 4 + [1600.0]
+WPM = 150
 
 
 def pct(values, p):
@@ -32,6 +33,10 @@ def pct(values, p):
 
 def summed(a, b):
     return [x + y for x, y in itertools.product(a, b)]
+
+
+def cut_mid_pause(row):
+    return row.get("speech_end_to_commit_ms", 0) < 0 or row.get("commits", 1) > 1
 
 
 def fmt(ms):
@@ -78,13 +83,39 @@ def main(argv):
                   f"{fmt(pct(zero, .5))} / {fmt(pct(zero, .9))} | {fmt(pct(modeled, .5))} / {fmt(pct(modeled, .9))} | "
                   f"{fmt(pct(total, .5))} / {fmt(pct(total, .9))} | {', '.join(typical) or 'none'} |")
         print()
+    speech = [r for r in rows if r.get("kind") == "speech"]
+    replies = [r for r in rows if r.get("kind") == "reply"]
+    if speech or replies:
+        print(f"## Spoken replies (words at {WPM} wpm)\n")
+        print("| Label | Flow or reply | Spoken words p50 | Spoken s p50 | First spoken p50 | What is said |")
+        print("|---|---|---|---|---|---|")
+        for label in dict.fromkeys(r["label"] for r in speech + replies):
+            for flow in FLOWS:
+                runs = [r for r in speech if r["label"] == label and r["flow"] == flow]
+                if not runs:
+                    continue
+                first = [r["first_spoken_ms"] for r in runs if "first_spoken_ms" in r]
+                said = max((" / ".join(r["spoken_lines"]) for r in runs), key=[" / ".join(r["spoken_lines"]) for r in runs].count)
+                print(f"| {label} | {flow} | {pct([r['spoken_words'] for r in runs], .5)} | "
+                      f"{pct([r['spoken_s'] for r in runs], .5):.2f} | {fmt(pct(first, .5))} s | {said or '(silent)'} |")
+            for r in replies:
+                if r["label"] == label:
+                    print(f"| {label} | {r['reply']} | {r['spoken_words']} | {r['spoken_s']:.2f} | – | "
+                          f"{' / '.join(r['spoken_lines']) or '(silent)'} |")
+        print()
     hands = [r for r in realtime if r.get("mode") == "handsfree"]
     if hands:
-        print("## Hands-free turn end (Realtime, semantic VAD)\n")
-        for key in ["speech_end_to_stopped_ms", "speech_end_to_commit_ms", "speech_end_to_transcript_ms"]:
-            for label in dict.fromkeys(r["label"] for r in hands):
-                values = [r[key] for r in hands if r["label"] == label and key in r]
-                print(f"- {label} {key}: p50 {fmt(pct(values, .5))} s, p90 {fmt(pct(values, .9))} s, n={len(values)}")
+        print("## Hands-free turn end (Realtime)\n")
+        print("A turn committed before its speech ended was cut mid-pause; it is counted on its own and left out of the percentiles.\n")
+        for label in dict.fromkeys(r["label"] for r in hands):
+            turns = [r for r in hands if r["label"] == label]
+            whole = [r for r in turns if not cut_mid_pause(r)]
+            print(f"- {label} mid-pause cut-offs: {len(turns) - len(whole)} of {len(turns)} turns")
+            for key in ["speech_end_to_stopped_ms", "speech_end_to_gate_end_ms", "speech_end_to_commit_ms",
+                        "speech_end_to_transcript_ms"]:
+                values = [r[key] for r in whole if key in r]
+                if values:
+                    print(f"- {label} {key}: p50 {fmt(pct(values, .5))} s, p90 {fmt(pct(values, .9))} s, n={len(values)}")
         print()
     if realtime:
         spent = sum(r.get("usd", 0) for r in realtime)
