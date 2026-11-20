@@ -114,6 +114,7 @@ final class TerraChooserTests: XCTestCase {
         let choose = TerraChooser.make(client: client(Self.payload(option: "c9", confidence: 1), usage: usage))
         _ = try await choose(state(), candidates)
         XCTAssertEqual(usage.value, [TerraClient.Usage(input: 2000, cached: 1500, output: 20)])
-        XCTAssertEqual(usage.value.first?.dollars ?? 0, (500 * 1.25 + 1500 * 0.05 + 20 * 5) / 1_000_000, accuracy: 1e-12)
+        let expected: Double = (500.0 * 1.25 + 1500.0 * 0.05 + 20.0 * 5.0) / 1_000_000.0
+        XCTAssertEqual(usage.value.first?.dollars ?? 0, expected, accuracy: 1e-12)
     }
 }
