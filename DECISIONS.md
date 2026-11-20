@@ -2,6 +2,27 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Equivalent phrasings through a small command grammar
+
+- "get Safari open", "hop over to desktop 2", "label everything", "I can't
+  find Notes", "hit Save" and "read my screen" are read by
+  `CommandGrammar`: lead-ins ("I want to", "let's", "help me"), a verb
+  class, an object and a particle, rewritten to the canonical command the
+  fast lane already parses. A rewrite is used only when that canonical
+  command parses to the family's action, and a phrase that already parses
+  is left alone, so the grammar adds phrasings without changing existing
+  commands. Screen questions are classified, not rewritten, so the question
+  reaches the screen reader verbatim. Jev's semantic router stays the
+  fallback for what the grammar can't read.
+- No maintained intent grammar fits a Swift app: Home Assistant's hassil
+  (Apache-2.0) is the closest, but it is Python, and Apple's NaturalLanguage
+  framework tags words without matching intents. The grammar is about 250
+  lines over the existing parsers.
+- Measured in `CommandPhrasingTests` (pass = same admission and fast action
+  as the canonical command; "!" rows must differ): design set 40/86 on main
+  → 86/86; same-author held-out set 32/72 → 71/72; a blind set written by
+  an agent that never saw the parser 51/72 → 66/72.
+
 ## 2026-11-20 — Standby opens a session on the wake word
 
 - Standby keeps the voice lane's microphone open, as Hold fn already does,

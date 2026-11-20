@@ -19,8 +19,8 @@ final class CommandPhrasingTests: XCTestCase {
 
     /// Held-out rows that must keep passing. Set once from the final
     /// measurement; raise it when the grammar improves, never lower it.
-    private static let heldOutFloor = 0
-    private static let blindFloor = 0
+    private static let heldOutFloor = 71
+    private static let blindFloor = 66
 
     private static let context: VoiceAdmissionContext = {
         var context = VoiceAdmissionContext()
