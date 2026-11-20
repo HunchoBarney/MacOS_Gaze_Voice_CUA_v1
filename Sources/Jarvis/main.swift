@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // a dying process.
             exit(0)
         }
+        if Vosk.directory() != nil { ListeningPolicy.wakeWord = VoskWakeWordDetector() }
         NSApp.setActivationPolicy(.accessory)
         diagnostics.start()
         installEditMenu()
@@ -174,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &subscriptions)
         input.$ready.removeDuplicates().sink { [weak self] ready in
             guard let self, self.canPrepareMicrophone else { return }
-            if ready || self.controller.config.handsFreeEnabled { self.controller.prepareMicrophone() }
+            if ready || self.controller.listensWithoutFn { self.controller.prepareMicrophone() }
             else { self.controller.suspendMicrophone("Fn input is unavailable.") }
         }.store(in: &subscriptions)
         input.start()
@@ -254,12 +255,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         input.refresh(); microphones.refresh()
-        if input.ready || controller.config.handsFreeEnabled { controller.prepareMicrophone() }
+        if input.ready || controller.listensWithoutFn { controller.prepareMicrophone() }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         controller.refreshPermissions(); input.refresh(); microphones.refresh()
-        if canPrepareMicrophone, input.ready || controller.config.handsFreeEnabled { controller.prepareMicrophone() }
+        if canPrepareMicrophone, input.ready || controller.listensWithoutFn { controller.prepareMicrophone() }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -590,8 +591,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let (symbol, description): (String, String)
         if controller.missingPermissions.contains(.microphone) {
             (symbol, description) = ("mic.slash", "Jarvis can't hear you. Microphone access is off.")
-        } else if !controller.handsFreeEnabled {
+        } else if !controller.listensWithoutFn {
             (symbol, description) = ("waveform", "Jarvis. Hold fn to talk.")
+        } else if controller.handsFreeState == .standby {
+            (symbol, description) = ("ear", "Jarvis is waiting for “Hey Jarvis”")
         } else if controller.handsFreeListening || controller.handsFreeState == .preparing {
             (symbol, description) = ("waveform", "Jarvis is listening")
         } else if case .unavailable = controller.handsFreeState {
@@ -607,7 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func togglePauseListening() {
-        if controller.handsFreeListening { controller.pauseHandsFree() } else { controller.resumeHandsFree() }
+        if controller.listeningWithoutFn { controller.pauseHandsFree() } else { controller.resumeHandsFree() }
     }
 
     /// One snapshot read, then repaint — cancelled reads can't paint over
@@ -626,8 +629,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Polling stays cheap: one read on open, then a slow timer only
     /// while the menu is actually tracking — never a hot loop.
     func menuWillOpen(_ menu: NSMenu) {
-        pauseListening?.isHidden = !controller.handsFreeEnabled
-        pauseListening?.title = controller.handsFreeListening ? "Pause Listening" : "Resume Listening"
+        pauseListening?.isHidden = !controller.listensWithoutFn
+        pauseListening?.title = controller.listeningWithoutFn ? "Pause Listening" : "Resume Listening"
         applyEyesState()
         refreshEyes()
         refreshAskBadge()

@@ -1,5 +1,7 @@
 import AVFoundation
 import Foundation
+import OSLog
+import os
 
 /// The Vosk C API (Alpha Cephei, Apache-2.0) and its small English model,
 /// loaded at runtime from `Resources/Vosk` in the app or `build/vendor/Vosk`
@@ -131,6 +133,10 @@ final class WakePhraseSpotter {
     private var recent: [Int16] = []
     private var awaiting: Int?
 
+    /// The listener heard the phrase and the checker is waiting for the
+    /// second after it.
+    var confirming: Bool { awaiting != nil }
+
     init(name: String, vosk: Vosk) throws {
         let words = Self.words(name)
         guard !words.isEmpty else { throw VoiceError("The assistant needs a name.") }
@@ -182,50 +188,80 @@ final class WakePhraseSpotter {
     }
 }
 
-/// The wake-word engine for Standby: the default microphone, converted to
-/// 16 kHz and spotted on a background queue. Nothing leaves the Mac.
+/// The wake-word engine for Standby. It hears the voice lane's own
+/// microphone tap (the chosen microphone), converts it to 16 kHz and
+/// spots on a background queue. Nothing leaves the Mac.
 final class VoskWakeWordDetector: WakeWordDetecting, @unchecked Sendable {
     private let name: String
-    private let queue = DispatchQueue(label: "com.karanvirkang.jarvis.wake-word")
-    private var engine: AVAudioEngine?
+    private let queue = DispatchQueue(label: "com.karanvirkang.jarvis.wake-word", qos: .userInitiated)
+    private let output = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: WakePhraseSpotter.sampleRate,
+                                       channels: 1, interleaved: true)!
+    private let listening = OSAllocatedUnfairLock(initialState: false)
+    private var spotter: WakePhraseSpotter?
+    private var converter: AVAudioConverter?
+    private var heard: (@MainActor (TimeInterval) -> Void)?
+    private var triggeredAt: TimeInterval = 0
 
     init(name: String = "Jarvis") { self.name = name }
 
-    func start(heard: @escaping @MainActor () -> Void) throws {
-        stop()
-        let spotter = try WakePhraseSpotter(name: name, vosk: try Vosk.shared())
-        let engine = AVAudioEngine()
-        let input = engine.inputNode.outputFormat(forBus: 0)
-        guard let output = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: WakePhraseSpotter.sampleRate,
-                                         channels: 1, interleaved: true),
-              let converter = AVAudioConverter(from: input, to: output) else {
-            throw VoiceError("The wake-word engine can't read this microphone format.")
-        }
-        let ratio = output.sampleRate / input.sampleRate
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: input) { [queue] buffer, _ in
-            guard let converted = AVAudioPCMBuffer(pcmFormat: output,
-                                                   frameCapacity: AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16) else { return }
-            var fed = false
-            converter.convert(to: converted, error: nil) { _, status in
-                if fed { status.pointee = .noDataNow; return nil }
-                fed = true
-                status.pointee = .haveData
-                return buffer
-            }
-            let samples = Array(UnsafeBufferPointer(start: converted.int16ChannelData![0], count: Int(converted.frameLength)))
-            queue.async {
-                guard spotter.accept(samples) else { return }
-                Task { @MainActor in heard() }
+    /// The model loads on the detector's queue, so the first start returns
+    /// before it's ready and audio heard meanwhile is skipped.
+    func start(heard: @escaping @MainActor (TimeInterval) -> Void) throws {
+        guard Vosk.directory() != nil else { throw VoiceError("The wake-word engine is missing from this build.") }
+        listening.withLock { $0 = true }
+        queue.async { [name] in
+            do {
+                if self.spotter == nil { self.spotter = try WakePhraseSpotter(name: name, vosk: try Vosk.shared()) }
+                self.heard = heard
+            } catch {
+                Self.log.error("wake word unavailable: \(error.localizedDescription, privacy: .public)")
             }
         }
-        engine.prepare()
-        try engine.start()
-        self.engine = engine
     }
 
+    private static let log = Logger(subsystem: "com.karanvirkang.jarvis.voice", category: "wake-word")
+
     func stop() {
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        engine = nil
+        listening.withLock { $0 = false }
+        queue.async { self.heard = nil }
+    }
+
+    func hear(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) {
+        guard listening.withLock({ $0 }), time.isHostTimeValid, let copy = Self.copy(buffer) else { return }
+        let ended = AVAudioTime.seconds(forHostTime: time.hostTime) + Double(buffer.frameLength) / buffer.format.sampleRate
+        queue.async { self.spot(copy, endingAt: ended) }
+    }
+
+    private func spot(_ buffer: AVAudioPCMBuffer, endingAt ended: TimeInterval) {
+        guard let spotter, let heard else { return }
+        if converter?.inputFormat != buffer.format { converter = AVAudioConverter(from: buffer.format, to: output) }
+        guard let converter,
+              let converted = AVAudioPCMBuffer(pcmFormat: output, frameCapacity:
+                AVAudioFrameCount(Double(buffer.frameLength) * output.sampleRate / buffer.format.sampleRate) + 16) else { return }
+        var fed = false
+        converter.convert(to: converted, error: nil) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        let confirming = spotter.confirming
+        let woke = spotter.accept(Array(UnsafeBufferPointer(start: converted.int16ChannelData![0], count: Int(converted.frameLength))))
+        if !confirming, spotter.confirming { triggeredAt = ended }
+        guard woke else { return }
+        let at = triggeredAt
+        Task { @MainActor in heard(at) }
+    }
+
+    private static func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else { return nil }
+        copy.frameLength = buffer.frameLength
+        let source = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        let target = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
+        for index in source.indices {
+            guard let from = source[index].mData, let to = target[index].mData else { return nil }
+            memcpy(to, from, Int(min(source[index].mDataByteSize, target[index].mDataByteSize)))
+        }
+        return copy
     }
 }

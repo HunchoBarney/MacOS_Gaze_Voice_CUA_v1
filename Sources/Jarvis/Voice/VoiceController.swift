@@ -44,6 +44,8 @@ struct VoiceTimings {
     var warning: TimeInterval = 50
     var limit: TimeInterval = 55
     var dismissal: TimeInterval = 1.5
+    /// A wake-word session closes after this long with nothing happening.
+    var wakeSessionQuiet: TimeInterval = 8
 }
 
 @MainActor
@@ -108,6 +110,12 @@ final class VoiceController: ObservableObject {
     @Published private(set) var conversationTurnOpen = false
     var handsFreeEnabled: Bool { config.handsFreeEnabled }
     var handsFreeListening: Bool { handsFreeState == .listening }
+    /// Standby is the chosen mode and the build has a wake-word engine.
+    var standbyChosen: Bool { ListeningPolicy.current.effective(config.listeningMode) == .standby }
+    /// The microphone stays open between turns: hands-free or Standby.
+    var listensWithoutFn: Bool { config.handsFreeEnabled || standbyChosen }
+    /// Listening without Fn right now, for a pause or resume control.
+    var listeningWithoutFn: Bool { handsFreeListening || handsFreeState == .standby || wakeSession != nil }
     var handsFreeLabel: String {
         switch handsFreeState {
         case .off: return "Not listening"
@@ -115,6 +123,7 @@ final class VoiceController: ObservableObject {
         case .listening:
             if handsFreeSpeaking { return "Talking, still listening" }
             return continuousScrolling ? "Scrolling, still listening" : "Listening"
+        case .standby: return "Waiting for “Hey Jarvis”"
         case .paused: return "Paused"
         case .unavailable: return "Can't listen right now"
         }
@@ -435,6 +444,12 @@ final class VoiceController: ObservableObject {
     private var handsFreeTask: Task<Void, Never>?
     private var handsFreeRequest = UUID()
     private var handsFreePaused = false
+    /// Standby: the wake word hears the prepared microphone's tap, and a
+    /// wake opens a hands-free session that closes once it goes quiet.
+    private var standbyArmed = false
+    private var wakeSession: Task<Void, Never>?
+    private var otherMicrophoneWatch: Task<Void, Never>?
+    private var otherAppListening = false
     private var manualOverride = false
     private var physicalFnDown = false
     private var manualResumeWanted = false
@@ -791,6 +806,9 @@ final class VoiceController: ObservableObject {
             }
             else { self.stopHandsFree(state: .off) }
         }.store(in: &subscriptions)
+        config.$listeningMode.dropFirst().removeDuplicates().sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.listeningModeChanged() }
+        }.store(in: &subscriptions)
     }
 
     private func bindPlayback() {
@@ -879,6 +897,11 @@ final class VoiceController: ObservableObject {
         handsFreePaused = false
         config.handsFreePaused = false
         microphoneEnabled = true
+        if standbyChosen {
+            handsFreeState = .off
+            prepareMicrophone()
+            return
+        }
         if !config.handsFreeEnabled { config.handsFreeEnabled = true }
         handsFreeState = .off
         startHandsFree()
@@ -895,6 +918,8 @@ final class VoiceController: ObservableObject {
     }
 
     private func stopHandsFree(state: ConversationListeningState) {
+        wakeSession?.cancel(); wakeSession = nil
+        disarmStandby()
         handsFreeRequest = UUID()
         handsFreeTask?.cancel(); handsFreeTask = nil
         cancelConversationActions()
@@ -907,7 +932,7 @@ final class VoiceController: ObservableObject {
     }
 
     private func startHandsFree(since: TimeInterval? = nil) {
-        guard config.handsFreeEnabled, !handsFreePaused, !manualOverride, microphoneEnabled,
+        guard config.handsFreeEnabled || wakeSession != nil, !handsFreePaused, !manualOverride, microphoneEnabled,
               !held, !physicalFnDown, !isMicrophoneTest,
               handsFreeTask == nil, let lane = speech as? RealtimeVoiceLane,
               lane.conversation.id == nil else { return }
@@ -936,6 +961,103 @@ final class VoiceController: ObservableObject {
         }
     }
 
+    /// Standby listens for the wake word on the prepared microphone. It
+    /// stands down for Fn, a pause, a session, and while another app is
+    /// using the microphone.
+    func armStandby() {
+        watchOtherMicrophoneUse()
+        guard standbyChosen, !standbyArmed, wakeSession == nil, !handsFreePaused, !manualOverride,
+              microphoneEnabled, !held, !physicalFnDown, !isMicrophoneTest, !otherAppListening,
+              let lane = speech as? RealtimeVoiceLane, lane.conversation.id == nil,
+              let detector = ListeningPolicy.wakeWord else { return }
+        guard !config.openAIAPIKey.isEmpty || config.hostedCredentialsConfigured else {
+            handsFreeState = .unavailable(OutcomeWording.missingVoiceKey)
+            return
+        }
+        do {
+            try detector.start { [weak self] moment in self?.wakeHeard(at: moment) }
+        } catch {
+            handsFreeState = .unavailable(error.localizedDescription)
+            return
+        }
+        lane.wakeListener = detector
+        standbyArmed = true
+        handsFreeState = .standby
+    }
+
+    private func disarmStandby() {
+        guard standbyArmed else { return }
+        standbyArmed = false
+        (speech as? RealtimeVoiceLane)?.wakeListener = nil
+        ListeningPolicy.wakeWord?.stop()
+    }
+
+    /// Opens a hands-free session from 1.5 s before the wake phrase, so
+    /// "Hey Jarvis, open Mail" is heard in one breath.
+    private func wakeHeard(at moment: TimeInterval) {
+        guard standbyArmed else { return }
+        disarmStandby()
+        Self.voiceLog.notice("wake_word heard")
+        let quiet = timings.wakeSessionQuiet
+        wakeSession = Task { [weak self] in
+            var lastActive = ProcessInfo.processInfo.systemUptime
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard let self, !Task.isCancelled else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                if self.wakeSessionBusy { lastActive = now }
+                if now - lastActive >= quiet {
+                    self.stopHandsFree(state: .off)
+                    self.armStandby()
+                    return
+                }
+            }
+        }
+        startHandsFree(since: moment - 1.5)
+    }
+
+    private var wakeSessionBusy: Bool {
+        conversationTurnOpen || handsFreeSpeaking || handsFreeState == .preparing || captureActive
+            || cua.tasks.contains { automaticTasks.contains($0.id) && $0.active }
+    }
+
+    private func listeningModeChanged() {
+        if standbyChosen {
+            microphoneEnabled = true
+            prepareMicrophone()
+        } else if wakeSession != nil, !config.handsFreeEnabled {
+            stopHandsFree(state: .off)
+        } else {
+            wakeSession?.cancel(); wakeSession = nil
+            disarmStandby()
+            if handsFreeState == .standby { handsFreeState = .off }
+        }
+    }
+
+    /// A call or another recording app owns the microphone: Standby waits
+    /// until it's done.
+    private func watchOtherMicrophoneUse() {
+        guard otherMicrophoneWatch == nil else { return }
+        otherMicrophoneWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.standbyChosen else {
+                    self?.otherMicrophoneWatch = nil
+                    return
+                }
+                let busy = await Task.detached { OtherMicrophoneUse.active() }.value
+                if busy != self.otherAppListening {
+                    self.otherAppListening = busy
+                    if busy, self.standbyArmed || self.wakeSession != nil {
+                        self.stopHandsFree(state: .unavailable("Paused while another app is using the microphone."))
+                    } else if !busy {
+                        self.armStandby()
+                    }
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
     private func cancelConversationActions() {
         for id in automaticTasks { cua.cancel(id) }
         automaticTasks = []
@@ -943,7 +1065,7 @@ final class VoiceController: ObservableObject {
     }
 
     private func overrideConversationForManualInput() {
-        guard config.handsFreeEnabled else { return }
+        guard listensWithoutFn else { return }
         if !manualOverride {
             if case .unavailable = handsFreeState { manualResumeWanted = false }
             else { manualResumeWanted = !handsFreePaused }
@@ -956,7 +1078,8 @@ final class VoiceController: ObservableObject {
         guard manualOverride, !held, !physicalFnDown, !latched, !isMicrophoneTest,
               startupTask == nil, cleanupTask == nil else { return }
         manualOverride = false
-        if manualResumeWanted { startHandsFree(since: ProcessInfo.processInfo.systemUptime) }
+        guard manualResumeWanted else { return }
+        if standbyChosen { armStandby() } else { startHandsFree(since: ProcessInfo.processInfo.systemUptime) }
     }
 
     func physicalFnChanged(_ down: Bool) {
@@ -1179,6 +1302,8 @@ final class VoiceController: ObservableObject {
                 try Task.checkCancellation()
                 if self.config.handsFreeEnabled, !self.handsFreePaused, !self.manualOverride {
                     self.startHandsFree()
+                } else if self.standbyChosen {
+                    self.armStandby()
                 }
                 let milliseconds = (ProcessInfo.processInfo.systemUptime - started) * 1000
                 Self.voiceLog.notice("microphone_preparation_ms=\(milliseconds)")
