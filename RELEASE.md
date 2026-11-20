@@ -20,6 +20,15 @@ fail spuriously.
 an ad-hoc app loses permission grants on every rebuild, so don't use it
 day to day.
 
+## Turning on the Live voice lane
+
+gpt-live-1.1 ships behind `voice.live`, off by default. It becomes the
+default only after the owner physical checks in [TESTING.md](TESTING.md)
+pass on a signed build; the same change deletes the gpt-realtime-2.1 lane
+(L11). The paid tiers ($30/month with usage limits, $100/month) need
+hosted credentials and metering (KAR-38) first, and the public
+distribution hold below still applies.
+
 ## Public distribution is on hold
 
 `make release PUBLIC=1` (what `.github/workflows/release.yml` runs on a
