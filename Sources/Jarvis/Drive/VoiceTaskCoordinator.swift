@@ -180,7 +180,7 @@ final class VoiceTaskCoordinator {
     }
 
     private let config: Config
-    private let jevAPIKey: () -> String
+    private let jevRoute: () async throws -> ServiceRoute?
     private let resolver: AppResolver
     private let commandDriver: DriveLoop.Call?
     private let foregroundAppLauncher: ((String) async throws -> Int)?
@@ -303,16 +303,16 @@ final class VoiceTaskCoordinator {
 
     /// `gazeService`/`overlay` default inside the init — nonisolated
     /// defaults can't read the MainActor `shared`s.
-    init(config: Config, jevAPIKey: @escaping () -> String,
+    init(config: Config, jevRoute: @escaping () async throws -> ServiceRoute?,
          gazeService: GazeService? = nil, overlay: TargetOverlay? = nil,
          resolver: AppResolver? = nil, commandDriver: DriveLoop.Call? = nil,
          foregroundAppLauncher: ((String) async throws -> Int)? = nil,
          desktopSpaces: DesktopSpaceSwitch.System = .live,
          activateApp: @escaping (Int) -> Void = DriveLoop.activateRunningApp) {
         self.config = config
+        self.jevRoute = jevRoute
         self.desktopSpaces = desktopSpaces
         self.activateApp = activateApp
-        self.jevAPIKey = jevAPIKey
         self.resolver = resolver ?? AppResolver()
         self.commandDriver = commandDriver
         if let foregroundAppLauncher { self.foregroundAppLauncher = foregroundAppLauncher }
@@ -703,11 +703,17 @@ final class VoiceTaskCoordinator {
     }
 
     /// Jev choice — one System One call, validated against the candidate
-    /// set. An empty key still produces a working closure: the client
-    /// fails the call and the loop's honest model-failure settle reports
-    /// it rather than the chooser refusing to exist.
+    /// set. The route is resolved per call. Without one the closure still
+    /// works: the empty key fails the call and the loop's honest
+    /// model-failure settle reports it rather than the chooser refusing to
+    /// exist.
     private func chooser() -> DriveLoop.Choose {
-        JevChooser.make(apiKey: jevAPIKey())
+        let jevRoute = jevRoute
+        return { state, candidates in
+            let route = try await jevRoute()
+            return try await JevChooser.make(apiKey: route?.bearer ?? "",
+                                             baseURL: route?.url ?? JevClient.systemOneURL)(state, candidates)
+        }
     }
 
     // MARK: - Voice tool entry points
@@ -849,7 +855,7 @@ final class VoiceTaskCoordinator {
         // Deterministic lanes need no model — admit the task either way,
         // but note once per key gap why anything model-driven will fail.
         onCommandStage?(captureID, nil, .keyBegin, nil)
-        let missingKey = jevAPIKey().isEmpty
+        let missingKey = config.apiKey.isEmpty && !config.hostedCredentialsConfigured
         onCommandStage?(captureID, nil, .keyEnd, nil)
         if missingKey {
             if !missingKeyNoted {
