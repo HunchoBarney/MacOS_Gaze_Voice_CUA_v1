@@ -27,10 +27,14 @@ actor TrackerHost {
     /// Where a tracker writes its API token; nil when no bundled tracker
     /// exists to say where.
     private let tokenFile: @Sendable () -> URL?
+    /// The port this host probes and controls; tests point it at a fake API.
+    private let port: Int
 
     init(spawnEnabled: Bool = true,
+         port: Int = TrackerHost.port,
          tokenFile: @escaping @Sendable () -> URL? = { TrackerHost.trackerDirectory().map(TrackerHost.tokenFile(trackerDir:)) }) {
         self.spawnEnabled = spawnEnabled
+        self.port = port
         self.tokenFile = tokenFile
     }
     /// The tracker's read-only API port (`--external-api-port` default).
@@ -364,7 +368,7 @@ actor TrackerHost {
             // Fail closed: without the tracker's own token every call
             // would get 401, and nothing a respawn does can fix that.
             guard let token = Self.storedToken(at: tokenFile()) else {
-                Self.log.error("tracker already serving on port \(Self.port) but its API token is unreadable — not adopting")
+                Self.log.error("tracker already serving on port \(port) but its API token is unreadable — not adopting")
                 state = .failed(Self.foreignTrackerMessage)
                 return
             }
@@ -372,7 +376,7 @@ actor TrackerHost {
             guard await authorizationAccepted() else {
                 Self.adoptedToken.withLock { $0 = nil }
                 guard generation == startGeneration, state == .starting else { return }
-                Self.log.error("tracker on port \(Self.port) refused its stored API token — not adopting")
+                Self.log.error("tracker on port \(port) refused its stored API token — not adopting")
                 state = .failed(Self.foreignTrackerMessage)
                 return
             }
@@ -380,7 +384,7 @@ actor TrackerHost {
                 Self.adoptedToken.withLock { $0 = nil }
                 return
             }
-            Self.log.notice("tracker already serving on port \(Self.port) — adopted")
+            Self.log.notice("tracker already serving on port \(port) — adopted")
             adopted = true
             state = .running
             armAttemptReset()
@@ -507,7 +511,7 @@ actor TrackerHost {
                     return
                 }
                 state = .running
-                Self.log.notice("tracker API serving on port \(Self.port)")
+                Self.log.notice("tracker API serving on port \(port)")
                 armAttemptReset()
                 armWedgeWatch()
                 return
@@ -523,7 +527,7 @@ actor TrackerHost {
         // stop() may already have run the same chain — it's idempotent.
         await retireSpawn(proc)
         guard generation == startGeneration, state == .starting else { return }
-        state = .failed("The eye tracker started but never answered on port \(Self.port).")
+        state = .failed("The eye tracker started but never answered on port \(port).")
         Self.log.error("tracker never served its API within 90s — killed")
     }
 
@@ -598,7 +602,7 @@ actor TrackerHost {
     /// freshness + the post-start grace before `wedgeSignal` judges.
     /// Any fetch/decode/non-200 is a health miss.
     private func probeSnapshot(runningSince: Date) async -> SnapshotProbe {
-        guard let url = URL(string: "http://127.0.0.1:\(Self.port)/snapshot") else {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/snapshot") else {
             return .verdict(.healthy, error: nil)
         }
         var request = Self.authorized(url)
@@ -937,7 +941,7 @@ actor TrackerHost {
     /// API goes down. Errors (dead socket, 400 on an older build) are
     /// fine — the SIGTERM step is next either way.
     private func requestTrackerQuit() async {
-        guard let url = URL(string: "http://127.0.0.1:\(Self.port)/control") else { return }
+        guard let url = URL(string: "http://127.0.0.1:\(port)/control") else { return }
         var request = Self.authorized(url)
         request.httpMethod = "POST"
         request.timeoutInterval = 2
@@ -1152,7 +1156,7 @@ actor TrackerHost {
     /// Whether the tracker accepts the current token. Only a 401 says no;
     /// a dropped request is the health checks' business.
     private func authorizationAccepted() async -> Bool {
-        guard let url = URL(string: "http://127.0.0.1:\(Self.port)/snapshot/status") else { return true }
+        guard let url = URL(string: "http://127.0.0.1:\(port)/snapshot/status") else { return true }
         var request = Self.authorized(url)
         request.timeoutInterval = 2
         guard let (_, response) = try? await URLSession.shared.data(for: request) else { return true }
@@ -1195,7 +1199,7 @@ actor TrackerHost {
     /// adoptee; and a dead tracker's port going quiet must end the
     /// kill-path waits, not sit out a foreign server's uptime.
     private func healthPayload() async -> [String: Any]? {
-        guard let url = URL(string: "http://127.0.0.1:\(Self.port)/health") else { return nil }
+        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
         guard let (data, response) = try? await URLSession.shared.data(for: request),

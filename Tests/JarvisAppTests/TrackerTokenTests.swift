@@ -28,7 +28,7 @@ final class TrackerTokenTests: XCTestCase {
     func testRunningTrackerWithoutAReadableTokenIsNotAdopted() async throws {
         let server = try await FakeTrackerAPI.start(acceptedToken: "fixture-good-token")
         defer { server.stop() }
-        let host = TrackerHost(spawnEnabled: false, tokenFile: { nil })
+        let host = TrackerHost(spawnEnabled: false, port: server.port, tokenFile: { nil })
         await host.userRequestedStart()
         let state = await settledState(host)
         XCTAssertEqual(state, .failed(TrackerHost.foreignTrackerMessage))
@@ -40,7 +40,7 @@ final class TrackerTokenTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
         let server = try await FakeTrackerAPI.start(acceptedToken: "fixture-good-token")
         defer { server.stop() }
-        let host = TrackerHost(spawnEnabled: false, tokenFile: { file })
+        let host = TrackerHost(spawnEnabled: false, port: server.port, tokenFile: { file })
         await host.userRequestedStart()
         let state = await settledState(host)
         XCTAssertEqual(state, .failed(TrackerHost.foreignTrackerMessage))
@@ -53,7 +53,7 @@ final class TrackerTokenTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
         let server = try await FakeTrackerAPI.start(acceptedToken: "fixture-good-token")
         defer { server.stop() }
-        let host = TrackerHost(spawnEnabled: false, tokenFile: { file })
+        let host = TrackerHost(spawnEnabled: false, port: server.port, tokenFile: { file })
         await host.userRequestedStart()
         let state = await settledState(host)
         XCTAssertEqual(state, .running)
@@ -83,26 +83,20 @@ final class TrackerTokenTests: XCTestCase {
     }
 }
 
-/// A stand-in tracker API on the real port: /health answers like the
+/// A stand-in tracker API on an ephemeral port: /health answers like the
 /// tracker, every other route needs the accepted bearer token.
 private final class FakeTrackerAPI: @unchecked Sendable {
     private let listener: NWListener
     private let lock = NSLock()
     private var quitWithoutToken = false
     var sawUnauthenticatedQuit: Bool { lock.withLock { quitWithoutToken } }
+    var port: Int { Int(listener.port?.rawValue ?? 0) }
 
     private init(listener: NWListener) { self.listener = listener }
 
     static func start(acceptedToken: String) async throws -> FakeTrackerAPI {
-        var health = URLRequest(url: URL(string: "http://127.0.0.1:\(TrackerHost.port)/health")!)
-        health.timeoutInterval = 0.5
-        let live = (try? await URLSession.shared.data(for: health))
-            .flatMap { _, r in (r as? HTTPURLResponse)?.statusCode } == 200
-        try XCTSkipIf(live, "a real tracker is serving on :\(TrackerHost.port)")
         let parameters = NWParameters.tcp
-        parameters.allowLocalEndpointReuse = true
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1",
-            port: NWEndpoint.Port(rawValue: UInt16(TrackerHost.port))!)
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         let listener = try NWListener(using: parameters)
         let server = FakeTrackerAPI(listener: listener)
         listener.newConnectionHandler = { [server] connection in
