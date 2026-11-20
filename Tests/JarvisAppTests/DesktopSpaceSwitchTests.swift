@@ -305,7 +305,11 @@ private final class FakeSpaces {
             shortcutEnabled: { self.shortcuts[$0] ?? true })
     }
 
+    private let lock = NSLock()
+
     func call(_ tool: String, _ args: [String: JSONValue]) throws -> JSONValue {
+        lock.lock()
+        defer { lock.unlock() }
         if tool == "hotkey" {
             let keys = args["keys"]?.array?.compactMap(\.string) ?? []
             steps.append("hotkey \(keys.joined(separator: "+"))")

@@ -26,7 +26,7 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(),
             environment: [:])
         return VoiceTaskCoordinator(
-            config: config, jevAPIKey: { "" },
+            config: config, jevRoute: { nil },
             gazeService: GazeService(
                 stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: overlay)
