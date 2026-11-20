@@ -2,6 +2,22 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — CI runs on the owner's Mac
+
+- GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI
+  test job (`make test`) on the Mac and posts a `local-ci` commit status,
+  which needs no Actions minutes. A launchd agent polls open same-repository
+  PRs and main every 5 minutes, one job at a time, at low priority, and only
+  while no other `swift-build`/`swift-test`/`swift-frontend`/`xcodebuild`
+  runs. Dependabot PRs run only with the `local-ci` label; fork PRs never run.
+- nektos/act (MIT) was considered to run `ci.yml` itself. In host mode it
+  copies the local directory instead of checking out the head, and
+  `setup-node` downloads its own Node, while the job's only real step is
+  `make test`. So the script calls `make test` directly and `ci.yml` stays
+  the definition of the step. The `package` job (a full signed release
+  build) is not run locally. No self-hosted Actions runner: it needs Actions
+  and runs workflow code on the owner's main Mac.
+
 ## 2026-11-20 — Hands-free uploads only speech
 
 - Hands-free audio is scored on the Mac by Silero VAD v6.2.1 (MIT, Core ML,
