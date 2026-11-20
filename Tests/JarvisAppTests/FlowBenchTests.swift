@@ -264,7 +264,8 @@ final class FlowBenchTests: XCTestCase {
     /// as a sample of the length the Realtime instructions ask for.
     static func representativeReplies() -> [(String, String)] {
         func settle(_ result: DriveResult) -> String {
-            VoiceToolResult.spoken(VoiceTaskCoordinator.describe(result, request: "click Reply").1, words: 30)
+            let (outcome, say) = VoiceTaskCoordinator.describe(result, request: "click Reply")
+            return VoiceTaskCoordinator.spokenOutcome(outcome, say: say) ?? ""
         }
         let instructions = RealtimeVoiceClient.instructions
         let filler = instructions.contains("\"Let me look.\"") ? "Let me look. " : ""
