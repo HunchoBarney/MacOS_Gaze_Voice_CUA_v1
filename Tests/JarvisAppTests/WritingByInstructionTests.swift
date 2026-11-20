@@ -308,7 +308,7 @@ final class WritingByInstructionTests: XCTestCase {
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.handsFreeEnabled = false
         config.voiceLive = true
-        let coordinator = VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })))
         let desk = FakeDesk()
         coordinator.writingByInstruction = writer(desk, local: "type this see you at five",

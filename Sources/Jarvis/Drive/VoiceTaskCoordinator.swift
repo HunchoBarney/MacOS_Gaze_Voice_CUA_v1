@@ -327,13 +327,13 @@ final class VoiceTaskCoordinator {
     }
 
     /// L7 writing by instruction, asked first by `beginVoiceTask` while
-    /// `Config.voiceLive` is on. Drafts go to the Responses API with the
-    /// OpenAI key; "send it" presses Send through this same spine.
+    /// `Config.voiceLive` is on. Drafts go to the Responses API through
+    /// `Config.responsesRoute`; "send it" presses Send through this same spine.
     lazy var writingByInstruction = WritingByInstruction(
         enabled: { [config] in config.voiceLive },
         compose: { [config] referent in
-            let key = config.openAIAPIKey
-            let reply = try await TerraClient(apiKey: { key })
+            let route = try await config.responsesRoute()
+            let reply = try await TerraClient(route: { route })
                 .respond(WritingByInstruction.composeRequest(for: referent))
             guard let text = reply["reply"]?.string else { throw TerraClient.Failure.malformed }
             return text
