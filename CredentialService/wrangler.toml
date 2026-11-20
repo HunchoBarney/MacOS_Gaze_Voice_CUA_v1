@@ -1,0 +1,24 @@
+# Jarvis credential service. Secrets (OPENAI_API_KEY, TYPESAFE_API_KEY,
+# ADMIN_TOKEN) are set with `wrangler secret put`, never in this file.
+name = "jarvis-keys"
+main = "src/worker.ts"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "LEDGER"
+class_name = "LedgerObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LedgerObject"]
+
+# Every value below is optional; these are the defaults in src/config.ts.
+# Change one with `wrangler deploy --var NAME:value` or edit it here.
+[vars]
+PAUSED = "0"
+REALTIME_MODEL = "gpt-realtime-2.1"
+RESPONSES_MODELS = "gpt-6.1-terra"
+JEV_MODELS = "jev-latest,jev-1.14.0"
+INSTALL_DAILY_CENTS = "100"
+GLOBAL_DAILY_CENTS = "2000"

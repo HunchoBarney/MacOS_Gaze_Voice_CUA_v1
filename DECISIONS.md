@@ -23,6 +23,27 @@ Settled choices, newest first. Change one only with a new entry here.
   → 86/86; same-author held-out set 32/72 → 71/72; a blind set written by
   an agent that never saw the parser 51/72 → 66/72.
 
+## 2026-11-20 — The owner's keys live in a Cloudflare Worker
+
+- People using Jarvis never hold an OpenAI or TypeSafe key. `CredentialService/`
+  is a Cloudflare Worker (owner's choice) named `jarvis-keys` on workers.dev.
+  Each install registers anonymously for a token kept in Keychain; no sign-in.
+- Realtime: the Worker mints an OpenAI client secret (`/v1/realtime/client_secrets`,
+  60 s to start a session, model pinned) and the app opens its socket to
+  OpenAI with it. Responses (Terra) and Jev (TypeSafe) calls go through the
+  Worker, which allows only the configured models and refuses tools and
+  streaming on Responses.
+- Limits live in one SQLite-backed Durable Object, so checks and charges are
+  strongly consistent; KV is eventually consistent and can't hold a limit.
+  Per install: requests per minute per route and estimated spend per UTC
+  day ($1 default). Global: $20 a day, new installs per network and per day,
+  a `PAUSED` variable and an admin pause, and per-install revoke.
+- Open source: Hono 4.13.19 (MIT) for routing, Wrangler 4.165.0 (MIT or
+  Apache-2.0) to run and deploy. Our code is the ledger and the proxy rules.
+- Realtime spend is an estimate per minted secret, because the socket goes
+  straight to OpenAI. A relay through the Worker would measure it exactly
+  but adds a hop to every audio frame.
+
 ## 2026-11-20 — Standby opens a session on the wake word
 
 - Standby keeps the voice lane's microphone open, as Hold fn already does,
