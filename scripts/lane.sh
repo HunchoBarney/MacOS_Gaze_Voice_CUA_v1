@@ -44,7 +44,9 @@ TIMEOUT=${JARVIS_LANE_TIMEOUT:-3600}
 POLL=${LANE_POLL:-2}
 BUILDS=${LANE_BUILDS:-'swift-build|swift-test|swift-frontend|xcodebuild'}
 
-alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
+pstart() { ps -o lstart= -p "$1" 2>/dev/null; }
+# A pid with a recorded start time is alive only while it is still that process.
+alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && { [ -z "${2:-}" ] || [ "$(pstart "$1")" = "$2" ]; }; }
 field() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1; }
 age() { local s=$(( $(date +%s) - $1 )); printf '%dm%02ds' $((s / 60)) $((s % 60)); }
 tickets() { ls "$QUEUE" 2>/dev/null | grep -E '^[01]-' | sort; }
@@ -54,7 +56,7 @@ prune() {
     local t
     for t in $(tickets); do
         local pid; pid=$(field "$QUEUE/$t" pid)
-        [ -n "$pid" ] && ! alive "$pid" && rm -f "$QUEUE/$t"
+        [ -n "$pid" ] && ! alive "$pid" "$(field "$QUEUE/$t" pstart)" && rm -f "$QUEUE/$t"
     done
 }
 
@@ -62,7 +64,7 @@ status() {
     mkdir -p "$QUEUE"
     prune
     local holder; holder=$(cat "$LOCK/pid" 2>/dev/null)
-    if alive "$holder"; then
+    if alive "$holder" "$(cat "$LOCK/pstart" 2>/dev/null)"; then
         local cmd started
         cmd=$(cat "$LOCK/cmd" 2>/dev/null || ps -o command= -p "$holder")
         started=$(cat "$LOCK/started" 2>/dev/null)
@@ -113,10 +115,11 @@ echo "$seq" >"$QUEUE/.seq"
 prio=1; [ "${LANE_PRIORITY:-}" = high ] && prio=0
 TICKET=$QUEUE/$prio-$(printf '%010d' "$seq")
 write_ticket() {
-    printf 'pid=%s\nqueued=%s\ncmd=%s\nsrc=%s\n' "$$" "$QUEUED" "$*" "$SRC" >"$QUEUE/.ticket-$$"
+    printf 'pid=%s\npstart=%s\nqueued=%s\ncmd=%s\nsrc=%s\n' "$$" "$PSTART" "$QUEUED" "$*" "$SRC" >"$QUEUE/.ticket-$$"
     mv "$QUEUE/.ticket-$$" "$TICKET"
 }
 QUEUED=$(date +%s)
+PSTART=$(pstart $$)
 write_ticket "$@"
 rm -rf "$QUEUE/.mutex"
 
@@ -136,12 +139,13 @@ trap 'exit 129' HUP
 take_lock() {
     mkdir -p "$LANE_HOME"
     if ! mkdir "$LOCK" 2>/dev/null; then
-        alive "$(cat "$LOCK/pid" 2>/dev/null)" && return 1
+        alive "$(cat "$LOCK/pid" 2>/dev/null)" "$(cat "$LOCK/pstart" 2>/dev/null)" && return 1
         rm -rf "$LOCK"
         mkdir "$LOCK" 2>/dev/null || return 1
     fi
     LOCKED=1
     echo $$ >"$LOCK/pid"
+    printf '%s\n' "$PSTART" >"$LOCK/pstart"
     printf '%s\n' "$*" >"$LOCK/cmd"
     date +%s >"$LOCK/started"
 }

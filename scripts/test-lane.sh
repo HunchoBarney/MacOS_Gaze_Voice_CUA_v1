@@ -102,5 +102,16 @@ check "live job's private copy kept" 'ls "$T/tmp"/lane.$V.* >/dev/null 2>&1'
 wait
 check "private copies removed afterwards" '[ -z "$(ls "$T/tmp")" ]'
 
+# 11. A ticket or lock whose pid now belongs to another process is reclaimed
+: >"$LOG"
+sleep 20 & OTHER=$!
+printf 'pid=%s\npstart=%s\nqueued=%s\ncmd=old\n' $OTHER 'Thu Jan  1 00:00:00 2026' "$(date +%s)" >"$LANE_STATE/0-0000000001"
+mkdir -p "$JARVIS_LANE_HOME/lock"; echo $OTHER >"$JARVIS_LANE_HOME/lock/pid"
+echo 'Thu Jan  1 00:00:00 2026' >"$JARVIS_LANE_HOME/lock/pstart"
+start=$(date +%s)
+JARVIS_LANE_TIMEOUT=5 "$L" bash -c 'job U 0.1' >/dev/null
+check "reused pid's ticket and lock reclaimed within 2 s" 'grep -q "end U" "$LOG" && [ $(( $(date +%s) - start )) -le 2 ]'
+kill $OTHER
+
 rm -rf "$T"
 exit $fail
