@@ -814,6 +814,37 @@ final class FastLaneExecutorTests: XCTestCase {
             "nativeForegroundReadBegin", "nativeForegroundReadEnd", "nativeForegroundVerified"])
     }
 
+    /// "click open in maps": a control called Open in Maps in the front
+    /// window is clicked there, and Maps is never launched.
+    func testWholeNameInTheFrontWindowBeatsTheAppScope() async throws {
+        guard FastAction.isAppOnThisMac("maps") else { throw XCTSkip("Maps isn't installed") }
+        let parsed = try XCTUnwrap(FastAction.parse("click open in maps"))
+        let driver = FakeDriver()
+        driver.responses["get_window_state"] = [.object([
+            "pid": .number(4242), "window_id": .number(9),
+            "elements": .array([.object([
+                "element_index": .number(1), "role": .string("AXButton"),
+                "label": .string("Open in Maps"), "element_token": .string("front-open"),
+                "actions": .array([.string("AXPress")]),
+                "frame": .object(["x": .number(10), "y": .number(10), "w": .number(120), "h": .number(30)]),
+            ])]),
+        ])]
+        let loop = DriveLoop(call: { try driver.call($0, $1) },
+            choose: { _, _ in XCTFail("a named click needs no model"); return nil },
+            ask: nil, granted: { true },
+            frontmostBundleID: { "fixture.front" }, frontmostPID: { 4242 }, frontmostWindowID: { 9 })
+        var history: [String] = [], confirmed = false
+        let result = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: parsed.action, openVerb: nil, name: "Maps", bundle: "com.apple.Maps"),
+            task: DriveTask(goal: "click open in maps"), session: "whole-name", history: &history,
+            confirmed: &confirmed)
+        XCTAssertEqual(result?.status, .done)
+        let click = try XCTUnwrap(driver.calls.first { $0.tool == "click" })
+        XCTAssertEqual(click.args["element_token"], .string("front-open"))
+        XCTAssertEqual(click.args["pid"], .number(4242))
+        XCTAssertFalse(driver.calls.contains { $0.tool == "launch_app" })
+    }
+
     func testNativeProofCannotBypassNamedOrPinnedWindowInventory() async throws {
         for named in [false, true] {
             let driver = FakeDriver(), proofs = LockedBox(0)

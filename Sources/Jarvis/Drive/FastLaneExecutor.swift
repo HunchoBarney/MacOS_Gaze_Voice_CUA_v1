@@ -431,6 +431,20 @@ extension DriveLoop {
                               blockedReason: "display scope unresolved")
             }
         }
+        // "click open in maps": a control called that in the frontmost
+        // window wins over the app the tail names.
+        if let action = resolved.action, case .clickNamed = action.body, let whole = action.wholeName,
+           let frontBundle = frontmostBundleID(), let frontPID = frontmostPID(),
+           let frontWindow = frontmostWindowID() {
+            bindConsentIdentity(name: NSRunningApplication(processIdentifier: pid_t(frontPID))?.localizedName,
+                                bundleID: frontBundle)
+            if let clicked = try await runNamedTarget(whole, clicks: true, pid: frontPID,
+                                                      windowID: frontWindow, windowTitle: "",
+                                                      task: task, session: session,
+                                                      history: &history, confirmed: &confirmed) {
+                return clicked
+            }
+        }
         guard !bundle.isEmpty else { return nil }
         // Consent now knows its scope — an "Always" answer on this lane's
         // asks persists against exactly this (action, bundle) pair.
