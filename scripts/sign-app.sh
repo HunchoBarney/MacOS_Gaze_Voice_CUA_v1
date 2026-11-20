@@ -147,6 +147,16 @@ find "$APP/Contents/Resources" -type f -exec stat -f '%i %N' {} + | sort -n | wh
     fi
 done
 
+# Signing a binary on its own leaves its bundle's resource seal stale, so
+# the tracker's Electron.app is re-sealed inside-out: frameworks, helper
+# apps, then the app.
+for electron in "$APP"/Contents/Resources/EyeTracker/node_modules/.pnpm/electron@*/node_modules/electron/dist/Electron.app; do
+    [ -d "$electron" ] || continue
+    for framework in "$electron"/Contents/Frameworks/*.framework; do sign library "$framework"; done
+    for helper in "$electron"/Contents/Frameworks/*.app; do sign executable "$helper"; done
+    sign executable "$electron"
+done
+
 /usr/libexec/PlistBuddy -c "Delete :JevCuaDriverSHA256" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :JevCuaDriverSHA256 string $(shasum -a 256 "$APP/Contents/Resources/cua-driver" | cut -d' ' -f1)" "$APP/Contents/Info.plist"
 sign executable "$APP"
