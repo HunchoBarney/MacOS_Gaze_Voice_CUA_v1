@@ -79,9 +79,10 @@ Settled choices, newest first. Change one only with a new entry here.
   client ledger admits each request once, whatever the session repeats,
   and speech not addressed to Jarvis causes no action. With no commits,
   the committed input transcript no longer decides a turn.
-- An explicit request ("click send") runs at once with a highlight.
-  Confirm only consequential actions the user didn't ask for. Scam
-  hard-refusals stay.
+- An explicit request ("click send") runs at once with a highlight,
+  except for the Standby-resume and alert-reply question in the approved
+  plan above. Confirm only consequential actions the user didn't ask
+  for. Scam hard-refusals stay.
 
 ## 2026-11-20 — Gaze is a second cursor
 

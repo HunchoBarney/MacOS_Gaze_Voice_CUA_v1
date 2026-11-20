@@ -64,8 +64,10 @@ in L4, and the Realtime lane in L11.
 Everything else runs through `TaskLoop` (via `DriveLoop`): observe through
 accessibility, ask `JevDecider` to choose, act, settle, repeat. Every action
 passes `CuaPolicy`, one consent choke point with a standing grant and a deny
-list the grant never bypasses. An explicit request runs at once with a
-highlight; only consequential actions the user didn't ask for are
+list the grant never bypasses. An explicit request in a session opened
+with the wake word runs at once with a highlight; after a Standby resume
+or in reply to an alert, a send, delete, buy or post asks one short
+question first. Other consequential actions the user didn't ask for are
 confirmed. `CuaDaemonHost` runs the embedded, pinned `cua-driver`, which
 every consumer shares.
 
