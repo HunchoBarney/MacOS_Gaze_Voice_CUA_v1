@@ -303,6 +303,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private let client: RealtimeVoiceClient
     private let player = RealtimePlayer()
     private let input = MicrophoneInput()
+    /// Hears the microphone while set: the wake word in Standby.
+    var wakeListener: (any WakeWordDetecting)? {
+        didSet { input.gate.listen(wakeListener) }
+    }
     private var hardware: MicrophoneInput.Ready?
     private var duplexRequested = false
     private var desiredInputMode: RealtimeVoiceClient.InputMode = .conversation

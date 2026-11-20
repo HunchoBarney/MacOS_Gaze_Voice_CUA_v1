@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// How a turn starts. Settings, the first run, the menu-bar icon and the
@@ -43,13 +44,16 @@ enum ListeningMode: String, CaseIterable, Sendable {
     }
 }
 
-/// A local wake-word engine. `VoskWakeWordDetector` is the one Jarvis
-/// ships; it plugs in through `ListeningPolicy.wakeWord` once Standby can
-/// start a turn when it fires.
-protocol WakeWordDetecting: AnyObject {
-    /// Starts listening locally; `heard` fires once per wake word.
-    func start(heard: @escaping @MainActor () -> Void) throws
+/// A local wake-word engine (`VoskWakeWordDetector`), registered in
+/// `ListeningPolicy.wakeWord` at launch when the build carries it.
+protocol WakeWordDetecting: AnyObject, Sendable {
+    /// Starts spotting the audio passed to `hear`. `heard` fires once per
+    /// wake phrase with the moment it was first heard, on the
+    /// `systemUptime` clock.
+    func start(heard: @escaping @MainActor (TimeInterval) -> Void) throws
     func stop()
+    /// Microphone audio straight from the input tap, on its audio thread.
+    func hear(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime)
 }
 
 /// The rules for listening modes, given whether a wake-word engine exists.

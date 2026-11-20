@@ -32,9 +32,17 @@ final class MicrophoneAudioGate: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         inputSnapshot = InputSnapshot()
     }
-    /// ~1s at tap format — enough for a warm-path `.starting` gap; a cold
-    /// socket clips only what precedes the last second.
-    static let preRollLimit: TimeInterval = 1.0
+    /// Long enough for a wake-word session to open at 1.5 s before the
+    /// wake phrase after the checker's second and a cold socket. Holds
+    /// replay only what follows the press.
+    static let preRollLimit: TimeInterval = 5.0
+    private var listener: (any WakeWordDetecting)?
+
+    /// Every tap buffer also goes to `listener` while one is set.
+    func listen(_ listener: (any WakeWordDetecting)?) {
+        lock.lock(); defer { lock.unlock() }
+        self.listener = listener
+    }
 
     /// `hostTime` is the press marker (default: now). Frames wholly before
     /// it are dropped; a buffer straddling it keeps only its pressed half.
@@ -67,6 +75,10 @@ final class MicrophoneAudioGate: @unchecked Sendable {
         return previous
     }
     func append(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) {
+        lock.lock()
+        let listener = self.listener
+        lock.unlock()
+        listener?.hear(buffer, at: time)
         lock.lock(); defer { lock.unlock() }
         guard time.isHostTimeValid else { return }
         inputSnapshot.frames += UInt64(buffer.frameLength)

@@ -31,6 +31,28 @@ final class WakeWordDetectorTests: XCTestCase {
         XCTAssertEqual(try wakes(spotter, "Hey Nova, open Mail."), 1)
     }
 
+    func testAResetForgetsAPhraseStillBeingConfirmed() throws {
+        let phrase = try spoken("What's the weather like? Hey Jarvis.") + [Int16](repeating: 0, count: 8_000)
+        func wakesOnSilence(_ spotter: WakePhraseSpotter) -> Int {
+            (0..<20).filter { _ in spotter.accept([Int16](repeating: 0, count: 1_600)) }.count
+        }
+        func confirming(_ spotter: WakePhraseSpotter) {
+            for start in stride(from: 0, to: phrase.count, by: 1_600) where !spotter.confirming {
+                XCTAssertFalse(spotter.accept(Array(phrase[start..<min(start + 1_600, phrase.count)])))
+            }
+        }
+        let kept = try WakePhraseSpotter(name: "Jarvis", vosk: try engine())
+        confirming(kept)
+        XCTAssertTrue(kept.confirming)
+        XCTAssertEqual(wakesOnSilence(kept), 1, "without a reset the old phrase still wakes")
+        let reset = try WakePhraseSpotter(name: "Jarvis", vosk: try engine())
+        confirming(reset)
+        XCTAssertTrue(reset.confirming)
+        reset.reset()
+        XCTAssertFalse(reset.confirming)
+        XCTAssertEqual(wakesOnSilence(reset), 0)
+    }
+
     func testANameTheModelCantHearIsRefused() throws {
         XCTAssertThrowsError(try WakePhraseSpotter(name: "Karanvir", vosk: try engine()))
         XCTAssertNoThrow(try WakePhraseSpotter(name: "Jarvis", vosk: try engine()))

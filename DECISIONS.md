@@ -2,6 +2,18 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Standby opens a session on the wake word
+
+- Standby keeps the voice lane's microphone open, as Hold fn already does,
+  and the wake word hears its tap. Nothing streams until the wake phrase.
+- A wake opens a hands-free session from 1.5 s before the phrase, so
+  "Hey Jarvis, open Mail" is heard in one breath. The tap's replay buffer
+  grew from 1 s to 5 s to cover the checker's second and a cold socket;
+  Fn holds still replay only what follows the press.
+- The session closes after 8 s with no turn, reply or task, and Standby
+  rearms. Fn, Pause Listening, and another app using the microphone (a
+  call, a recording; Core Audio process objects) stand Standby down.
+
 ## 2026-11-20 — The wake word is Vosk, not our own detector
 
 - "Hey <name>" (default "Hey Jarvis") is spotted on the Mac by Vosk 0.3.44
