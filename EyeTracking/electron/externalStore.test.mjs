@@ -619,19 +619,63 @@ describe("external API control endpoint", () => {
   });
 });
 
+describe("external API token", () => {
+  const token = "t".repeat(64);
+  const auth = { authorization: `Bearer ${token}` };
+
+  it("answers 401 without the bearer token on every route but /health", async () => {
+    const calls = [];
+    const handler = createRequestHandler(initializeStore(), (action) => calls.push(action), { token });
+    await expect(getJson("/snapshot", handler)).resolves.toMatchObject({ status: 401, body: { error: "unauthorized" } });
+    await expect(getJson("/ready", handler)).resolves.toMatchObject({ status: 401 });
+    await expect(
+      requestJson("/snapshot", handler, { headers: { authorization: "Bearer wrong" } })
+    ).resolves.toMatchObject({ status: 401 });
+    await expect(
+      requestJson("/control", handler, { method: "POST", body: { action: "pause_toggle" } })
+    ).resolves.toMatchObject({ status: 401 });
+    expect(calls).toHaveLength(0);
+    await expect(getJson("/health", handler)).resolves.toMatchObject({ status: 200, body: { ok: true } });
+  });
+
+  it("serves requests that carry the token", async () => {
+    const calls = [];
+    const handler = createRequestHandler(initializeStore(), (action) => calls.push(action), { token });
+    await expect(requestJson("/snapshot", handler, { headers: auth })).resolves.toMatchObject({ status: 200 });
+    await expect(
+      requestJson("/control", handler, { method: "POST", headers: auth, body: { action: "pause_toggle" } })
+    ).resolves.toMatchObject({ status: 200 });
+    expect(calls).toEqual(["pause_toggle"]);
+  });
+
+  it("refuses to start the server without a token", () => {
+    expect(() =>
+      startExternalApiServer({ store: initializeStore(), host: "127.0.0.1", port: 0, logger: { log: () => undefined, error: () => undefined } })
+    ).toThrow(TypeError);
+  });
+});
+
 describe("external API WebSocket", () => {
-  it("continues to accept originless native clients", async () => {
+  const token = "t".repeat(64);
+  const auth = { authorization: `Bearer ${token}` };
+
+  it("continues to accept originless native clients that carry the token", async () => {
     const api = startExternalApiServer({
       store: initializeStore(),
       host: "127.0.0.1",
       port: 0,
+      token,
       logger: { log: () => undefined, error: () => undefined }
     });
 
     try {
       await waitForListening(api.server);
       const address = api.server.address();
-      await expect(websocketOutcome(`ws://127.0.0.1:${address.port}/events`)).resolves.toEqual({ type: "open" });
+      await expect(websocketOutcome(`ws://127.0.0.1:${address.port}/events`, { headers: auth })).resolves.toEqual({ type: "open" });
+      await expect(websocketOutcome(`ws://127.0.0.1:${address.port}/events`)).resolves.toEqual({
+        type: "rejected",
+        statusCode: 401
+      });
     } finally {
       api.close();
     }
@@ -642,6 +686,7 @@ describe("external API WebSocket", () => {
       store: initializeStore(),
       host: "127.0.0.1",
       port: 0,
+      token,
       logger: { log: () => undefined, error: () => undefined }
     });
 
@@ -649,7 +694,7 @@ describe("external API WebSocket", () => {
       await waitForListening(api.server);
       const address = api.server.address();
       for (const origin of ["https://untrusted.example", "null", "http://127.0.0.1:3000"]) {
-        const outcome = await websocketOutcome(`ws://127.0.0.1:${address.port}/events`, { origin });
+        const outcome = await websocketOutcome(`ws://127.0.0.1:${address.port}/events`, { origin, headers: auth });
         expect(outcome).toEqual({ type: "rejected", statusCode: 403 });
       }
     } finally {

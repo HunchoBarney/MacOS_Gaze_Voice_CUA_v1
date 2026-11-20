@@ -74,7 +74,7 @@ struct GazeClient: Sendable {
          fetch: (@Sendable (URL) async throws -> Data)? = nil) {
         self.baseURL = baseURL ?? Self.defaultBaseURL
         self.fetch = fetch ?? { url in
-            var request = URLRequest(url: url)
+            var request = TrackerHost.authorized(url)
             request.timeoutInterval = 2
             let (data, _) = try await URLSession.shared.data(for: request)
             return data

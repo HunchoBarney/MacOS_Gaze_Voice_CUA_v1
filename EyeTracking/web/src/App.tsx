@@ -460,7 +460,7 @@ function App() {
     setStatusLevel(level);
   }, []);
 
-  // Single entry for user-invoked calibration — ⌘⇧G, the menu action and the
+  // Single entry for user-invoked calibration — the menu action and the
   // first-run card all funnel through the countdown → pursuit path.
   const applyPausedState = useCallback((next: boolean) => {
     pausedRef.current = next;
@@ -676,7 +676,7 @@ function App() {
       // Drift alarm from the worker: implicit labels keep landing in one
       // consistent direction off the map — the camera/laptop moved. Warn the
       // user instead of hijacking the screen; they trigger the quick
-      // recalibration with ⌘⇧G when they choose.
+      // recalibration from the menu or by voice when they choose.
       if (
         payload.message === "drift_detected" &&
         Date.now() - lastDriftTriggerRef.current > 120_000 &&
@@ -684,7 +684,7 @@ function App() {
         accuracyIndexRef.current === null
       ) {
         lastDriftTriggerRef.current = Date.now();
-        setDriftNotice("Tracking feels off? Press ⌘⇧G for a 10-second retune");
+        setDriftNotice("Tracking feels off? Say “recalibrate” for a 10-second retune");
       }
       if (payload.detector_providers || payload.gaze_providers) {
         setModelRuntime((current) => ({
@@ -775,7 +775,7 @@ function App() {
         onboardingRef.current = false;
         setOnboarding(false);
         if (payload.status === "invalid") {
-          flashHint("Press ⌘⇧G any time to calibrate");
+          flashHint("Say “recalibrate” any time to calibrate");
         }
       }
       if (payload.status === "pursuit_sampled" && payload.count !== undefined) {
@@ -839,7 +839,7 @@ function App() {
           if (rejectedFitRetriesRef.current >= 2) {
             // Bounded retry — a fit that keeps failing the gate would otherwise
             // loop the modal forever; show the reason and stand down.
-            setCalibrationNotice(payload.message ?? "Calibration did not validate — press ⌘⇧G to try again");
+            setCalibrationNotice(payload.message ?? "Calibration did not validate — say “recalibrate” to try again");
             setPursuitActive(false);
             setPursuitPos(null);
           } else {
@@ -876,7 +876,7 @@ function App() {
         // calibration screen is correct, and resume replays nothing.
         applyPausedState(payload.value === true);
       } else if (payload.action === "recalibrate") {
-        // Menu entry — the same quick top-up ⌘⇧G performs.
+        // Menu entry — the quick top-up.
         beginCalibration("quick");
       } else if (payload.action === "accuracy_check") {
         // Settings → "Check eye-tracking accuracy": a full calibration, then
@@ -999,7 +999,7 @@ function App() {
           pursuitAwaitingRuntimeRef.current = false;
           setPursuitActive(false);
           setPursuitPos(null);
-          setCalibrationNotice("Tracking failed to start — press ⌘⇧G to try again");
+          setCalibrationNotice("Tracking failed to start — say “recalibrate” to try again");
         }
       });
     return () => {
@@ -1108,7 +1108,7 @@ function App() {
     setCalibrationCountdown(3);
   }, [config?.calibrate, config?.calibrationTier, autoCalibrate, calibrationDone, gazePresence.live]);
 
-  // ⌘⇧G (registered globally in the main process) is the user-invoked
+  // The Recalibrate menu action (tray, Jarvis menu, POST /control) is the user-invoked
   // recalibration path — also what the drift notice points at. It's the
   // top-up: corners+center quick pass, not the full tour.
   useEffect(() => {
@@ -1142,7 +1142,7 @@ function App() {
         // instead of holding the scrim on a wait that can never resolve.
         setPursuitActive(false);
         setPursuitPos(null);
-        setCalibrationNotice("Tracking isn't running — press ⌘⇧G after it starts");
+        setCalibrationNotice("Tracking isn't running — say “recalibrate” after it starts");
         return;
       }
       // Model build/warm-up can outlast the countdown — hold the modal and
@@ -1640,7 +1640,7 @@ function App() {
       } else {
         // The first-run card is a modal too — Escape answers "not now".
         dismissOnboarding();
-        flashHint("Press ⌘⇧G any time to calibrate");
+        flashHint("Say “recalibrate” any time to calibrate");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1730,7 +1730,7 @@ function App() {
               type="button"
               onClick={() => {
                 dismissOnboarding();
-                flashHint("Press ⌘⇧G any time to calibrate");
+                flashHint("Say “recalibrate” any time to calibrate");
               }}
             >
               Not now

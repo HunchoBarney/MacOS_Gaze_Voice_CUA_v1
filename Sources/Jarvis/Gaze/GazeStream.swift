@@ -126,7 +126,8 @@ actor GazeStream {
     }
 
     /// The production WebSocket — URLSession's task sends no Origin header,
-    /// which is exactly what the tracker's browser-rejection lets through.
+    /// which is exactly what the tracker's browser-rejection lets through,
+    /// and carries the API token the upgrade requires.
     private static func socketFrames() -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let url = GazeClient.defaultBaseURL
@@ -136,7 +137,7 @@ actor GazeStream {
             guard let socketURL = components?.url else {
                 continuation.finish(throwing: GazeError.unreachable); return
             }
-            let task = URLSession.shared.webSocketTask(with: socketURL)
+            let task = URLSession.shared.webSocketTask(with: TrackerHost.authorized(socketURL))
             task.resume()
             let pump = Task {
                 defer { continuation.finish() }

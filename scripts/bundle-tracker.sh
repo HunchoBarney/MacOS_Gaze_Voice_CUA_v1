@@ -264,20 +264,25 @@ fi
 
 # A bundled node removes the last external dependency — TrackerHost resolves
 # nodeBinary() and can prefer <trackerDir>/bin/node once it knows to look.
-NODE_BIN=""
-for c in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node; do
-	[[ -n "$c" && -x "$c" ]] && NODE_BIN="$c" && break
-done
-if [[ -n "$NODE_BIN" ]]; then
-	NODE_REAL="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$NODE_BIN")"
-	mkdir -p "$STAGE/bin"
-	# The app is arm64-only, so a universal node ships only its arm64 slice.
-	if lipo -archs "$NODE_REAL" 2>/dev/null | grep -qw arm64 && [[ "$(lipo -archs "$NODE_REAL")" != "arm64" ]]; then
-		lipo "$NODE_REAL" -thin arm64 -output "$STAGE/bin/node"
-	else
-		cp -X "$NODE_REAL" "$STAGE/bin/node"
-	fi
+# It is pinned and checksum-verified (arm64 build from nodejs.org), never
+# whatever node happens to be on PATH. Bump both lines together, taking the
+# hash from the release's SHASUMS256.txt.
+NODE_VERSION="v24.22.3"
+NODE_SHA256="ff6e17d4874b76d272212b908cc020d6e815fba5a6c7eaaa06add725840307fd"
+NODE_NAME="node-$NODE_VERSION-darwin-arm64"
+NODE_CACHE="$HOME/Library/Caches/Jarvis/node"
+NODE_TGZ="$NODE_CACHE/$NODE_NAME.tar.gz"
+mkdir -p "$NODE_CACHE"
+if ! echo "$NODE_SHA256  $NODE_TGZ" | shasum -a 256 -c --status 2>/dev/null; then
+	curl -fsSL "https://nodejs.org/dist/$NODE_VERSION/$NODE_NAME.tar.gz" -o "$NODE_TGZ.tmp" \
+		|| skip "couldn't download node $NODE_VERSION"
+	echo "$NODE_SHA256  $NODE_TGZ.tmp" | shasum -a 256 -c --status \
+		|| { rm -f "$NODE_TGZ.tmp"; skip "node $NODE_VERSION failed its checksum"; }
+	mv "$NODE_TGZ.tmp" "$NODE_TGZ"
 fi
+mkdir -p "$STAGE/bin"
+tar -xzf "$NODE_TGZ" -C "$STAGE/bin" --strip-components 2 "$NODE_NAME/bin/node"
+log "bundled node $NODE_VERSION (pinned)"
 
 # TCC: every bundled plist needs NSCameraUsageDescription or a camera request
 # attributed to an unpatched helper is a SIGABRT, not a prompt. Same stamp

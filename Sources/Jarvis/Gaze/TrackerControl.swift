@@ -122,7 +122,7 @@ struct TrackerControl: Sendable {
     /// as `.unreachable`; a non-2xx answer as `.rejected` — the caller
     /// decides whether silence or a spoken refusal is honest.
     func post(action: String, value: Any? = nil) async throws {
-        var request = URLRequest(url: baseURL.appendingPathComponent("control"))
+        var request = TrackerHost.authorized(baseURL.appendingPathComponent("control"))
         request.httpMethod = "POST"
         request.timeoutInterval = 2
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -164,7 +164,7 @@ struct TrackerControl: Sendable {
         let data: Data
         let response: URLResponse
         do {
-            var request = URLRequest(url: baseURL.appendingPathComponent("snapshot"))
+            var request = TrackerHost.authorized(baseURL.appendingPathComponent("snapshot"))
             request.timeoutInterval = 2
             (data, response) = try await send(request)
         } catch is CancellationError {

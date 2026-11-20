@@ -50,7 +50,7 @@ function heavyStore() {
 
 function collectFrames(url, count) {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, { headers: { authorization: `Bearer ${"c".repeat(64)}` } });
     const frames = [];
     socket.on("message", (data) => {
       frames.push(JSON.parse(data.toString()));
@@ -213,6 +213,7 @@ describe("/events wire shape", () => {
       store,
       host: "127.0.0.1",
       port: 0,
+      token: "c".repeat(64),
       logger: { log: () => undefined, error: () => undefined }
     });
     try {

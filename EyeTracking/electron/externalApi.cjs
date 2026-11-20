@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const http = require("http");
 const { WebSocketServer } = require("ws");
 const { SCHEMA_VERSION } = require("./externalStore.cjs");
@@ -119,6 +120,22 @@ function checkReadiness(snapshot) {
   return { ready: false, reason: "no_recent_gaze" };
 }
 
+// Every route but /health needs the per-launch bearer token. /health stays
+// open because it carries only process identity: the host uses it to find
+// an already-running tracker before it has read that tracker's token.
+function isAuthorized(request, token) {
+  if (token === undefined) {
+    return true;
+  }
+  const header = request.headers.authorization;
+  if (typeof header !== "string") {
+    return false;
+  }
+  const given = Buffer.from(header);
+  const expected = Buffer.from(`Bearer ${token}`);
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+}
+
 function handleControlRequest(request, response, onControl, onQuit) {
   if (request.method !== "POST") {
     sendJson(response, 405, { error: "method_not_allowed" });
@@ -222,8 +239,10 @@ function handleControlRequest(request, response, onControl, onQuit) {
 // `options.onQuit` (optional): invoked after `POST /control {"action":"quit"}`
 // is acknowledged. The main process wires `() => app.quit()` here; without it
 // the action answers 503 like an unwired onControl.
+// `options.token`: when set, every route but /health answers 401 without
+// `Authorization: Bearer <token>`. The server always sets it.
 function createRequestHandler(store, onControl, options = {}) {
-  const { onQuit, logger = console } = options;
+  const { onQuit, logger = console, token } = options;
   return (request, response) => {
     // An 'error' event with no listener throws out of the emit and lands in
     // the app's uncaughtException handler — a dropped client socket must
@@ -237,6 +256,10 @@ function createRequestHandler(store, onControl, options = {}) {
       // Absolute-form targets ("GET http://[::1") arrive here unparseable —
       // a throw inside the request listener kills the app, so answer 400.
       sendJson(response, 400, { error: "bad_request" });
+      return;
+    }
+    if (url.pathname !== "/health" && !isAuthorized(request, token)) {
+      sendJson(response, 401, { error: "unauthorized" });
       return;
     }
     if (url.pathname === "/control") {
@@ -302,8 +325,11 @@ function sendSocketJson(socket, payload) {
 //   onQuit() — fired after POST /control {"action":"quit"} is acknowledged;
 //     main.cjs's maybeStartExternalApi wires `() => app.quit()` here.
 //     Optional: without it the action answers 503.
-function startExternalApiServer({ store, host, port, logger = console, onControl, onQuit }) {
-  const server = http.createServer(createRequestHandler(store, onControl, { onQuit, logger }));
+function startExternalApiServer({ store, host, port, logger = console, onControl, onQuit, token }) {
+  if (typeof token !== "string" || token.length === 0) {
+    throw new TypeError("the external API needs a token");
+  }
+  const server = http.createServer(createRequestHandler(store, onControl, { onQuit, logger, token }));
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", (socket) => {
@@ -336,6 +362,10 @@ function startExternalApiServer({ store, host, port, logger = console, onControl
     // native local clients, which omit Origin, remain supported.
     if (request.headers.origin !== undefined) {
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    if (!isAuthorized(request, token)) {
+      socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {

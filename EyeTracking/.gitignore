@@ -235,3 +235,6 @@ accuracy_report.json
 tsconfig.tsbuildinfo
 public/runtime-assets/onnxruntime-web/*
 !public/runtime-assets/onnxruntime-web/.gitkeep
+
+# Per-launch tracker API token
+.tracker_api_token

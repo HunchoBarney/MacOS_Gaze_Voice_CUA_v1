@@ -67,11 +67,17 @@ function reportModelsLoaded(store) {
   });
 }
 
+// The per-launch API token every request below carries, as Jarvis's
+// clients do.
+const TOKEN = "f".repeat(64);
+const AUTH = { authorization: `Bearer ${TOKEN}` };
+
 async function startApi(options) {
   const api = startExternalApiServer({
     host: "127.0.0.1",
     port: 0,
     logger: silentLogger,
+    token: TOKEN,
     ...options
   });
   await new Promise((resolve, reject) => {
@@ -89,7 +95,7 @@ async function startApi(options) {
 async function request(base, pathname, { method = "GET", headers, body, rawBody } = {}) {
   const response = await fetch(`${base}${pathname}`, {
     method,
-    headers,
+    headers: { ...AUTH, ...headers },
     body: rawBody !== undefined ? rawBody : body !== undefined ? JSON.stringify(body) : undefined
   });
   const text = await response.text();
@@ -169,7 +175,7 @@ function createSettingsWriter(settingsPath, store) {
 
 // A connected /events client whose frames arrive as an ordered async queue.
 function openEventsSocket(wsBase) {
-  const socket = new WebSocket(`${wsBase}/events`);
+  const socket = new WebSocket(`${wsBase}/events`, { headers: AUTH });
   const buffered = [];
   const waiters = [];
   socket.on("message", (data) => {

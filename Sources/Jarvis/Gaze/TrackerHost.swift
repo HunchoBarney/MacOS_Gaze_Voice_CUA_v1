@@ -30,6 +30,36 @@ actor TrackerHost {
     /// The tracker's read-only API port (`--external-api-port` default).
     static let port = 47892
 
+    /// The tracker API's bearer token for trackers this launch spawns,
+    /// passed in JARVIS_TRACKER_TOKEN. Every route but /health refuses a
+    /// request without it, so a web page or another user can't read gaze
+    /// or drive the tracker.
+    nonisolated static let launchToken: String = {
+        var generator = SystemRandomNumberGenerator()
+        return (0..<32).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max, using: &generator)) }
+            .joined()
+    }()
+
+    /// The running tracker's token: the owner-only file it writes beside
+    /// its calibration (an adopted tracker has its own), else this
+    /// launch's token.
+    nonisolated static func apiToken() -> String {
+        if let dir = trackerDirectory(),
+           let text = try? String(contentsOf: calibrationDirectory(trackerDir: dir)
+                .appendingPathComponent(".tracker_api_token"), encoding: .utf8) {
+            let token = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty { return token }
+        }
+        return launchToken
+    }
+
+    /// A request to the tracker API, carrying the bearer token.
+    nonisolated static func authorized(_ url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(apiToken())", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
     enum State: Equatable, Sendable {
         case stopped, starting, running, failed(String)
     }
@@ -352,6 +382,7 @@ actor TrackerHost {
         env.removeValue(forKey: "NODE_ENV")
         env.removeValue(forKey: "ELECTRON_RUN_AS_NODE")
         env.removeValue(forKey: "ELECTRON_NO_ATTACH_CONSOLE")
+        env["JARVIS_TRACKER_TOKEN"] = Self.launchToken
         // node on a GUI app's PATH is bare — resolve it explicitly rather
         // than trusting /usr/bin/env to find it.
         guard let node = Self.nodeBinary(environment: env, trackerDir: dir) else {
@@ -526,7 +557,7 @@ actor TrackerHost {
         guard let url = URL(string: "http://127.0.0.1:\(Self.port)/snapshot") else {
             return .verdict(.healthy, error: nil)
         }
-        var request = URLRequest(url: url)
+        var request = Self.authorized(url)
         request.timeoutInterval = 3
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
@@ -746,7 +777,7 @@ actor TrackerHost {
                     // The tracker keeps its pause; the flag is already
                     // cleared so a later unlock edge won't replay a stale
                     // intent. Honest degradation: the user unpauses by hand
-                    // (⌘⇧P/tray).
+                    // (the Jarvis menu or by voice).
                     Self.log.notice("screen-unlock resume request didn't land: \(error.localizedDescription, privacy: .public)")
                 }
                 // A re-lock that landed during the resume POST loops back
@@ -856,7 +887,7 @@ actor TrackerHost {
     /// fine — the SIGTERM step is next either way.
     private func requestTrackerQuit() async {
         guard let url = URL(string: "http://127.0.0.1:\(Self.port)/control") else { return }
-        var request = URLRequest(url: url)
+        var request = Self.authorized(url)
         request.httpMethod = "POST"
         request.timeoutInterval = 2
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
