@@ -280,6 +280,8 @@ final class VoiceTaskCoordinator {
     var gazeContextProvider: () async -> String? = { nil }
     /// Proactivity answers "what's up", "what did I miss", watch requests
     /// and replies to a spoken alert before the utterance becomes a task.
+    /// It hears the person's own words when the turn has them: a "yes"
+    /// answers the alert, whatever the model made of it.
     var proactiveIntercept: ((String) -> ProactiveIntercept?)?
     /// The candidate enumerator the service drives — built over `call`
     /// by `configureGazeService`; nil means the feed reports empty.
@@ -845,7 +847,7 @@ final class VoiceTaskCoordinator {
             return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
         }
         let phrase = Self.normalizedPhrase(trimmed)
-        if windowScroll == nil, let intercept = proactiveIntercept?(trimmed) {
+        if windowScroll == nil, let intercept = proactiveIntercept?(transcriptHint ?? trimmed) {
             switch intercept {
             case .say(let line):
                 return VoiceToolResult(status: VoiceToolResult.Status.ok, say: line).encoded()

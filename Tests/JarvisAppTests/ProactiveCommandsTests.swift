@@ -12,6 +12,12 @@ final class ProactiveCommandsTests: XCTestCase {
         func stop() {}
     }
 
+    private struct MemoryKeys: APIKeyStore {
+        func read() throws -> String? { nil }
+        func save(_ apiKey: String) throws {}
+        func delete() throws {}
+    }
+
     private var now = Date(timeIntervalSince1970: 1_800_000_000)
     private var suite: String!
     private var defaults: UserDefaults!
@@ -78,6 +84,28 @@ final class ProactiveCommandsTests: XCTestCase {
         engine.submit([alert(.reminder, "Reminder: pills", action: .completeReminder("r1"))])
         XCTAssertEqual(commands.intercept("okay"), .say("Done."))
         XCTAssertEqual(completed, ["r1"])
+    }
+
+    func testTheWakePhraseIsNotPartOfTheReply() {
+        let link = URL(string: "https://zoom.us/j/2")!
+        engine.submit([alert(.meetingNow, "Review starts now", action: .openURL(link))])
+        XCTAssertEqual(commands.intercept("Hey Jarvis, yes."), .say("Opening it."))
+        XCTAssertEqual(opened, [link])
+        XCTAssertEqual(commands.intercept("Jarvis, what's up?"), .say("Nothing new."))
+        XCTAssertEqual(commands.intercept("hey jarvis tell me when Dana replies"), .say("I'll tell you when dana replies."))
+    }
+
+    func testBeginVoiceTaskInterceptsThePersonsWordsNotTheModelsInstruction() async {
+        let config = Config(defaults: defaults, keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.handsFreeEnabled = false
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { nil },
+            gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })))
+        var heard: [String] = []
+        coordinator.proactiveIntercept = { heard.append($0); return .say("Opening it.") }
+        let result = await coordinator.beginVoiceTask("open the meeting link", transcriptHint: "Yes.")
+        XCTAssertEqual(heard, ["Yes."])
+        XCTAssertTrue(result.contains("Opening it."))
+        XCTAssertTrue(coordinator.tasks.isEmpty)
     }
 
     func testNoAndNotNowAreAnsweredAndOtherRepliesFallThrough() {

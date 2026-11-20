@@ -144,15 +144,19 @@ struct ProactiveCommands {
     private static let missed: Set<String> = [
         "what did i miss", "what have i missed", "what did i miss today", "catch me up", "anything i missed",
     ]
+    private static let wakeLeads = ["hey jarvis", "okay jarvis", "ok jarvis", "jarvis"]
     private static let watchPattern = try! NSRegularExpression(
         pattern: #"^(?:tell|let) me (?:know )?when (.+?) (?:replies|writes back|messages me|texts me|answers|gets back to me)$"#)
 
     /// nil leaves the utterance to the task loop.
     func intercept(_ utterance: String) -> ProactiveIntercept? {
-        let phrase = utterance.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
+        var spoken = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let lead = Self.wakeLeads.first(where: { spoken.lowercased().hasPrefix($0) }) {
+            spoken = String(spoken.dropFirst(lead.count)).trimmingCharacters(in: CharacterSet(charactersIn: " ,.!?"))
+        }
+        let phrase = spoken.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".?!"))
         if engine.awaiting != nil {
-            switch engine.handleReply(utterance) {
+            switch engine.handleReply(spoken) {
             case .ignored, .converse: break
             case .declined: return .say("Okay.")
             case .snoozed: return .say("Okay, later.")
