@@ -38,6 +38,10 @@ struct SettingsView: View {
     @State private var eyeDotVisible = false
     @State private var eyeSettingsTouched = false
     @State private var dwellMode = DwellPolicy.load().mode.rawValue
+    @State private var openAIKeyDraft = ""
+    @State private var openAIKeySaved = false
+    @State private var typeSafeKeyDraft = ""
+    @State private var typeSafeKeySaved = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -109,6 +113,7 @@ struct SettingsView: View {
             eyeTracking.id(SettingsNavigation.Anchor.eyeTracking.rawValue)
             permissions.id(SettingsNavigation.Anchor.permissions.rawValue)
             general
+            if !config.hostedCredentialsConfigured { advanced }
         }
     }
 
@@ -162,7 +167,7 @@ struct SettingsView: View {
                     controller.isMicrophoneTest ? controller.stopMicrophoneTest() : controller.startMicrophoneTest()
                 }.disabled(!controller.canBegin && !controller.isMicrophoneTest)
                 Spacer()
-                VoiceWaveform(level: controller.isMicrophoneTest ? controller.audioLevel : 0, color: .mint)
+                LevelMeter(level: controller.isMicrophoneTest ? controller.audioLevel : 0)
             }
             if controller.isMicrophoneTest {
                 Note(controller.inputName.isEmpty ? "Starting the microphone…" : "Say something. Jarvis won't do anything during the test.")
@@ -316,6 +321,46 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Advanced
+
+    /// Keys typed on this Mac — only until Jarvis's own sign-in exists.
+    private var advanced: some View {
+        DisclosureGroup("Advanced") {
+            VStack(alignment: .leading, spacing: 12) {
+                Note("Until Jarvis connects for you, it needs your own keys: OpenAI to hear and answer you, TypeSafe to understand requests. They stay in your Mac's Keychain.")
+                keyField("OpenAI key", placeholder: "sk-…", draft: $openAIKeyDraft, saved: openAIKeySaved) {
+                    openAIKeySaved = config.saveOpenAIAPIKey(openAIKeyDraft)
+                }
+                keyField("TypeSafe key", placeholder: "ts-…", draft: $typeSafeKeyDraft, saved: typeSafeKeySaved) {
+                    typeSafeKeySaved = config.saveAPIKey(typeSafeKeyDraft)
+                }
+                if let error = config.apiKeyError { Note(error, tint: .orange) }
+            }
+            .padding(.top, 10)
+        }
+        .font(.system(size: 14))
+        .padding(.horizontal, 4)
+        .onAppear {
+            openAIKeyDraft = config.openAIAPIKey
+            typeSafeKeyDraft = config.apiKey
+        }
+        .onChange(of: openAIKeyDraft) { openAIKeySaved = false }
+        .onChange(of: typeSafeKeyDraft) { typeSafeKeySaved = false }
+    }
+
+    private func keyField(_ title: String, placeholder: String, draft: Binding<String>,
+                          saved: Bool, save: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 14))
+            HStack {
+                SecureField(placeholder, text: draft).textFieldStyle(.roundedBorder).onSubmit(save)
+                    .accessibilityLabel(title)
+                Button("Save", action: save)
+            }
+            if saved { Note(draft.wrappedValue.isEmpty ? "Removed." : "Saved.") }
+        }
+    }
+
     /// What ServiceManagement actually holds, only when it needs saying.
     private var loginServiceStatusText: String? {
         switch config.loginServiceStatus {
@@ -338,7 +383,7 @@ private struct SettingsSection<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VoiceCard {
+        JarvisCard {
             VStack(alignment: .leading, spacing: 12) {
                 Label(title, systemImage: symbol).font(.system(size: 17, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)

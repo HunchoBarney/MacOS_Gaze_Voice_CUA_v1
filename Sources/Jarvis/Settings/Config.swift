@@ -18,6 +18,9 @@ final class Config: ObservableObject {
     /// first, Keychain `openAIAPIKey` second. ChatGPT sign-in cannot mint
     /// realtime sessions; this lane requires an API key.
     @Published private(set) var openAIAPIKey: String
+    /// True once Jarvis signs in to hosted credentials (KAR-38). Until
+    /// then the keys above are typed into Settings → Advanced.
+    var hostedCredentialsConfigured: Bool { false }
 
     @Published var microphoneUID: String {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
