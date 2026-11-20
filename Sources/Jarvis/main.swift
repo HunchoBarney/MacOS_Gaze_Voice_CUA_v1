@@ -239,6 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.refreshPermissions()
         if ProcessInfo.processInfo.arguments.contains("--settings") {
             windows.show(.voice)
+        } else if ProcessInfo.processInfo.arguments.contains("--first-run") {
+            windows.showFirstRun()
         } else if !controller.config.firstRunCompleted {
             if Permission.microphone.isGranted && Permission.accessibility.isGranted {
                 controller.config.firstRunCompleted = true

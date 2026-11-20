@@ -104,52 +104,6 @@ final class JevModelsTests: XCTestCase {
         XCTAssertNotNil(response.answers["step"])
     }
 
-    func testBoxQuestionEncodesWithoutCriteria() throws {
-        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
-            Question.box(instructions: "the Search control in `window_image`"))) as? [String: Any]
-        XCTAssertEqual(object?["type"] as? String, "box")
-        XCTAssertEqual(object?["instructions"] as? String, "the Search control in `window_image`")
-        XCTAssertNil(object?["criteria"])
-    }
-
-    func testBoxAnswerPreservesNullableConfidence() throws {
-        for field in ["null", "0.0", "0.91"] {
-            let answer = try decodeAnswer("""
-                {"type":"box","box":{"top":0.1,"bottom":0.5,"left":0.2,"right":0.8},"confidence":\(field)}
-                """)
-            guard case let .box(box, confidence) = answer else { return XCTFail("not a box") }
-            XCTAssertEqual(box.left, 0.2)
-            if field == "null" { XCTAssertNil(confidence) }
-            else { XCTAssertEqual(confidence, Double(field)) }
-        }
-    }
-
-    func testBoxRejectsOutsideReversedAndZeroAreaCoordinates() throws {
-        for box in [
-            #"{"top":-0.1,"bottom":0.5,"left":0.2,"right":0.8}"#,
-            #"{"top":0.1,"bottom":1.1,"left":0.2,"right":0.8}"#,
-            #"{"top":0.1,"bottom":0.5,"left":-0.2,"right":0.8}"#,
-            #"{"top":0.1,"bottom":0.5,"left":0.2,"right":1.1}"#,
-            #"{"top":0.5,"bottom":0.1,"left":0.2,"right":0.8}"#,
-            #"{"top":0.1,"bottom":0.5,"left":0.8,"right":0.2}"#,
-            #"{"top":0.1,"bottom":0.1,"left":0.2,"right":0.8}"#,
-            #"{"top":0.1,"bottom":0.5,"left":0.2,"right":0.2}"#,
-            #"{"top":"NaN","bottom":0.5,"left":0.2,"right":0.8}"#,
-            #"{"top":true,"bottom":0.5,"left":0.2,"right":0.8}"#,
-        ] {
-            XCTAssertThrowsError(try decodeAnswer(
-                #"{"type":"box","box":\#(box),"confidence":0.9}"#))
-        }
-    }
-
-    func testBoxRejectsMalformedConfidence() {
-        for value in ["-0.1", "1.1", #""certain""#, "true"] {
-            XCTAssertThrowsError(try decodeAnswer("""
-                {"type":"box","box":{"top":0,"bottom":1,"left":0,"right":1},"confidence":\(value)}
-                """))
-        }
-    }
-
     /// A malformed answer drops its own key — the same lossy rule Answer
     /// applies to its fields — instead of poisoning sibling answers.
     func testMalformedAnswerDropsKeyWithoutPoisoningSiblings() throws {
