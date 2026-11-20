@@ -100,6 +100,10 @@ final class VoiceActivityGateTests: XCTestCase {
         var resumed: [Data] = []
         for i in 0..<6 { resumed += try await gate.admit(buffer(loud: true, seed: Int16(100 + i))) }
         XCTAssertTrue(resumed.contains(buffer(loud: true, seed: 105)))
+        let usage = await gate.usage
+        XCTAssertGreaterThan(usage.sentSilence, 0)
+        XCTAssertLessThanOrEqual(usage.sentSpeech + usage.sentSilence, usage.heard + 1e-9,
+                                 "nothing that went out as silence is sent again as audio")
     }
 
     // MARK: - The shipped Silero model
@@ -111,7 +115,6 @@ final class VoiceActivityGateTests: XCTestCase {
         for i in noise.indices { noise[i] = Int16.random(in: -60...60, using: &generator) }
 
         let gate = try VoiceActivityGate.silero(sampleRate: rate)
-        var sent: [Data] = []
         let stream = noise + speech + noise + noise
         let speechStart = noise.count * 2
         var offset = 0
@@ -122,16 +125,16 @@ final class VoiceActivityGateTests: XCTestCase {
             let out = try await gate.admit(chunk.withUnsafeBytes { Data($0) })
             if !out.isEmpty, firstUploadAt == nil { firstUploadAt = offset }
             if offset + chunk.count * 2 <= speechStart { uploadedBeforeSpeech += out.count }
-            sent += out
             offset += chunk.count * 2
         }
         XCTAssertEqual(uploadedBeforeSpeech, 0, "two seconds of room noise stay local")
+        let firstUpload = try XCTUnwrap(firstUploadAt, "the sentence opens the gate")
+        XCTAssertGreaterThanOrEqual(firstUpload, speechStart - frame * 2, "nothing leaves before the speech begins")
+        XCTAssertLessThan(firstUpload, speechStart + Int(rate) * 2, "the gate opens within a second of speech")
         let usage = await gate.usage
         let spokenSeconds = Double(speech.count) / rate
         XCTAssertGreaterThan(usage.sentSpeech, spokenSeconds * 0.9, "the sentence is uploaded")
         XCTAssertLessThan(usage.sentSpeech, spokenSeconds + 3.5, "plus at most the pre-roll, scoring lag and hangover")
-        let firstRealBytes = sent.first { !isSilence($0) }
-        XCTAssertNotNil(firstRealBytes)
     }
 
     private func spoken(_ text: String) throws -> [Int16] {
@@ -140,9 +143,10 @@ final class VoiceActivityGateTests: XCTestCase {
         let say = Process()
         say.executableURL = URL(fileURLWithPath: "/usr/bin/say")
         say.arguments = ["-v", "Samantha", "-o", url.path, "--data-format=LEI16@24000", text]
-        guard (try? say.run()) != nil else { throw XCTSkip("say is unavailable") }
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/say") else { throw XCTSkip("say is unavailable") }
+        try say.run()
         say.waitUntilExit()
-        guard say.terminationStatus == 0 else { throw XCTSkip("say could not render speech") }
+        XCTAssertEqual(say.terminationStatus, 0, "say could not render speech")
         let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatInt16, interleaved: true)
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
         try file.read(into: buffer)

@@ -2,6 +2,29 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — The wake word is Vosk, not our own detector
+
+- "Hey <name>" (default "Hey Jarvis") is spotted on the Mac by Vosk 0.3.44
+  (Alpha Cephei, Apache-2.0) with `vosk-model-small-en-us-0.15`
+  (Apache-2.0), both pinned by SHA-256 in `ThirdParty/Vosk`. Our code is
+  the adapter: microphone tap, 16 kHz conversion, a 3.5 s buffer and two
+  grammar recognizers. A listener that knows only the wake phrase runs on
+  everything; its hits are decoded again with every first name in macOS's
+  `/usr/share/dict/propernames` as a rival, and count at 0.6 confidence.
+- Measured with the shipped code on 28 synthetic `say` voices plus 60 min
+  of speech (LibriSpeech and `say` paragraphs): "Hey Jarvis" 80/84
+  accepted, "Hey Nova" 53/56, 0 false wakes in 60 min, below 1 % of an M1
+  core while speech plays. Near-misses ("Hey Marvin", "Hey jars", "Hey Noah",
+  the bare name) wake it 7/140 and 5/56 times. Short names that sound like another first name are
+  missed more ("Hey Jake" 56/84, heard as "Hey Jay").
+- A name must be in the model's vocabulary (41 of 45 names tried).
+- Rejected: sherpa-onnx keyword spotting (the only small English KWS model
+  is trained on GigaSpeech, whose audio is non-commercial, and it accepted
+  44–55 %); Apple's on-device recognizer as the checker (it mishears names,
+  "AJ" or "Jane" for Jake, 360 ms per check, no accuracy gained over Vosk);
+  openWakeWord's pretrained models (CC BY-NC-SA); Picovoice (cost); and
+  any hand-built detector.
+- The app grows by 80 MB (68 MB model, 12 MB library).
 ## 2026-11-20 — CI runs on the owner's Mac
 
 - GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI

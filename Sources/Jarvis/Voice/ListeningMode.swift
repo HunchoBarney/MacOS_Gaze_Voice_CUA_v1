@@ -43,8 +43,9 @@ enum ListeningMode: String, CaseIterable, Sendable {
     }
 }
 
-/// A local wake-word engine. None ships yet: the engine arrives as its own
-/// change and plugs in through `ListeningPolicy.wakeWord`.
+/// A local wake-word engine. `VoskWakeWordDetector` is the one Jarvis
+/// ships; it plugs in through `ListeningPolicy.wakeWord` once Standby can
+/// start a turn when it fires.
 protocol WakeWordDetecting: AnyObject {
     /// Starts listening locally; `heard` fires once per wake word.
     func start(heard: @escaping @MainActor () -> Void) throws
