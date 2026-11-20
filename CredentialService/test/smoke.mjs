@@ -92,7 +92,7 @@ try {
   assert.equal((await request("/v1/realtime/client_secret", { token })).json.error.code, "rate_limited");
 
   const live = await request("/v1/live/sessions", { token, body: { sdp: "v=0 offer" } });
-  assert.deepEqual(live, { status: 201, json: { sessionID: "live_smoke", sdp: "v=0 answer", model: "gpt-live-1.1" } });
+  assert.deepEqual(live, { status: 201, json: { session: { id: "live_smoke" }, transport: { type: "webrtc", sdp: "v=0 answer" } } });
 
   assert.equal((await request("/v1/responses", { token, body: { model: "gpt-6.1-terra", input: [] } })).status, 200);
   assert.equal((await request("/v1/jev", { token, body: { model: "jev-1.14.0", state: {}, questions: {} } })).status, 200);

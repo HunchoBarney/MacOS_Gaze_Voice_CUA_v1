@@ -25,7 +25,7 @@ consistent. KV is eventually consistent, so it can't enforce a limit.
 | --- | --- | --- |
 | `POST /v1/installs` | none | Registers an install: `{ installID, token }` |
 | `POST /v1/realtime/client_secret` | install token | `{ value, expiresAt, model }` |
-| `POST /v1/live/sessions` | install token | GPT-Live WebRTC session: `{ sdp, instructions?, input?, voice?, idle_timeout_s?, wake_policy?, acknowledgement_delay_ms? }` → 201 `{ sessionID, sdp, model }`. The Worker fixes the model, client delegation, `store: false` and the safety identifier; any other field is `field_not_allowed`. A provider 400 passes through |
+| `POST /v1/live/sessions` | install token | GPT-Live WebRTC session: `{ sdp, instructions?, input?, voice?, idle_timeout_s?, vad_threshold? }` → OpenAI's 201 `{ session: { id }, transport: { type, sdp } }` unchanged. The Worker fixes the model, client delegation with no tools, `store: false`, the speech wake policy (`idle_timeout_s` defaults to 8), a hashed safety identifier and the data-channel client events (`LIVE_CLIENT_EVENTS`); any other field is `field_not_allowed`. A provider 400 passes through |
 | `POST /v1/responses` | install token | Responses API, allowed models only, `store: false`, no tools or streaming |
 | `POST /v1/jev` | install token | TypeSafe System One, allowed models only |
 | `GET /admin/usage` | admin token | Today's spend, installs, top spenders |

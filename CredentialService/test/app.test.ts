@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { createApp } from "../src/app.ts";
+import { createApp, LIVE_CLIENT_EVENTS } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { Ledger, type LedgerClient, type Sql } from "../src/ledger.ts";
 
@@ -161,68 +161,90 @@ describe("realtime client secrets", () => {
 });
 
 describe("Live sessions", () => {
-  it("opens a client-delegated session for the pinned model with the owner's key", async () => {
+  const fixed = (installHash: string) => ({
+    model: "gpt-live-1.1",
+    delegation: null,
+    store: false,
+    idle_timeout_s: 8,
+    wake_policy: { type: "speech" },
+    safety_identifier: installHash,
+    client: { data_channel: { allowed_client_events: LIVE_CLIENT_EVENTS } },
+  });
+  const hash = async (text: string) =>
+    [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))]
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+  it("opens a client-delegated session for the pinned model with the owner's key and returns OpenAI's answer", async () => {
     const h = harness({ LIVE_SESSION_CENTS: "8" });
     const { installID, token } = await h.register();
-    const input = [{ type: "message", role: "user", content: [{ type: "input_text", text: "Earlier: open Notes" }] }];
+    const input = [
+      { type: "message", role: "developer", content: [{ type: "input_text", text: "Context" }] },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "Earlier: open Notes" }] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Opened." }] },
+    ];
     const response = await h.request("/v1/live/sessions", {
       token,
-      body: {
-        ...live, instructions: "Be brief.", input, voice: "cedar", idle_timeout_s: 8,
-        wake_policy: { type: "speech", vad_threshold: 0.6 }, acknowledgement_delay_ms: 800,
-      },
+      body: { ...live, instructions: "Be brief.", input, voice: "cedar", idle_timeout_s: 20, vad_threshold: 0.6 },
     });
     expect(response.status).toBe(201);
-    expect(await body(response)).toEqual({ sessionID: "live_fixture", sdp: "v=0 answer", model: "gpt-live-1.1" });
+    expect(await body(response)).toEqual({ session: { id: "live_fixture" }, transport: { type: "webrtc", sdp: "v=0 answer" } });
     expect(h.calls).toHaveLength(1);
     expect(h.calls[0].url).toBe("https://api.openai.com/v1/live/sessions");
     expect(h.calls[0].headers.authorization).toBe(`Bearer ${OPENAI_KEY}`);
     expect(h.calls[0].body).toEqual({
       session: {
-        model: "gpt-live-1.1",
-        delegation: { type: "client", acknowledgement_delay_ms: 800 },
-        store: false,
-        safety_identifier: installID,
+        ...fixed(await hash(installID)),
+        idle_timeout_s: 20,
+        wake_policy: { type: "speech", vad_threshold: 0.6 },
         instructions: "Be brief.",
         input,
-        idle_timeout_s: 8,
-        wake_policy: { type: "speech", vad_threshold: 0.6 },
         audio: { output: { voice: "cedar" } },
       },
       transport: { type: "webrtc", sdp: "v=0 offer" },
     });
+    expect(JSON.stringify(h.calls[0].body)).not.toContain(installID);
     const usage = await body(await h.admin("/admin/usage", "GET"));
     expect(usage.top).toEqual([{ installID, cents: 8 }]);
   });
 
-  it("sends only the offer when the app sets nothing else", async () => {
+  it("fixes everything but the offer when the app sets nothing else", async () => {
     const h = harness();
     const { installID, token } = await h.register();
     expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
-    expect(h.calls[0].body.session).toEqual({
-      model: "gpt-live-1.1", delegation: { type: "client" }, store: false, safety_identifier: installID,
-    });
+    expect(h.calls[0].body.session).toEqual(fixed(await hash(installID)));
+    expect(LIVE_CLIENT_EVENTS).toEqual([
+      "session.close", "session.instructions.append", "session.thinking.append", "session.commentary.append",
+      "session.input_audio.mute", "session.input_audio.unmute",
+    ]);
   });
 
-  it("refuses a missing offer and every field the service decides, without calling upstream or charging", async () => {
+  it("refuses fields the service decides and malformed ones, without calling upstream or charging", async () => {
     const h = harness({ LIVE_PER_MINUTE: "100" });
     const { token } = await h.register();
     for (const extra of [
       { model: "gpt-live-1" }, { delegation: { type: "responses" } }, { store: true }, { triggers: [] },
       { client: { data_channel: { allowed_client_events: "all" } } }, { tools: [] }, { safety_identifier: "x" },
-      { audio: { output: { voice: "cedar" } } }, { session: {} },
+      { audio: { output: { voice: "cedar" } } }, { wake_policy: { type: "speech" } }, { acknowledgement_delay_ms: 0 },
+      { session: {} }, { transport: {} },
     ]) {
       const response = await h.request("/v1/live/sessions", { token, body: { ...live, ...extra } });
       expect(response.status).toBe(400);
       expect((await body(response)).error.code).toBe("field_not_allowed");
     }
-    for (const offer of [{}, { sdp: "" }, { sdp: 7 }]) {
-      const response = await h.request("/v1/live/sessions", { token, body: offer });
-      expect(response.status).toBe(400);
+    for (const request of [
+      {}, { sdp: "" }, { sdp: 7 }, { ...live, instructions: 7 }, { ...live, input: "hi" },
+      { ...live, input: Array(129).fill({ type: "message", role: "user", content: [] }) },
+      { ...live, input: [{ type: "message", role: "system", content: [] }] }, { ...live, input: [null] },
+      { ...live, voice: "robot" }, { ...live, voice: { id: "voice_custom" } },
+      { ...live, idle_timeout_s: 4 }, { ...live, idle_timeout_s: 61 }, { ...live, idle_timeout_s: 8.5 },
+      { ...live, vad_threshold: 1.5 }, { ...live, vad_threshold: "0.5" },
+    ]) {
+      const response = await h.request("/v1/live/sessions", { token, body: request });
+      expect(response.status, JSON.stringify(request).slice(0, 80)).toBe(400);
       expect((await body(response)).error.code).toBe("bad_request");
     }
-    const tooLarge = await h.request("/v1/live/sessions", { token, body: { sdp: "a".repeat(256 * 1024) } });
-    expect(tooLarge.status).toBe(413);
+    expect((await h.request("/v1/live/sessions", { token, body: { sdp: "a".repeat(64 * 1024 + 1) } })).status).toBe(413);
+    expect((await h.request("/v1/live/sessions", { token, body: { ...live, instructions: "a".repeat(256 * 1024) } })).status).toBe(413);
     expect(h.calls).toHaveLength(0);
     expect((await body(await h.admin("/admin/usage", "GET"))).globalCents).toBe(0);
   });
