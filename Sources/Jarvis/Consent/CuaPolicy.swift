@@ -27,17 +27,17 @@ import os
 ///      vector. Nothing calls them today; the table stands so the
 ///      contract is honest, not aspirational.
 ///   3. **The never list** (`neverReason`) refuses first: wipes, remote-access
-///      tools, gift cards, scam links and popup phone numbers. Typing
-///      into a password box refuses next. Then **the deny-list scan**
-///      runs twice, once per shape: the phrase
-///      corpus over element label/value + url-ish args, then the
-///      command-shaped corpus (`deniedInTypedPayload`) over every string
-///      arg — `type_text`'s payload included. Both refuse before the
-///      grant, so a standing "always allow" never rubber-stamps
-///      "empty trash" or a typed `rm -rf`. A phrase hit that names a
-///      `Consequence` passes only with `consequenceConfirmed:`, the
-///      caller's record of a clear spoken yes for that one control.
-///   4. **Everything else needs the standing grant, a scoped
+///      tools, gift cards, scam links and popup phone numbers, over
+///      element label/value + url-ish args. Typing into a password box
+///      refuses next, then the command-shaped scan
+///      (`deniedInTypedPayload`) over every string arg — `type_text`'s
+///      payload included. All refuse before the grant, so a standing
+///      "always allow" never rubber-stamps "empty trash" or a typed `rm -rf`.
+///   4. **A consequential press asks first** (`askFirst`): Send, Delete,
+///      Pay, Call, Sign out or Allow that the person's words didn't name
+///      (`spokenConsequences`) and that hasn't had its spoken yes
+///      (`consequenceConfirmed`).
+///   5. **Everything else needs the standing grant, a scoped
 ///      "Always for this app" grant (`scopedGrant:`), or a per-task
 ///      approval.** A request that is none of the above lands here too —
 ///      unknown tool names fail safe.
@@ -51,6 +51,10 @@ enum CuaPolicy {
         case allow
         case deny(String)
         case needsConfirm(String)
+        /// A consequential press the person's words didn't name: ask the
+        /// `Consequence` question for this one control, then decide again
+        /// with `consequenceConfirmed: true`.
+        case askFirst(Consequence)
     }
 
     /// Read-only by contract — they return state without a side effect.
@@ -74,46 +78,20 @@ enum CuaPolicy {
         "execute_script", "run_applescript", "shell_command",
     ]
 
-    /// Phrase-level denies: a model can always pick a *labelled* element
-    /// whose action is consequential (the tool is just "click"), so the
-    /// deny list lives in the visible vocabulary — the thing the user can
-    /// verify on the card. Matching is normalized-substring, so the bare
-    /// entries deliberately catch their inflections: "delete" also
-    /// refuses "Delete Draft"/"deleted", "send" catches "resend", and an
-    /// "Allow" button on a consent dialog denies like every other
-    /// privilege prompt — consequential effects require the user's hands.
-    /// More-specific phrases sit above the bare words so the reported
-    /// hit names the fuller intent ("send payment" over "send").
+    /// The never list: what no grant, spoken command or yes unlocks.
+    /// Wiping the Mac or its data, closing accounts, money moved where it
+    /// can't come back, and the tools and payment shapes tech-support
+    /// scams use. Matching is normalized-substring over the element label
+    /// and value, the URL, the menu path and the window or dialog title.
     ///
-    /// This list is the canonical copy — `DwellPolicy.deniedTokens`
-    /// (Gaze/DwellClick.swift) mirrors a broader word-level variant for
-    /// the always-on dwell lane. Keep them in sync when the protected
-    /// vocabulary changes.
+    /// Ordinary consequential controls (Send, Delete, Pay, Sign out,
+    /// Allow) are not here: the person's own words press them, and a
+    /// press Jarvis chose itself asks first (`Consequence`).
+    ///
+    /// This list is the canonical copy. `DwellPolicy.deniedTokens`
+    /// (Gaze/DwellClick.swift) carries it plus a broader word list, since
+    /// a dwell click has no words behind it. Keep them in sync.
     static let deniedPatterns: [String] = [
-        "empty trash", "move to trash", "erase all content", "erase disk",
-        "erase this mac", "delete permanently", "permanently delete",
-        "format disk", "factory reset", "reset all settings",
-        "transfer money", "wire transfer", "send payment",
-        "purchase now", "buy now", "place order", "place your order",
-        "confirm purchase", "pay now", "reply all", "delete account",
-        "close account", "remove device", "allow remote access",
-        "share my screen", "sign out", "log out", "turn off filevault",
-        "disable sip", "enter recovery",
-        "anydesk", "teamviewer", "screenconnect", "connectwise control", "quick assist",
-        "logmein", "gotoassist", "ultraviewer", "rustdesk", "request remote control",
-        "give control", "gift card", "bitcoin atm", "crypto atm", "western union",
-        "checkout", "submit",
-        "delete", "send", "reply", "allow", "erase", "format", "reset",
-        "rm -rf", "mkfs", ":(){",
-    ]
-
-    /// The part of the protected list no confirmation unlocks: wiping the
-    /// Mac or its data, account closure, money moved where it can't come
-    /// back, and the tools and payment shapes that tech-support scams use.
-    /// Everything else on the list is a `Consequence` that a clear spoken
-    /// yes for that one control can allow once. Every entry is also in
-    /// `deniedPatterns`, so lanes that can't ask still refuse it.
-    static let hardDeniedPatterns: [String] = [
         "empty trash", "erase all content", "erase disk", "erase this mac",
         "delete permanently", "permanently delete", "format disk", "factory reset",
         "reset all settings", "transfer money", "wire transfer", "delete account",
@@ -124,26 +102,13 @@ enum CuaPolicy {
         "crypto atm", "western union", "rm -rf", "mkfs", ":(){",
     ]
 
-    private static let normalizedHardDenied: [(match: String, display: String)] =
-        hardDeniedPatterns.compactMap { raw in
-            let match = normalize(raw)
-            return match.isEmpty ? nil : (match: match, display: raw)
-        }
-
-    /// The hard half of the deny scan: a hit here refuses even after the
-    /// person said yes.
-    static func hardDeniedPhrase(in text: String) -> String? {
-        let normalized = normalize(text.lowercased())
-        return normalizedHardDenied.first { normalized.contains($0.match) }?.display
-    }
-
     /// Why a dispatch is refused no matter who agreed, or nil: a never-list
     /// phrase, a link whose words name a different site than it opens, or
     /// a call to a number shown on a scare popup. `text` is what the
     /// control shows; `url` is where it goes, when the caller knows.
     static func neverReason(text: String, url: String? = nil) -> String? {
         let corpus = text + " " + (url ?? "")
-        if let hit = hardDeniedPhrase(in: corpus) {
+        if let hit = deniedPhrase(in: corpus) {
             return "Refused: '\(hit)' is never done for you, even with a yes"
         }
         if let link = ScamSignals.linkMismatch(text: text, url: url) {
@@ -156,6 +121,11 @@ enum CuaPolicy {
         }
         return nil
     }
+
+    /// Tools that press a control. A consequential press among them asks
+    /// first unless the person's words named it (`spokenConsequences`)
+    /// or they already said yes (`consequenceConfirmed`).
+    static let pressTools: Set<String> = ["click", "double_click", "browser_click", "invoke_menu"]
 
     /// Typing tools never touch a password box: Jarvis doesn't type,
     /// read or remember passwords, and says so instead.
@@ -223,7 +193,8 @@ enum CuaPolicy {
     /// first, so no grant rubber-stamps a protected phrase.
     static func decide(tool: String, args: [String: JSONValue],
                        elementText: String?, standingGrant: Bool,
-                       scopedGrant: Bool = false, consequenceConfirmed: Bool = false) -> Decision {
+                       scopedGrant: Bool = false, spokenConsequences: Set<Consequence> = [],
+                       consequenceConfirmed: Bool = false) -> Decision {
         if observationTools.contains(tool) { return .allow }
         if deniedTools.contains(tool) {
             return .deny("'\(tool)' changes driver or session state — it is never dispatched through the policy path")
@@ -238,9 +209,6 @@ enum CuaPolicy {
            DriveCandidates.isSecure(role: "", label: elementText) {
             return .deny("Refused: I never type passwords. Type it yourself; I don't read what goes in that box.")
         }
-        if let hit = deniedPhrase(in: corpus), !consequenceConfirmed {
-            return .deny("Refused: '\(hit)' is on the protected list — it requires the user's hands, not ours")
-        }
         // Typed payloads were the audit's worst hole: `type_text` +
         // `press_key: return` ran a shell line under the standing grant
         // with no scan at all. Every string arg (`text`, `value`, a key
@@ -254,6 +222,10 @@ enum CuaPolicy {
                     return .deny("Refused: the payload runs '\(hit)' — shell-shaped input is the user's own hands, not ours")
                 }
             }
+        }
+        if pressTools.contains(tool), let consequence = Consequence.of(control: elementText ?? ""),
+           !spokenConsequences.contains(consequence), !consequenceConfirmed {
+            return .askFirst(consequence)
         }
         if standingGrant || scopedGrant { return .allow }
         let target = elementText?

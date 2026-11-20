@@ -152,6 +152,11 @@ actor DriveLoop {
     /// lane) so a consent ask can offer "Always for <app>" and a yes
     /// lands as a (tool, bundle) scoped grant, never a blanket one.
     var consentAppName: String?
+    /// The consequences the person's own words named for the running task
+    /// ("send it", "delete that email"). Those presses go ahead with a
+    /// glow; any other consequential press asks first. Empty when the goal
+    /// is model-authored (`explicitConsent` off).
+    private(set) var spokenConsequences: Set<Consequence> = []
     var consentAppBundleID: String?
     let ask: AskFn?
     let granted: () -> Bool
@@ -611,6 +616,7 @@ actor DriveLoop {
         /// A per-task approval granted this run — one `ask` covers every
         /// later consent prompt, including the bind-phase launch gate.
         var confirmedTask = false
+        spokenConsequences = explicitConsent ? Consequence.named(in: task.goal) : []
         func step(_ s: String) { feed(s); history.append(s) }
 
         do {
@@ -1308,21 +1314,28 @@ actor DriveLoop {
     /// host-side AXPress) run the identical gate instead of a hand copy.
     func consentGate(tool: String, args: [String: JSONValue],
                      elementText: String?, denied: [String],
-                     confirmed: inout Bool) async throws {
+                     confirmed: inout Bool, pressFrame: CGRect? = nil) async throws {
         if let elementText,
            let hit = denied.first(where: { elementText.lowercased().contains($0.lowercased()) }) {
             feed("denied by task rule: \(hit)")
             throw Abort.denied("Refused: '\(hit)' is blocked for this task.")
         }
-        let consequenceYes = try await confirmConsequence(tool: tool, args: args,
-                                                          elementText: elementText, label: elementText)
-        switch CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
-                                standingGrant: granted() || confirmed || consequenceYes,
-                                scopedGrant: consentScopedGrant(for: tool),
-                                consequenceConfirmed: consequenceYes) {
+        var decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
+                                        standingGrant: granted() || confirmed,
+                                        scopedGrant: consentScopedGrant(for: tool),
+                                        spokenConsequences: spokenConsequences)
+        if case .askFirst(let consequence) = decision {
+            try await confirmConsequence(consequence, label: elementText)
+            decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
+                                        standingGrant: true, scopedGrant: consentScopedGrant(for: tool),
+                                        spokenConsequences: spokenConsequences, consequenceConfirmed: true)
+        }
+        switch decision {
         case .deny(let why):
             feed("denied: \(why)")
             throw Abort.denied(why)
+        case .askFirst:
+            throw Abort.denied("Refused: the press still needed a yes after one was given.")
         case .needsConfirm(let prompt):
             guard let ask else { throw Abort.missingGrant }
             // ONE ask carries every consent shape — the radial shows
@@ -1354,34 +1367,36 @@ actor DriveLoop {
         case .allow:
             break
         }
+        if let pressFrame, CuaPolicy.pressTools.contains(tool),
+           Consequence.of(control: elementText ?? "") != nil {
+            await glowPress(pressFrame, label: elementText ?? "")
+        }
     }
 
-    /// Ask-first for one consequential control (send, delete, pay, call,
-    /// account, permission): asks the `Consequence` question and returns
-    /// true only on a clear spoken yes within 30 s. The yes covers this
-    /// one dispatch; it never sets the task's `confirmed` flag. Returns
-    /// false when nothing consequential is in reach or nobody can be
-    /// asked, so the protected-list refusal stands. A dispatch that would
-    /// be refused anyway (never list, typed payload, password box) is
-    /// refused before the question, so nobody says yes for nothing.
-    private func confirmConsequence(tool: String, args: [String: JSONValue],
-                                    elementText: String?, label: String?) async throws -> Bool {
-        guard let ask,
-              let pending = ConsequenceConfirmation(
-                corpus: CuaPolicy.scanCorpus(args: args, elementText: elementText), label: label)
-        else { return false }
-        if case .deny(let why) = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
-                                                   standingGrant: true, consequenceConfirmed: true) {
-            feed("denied: \(why)")
-            throw Abort.denied(why)
+    /// Ask-first for a consequential press Jarvis chose itself (one the
+    /// person's words didn't name): one short `Consequence` question, and
+    /// only a clear yes within 30 s goes on. The yes covers this one press;
+    /// it never sets the task's `confirmed` flag. With nobody to ask, the
+    /// press is refused.
+    private func confirmConsequence(_ consequence: Consequence, label: String?) async throws {
+        guard let ask else {
+            feed("denied: \(consequence.rawValue) needs a yes and nobody can answer")
+            throw Abort.denied("Refused: pressing that needs your OK, and I can't ask right now.")
         }
+        let pending = ConsequenceConfirmation(consequence: consequence, label: label)
         let answer = await ask(.confirm(pending.question))
         guard pending.accepts(answer) else {
-            feed("not confirmed: \(pending.consequence.rawValue) \(pending.label)")
+            feed("not confirmed: \(consequence.rawValue)")
             throw Abort.declined
         }
-        feed("confirmed \(pending.consequence.rawValue): \(pending.label)")
-        return true
+        feed("confirmed \(consequence.rawValue)")
+    }
+
+    /// The glow on a consequential control as Jarvis presses it, so the
+    /// person sees what was pressed for them. Best effort: no overlay
+    /// (agent contexts, tests) means no glow, never a refusal.
+    func glowPress(_ frame: CGRect, label: String) async {
+        _ = await overlayDispatch?(.pressGlow, [(frame: frame, label: label)], nil)
     }
 
     /// The fast lane's consent gate — the (a) side of the two-class
@@ -1409,11 +1424,6 @@ actor DriveLoop {
                 feed("denied: \(why)")
                 throw Abort.denied(why)
             }
-            if let hit = CuaPolicy.deniedPhrase(in: corpus),
-               !(try await confirmConsequence(tool: tool, args: [:], elementText: corpus, label: nil)) {
-                feed("denied: \(hit)")
-                throw Abort.denied("Refused: '\(hit)' is on the protected list — it requires the user's hands, not ours")
-            }
             return
         }
         try await consentGate(tool: tool, args: [:], elementText: corpus,
@@ -1424,9 +1434,9 @@ actor DriveLoop {
     /// join the code deny list for this call only.
     private func dispatch(_ tool: String, _ args: [String: JSONValue],
                           elementText: String?, denied: [String],
-                          confirmed: inout Bool) async throws -> (effect: String, escalation: String?, confirmed: Bool) {
+                          confirmed: inout Bool, pressFrame: CGRect? = nil) async throws -> (effect: String, escalation: String?, confirmed: Bool) {
         try await consentGate(tool: tool, args: args, elementText: elementText,
-                              denied: denied, confirmed: &confirmed)
+                              denied: denied, confirmed: &confirmed, pressFrame: pressFrame)
         do {
             let result = try await call(tool, args)
             let effect = result["effect"]?.string ?? "unverifiable"
@@ -1856,19 +1866,21 @@ extension DriveLoop {
         var args = request.args
         args["pid"] = .number(Double(pid))
         args["window_id"] = .number(Double(windowID))
-        // A consequential control is asked about once, at dispatch, where
-        // `consentGate` hears the spoken words. The media-key post and the
-        // traffic-light press skip that gate, so they keep the refusal.
-        if ask != nil, !["media key", "window_control"].contains(request.tool),
-           ConsequenceConfirmation(corpus: CuaPolicy.scanCorpus(args: args, elementText: request.elementText),
-                                   label: request.elementText) != nil {
-            return .allow
-        }
         switch CuaPolicy.decide(tool: request.tool, args: args,
                                 elementText: request.elementText,
                                 standingGrant: granted() || box.confirmed,
-                                scopedGrant: consentScopedGrant(for: request.tool)) {
+                                scopedGrant: consentScopedGrant(for: request.tool),
+                                spokenConsequences: spokenConsequences) {
         case .allow:
+            return .allow
+        case .askFirst:
+            // A consequential press Jarvis chose: `consentGate` asks at
+            // dispatch, where it hears the spoken words, and the yes covers
+            // that one press. With nobody to ask, refuse here.
+            guard ask != nil else {
+                box.consentBlock = .permanent
+                return .deny(.consent("Pressing that needs your OK, and I can't ask right now."))
+            }
             return .allow
         case .deny(let why):
             feed("denied: \(why)")
@@ -2040,7 +2052,7 @@ extension DriveLoop {
             do {
                 var outcome = try await dispatch(request.tool, args,
                     elementText: request.elementText, denied: task.deny,
-                    confirmed: &box.confirmed)
+                    confirmed: &box.confirmed, pressFrame: element.flatMap(Self.nativeAXScreenRect))
                 if outcome.effect == "suspected_noop", let element {
                     outcome = try await escalateNoop(request.tool, args,
                         outcome: outcome, element: element,

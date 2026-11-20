@@ -1631,13 +1631,13 @@ final class FastLaneExecutorTests: XCTestCase {
     // MARK: - deny corpus on the fast lane
 
     /// The bound window's own words ride the deny scan: "file menu save
-    /// as" is a benign path, but on a window titled "Confirm purchase"
+    /// as" is a benign path, but on a window titled "Wire Transfer"
     /// the corpus refuses — grant or not.
     func testMenuOnDeniedWindowTitleRefuses() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Store", "com.example.store", pid: 42)])]
         driver.responses["list_windows"] = [windows([
-            windowRow(id: 7, pid: 42, app: "Store", title: "Confirm purchase",
+            windowRow(id: 7, pid: 42, app: "Store", title: "Wire Transfer",
                       x: 0, y: 0, w: 800, h: 600)])]
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
@@ -1650,19 +1650,19 @@ final class FastLaneExecutorTests: XCTestCase {
     }
 
     /// The field's identity is the deny corpus — typing into a field
-    /// labelled "Confirm purchase" refuses even though the payload is
+    /// labelled "Gift card number" refuses even though the payload is
     /// never scanned.
     func testTypeIntoDeniedFieldRefuses() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Store", "com.example.store", pid: 42)])]
         driver.responses["list_windows"] = [windows([
-            windowRow(id: 7, pid: 42, app: "Store", title: "Checkout",
+            windowRow(id: 7, pid: 42, app: "Store", title: "Redeem",
                       x: 0, y: 0, w: 800, h: 600)])]
         driver.responses["get_window_state"] = [.object([
             "elements": .array([
                 .object(["element_index": .number(1),
                          "role": .string("AXTextField"),
-                         "label": .string("Confirm purchase"),
+                         "label": .string("Gift card number"),
                          "enabled": .bool(true),
                          "element_token": .string("tok-1"),
                          "frame": .object(["x": .number(100), "y": .number(100),
@@ -1685,7 +1685,7 @@ final class FastLaneExecutorTests: XCTestCase {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Store", "com.example.store", pid: 42)])]
         driver.responses["list_windows"] = [windows([
-            windowRow(id: 7, pid: 42, app: "Store", title: "Confirm purchase",
+            windowRow(id: 7, pid: 42, app: "Store", title: "Wire Transfer",
                       x: 0, y: 0, w: 800, h: 600)])]
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
@@ -1700,13 +1700,13 @@ final class FastLaneExecutorTests: XCTestCase {
     }
 
     /// The deny scan reads the window under the point even on the raw
-    /// gaze fallback — a click at "Confirm purchase" refuses before any
+    /// gaze fallback — a click at "Wire Transfer" refuses before any
     /// pixel dispatch.
     func testGazeClickOnDeniedWindowRefuses() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([])]
         driver.responses["list_windows"] = [windows([
-            windowRow(id: 7, pid: 42, app: "Store", title: "Confirm purchase",
+            windowRow(id: 7, pid: 42, app: "Store", title: "Wire Transfer",
                       x: 0, y: 0, w: 800, h: 600)])]
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },

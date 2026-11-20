@@ -77,10 +77,10 @@ final class CuaPolicyTests: XCTestCase {
     func testDeniedPhraseMatchesNormalizedText() {
         XCTAssertEqual(CuaPolicy.deniedPhrase(in: "the Empty Trash menu item"),
                        "empty trash")
-        // Separators normalize — "Confirm-Purchase" hits a protected
+        // Separators normalize — "Erase-This-Mac" hits a protected
         // phrase whichever spelling the UI used.
-        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "Confirm-Purchase now?"))
-        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "https://x.example/place-order"))
+        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "Erase-This-Mac now?"))
+        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "https://x.example/wire-transfer"))
         XCTAssertNil(CuaPolicy.deniedPhrase(in: "save the draft"))
         XCTAssertNil(CuaPolicy.deniedPhrase(in: ""))
     }

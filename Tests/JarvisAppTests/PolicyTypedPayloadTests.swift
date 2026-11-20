@@ -114,7 +114,7 @@ final class PolicyTypedPayloadTests: XCTestCase {
                                 elementText: nil, standingGrant: false) {
         case .deny: break
         case .allow: XCTFail("denied payload allowed")
-        case .needsConfirm: XCTFail("denied payload must not degrade to a confirm")
+        case .needsConfirm, .askFirst: XCTFail("denied payload must not degrade to a confirm")
         }
     }
 

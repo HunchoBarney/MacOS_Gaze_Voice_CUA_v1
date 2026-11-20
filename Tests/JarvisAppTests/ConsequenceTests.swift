@@ -2,14 +2,16 @@ import XCTest
 @testable import Jarvis
 import JarvisCore
 
-/// Contract for piece 4 of JARA-36: consequential controls ask first,
-/// the never list refuses outright, passwords are never typed, and scam
-/// links and popup phone numbers are refused on sight.
+/// Contract for piece 4 of JARA-36 under the owner's rule: the person's
+/// own words press consequential controls straight away with a glow; a
+/// consequential press Jarvis chose itself asks one question; the never
+/// list (scams, wipes, passwords) refuses either way.
 final class ConsequenceTests: XCTestCase {
 
-    private func makeLoop(ask: DriveLoop.AskFn? = nil, grant: Bool = false) -> DriveLoop {
+    private func makeLoop(ask: DriveLoop.AskFn? = nil, grant: Bool = false,
+                          overlay: ((FastAction.OverlayVerb, [(frame: CGRect, label: String)], CGPoint?) async -> DriveResult?)? = nil) -> DriveLoop {
         DriveLoop(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
-                  ask: ask, granted: { grant })
+                  ask: ask, granted: { grant }, overlayDispatch: overlay)
     }
 
     private func expectAbort(_ expected: String, _ body: () async throws -> Void,
@@ -31,6 +33,12 @@ final class ConsequenceTests: XCTestCase {
         }
     }
 
+    private func decide(_ label: String, tool: String = "click", grant: Bool = true,
+                        spoken: Set<Consequence> = [], confirmed: Bool = false) -> CuaPolicy.Decision {
+        CuaPolicy.decide(tool: tool, args: [:], elementText: label, standingGrant: grant,
+                         spokenConsequences: spoken, consequenceConfirmed: confirmed)
+    }
+
     // MARK: - Words
 
     func testClassifyNamesTheConsequence() {
@@ -45,6 +53,18 @@ final class ConsequenceTests: XCTestCase {
         XCTAssertEqual(Consequence.classify("FaceTime"), .call)
         XCTAssertNil(Consequence.classify("Save"))
         XCTAssertNil(Consequence.classify("Sender"))
+    }
+
+    func testControlLabelIgnoresTheLinkAddress() {
+        XCTAssertNil(Consequence.of(control: "aria-label=Weather href=https://x.example/share?id=1"))
+        XCTAssertEqual(Consequence.of(control: "aria-label=Share href=https://x.example/a"), .send)
+    }
+
+    func testTheirWordsNameWhatTheyCover() {
+        XCTAssertEqual(Consequence.named(in: "click Send"), [.send])
+        XCTAssertEqual(Consequence.named(in: "reply to Mom saying I'm on my way and send it"), [.send])
+        XCTAssertEqual(Consequence.named(in: "delete that email"), [.delete])
+        XCTAssertEqual(Consequence.named(in: "open my email"), [])
     }
 
     func testOnlyAClearYesCounts() {
@@ -70,57 +90,57 @@ final class ConsequenceTests: XCTestCase {
         XCTAssertFalse(DriveLoop.affirmative("yes, don't send it"))
     }
 
-    func testConfirmationExpiresAfterThirtySeconds() throws {
+    func testConfirmationExpiresAfterThirtySeconds() {
         let start = Date()
-        let pending = try XCTUnwrap(ConsequenceConfirmation(corpus: "send", label: "Send", now: start))
-        XCTAssertEqual(pending.consequence, .send)
+        let pending = ConsequenceConfirmation(consequence: .send, label: "Send", now: start)
         XCTAssertTrue(pending.question.contains("\u{201C}Send\u{201D}"))
         XCTAssertTrue(pending.accepts("yes", now: start.addingTimeInterval(29)))
         XCTAssertFalse(pending.accepts("yes", now: start.addingTimeInterval(31)))
         XCTAssertFalse(pending.accepts(nil, now: start))
     }
 
-    func testNoConfirmationForNeverListOrPlainControls() {
-        XCTAssertNil(ConsequenceConfirmation(corpus: "empty trash", label: "Empty Trash"))
-        XCTAssertNil(ConsequenceConfirmation(corpus: "buy a gift card", label: "Buy"))
-        XCTAssertNil(ConsequenceConfirmation(corpus: "save", label: "Save"))
-    }
-
     // MARK: - Policy
 
-    func testNeverListIsInsideTheProtectedList() {
-        for phrase in CuaPolicy.hardDeniedPatterns {
-            XCTAssertTrue(CuaPolicy.deniedPatterns.contains(phrase), phrase)
+    /// One policy: Send, Reply, Delete and Allow are no longer on the flat
+    /// refusal list. What's left there is the never list.
+    func testOrdinaryConsequentialWordsAreNotRefused() {
+        for label in ["Send", "Reply", "Reply All", "Delete", "Allow", "Sign Out", "Pay Now", "Submit"] {
+            XCTAssertNil(CuaPolicy.deniedPhrase(in: label), label)
+            XCTAssertNil(CuaPolicy.neverReason(text: label), label)
         }
     }
 
-    func testDwellWallCarriesTheScamTools() {
-        for phrase in ["anydesk", "teamviewer", "quick assist", "gift card", "western union"] {
-            XCTAssertTrue(DwellPolicy.deniedTokens.contains(phrase), phrase)
+    func testTheirWordsPressWithoutAQuestion() {
+        XCTAssertEqual(decide("Send", spoken: [.send]), .allow)
+        XCTAssertEqual(decide("Move to Trash", spoken: [.delete]), .allow)
+        guard case .needsConfirm = decide("Send", grant: false, spoken: [.send]) else {
+            return XCTFail("their words don't replace the computer-use grant on the model lane")
         }
+    }
+
+    func testAPressJarvisChoseAsksFirst() {
+        XCTAssertEqual(decide("Send"), .askFirst(.send))
+        XCTAssertEqual(decide("Delete", spoken: [.send]), .askFirst(.delete),
+                       "\"send it\" doesn't cover a Delete")
+        XCTAssertEqual(decide("Send", confirmed: true), .allow)
+        XCTAssertEqual(decide("Save"), .allow)
+        XCTAssertEqual(CuaPolicy.decide(tool: "type_text", args: ["text": .string("hi")], elementText: "Reply",
+                                        standingGrant: true), .allow, "typing isn't pressing")
     }
 
     func testNeverListRefusesEvenWithAYes() {
         for label in ["Empty Trash", "Download AnyDesk", "Open TeamViewer", "Buy Gift Card",
                       "Erase This Mac", "Wire Transfer"] {
-            guard case .deny(let why) = CuaPolicy.decide(tool: "click", args: [:], elementText: label,
-                                                         standingGrant: true, consequenceConfirmed: true) else {
+            guard case .deny(let why) = decide(label, spoken: Set(Consequence.allCases), confirmed: true) else {
                 return XCTFail(label)
             }
             XCTAssertTrue(why.contains("never"), why)
         }
     }
 
-    func testConsequenceYesUnlocksOnlyThePhraseScan() {
-        guard case .deny = CuaPolicy.decide(tool: "click", args: [:], elementText: "Send",
-                                            standingGrant: true) else {
-            return XCTFail("an unconfirmed send stays refused")
-        }
-        XCTAssertEqual(CuaPolicy.decide(tool: "click", args: [:], elementText: "Send",
-                                        standingGrant: true, consequenceConfirmed: true), .allow)
-        guard case .needsConfirm = CuaPolicy.decide(tool: "click", args: [:], elementText: "Send",
-                                                    standingGrant: false, consequenceConfirmed: true) else {
-            return XCTFail("the consequence yes is passed as the grant by the caller, not implied")
+    func testDwellWallCarriesTheNeverList() {
+        for phrase in CuaPolicy.deniedPatterns {
+            XCTAssertTrue(DwellPolicy.deniedTokens.contains(phrase), phrase)
         }
     }
 
@@ -147,9 +167,7 @@ final class ConsequenceTests: XCTestCase {
         XCTAssertNil(ScamSignals.linkMismatch(text: "google.com", url: "https://accounts.google.com"))
         XCTAssertNil(ScamSignals.linkMismatch(text: "Download report.pdf", url: "https://files.example.com/report.pdf"))
         XCTAssertNil(ScamSignals.linkMismatch(text: "Click here", url: "https://anything.example"))
-        guard case .deny(let why) = CuaPolicy.decide(tool: "browser_click", args: [:],
-                                                     elementText: "amazon.com href=https://amaz0n-refunds.top",
-                                                     standingGrant: true) else {
+        guard case .deny(let why) = decide("amazon.com href=https://amaz0n-refunds.top", tool: "browser_click") else {
             return XCTFail("mismatched link must refuse")
         }
         XCTAssertTrue(why.contains("amazon.com"), why)
@@ -171,23 +189,22 @@ final class ConsequenceTests: XCTestCase {
                      "closing the popup stays allowed")
     }
 
-    // MARK: - The loop asks once, for one control
+    // MARK: - The loop
 
-    func testConsentGateAsksTheConsequenceQuestionForEachSend() async throws {
+    func testAPressJarvisChoseAsksEveryTime() async throws {
         var asked: [DriveLoop.Ask] = []
         let loop = makeLoop(ask: { ask in asked.append(ask); return "yes, send it" })
         var confirmed = false
         try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
                                    denied: [], confirmed: &confirmed)
-        XCTAssertFalse(confirmed, "the yes covers one dispatch, not the task")
+        XCTAssertFalse(confirmed, "the yes covers one press, not the task")
         try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
                                    denied: [], confirmed: &confirmed)
-        XCTAssertEqual(asked.count, 2)
-        guard case .confirm(let question) = asked.first else { return XCTFail("\(asked)") }
-        XCTAssertEqual(question, Consequence.send.question(target: "Send"))
+        XCTAssertEqual(asked, [.confirm(Consequence.send.question(target: "Send")),
+                               .confirm(Consequence.send.question(target: "Send"))])
     }
 
-    func testConsentGateDeclinesAHedgedAnswer() async {
+    func testAHedgedAnswerDeclines() async {
         let loop = makeLoop(ask: { _ in "yes, but not yet" }, grant: true)
         var confirmed = false
         await expectAbort("declined") {
@@ -196,7 +213,7 @@ final class ConsequenceTests: XCTestCase {
         }
     }
 
-    func testConsentGateWithoutAskKeepsTheRefusal() async {
+    func testNobodyToAskRefuses() async {
         let loop = makeLoop(ask: nil, grant: true)
         var confirmed = false
         await expectAbort("denied") {
@@ -214,25 +231,36 @@ final class ConsequenceTests: XCTestCase {
                                        denied: [], confirmed: &confirmed)
         }
         await expectAbort("denied") {
-            try await loop.consentGate(tool: "type_text", args: ["text": .string("rm -rf ~")],
+            try await loop.consentGate(tool: "click", args: ["text": .string("rm -rf ~")],
                                        elementText: "Reply", denied: [], confirmed: &confirmed)
         }
         XCTAssertEqual(asked, 0)
     }
 
-    func testSpokenCommandAsksBeforeSending() async throws {
-        var asked: [DriveLoop.Ask] = []
-        let loop = makeLoop(ask: { ask in asked.append(ask); return "yes" })
+    func testTheButtonGlowsAsItIsPressed() async throws {
+        let glows = LockedBox<[CGRect]>([])
+        let loop = makeLoop(ask: { _ in "yes" }, grant: true, overlay: { verb, targets, _ in
+            if verb == .pressGlow { glows.set(glows.value + targets.map(\.frame)) }
+            return DriveResult(status: .done)
+        })
+        var confirmed = false
+        let frame = CGRect(x: 40, y: 60, width: 80, height: 28)
+        try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
+                                   denied: [], confirmed: &confirmed, pressFrame: frame)
+        try await loop.consentGate(tool: "click", args: [:], elementText: "Save",
+                                   denied: [], confirmed: &confirmed, pressFrame: frame)
+        XCTAssertEqual(glows.value, [frame], "only the consequential press glows")
+    }
+
+    func testSpokenCommandPressesWithoutAsking() async throws {
+        var asked = 0
+        let loop = makeLoop(ask: { _ in asked += 1; return "no" })
         var confirmed = false
         try await loop.gateExplicit("click", corpus: "Send Mail", denied: [], confirmed: &confirmed)
-        XCTAssertEqual(asked, [.confirm(Consequence.send.question(target: "send"))])
-
-        let refusing = makeLoop(ask: { _ in "not yet" })
-        await expectAbort("declined") {
-            try await refusing.gateExplicit("click", corpus: "Send Mail", denied: [], confirmed: &confirmed)
-        }
+        try await loop.gateExplicit("click", corpus: "Delete Inbox", denied: [], confirmed: &confirmed)
+        XCTAssertEqual(asked, 0)
         await expectAbort("denied") {
-            try await refusing.gateExplicit("click", corpus: "Install AnyDesk", denied: [], confirmed: &confirmed)
+            try await loop.gateExplicit("click", corpus: "Install AnyDesk", denied: [], confirmed: &confirmed)
         }
     }
 }

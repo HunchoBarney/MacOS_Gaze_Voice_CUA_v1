@@ -1404,7 +1404,9 @@ final class JevVisionTests: XCTestCase {
     func testVisualPurchaseCannotLoseTheCanonicalProtectedActionMarker() async throws {
         let decision = try await visualDecision(VisualModel(.purchase), visualObservation())
         guard case .act(let request) = decision else { return XCTFail("\(decision)") }
-        XCTAssertEqual(CuaPolicy.deniedPhrase(in: request.elementText ?? ""), "purchase now")
+        XCTAssertEqual(Consequence.of(control: request.elementText ?? ""), .pay)
+        XCTAssertEqual(CuaPolicy.decide(tool: "click", args: [:], elementText: request.elementText,
+                                        standingGrant: true), .askFirst(.pay))
     }
 
     func testEditableVoteCannotOverrideContradictoryControlIdentity() async throws {

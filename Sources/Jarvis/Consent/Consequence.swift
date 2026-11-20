@@ -1,16 +1,17 @@
 import Foundation
 
-/// Consequential actions: things a person must agree to out loud before
-/// Jarvis does them, because they can't be taken back or they reach other
-/// people, money or accounts. `CuaPolicy.deniedPatterns` splits in two:
+/// Consequential controls: presses that reach other people, money or
+/// accounts, or can't easily be taken back. The owner's rule:
 ///
-/// - **Never** (`CuaPolicy.neverReason`): erasing the Mac, emptying the
-///   Trash, remote-access tools, gift cards, wire transfers, closing
-///   accounts, scam links and numbers from warning popups. No answer
-///   unlocks them.
-/// - **Ask first** (this type): sending, deleting, paying, calling,
-///   signing out, granting a permission. A clear spoken yes, within 30
-///   seconds, allows that one dispatch and nothing after it.
+/// - **The person's words cover the press.** "click Send", "send it",
+///   "reply to Mom saying I'm on my way and send it", "delete that email":
+///   Jarvis presses straight away and the button glows as it does.
+/// - **Jarvis chose the press itself** (a step it picked mid-task that the
+///   words didn't name): it asks one short question first, and only a
+///   clear yes within 30 seconds presses that one control.
+/// - **The never list** (`CuaPolicy.neverReason`) refuses either way:
+///   wiping the Mac, remote-access tools, gift cards, wire transfers, scam
+///   links and numbers from warning popups.
 enum Consequence: String, CaseIterable, Sendable {
     case pay, account, send, delete, call, permission
 
@@ -23,6 +24,22 @@ enum Consequence: String, CaseIterable, Sendable {
         (.call, ["facetime", "call", "start video", "join call"]),
         (.permission, ["allow", "install", "open anyway", "grant"]),
     ]
+
+    /// The consequence of pressing a control with this label, or nil. A
+    /// browser ref's `href=` is where the link goes, not what it says, so
+    /// it's left out.
+    static func of(control label: String) -> Consequence? {
+        classify(label.replacingOccurrences(of: #"(?i)\bhref=\S+"#, with: " ", options: .regularExpression))
+    }
+
+    /// Every consequence the person's own words name: "reply to Mom and
+    /// send it" covers `.send`, "delete that email" covers `.delete`.
+    static func named(in words: String) -> Set<Consequence> {
+        let text = " " + CuaPolicy.normalize(words.lowercased()) + " "
+        return Set(phrases.compactMap { consequence, list in
+            list.contains { text.contains(" " + CuaPolicy.normalize($0) + " ") } ? consequence : nil
+        })
+    }
 
     /// The first consequence the text names, or nil.
     static func classify(_ text: String) -> Consequence? {
@@ -77,25 +94,18 @@ enum Consequence: String, CaseIterable, Sendable {
     }
 }
 
-/// One ask-first question for one dispatch. It exists only when the
-/// dispatch's text names a consequence and nothing on the never list.
+/// One ask-first question for one press Jarvis chose itself.
 struct ConsequenceConfirmation: Sendable, Equatable {
     static let lifetime: TimeInterval = 30
 
     let consequence: Consequence
-    let label: String
     let question: String
     let expiresAt: Date
 
-    init?(corpus: String, label: String?, now: Date = Date()) {
-        guard CuaPolicy.neverReason(text: corpus) == nil,
-              let hit = CuaPolicy.deniedPhrase(in: corpus),
-              let consequence = Consequence.classify(hit) ?? Consequence.classify(corpus)
-        else { return nil }
+    init(consequence: Consequence, label: String?, now: Date = Date()) {
         let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.consequence = consequence
-        self.label = trimmed.isEmpty ? hit : String(trimmed.prefix(60))
-        self.question = consequence.question(target: self.label)
+        self.question = consequence.question(target: trimmed.isEmpty ? consequence.rawValue : String(trimmed.prefix(60)))
         self.expiresAt = now.addingTimeInterval(Self.lifetime)
     }
 
