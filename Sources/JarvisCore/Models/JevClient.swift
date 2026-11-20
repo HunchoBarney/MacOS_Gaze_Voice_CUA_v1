@@ -18,6 +18,8 @@ public enum JevError: Error, LocalizedError {
 }
 
 public final class JevClient: Sendable {
+    public static let systemOneURL = URL(string: "https://api.typesafe.ai/v1/systemone")!
+
     public let apiKey: String
     public let baseURL: URL
     public let model: String
@@ -25,7 +27,7 @@ public final class JevClient: Sendable {
 
     public init(
         apiKey: String,
-        baseURL: URL = URL(string: "https://api.typesafe.ai/v1/systemone")!,
+        baseURL: URL = JevClient.systemOneURL,
         model: String = "jev-latest",
         session: URLSession = .shared
     ) {

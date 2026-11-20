@@ -359,7 +359,9 @@ final class RealtimeVoiceClient {
 
     /// Connect and configure. Resolves once the server confirms the session
     /// update — the socket is then warm for immediate audio streaming.
-    func connect(apiKey: String, model: String = "gpt-realtime-2.1",
+    static let defaultModel = "gpt-realtime-2.1"
+
+    func connect(apiKey: String, model: String = RealtimeVoiceClient.defaultModel,
                  voice: String = "marin", inputMode: InputMode = .conversation) async throws {
         teardown()
         connectionID = UUID()

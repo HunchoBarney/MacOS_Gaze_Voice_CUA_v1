@@ -619,11 +619,11 @@ final class VoiceController: ObservableObject {
         self.speaker = speaker
         self.authorize = authorize ?? { await RealtimeVoiceLane.requestAuthorization() }
         // `speech` must exist before self can appear in closures below.
-        self.speech = speech ?? RealtimeVoiceLane(apiKey: { [weak config] in config?.openAIAPIKey ?? "" })
+        self.speech = speech ?? RealtimeVoiceLane(credential: { [weak config] in try await config?.realtimeCredential() })
         // One final-only admission owner routes local actions or one
         // remote miss into the existing execution spine.
         self.cua = cuaRuntime ?? VoiceTaskCoordinator(config: config,
-            jevAPIKey: { [weak config] in config?.apiKey ?? "" })
+            jevRoute: { [weak config] in try await config?.jevRoute() })
         self.timings = timings
         self.frontmost = frontmost ?? { NSWorkspace.shared.frontmostApplication?.localizedName }
         self.focusedWindow = focusedWindow ?? {
@@ -745,9 +745,9 @@ final class VoiceController: ObservableObject {
                 guard let self, self.config.semanticAppSuggestions else {
                     throw CancellationError()
                 }
-                let key = self.config.apiKey
-                guard !key.isEmpty else { throw VoiceSemanticRouter.Failure.unavailable }
-                return try await VoiceSemanticRouter.live(apiKey: key).interpret(admission, context: context)
+                guard let route = try await self.config.jevRoute() else { throw VoiceSemanticRouter.Failure.unavailable }
+                return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
+                    .interpret(admission, context: context)
             }
             lane.semanticConfirmationHandler = { [weak self] proposal in
                 guard let self, self.config.semanticAppSuggestions else { return false }
@@ -861,10 +861,10 @@ final class VoiceController: ObservableObject {
         }
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
         lane.conversation.interpret = { [weak self] text, context, memory in
-            guard let self, !self.config.apiKey.isEmpty else {
+            guard let self, let route = try await self.config.jevRoute() else {
                 throw VoiceError(OutcomeWording.missingUnderstandingKey)
             }
-            return try await VoiceSemanticRouter.live(apiKey: self.config.apiKey)
+            return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
                 .interpretConversation(text, context: context, memory: memory)
         }
         lane.conversation.beforeAction = { [weak self] in
