@@ -2,6 +2,15 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — A fifth end-to-end flow: "stop" mid-scroll
+
+- `stop-scroll` says "Hey Jarvis, scroll down", "keep scrolling", then "stop"
+  while the scroll repeats, and checks that the fixture list stops and stays
+  put. The task is the ongoing scroll because its three commands are decided
+  on the Mac with no model call, so the flow is deterministic apart from
+  hearing the lines. A stop in the middle of a model-planned task is not
+  covered: when the stop lands would depend on the model's pace.
+
 ## 2026-11-20 — End-to-end flows run on e2e's macOS engine
 
 - Four flows on a signed build (`e2e/`, `make e2e`): the first run, "show
