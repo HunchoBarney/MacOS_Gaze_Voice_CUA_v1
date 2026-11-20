@@ -59,6 +59,9 @@ enum VoiceAdmissionPolicy {
             }
             if !stripped { break }
         }
+        if let canonical = CommandGrammar.canonical(command, isApp: {
+            !namedCandidates($0, context: context).isEmpty
+        }) { return canonical }
         if let parsed = FastAction.parse(command), !namesApp(parsed.action, context: context) { return command }
         if let parsed = FastAction.parseOpen(command),
            !namedCandidates(parsed.query.components(separatedBy: " and ")[0], context: context).isEmpty {
@@ -310,12 +313,8 @@ enum VoiceAdmissionPolicy {
             return remote("question", context: context)
         }
         if t.split(separator: " ").count == 1 { return blocked(.clarify, "unclear_request") }
-        if case .query = IntentRouter.classify(text).verb {
-            if ["screen", "this page", "this window", "this button"].contains(where: { t.contains($0) }) {
-                return remote("screen_question", context: context)
-            }
-            return remote("question", context: context)
-        }
+        if CommandGrammar.asksAboutScreen(text) { return remote("screen_question", context: context) }
+        if case .query = IntentRouter.classify(text).verb { return remote("question", context: context) }
         return remote("remote", context: context)
     }
 

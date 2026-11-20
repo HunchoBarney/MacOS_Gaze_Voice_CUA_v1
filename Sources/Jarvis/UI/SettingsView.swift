@@ -115,7 +115,7 @@ struct SettingsView: View {
             eyeTracking.id(SettingsNavigation.Anchor.eyeTracking.rawValue)
             permissions.id(SettingsNavigation.Anchor.permissions.rawValue)
             general
-            if !config.hostedCredentialsConfigured {
+            if config.showsKeyFields {
                 advanced.id(SettingsNavigation.Anchor.advanced.rawValue)
             }
         }
@@ -332,11 +332,14 @@ struct SettingsView: View {
 
     // MARK: - Advanced
 
-    /// Keys typed on this Mac — only until Jarvis's own sign-in exists.
+    /// Keys typed on this Mac: required in a build without Jarvis's
+    /// credential service, a developer override in one with it.
     private var advanced: some View {
         DisclosureGroup("Advanced", isExpanded: $advancedOpen) {
             VStack(alignment: .leading, spacing: 12) {
-                Note("Until Jarvis connects for you, it needs your own keys: OpenAI to hear and answer you, TypeSafe to understand requests. They stay in your Mac's Keychain.")
+                Note(config.hostedCredentialsConfigured
+                    ? "Jarvis connects for you. Keys typed here replace that on this Mac, for development. Remove them to go back."
+                    : "This build of Jarvis needs your own keys: OpenAI to hear and answer you, TypeSafe to understand requests. They stay in your Mac's Keychain.")
                 keyField("OpenAI key", placeholder: "sk-…", draft: $openAIKeyDraft, saved: openAIKeySaved) {
                     openAIKeySaved = config.saveOpenAIAPIKey(openAIKeyDraft)
                 }

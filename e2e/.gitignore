@@ -1,0 +1,6 @@
+node_modules/
+vendor/
+.e2e/
+# The engine is a local build until it is released, so its tarball's hash
+# changes per build and a lockfile can't pin it.
+pnpm-lock.yaml

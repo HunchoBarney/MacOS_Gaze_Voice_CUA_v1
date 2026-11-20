@@ -26,11 +26,11 @@ final class TrackerHostTests: XCTestCase {
     /// running tracker.
     private func skipIfTrackerServing() async throws {
         var request = URLRequest(
-            url: URL(string: "http://127.0.0.1:\(TrackerHost.port)/health")!)
+            url: URL(string: "http://127.0.0.1:\(TrackerHost.apiPort)/health")!)
         request.timeoutInterval = 0.5
         let live = (try? await URLSession.shared.data(for: request))
             .flatMap { _, r in (r as? HTTPURLResponse)?.statusCode } == 200
-        try XCTSkipIf(live, "a real tracker is serving on :\(TrackerHost.port) — kill-path tests would quit it")
+        try XCTSkipIf(live, "a real tracker is serving on :\(TrackerHost.apiPort) — kill-path tests would quit it")
     }
 
     private func tempTrackerDir() throws -> URL {
