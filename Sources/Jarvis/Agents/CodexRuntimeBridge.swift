@@ -201,9 +201,6 @@ public actor CodexRuntimeBridge {
         sessions.filter { !$0.value.activeTurnIDs.isEmpty }.keys.sorted()
     }
 
-    /// Thread the agent is currently bound to, if a session is live.
-    public func activeThread(slug: String) -> String? { sessions[slug]?.threadID }
-
     /// Escape hatch: the live protocol client for a running agent session.
     public func client(slug: String) -> CodexProtocolClient? { sessions[slug]?.client }
 

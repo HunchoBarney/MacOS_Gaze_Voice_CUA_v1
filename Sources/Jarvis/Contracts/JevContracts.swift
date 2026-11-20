@@ -273,14 +273,6 @@ public struct AgentCursor: Sendable, Equatable {
     }
 }
 
-// MARK: jev-use MCP tools (agent-facing surface)
-
-/// Tool names the in-app jev-use MCP server exposes to agents.
-public enum JevUseTools {
-    public static let driveUntil = "drive_until"
-    public static let suggestAction = "suggest_action"
-}
-
 // MARK: Speech output + dictation seams
 
 /// TTS seam — every spoken surface goes through this.

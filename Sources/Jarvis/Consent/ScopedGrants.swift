@@ -58,13 +58,6 @@ extension CuaPolicy {
         writePolicyFile(standingGrant: state.standingGrant, scopedGrants: kept)
     }
 
-    /// Drop every scoped grant; the standing grant is untouched.
-    static func revokeAllAlways() {
-        let state = readPolicyState()
-        guard !state.scopedGrants.isEmpty else { return }
-        writePolicyFile(standingGrant: state.standingGrant, scopedGrants: [])
-    }
-
     /// Every persisted scope pair — for a settings surface to list.
     static func scopedGrants() -> [ScopedGrant] {
         readPolicyState().scopedGrants

@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 import JarvisCore
 
 /// Observed identities, not a vocabulary supplied with expected ASR answers.
@@ -385,15 +384,11 @@ enum VoiceAdmissionPolicy {
 /// This owner is used by typed and recorded turns and, at integration, the microphone lane.
 @MainActor
 final class LocalSpeechSession {
-    private static let finalLog = Logger(subsystem: "com.karanvirkang.jarvis.voice", category: "local-final")
     private(set) var gate = VoiceTurnGate()
     var context = VoiceAdmissionContext()
     private var capturedContext = VoiceAdmissionContext()
-    private let provider: (any LocalTranscriptProvider)?
-    private var drainedFrames = 0
     private var remoteFrames: [Data] = []
     private var remoteBytes = 0
-    private var exportedRemote = false
     private(set) var finalizedAt: TimeInterval?
     var boundContext: VoiceAdmissionContext { capturedContext }
     var execute: (VoiceAdmission) async -> Void
@@ -401,9 +396,8 @@ final class LocalSpeechSession {
     var onPartial: ((UUID, String) -> Void)?
     var onDiagnostic: (@Sendable (VoiceSpeechDiagnostic) -> Void)?
 
-    init(provider: (any LocalTranscriptProvider)? = nil,
-         execute: @escaping (VoiceAdmission) async -> Void) {
-        self.provider = provider; self.execute = execute
+    init(execute: @escaping (VoiceAdmission) async -> Void) {
+        self.execute = execute
     }
 
     @discardableResult
@@ -411,7 +405,7 @@ final class LocalSpeechSession {
                realtimeConnection: UUID? = nil) -> VoiceTurnToken {
         capturedContext = context
         finalizedAt = nil
-        drainedFrames = 0; remoteFrames = []; remoteBytes = 0; exportedRemote = false
+        remoteFrames = []; remoteBytes = 0
         return gate.begin(id: id, mode: mode, ready: ready, now: now, realtimeConnection: realtimeConnection)
     }
 
@@ -458,155 +452,13 @@ final class LocalSpeechSession {
     func cancel(_ turn: VoiceTurnToken) { gate.cancel(turn) }
     func fail(_ turn: VoiceTurnToken, reason: String) { gate.fail(turn, reason: reason) }
 
-    var readyForCapture: Bool { provider?.readyForTurn ?? false }
-    var preparedForCapture: Bool { provider?.preparedForCapture ?? false }
-
-    func recordedSession(context: VoiceAdmissionContext) -> LocalSpeechSession {
-        let session = LocalSpeechSession(provider: provider) { _ in }
-        session.context = context
-        session.onDiagnostic = onDiagnostic
-        return session
-    }
-
     func consumeAdmission(_ turn: VoiceTurnToken, resolvingClarification: Bool = false) -> VoiceAdmission? {
         gate.consume(turn, resolvingClarification: resolvingClarification)
-    }
-
-    func prewarm() async throws {
-        guard let provider else { throw LocalSpeechError.unavailable }
-        try await withVoiceDeadline(until: ProcessInfo.processInfo.systemUptime + 180) {
-            try await provider.prepare()
-        }
-    }
-
-    func beginCapture(id: UUID, mode: VoiceCaptureMode, now: TimeInterval,
-                      previews: Bool = true, readyDeadline: TimeInterval? = nil) async throws -> VoiceTurnToken {
-        let old = gate.token
-        let turn = begin(id: id, mode: mode, ready: true, now: now)
-        guard let provider, mode != .microphoneTest else {
-            gate.fail(turn, reason: "provider_unavailable"); throw LocalSpeechError.unavailable
-        }
-        provider.evidenceSink?.set(onDiagnostic)
-        if let old { await provider.cancelHold(old) }
-        // A short finishing gap can ride the mic's existing pre-roll; a cold
-        // provider never accepts speech while waiting for its models.
-        let waitEnd = readyDeadline ?? (ProcessInfo.processInfo.systemUptime + 0.25)
-        while !provider.readyForTurn, ProcessInfo.processInfo.systemUptime < waitEnd {
-            try Task.checkCancellation()
-            try await Task.sleep(nanoseconds: 10_000_000)
-            guard gate.isCurrent(turn) else { throw LocalSpeechError.stale }
-        }
-        guard provider.readyForTurn, gate.isCurrent(turn) else {
-            gate.fail(turn, reason: "provider_unavailable"); throw LocalSpeechError.unavailable
-        }
-        do {
-            if previews {
-                try await provider.beginHold(turn) { [weak self] token, text in
-                    Task { @MainActor [weak self] in self?.partial(text, turn: token) }
-                }
-            } else {
-                try await provider.beginRecordedUtterance(turn)
-            }
-        } catch {
-            gate.fail(turn, reason: "provider_unavailable")
-            throw error
-        }
-        guard gate.isCurrent(turn), !Task.isCancelled else {
-            await provider.cancelHold(turn); throw LocalSpeechError.stale
-        }
-        return turn
-    }
-
-    func consume(_ frame: VoicePCMFrame, sequence: Int, turn: VoiceTurnToken,
-                 retainRemote: Bool = true) async throws {
-        guard gate.isCurrent(turn), let provider else { throw LocalSpeechError.stale }
-        guard gate.acceptFrame(turn, sequence: sequence) else { throw LocalSpeechError.captureLoss }
-        do {
-            if retainRemote {
-                guard !frame.isFloat, frame.sampleRate == 24_000,
-                      remoteBytes + frame.bytes.count <= 60 * 24_000 * 2 else {
-                    throw LocalSpeechError.captureLoss
-                }
-                remoteFrames.append(frame.bytes); remoteBytes += frame.bytes.count
-            }
-            try await provider.appendHold(turn, frame: frame)
-            guard gate.isCurrent(turn) else { throw LocalSpeechError.stale }
-            drainedFrames += 1
-        } catch {
-            gate.fail(turn, reason: "capture_loss")
-            await provider.cancelHold(turn)
-            throw error
-        }
-    }
-
-    /// `capturedSeconds` is the sealed hold's total duration — the caller's
-    /// count includes frames still queued in `drain`, which this session
-    /// cannot see before the drain runs but whose decode the budget must pay.
-    func finishCapture(
-        _ turn: VoiceTurnToken, acceptedFrames: Int, releasedAt: TimeInterval,
-        capturedSeconds: Double,
-        executeAutomatically: Bool = true,
-        drain: @escaping @Sendable () async throws -> Void
-    ) async throws -> VoiceAdmission? {
-        guard gate.release(turn, acceptedFrames: acceptedFrames, now: releasedAt),
-              let provider else { throw LocalSpeechError.stale }
-        do {
-            // One authoritative whole-hold decode plus capture drain. Optional
-            // streaming partials are not a dependency. Keep the release-anchored
-            // safety budget unchanged; it is not the warm latency target.
-            let budget = min(8, max(2.0, 1.2 + capturedSeconds * 0.3))
-            let observe = onDiagnostic
-            observe?(.init(turn: turn.id, stage: "finalization.begin", metrics: [
-                "budget_ms": budget * 1000, "captured_seconds": capturedSeconds,
-                "accepted_frames": Double(acceptedFrames),
-                "before_drain_ms": (ProcessInfo.processInfo.systemUptime - releasedAt) * 1000]))
-            Self.finalLog.notice("finalize generation=\(turn.generation) budget_ms=\(budget * 1000) elapsed_before_drain_ms=\((ProcessInfo.processInfo.systemUptime - releasedAt) * 1000)")
-            let text = try await withVoiceDeadline(until: releasedAt + budget) {
-                let drainStarted = ProcessInfo.processInfo.systemUptime
-                observe?(.init(turn: turn.id, stage: "finalization.drain_begin"))
-                try await drain()
-                observe?(.init(turn: turn.id, stage: "finalization.drain_end", metrics: [
-                    "elapsed_ms": (ProcessInfo.processInfo.systemUptime - drainStarted) * 1000]))
-                Self.finalLog.notice("finalize generation=\(turn.generation) drain_ms=\((ProcessInfo.processInfo.systemUptime - drainStarted) * 1000)")
-                try Task.checkCancellation()
-                return try await provider.finishHold(turn)
-            }
-            guard gate.isCurrent(turn) else { throw LocalSpeechError.stale }
-            try Task.checkCancellation()
-            guard let admitted = await finalize(text, turn: turn, drainedFrames: drainedFrames,
-                                                now: ProcessInfo.processInfo.systemUptime,
-                                                speech: true, window: budget,
-                                                executeAutomatically: executeAutomatically) else {
-                throw LocalSpeechError.deadline
-            }
-            onDiagnostic?(.init(turn: turn.id, stage: "finalization.admitted"))
-            return admitted
-        } catch {
-            let code = (error as? LocalSpeechError).map { String(describing: $0) }
-                ?? (error is CancellationError ? "cancelled" : "unknown")
-            onDiagnostic?(.init(turn: turn.id, stage: "finalization.failure.\(code)"))
-            if gate.isCurrent(turn) {
-                gate.fail(turn, reason: error is CancellationError ? "cancelled" : "finalization_failed")
-                remoteFrames = []; remoteBytes = 0
-            }
-            await provider.cancelHold(turn)
-            throw error
-        }
     }
 
     func cancelCapture(_ turn: VoiceTurnToken) async {
         guard gate.isCurrent(turn) else { return }
         gate.cancel(turn); remoteFrames = []; remoteBytes = 0
-        await provider?.cancelHold(turn)
-    }
-
-    func takeRemoteAudio(_ turn: VoiceTurnToken) throws -> [Data] {
-        guard gate.isCurrent(turn), gate.admission?.route == .remote,
-              !exportedRemote else { throw LocalSpeechError.stale }
-        exportedRemote = true
-        let frames = remoteFrames
-        remoteFrames = []; remoteBytes = 0
-        return frames
     }
 
     func discardRemoteAudio() { remoteFrames = []; remoteBytes = 0 }

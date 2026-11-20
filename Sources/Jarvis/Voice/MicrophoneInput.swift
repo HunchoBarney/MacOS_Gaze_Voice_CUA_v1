@@ -184,12 +184,6 @@ final class MicrophoneInput: @unchecked Sendable {
         let startupRecoveries: Int
         var playback: VoicePlaybackOutputs? = nil
     }
-    struct RouteSnapshot: Sendable {
-        var inputDeviceID: AudioDeviceID?
-        var outputDeviceID: AudioDeviceID?
-        var outputSample: AVAudioFramePosition?
-        var voiceProcessingEnabled = false
-    }
 
     static func defaultOutputDeviceID() throws -> AudioDeviceID {
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
@@ -202,26 +196,6 @@ final class MicrophoneInput: @unchecked Sendable {
             throw VoiceError("The speaker device is unavailable.")
         }
         return device
-    }
-
-    func routeSnapshot() async -> RouteSnapshot {
-        await withCheckedContinuation { continuation in
-            queue.async {
-                guard let engine = self.engine else {
-                    continuation.resume(returning: RouteSnapshot())
-                    return
-                }
-                var snapshot = RouteSnapshot(inputDeviceID: self.currentDevice(engine.inputNode, input: true))
-                if self.voiceProcessing {
-                    snapshot.outputDeviceID = self.currentDevice(engine.outputNode, input: false)
-                    let time = engine.outputNode.lastRenderTime
-                    snapshot.outputSample = time?.isSampleTimeValid == true ? time?.sampleTime : nil
-                    snapshot.voiceProcessingEnabled = engine.isRunning
-                        && engine.inputNode.isVoiceProcessingEnabled && engine.outputNode.isVoiceProcessingEnabled
-                }
-                continuation.resume(returning: snapshot)
-            }
-        }
     }
 
     private func currentDevice(_ node: AVAudioIONode, input: Bool) -> AudioDeviceID? {

@@ -54,13 +54,6 @@ public actor AgentStore {
 
     public func agent(slug: String) -> CompanionAgent? { bySlug[slug] }
 
-    @discardableResult
-    public func upsert(_ agent: CompanionAgent) throws -> CompanionAgent {
-        bySlug[agent.slug] = agent
-        try persist()
-        return agent
-    }
-
     /// Founds an agent: slugifies the name (deduping against the roster),
     /// prepares its workspace, and records it.
     @discardableResult
