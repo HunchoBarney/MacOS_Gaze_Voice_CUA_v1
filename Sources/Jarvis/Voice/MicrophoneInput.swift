@@ -440,6 +440,8 @@ final class MicrophoneInput: @unchecked Sendable {
         outputGeneration.set(nil)
         outputReceipt.set(nil)
         stalledSince = nil
+        let interrupted = self.interrupted
+        self.interrupted = nil
         interrupted?()
     }
     private func receivedInput(generation: UUID, tap: UUID, frames: UInt32) {
