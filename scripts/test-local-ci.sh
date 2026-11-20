@@ -8,6 +8,7 @@ dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 esc=$'\x1b'
 failures=0
+export LC_ALL=en_US.UTF-8
 
 vitest_block() {
     printf '%s[2m Test Files %s[22m %s[1m%s[32m1 passed%s[39m%s[22m%s[90m (1)%s[39m\n' "$esc" "$esc" "$esc" "$esc" "$esc" "$esc" "$esc" "$esc"
@@ -42,6 +43,12 @@ expect passing.log "swift 2/0 fail · vitest 292/292"
     vitest_block "${esc}[1m${esc}[31m1 failed${esc}[39m${esc}[22m${esc}[2m | ${esc}[22m${esc}[1m${esc}[32m28 passed${esc}[39m${esc}[22m" 29
 } >"$dir/failing.log"
 expect failing.log "swift 2/1 fail · vitest 291/292"
+
+{
+    printf 'raw output \xff\xfe\n'
+    cat "$dir/passing.log"
+} >"$dir/invalid-utf8.log"
+expect invalid-utf8.log "swift 2/0 fail · vitest 292/292"
 
 {
     echo "[1/2] Testing JarvisAppTests.ATests/testOne"

@@ -61,7 +61,7 @@ resolve() {
 # a serial run's is XCTest's own summary.
 summary() {
     local plain part total=0 failed=0 skipped="" out=""
-    plain=$(sed $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1")
+    plain=$(LC_ALL=C sed $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1")
     part=$(grep -aoE '^\[[0-9]+/[0-9]+\] Testing ' <<<"$plain" | tail -1)
     if [ -n "$part" ]; then
         local ran listed
