@@ -22,6 +22,8 @@
 	<string>26.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Jarvis sends your speech to OpenAI so you can talk to your Mac and dictate.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Jarvis uses on-device speech recognition to double-check the exact words before it types them.</string>
 	<key>JarvisInputProvider</key>
 	<string>openai-realtime</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>

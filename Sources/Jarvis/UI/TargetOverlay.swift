@@ -882,6 +882,13 @@ final class TargetOverlay {
             cheatPanel = nil
             return
         }
+        showSheet(lines: lines)
+    }
+
+    /// The same panel, replacing what it shows instead of toggling: L7's
+    /// "Type this?" and reply drafts.
+    func showSheet(lines: [String]) {
+        hideSheet()
         let hosting = NSHostingView(rootView: CheatSheet(lines: lines))
         let panel = Self.makePanel()
         panel.contentView = hosting
@@ -894,5 +901,10 @@ final class TargetOverlay {
                               width: size.width, height: size.height), display: true)
         panel.orderFrontRegardless()
         cheatPanel = panel
+    }
+
+    func hideSheet() {
+        cheatPanel?.orderOut(nil)
+        cheatPanel = nil
     }
 }
