@@ -1,11 +1,8 @@
 import AppKit
-import ApplicationServices
 
-// The e2e harness's small native helper: posts the Fn key the way the
-// keyboard does, and counts or quits apps by bundle id through
-// NSRunningApplication, which needs no Automation grant.
+// The e2e harness's small native helper: counts and quits apps by bundle id
+// through NSRunningApplication, which needs no Automation grant.
 //
-//   e2e-helper fn down|up
 //   e2e-helper count <bundle-id>
 //   e2e-helper paths <bundle-id>
 //   e2e-helper quit <bundle-id> [seconds]   force-quits what is left after the wait
@@ -21,17 +18,6 @@ func running(_ bundleID: String) -> [NSRunningApplication] {
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch (arguments.first, arguments.count) {
-case ("fn", 2):
-    guard arguments[1] == "down" || arguments[1] == "up" else { fail("fn takes down or up") }
-    guard AXIsProcessTrusted() else {
-        fail("this process can't post keys: grant Accessibility to the app that started the run", 77)
-    }
-    let down = arguments[1] == "down"
-    guard let event = CGEvent(keyboardEventSource: CGEventSource(stateID: .hidSystemState),
-                              virtualKey: 63, keyDown: down) else { fail("could not make the Fn event", 70) }
-    event.type = .flagsChanged
-    event.flags = down ? .maskSecondaryFn : []
-    event.post(tap: .cghidEventTap)
 case ("count", 2):
     print(running(arguments[1]).count)
 case ("paths", 2):
@@ -49,5 +35,5 @@ case ("quit", 2), ("quit", 3):
     RunLoop.current.run(until: Date().addingTimeInterval(1))
     fail("force-quit \(left.count) copy of \(arguments[1]) after \(Int(seconds)) s", running(arguments[1]).isEmpty ? 3 : 1)
 default:
-    fail("usage: e2e-helper fn down|up | count <bundle-id> | paths <bundle-id> | quit <bundle-id> [seconds]")
+    fail("usage: e2e-helper count <bundle-id> | paths <bundle-id> | quit <bundle-id> [seconds]")
 }

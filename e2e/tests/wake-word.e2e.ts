@@ -2,7 +2,7 @@ import { test } from '@e2e-dev/desktop';
 import { expect } from 'e2e';
 import { CALCULATOR, count, openActivity, quit, say, sleep } from '../support/jarvis.ts';
 
-// Runs on the standby target: Jarvis waits for "Hey Jarvis". A command
+// Jarvis waits for "Hey Jarvis", as on every flow that speaks. A command
 // without the name must do nothing (nothing leaves the Mac); the same command
 // after the name opens Calculator. One Realtime turn.
 

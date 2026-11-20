@@ -16,12 +16,14 @@ test('"show names", then "click Banana": Banana is pressed exactly once', { time
   const board = await openBoard('show-names');
 
   await command('Show names.');
-  await expect(screen.getByText(/Show(ed|ing) the names|showed \d+ names/i)).toBeVisible({ timeout: 30_000 });
+  await expect(screen.getByText(/Showed the names|showed \d+ names/i)).toBeVisible({ timeout: 30_000 });
   expect(await board.presses()).toEqual([]);
 
   await command('Click Banana.');
-  // Without a standing grant Jarvis asks first; Activity's Run answers it.
-  const confirm = screen.getByRole('button', { name: 'Run', disabled: false });
+  // Without a standing grant Jarvis asks first. Activity answers a task's
+  // question with Go ahead, and a single action's with Run (the typed-command
+  // Run beside it stays disabled while its field is empty).
+  const confirm = screen.getByRole('button', 'Go ahead').or(screen.getByRole('button', { name: 'Run', disabled: false }));
   await expect
     .poll(
       async () => {

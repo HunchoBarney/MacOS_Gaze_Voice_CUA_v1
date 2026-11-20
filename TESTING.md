@@ -63,7 +63,7 @@ checkout.
 
 ## End-to-end flows
 
-`make e2e` runs five flows on a signed Jarvis through e2e's macOS engine
+`make e2e` runs four flows on a signed Jarvis through e2e's macOS engine
 (`e2e/README.md`). They launch Jarvis, speak aloud and use the owner's
 Realtime key, so they run only on the owner's go, under the desktop lock.
 They are not part of `make test` or local CI.

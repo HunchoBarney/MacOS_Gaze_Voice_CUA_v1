@@ -1,8 +1,8 @@
 /**
  * What the flows share: the harness's environment, speaking to Jarvis the way
- * a person does (Fn held, or the wake phrase, through the speakers or a
- * virtual microphone), the Activity page, the fixture board, and checks that
- * read the Mac rather than Jarvis's own UI.
+ * a person does (the wake phrase, through the speakers or a virtual
+ * microphone), the Activity page, the fixture board, and checks that read the
+ * Mac rather than Jarvis's own UI.
  */
 
 import { execFile } from 'node:child_process';
@@ -22,11 +22,6 @@ function required(name: string): string {
   const value = process.env[name];
   if (value === undefined || value === '') throw new Error(name + ' is not set: run the flows through make e2e');
   return value;
-}
-
-/** How a turn starts in this run: hold Fn (Hold fn to talk), or say the wake phrase (Standby). */
-export function trigger(): 'fn' | 'wake' {
-  return process.env.JARVIS_E2E_TRIGGER === 'wake' ? 'wake' : 'fn';
 }
 
 async function helper(...args: string[]): Promise<string> {
@@ -54,22 +49,9 @@ export async function say(line: string): Promise<void> {
   await run('say', [...(device ? ['-a', device] : []), '-v', process.env.JARVIS_E2E_VOICE ?? 'Samantha', line]);
 }
 
-/** Holds Fn for the length of the line, as a person would. Fn always comes back up. */
-export async function holdFnAndSay(line: string): Promise<void> {
-  await helper('fn', 'down');
-  try {
-    await sleep(400);
-    await say(line);
-    await sleep(600);
-  } finally {
-    await helper('fn', 'up');
-  }
-}
-
-/** One spoken command, started the way this run starts turns. */
+/** One spoken command, opened with the wake phrase. */
 export async function command(line: string): Promise<void> {
-  if (trigger() === 'wake') await say('Hey Jarvis, ' + line);
-  else await holdFnAndSay(line);
+  await say('Hey Jarvis, ' + line);
 }
 
 /** Reads one key of Jarvis's saved settings, as the defaults command prints it; undefined when unset. */

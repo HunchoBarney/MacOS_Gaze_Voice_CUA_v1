@@ -30,11 +30,6 @@ export default {
     {
       name: 'jarvis',
       engine,
-      app: { appPath, launchArguments: ['--settings', '-firstRunCompleted', '<true/>', '-listeningMode', 'pushToTalk', '-latchMode', '<false/>', ...quiet] },
-    },
-    {
-      name: 'jarvis-standby',
-      engine,
       app: { appPath, launchArguments: ['--settings', '-firstRunCompleted', '<true/>', '-listeningMode', 'standby', ...quiet] },
     },
   ],
