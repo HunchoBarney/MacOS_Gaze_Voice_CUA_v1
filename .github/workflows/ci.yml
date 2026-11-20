@@ -45,7 +45,7 @@ jobs:
   package:
     needs: changes
     if: >-
-      always() && (
+      !cancelled() && (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
         needs.changes.outputs.package == 'true'
       )
