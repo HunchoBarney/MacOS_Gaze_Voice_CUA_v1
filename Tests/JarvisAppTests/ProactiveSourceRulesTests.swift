@@ -194,6 +194,14 @@ final class ProactiveSourceRulesTests: XCTestCase {
         XCTAssertNil(alerts[4].offer)
     }
 
+    func testTwoMessagesWithTheSameOpeningAreBothKept() {
+        let opening = String(repeating: "Running late, sorry about that, ", count: 3)
+        let banners = [BannerSnapshot(app: "Messages", title: "Mom", body: opening + "see you at 6"),
+                       BannerSnapshot(app: "Messages", title: "Mom", body: opening + "actually make it 7")]
+        let alerts = BannerRules.alerts(banners, important: ["Mom"], watches: [], now: now)
+        XCTAssertEqual(Set(alerts.map(\.key)).count, 2)
+    }
+
     func testBannersAreReadFromTheNotificationCenterTree() {
         let root = ScreenNode(role: "AXWindow", children: [
             ScreenNode(role: "AXGroup", subrole: "AXNotificationCenterBanner", description: "Messages, Dana, Here's the file",
