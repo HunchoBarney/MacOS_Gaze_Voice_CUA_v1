@@ -2,12 +2,14 @@ import AppKit
 import AVFoundation
 import SwiftUI
 
-/// The first run: allow the microphone, allow Accessibility, then try a
-/// command. Each permission step watches the system and moves on by itself
+/// The first run: choose how Jarvis listens, allow the microphone, allow
+/// Accessibility, then try a command. Each permission step watches the system and moves on by itself
 /// once the grant lands, so nobody has to come back and press anything.
 @MainActor
 final class FirstRunModel: ObservableObject {
     enum Step: CaseIterable {
+        /// How Jarvis listens, and what leaves the Mac.
+        case listening
         /// Explains the orange microphone dot. Shown only when Standby can
         /// actually run, so it stays hidden until a wake-word engine ships.
         case standbyIntro
@@ -16,6 +18,7 @@ final class FirstRunModel: ObservableObject {
 
     enum Grant: Equatable { case notAsked, waiting, granted, refused }
 
+    let policy: ListeningPolicy
     let steps: [Step]
     @Published private(set) var step: Step
     @Published private(set) var microphone: Grant = .notAsked
@@ -31,6 +34,7 @@ final class FirstRunModel: ObservableObject {
     var openSystemSettings: (Permission) -> Void = { $0.openSystemSettings() }
 
     init(policy: ListeningPolicy = .current) {
+        self.policy = policy
         steps = Step.allCases.filter { $0 != .standbyIntro || policy.showsStandbyIntro }
         step = steps[0]
     }
@@ -60,7 +64,7 @@ final class FirstRunModel: ObservableObject {
         case .accessibility:
             accessibility = .waiting
             Task { await requestAccessibility(); refresh() }
-        case .standbyIntro, .tryIt:
+        case .listening, .standbyIntro, .tryIt:
             advance()
         }
     }
@@ -101,7 +105,7 @@ struct FirstRunView: View {
             footer
         }
         .padding(32)
-        .frame(width: 520, height: 400, alignment: .topLeading)
+        .frame(width: 520, height: 440, alignment: .topLeading)
         .task {
             while !Task.isCancelled {
                 model.refresh()
@@ -117,6 +121,7 @@ struct FirstRunView: View {
 
     private var title: String {
         switch model.step {
+        case .listening: return "How should Jarvis listen?"
         case .standbyIntro: return "Jarvis listens for “Hey Jarvis”"
         case .microphone: return "Let Jarvis hear you"
         case .accessibility: return "Let Jarvis use your Mac"
@@ -127,6 +132,17 @@ struct FirstRunView: View {
     @ViewBuilder private var content: some View {
         Text(title).font(.system(size: 26, weight: .semibold)).padding(.bottom, 12)
         switch model.step {
+        case .listening:
+            VStack(spacing: 10) {
+                ForEach(model.policy.offeredModes, id: \.self) { mode in
+                    ListeningChoice(mode: mode, recommended: mode == model.policy.defaultMode,
+                                    selected: config.listeningMode == mode) { config.listeningMode = mode }
+                }
+            }
+            Text("What you say to Jarvis goes to OpenAI so it can understand you. Silence and room noise stay on your Mac.")
+                .font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 14)
         case .standbyIntro:
             HStack(spacing: 10) {
                 Circle().fill(Color.orange).frame(width: 12, height: 12).accessibilityHidden(true)
@@ -142,7 +158,7 @@ struct FirstRunView: View {
             case .waiting:
                 paragraph("Choose Allow in the box that just opened.")
             case .notAsked, .granted:
-                paragraph("Jarvis needs the microphone to hear what you ask. What you say is used only to do what you asked.")
+                paragraph("Jarvis needs the microphone to hear what you ask.")
             }
         case .accessibility:
             switch model.accessibility {
@@ -194,7 +210,7 @@ struct FirstRunView: View {
                 if !model.triedIt { Button("Skip") { done() } }
                 Spacer()
                 Button("Done") { done() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-            case .standbyIntro:
+            case .listening, .standbyIntro:
                 Spacer()
                 Button("Continue") { model.advance() }.buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
@@ -216,5 +232,49 @@ struct FirstRunView: View {
     private func announce(_ text: String) {
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
                              userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+    }
+}
+
+/// One listening mode as a large, whole-row choice: easier to hit and read
+/// than a radio button and its label.
+private struct ListeningChoice: View {
+    let mode: ListeningMode
+    let recommended: Bool
+    let selected: Bool
+    let choose: () -> Void
+
+    var body: some View {
+        Button(action: choose) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text(mode.title).font(.system(size: 16, weight: .semibold))
+                        if recommended {
+                            Text("Recommended")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.14), in: Capsule())
+                        }
+                    }
+                    Text(mode.detail).font(.system(size: 14)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(selected ? Color.accentColor.opacity(0.08) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.35),
+                              lineWidth: selected ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

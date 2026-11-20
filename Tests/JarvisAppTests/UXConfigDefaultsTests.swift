@@ -26,11 +26,12 @@ final class UXConfigDefaultsTests: XCTestCase {
         XCTAssertTrue(c.tapToGazeClick)
     }
 
-    func testHandsFreeDefaultsOnAndExplicitOffOrPauseSurvivesReload() {
+    func testHandsFreeDefaultsOffAndExplicitChoiceOrPauseSurvivesReload() {
         let defaults = UserDefaults(suiteName: "hands-free-default-\(UUID())")!
         let initial = config(defaults: defaults)
-        XCTAssertTrue(initial.handsFreeEnabled)
+        XCTAssertFalse(initial.handsFreeEnabled)
         XCTAssertFalse(initial.handsFreePaused)
+        initial.handsFreeEnabled = true
         initial.handsFreePaused = true
         XCTAssertTrue(config(defaults: defaults).handsFreePaused)
         XCTAssertTrue(config(defaults: defaults).handsFreeEnabled)

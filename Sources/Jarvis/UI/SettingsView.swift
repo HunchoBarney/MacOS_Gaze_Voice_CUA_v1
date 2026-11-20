@@ -14,7 +14,7 @@ final class SettingsNavigation: ObservableObject {
             }
         }
     }
-    enum Anchor: String { case eyeTracking, permissions }
+    enum Anchor: String { case eyeTracking, permissions, advanced }
     @Published var section: Section = .voice
     /// Part of the page to bring into view when the window opens.
     @Published var anchor: Anchor?
@@ -42,6 +42,7 @@ struct SettingsView: View {
     @State private var openAIKeySaved = false
     @State private var typeSafeKeyDraft = ""
     @State private var typeSafeKeySaved = false
+    @State private var advancedOpen = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -98,6 +99,7 @@ struct SettingsView: View {
 
     private func scroll(_ proxy: ScrollViewProxy) {
         if navigation.section == .voice, let anchor = navigation.anchor {
+            if anchor == .advanced { advancedOpen = true }
             proxy.scrollTo(anchor.rawValue, anchor: .top)
             navigation.anchor = nil
         } else {
@@ -113,7 +115,9 @@ struct SettingsView: View {
             eyeTracking.id(SettingsNavigation.Anchor.eyeTracking.rawValue)
             permissions.id(SettingsNavigation.Anchor.permissions.rawValue)
             general
-            if !config.hostedCredentialsConfigured { advanced }
+            if !config.hostedCredentialsConfigured {
+                advanced.id(SettingsNavigation.Anchor.advanced.rawValue)
+            }
         }
     }
 
@@ -266,6 +270,8 @@ struct SettingsView: View {
                 HStack {
                     Button("Check eye-tracking accuracy") { accuracyCheck.start() }
                         .disabled(accuracyCheck.running)
+                    Button("Measure accuracy (no calibration)") { accuracyCheck.start(measureOnly: true) }
+                        .disabled(accuracyCheck.running)
                     if accuracyCheck.running { ProgressView().controlSize(.small) }
                 }
                 if !accuracyCheck.message.isEmpty { Note(accuracyCheck.message) }
@@ -325,7 +331,7 @@ struct SettingsView: View {
 
     /// Keys typed on this Mac — only until Jarvis's own sign-in exists.
     private var advanced: some View {
-        DisclosureGroup("Advanced") {
+        DisclosureGroup("Advanced", isExpanded: $advancedOpen) {
             VStack(alignment: .leading, spacing: 12) {
                 Note("Until Jarvis connects for you, it needs your own keys: OpenAI to hear and answer you, TypeSafe to understand requests. They stay in your Mac's Keychain.")
                 keyField("OpenAI key", placeholder: "sk-…", draft: $openAIKeyDraft, saved: openAIKeySaved) {

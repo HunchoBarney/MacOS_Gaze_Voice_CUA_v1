@@ -15,17 +15,17 @@ enum ListeningMode: String, CaseIterable, Sendable {
 
     var title: String {
         switch self {
-        case .conversation: return "Listen all the time"
+        case .conversation: return "Hands-free"
         case .standby: return "Wait for “Hey Jarvis”"
-        case .pushToTalk: return "Only while I hold fn"
+        case .pushToTalk: return "Hold fn to talk"
         }
     }
 
     var detail: String {
         switch self {
-        case .conversation: return "Just talk. Say “pause listening” when you need quiet."
+        case .conversation: return "Jarvis listens all the time, so you can just talk."
         case .standby: return "Jarvis listens on your Mac for its name. Nothing leaves your Mac until you say it."
-        case .pushToTalk: return "Hold fn, speak, let go."
+        case .pushToTalk: return "Hold the fn key while you speak, then let go."
         }
     }
 }
@@ -39,8 +39,9 @@ protocol WakeWordDetecting: AnyObject {
 }
 
 /// The rules for listening modes, given whether a wake-word engine exists.
-/// Until one does, Standby isn't offered, the default stays Listen all the
-/// time, and a stored Standby choice behaves like Listen all the time.
+/// Until one does, Standby isn't offered, the default is Hold fn to talk,
+/// and a stored Standby choice behaves like Hands-free. The recommended
+/// mode is the default and is offered first.
 struct ListeningPolicy {
     var wakeWordAvailable: Bool
 
@@ -48,10 +49,10 @@ struct ListeningPolicy {
     nonisolated(unsafe) static var wakeWord: (any WakeWordDetecting)?
     static var current: ListeningPolicy { ListeningPolicy(wakeWordAvailable: wakeWord != nil) }
 
-    var defaultMode: ListeningMode { wakeWordAvailable ? .standby : .conversation }
+    var defaultMode: ListeningMode { wakeWordAvailable ? .standby : .pushToTalk }
 
     var offeredModes: [ListeningMode] {
-        wakeWordAvailable ? [.standby, .conversation, .pushToTalk] : [.conversation, .pushToTalk]
+        wakeWordAvailable ? [.standby, .pushToTalk, .conversation] : [.pushToTalk, .conversation]
     }
 
     func effective(_ chosen: ListeningMode) -> ListeningMode {

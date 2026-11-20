@@ -123,8 +123,8 @@ final class VoiceFirstTests: XCTestCase {
 
     func testWithoutWakeWordEngineStandbyIsNotOffered() {
         let policy = ListeningPolicy(wakeWordAvailable: false)
-        XCTAssertEqual(policy.defaultMode, .conversation)
-        XCTAssertEqual(policy.offeredModes, [.conversation, .pushToTalk])
+        XCTAssertEqual(policy.defaultMode, .pushToTalk)
+        XCTAssertEqual(policy.offeredModes, [.pushToTalk, .conversation])
         XCTAssertEqual(policy.effective(.standby), .conversation)
         XCTAssertTrue(policy.streamsContinuously(.standby))
         XCTAssertFalse(policy.showsStandbyIntro)
@@ -193,10 +193,10 @@ final class ListeningModeConfigTests: XCTestCase {
 
     private func fresh() -> UserDefaults { UserDefaults(suiteName: "listening-\(UUID().uuidString)")! }
 
-    func testDefaultsToListeningAllTheTimeAndEyesOff() {
+    func testDefaultsToHoldFnAndEyesOff() {
         let c = config(fresh())
-        XCTAssertEqual(c.listeningMode, .conversation)
-        XCTAssertTrue(c.handsFreeEnabled)
+        XCTAssertEqual(c.listeningMode, .pushToTalk)
+        XCTAssertFalse(c.handsFreeEnabled)
         XCTAssertFalse(c.gazeTracking)
         XCTAssertFalse(c.firstRunCompleted)
     }

@@ -315,8 +315,11 @@ struct FastAction: Sendable {
         }
         var qualifier: String?
         // "click on Save" names a control, not an app: the qualifier split
-        // would leave a bare gaze "click" aimed at an app called Save.
-        if let split = splitAppQualifier(command), gazeTable[split.command] != nil,
+        // would leave a bare gaze "click" aimed at an app called Save. Only
+        // "on" reads that way — "click in Safari" and "click this in
+        // Safari" stay gaze clicks scoped to the app.
+        if ["click on ", "tap on ", "press on "].contains(where: command.hasPrefix),
+           let split = splitAppQualifier(command), gazeTable[split.command] != nil,
            let named = parseNamed(command) {
             return (named, display.scoped ? Self.gazeDisplayQualifier : nil)
         }

@@ -54,8 +54,8 @@ final class AppWindows: NSObject, NSWindowDelegate {
         self.input = input
         indicatorHost = FirstClickHostingView(rootView: ListeningIndicatorView(controller: controller))
         super.init()
-        indicatorHost.rootView = ListeningIndicatorView(controller: controller, openSettings: { [weak self] in
-            self?.show(.voice, anchor: .permissions)
+        indicatorHost.rootView = ListeningIndicatorView(controller: controller, openSettings: { [weak self] anchor in
+            self?.show(.voice, anchor: anchor)
         })
         indicator.contentView = indicatorHost
         controller.objectWillChange
@@ -145,11 +145,11 @@ final class AppWindows: NSObject, NSWindowDelegate {
         bringForward(window)
     }
 
-    /// The three-step first run. Closing it early is fine: Settings has
+    /// The four-step first run. Closing it early is fine: Settings has
     /// the same permissions, and it shows again until it's finished.
     func showFirstRun() {
         let window = firstRunWindow ?? makeWindow(
-            title: "Set up Jarvis", size: NSSize(width: 520, height: 400), minimum: nil,
+            title: "Set up Jarvis", size: NSSize(width: 520, height: 440), minimum: nil,
             content: FirstRunView(config: controller.config, finish: { [weak self] in self?.firstRunWindow?.close() }))
         firstRunWindow = window
         bringForward(window)

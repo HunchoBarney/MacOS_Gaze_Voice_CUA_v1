@@ -839,7 +839,7 @@ final class VoiceController: ObservableObject {
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
         lane.conversation.interpret = { [weak self] text, context, memory in
             guard let self, !self.config.apiKey.isEmpty else {
-                throw VoiceError("I can't connect right now. Check your internet and try again.")
+                throw VoiceError(OutcomeWording.missingUnderstandingKey)
             }
             return try await VoiceSemanticRouter.live(apiKey: self.config.apiKey)
                 .interpretConversation(text, context: context, memory: memory)

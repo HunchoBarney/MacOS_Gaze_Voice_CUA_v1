@@ -59,6 +59,26 @@ final class GazeLaneTests: XCTestCase {
         }
     }
 
+    /// JARA-38: "click … in Safari" is a gaze click scoped to Safari, while
+    /// "click on Save" and "click save" still name a control.
+    func testClickInAppStaysAGazeClick() {
+        for phrase in ["click in safari", "click this in safari", "tap it in safari"] {
+            guard let parsed = FastAction.parse(phrase),
+                  case .gaze(let verb) = parsed.action.body else {
+                XCTFail("'\(phrase)' should parse to a gaze click, got \(String(describing: FastAction.parse(phrase)?.action.body))")
+                continue
+            }
+            XCTAssertEqual(verb, .click, phrase)
+            XCTAssertEqual(parsed.appQualifier, "safari", phrase)
+        }
+        for phrase in ["click on save", "click save"] {
+            guard case .clickNamed("save") = FastAction.parse(phrase)?.action.body else {
+                XCTFail("'\(phrase)' names a control, got \(String(describing: FastAction.parse(phrase)?.action.body))")
+                continue
+            }
+        }
+    }
+
     // MARK: - Dispatch
 
     private final class FakeDriver {

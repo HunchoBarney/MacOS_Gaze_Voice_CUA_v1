@@ -1,40 +1,64 @@
 import XCTest
 @testable import Jarvis
 
-/// The first run: microphone, Accessibility, then a try-it step. Grants
+/// The first run: how Jarvis listens, microphone, Accessibility, then a
+/// try-it step. Grants
 /// move the user on by themselves; refusals offer a way out. Probes are
 /// stubbed — no TCC.
 @MainActor
 final class UXOnboardingTests: XCTestCase {
 
-    private func model(engine: Bool = false) -> FirstRunModel {
+    /// A first run with its probes stubbed. Unless `choosing`, it starts
+    /// past the listening choice, on the microphone step.
+    private func model(engine: Bool = false, choosing: Bool = false) -> FirstRunModel {
         let m = FirstRunModel(policy: ListeningPolicy(wakeWordAvailable: engine))
         m.microphoneGrant = { .notAsked }
         m.accessibilityGranted = { false }
         m.requestMicrophone = {}
         m.requestAccessibility = {}
         m.openSystemSettings = { _ in }
+        if !choosing { m.advance() }
         return m
     }
 
-    /// Three numbered steps; the orange-dot screen stays hidden until a
+    /// Four numbered steps; the orange-dot screen stays hidden until a
     /// wake-word engine exists.
-    func testThreeStepsWithoutWakeWordEngine() {
-        let m = model()
-        XCTAssertEqual(m.steps, [.microphone, .accessibility, .tryIt])
-        XCTAssertEqual(m.step, .microphone)
+    func testFourStepsWithoutWakeWordEngine() {
+        let m = model(choosing: true)
+        XCTAssertEqual(m.steps, [.listening, .microphone, .accessibility, .tryIt])
+        XCTAssertEqual(m.step, .listening)
         XCTAssertEqual(m.position?.number, 1)
-        XCTAssertEqual(m.position?.of, 3)
+        XCTAssertEqual(m.position?.of, 4)
     }
 
-    func testStandbyIntroLeadsOnlyWithEngine() {
+    /// The listening choice comes first and recommends Hold fn; Hands-free
+    /// is the only other choice until the wake word ships.
+    func testListeningChoiceRecommendsHoldFn() {
+        let m = model(choosing: true)
+        XCTAssertEqual(m.policy.offeredModes, [.pushToTalk, .conversation])
+        XCTAssertEqual(m.policy.defaultMode, .pushToTalk)
+        XCTAssertEqual(ListeningMode.pushToTalk.title, "Hold fn to talk")
+        XCTAssertEqual(ListeningMode.conversation.title, "Hands-free")
+        m.allow()
+        XCTAssertEqual(m.step, .microphone)
+        XCTAssertEqual(m.position?.number, 2)
+    }
+
+    /// Once the wake word ships, it is offered first and preselected.
+    func testWakeWordBecomesTheRecommendedChoice() {
+        let m = model(engine: true, choosing: true)
+        XCTAssertEqual(m.policy.offeredModes, [.standby, .pushToTalk, .conversation])
+        XCTAssertEqual(m.policy.defaultMode, .standby)
+    }
+
+    func testStandbyIntroFollowsTheChoiceOnlyWithEngine() {
         let m = model(engine: true)
-        XCTAssertEqual(m.steps, [.standbyIntro, .microphone, .accessibility, .tryIt])
+        XCTAssertEqual(m.steps, [.listening, .standbyIntro, .microphone, .accessibility, .tryIt])
         XCTAssertEqual(m.step, .standbyIntro)
         XCTAssertNil(m.position, "the intro isn't a numbered step")
         m.allow()
         XCTAssertEqual(m.step, .microphone)
-        XCTAssertEqual(m.position?.number, 1)
+        XCTAssertEqual(m.position?.number, 2)
     }
 
     /// A grant that lands while the page is up moves the user on.
