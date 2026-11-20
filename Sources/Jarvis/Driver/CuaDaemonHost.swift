@@ -10,7 +10,7 @@ import JarvisCore
 enum CuaSocketDirectory {
     static let current: String? = create(in: NSTemporaryDirectory())
 
-    /// Unix socket paths are limited to `104 bytes, so a long temp folder
+    /// Unix socket paths are limited to ~104 bytes, so a long temp folder
     /// falls back to /tmp.
     static func create(in base: String) -> String? {
         let parent = base.utf8.count < 60 ? base : "/tmp"
@@ -67,9 +67,9 @@ final class EmbeddedDaemon {
     /// The daemon's post-mutation observation window — how long its
     /// WindowChangeDetector waits for a window change after each
     /// bound-window mutation. Driver default is 1000ms (the dominant
-    /// per-dispatch tax, `1.4s clicks); the driver clamps the knob to
+    /// per-dispatch tax, ~1.4s clicks); the driver clamps the knob to
     /// 0–10000ms. 100ms keeps the window-diff coverage launch/menu opens
-    /// need while shrinking the tail `10x per dispatch.
+    /// need while shrinking the tail ~10x per dispatch.
     ///
     /// SAFETY: a shorter tail means the detector can report "no change"
     /// for UI still settling past 100ms — the drive loop's next observe
