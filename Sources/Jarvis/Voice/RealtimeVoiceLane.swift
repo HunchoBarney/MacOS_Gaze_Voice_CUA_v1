@@ -327,6 +327,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var duplexRequested = false
     private var desiredInputMode: RealtimeVoiceClient.InputMode = .conversation
     private var conversationFeed: ConvertedAudioFeed?
+    /// The last 20 s of hands-free speech sent to Realtime, for L7's
+    /// on-device second transcription of "type this …".
+    let recentSpeech = RecentSpeechAudio()
     private var conversationStartID = UUID()
     private var conversationMeter: Timer?
     private var conversationSender: Task<Void, Never>?
@@ -1361,6 +1364,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 self.onReadiness?(.ready(hardware.name))
                 return hardware.name
             } catch {
+                Self.log.error("prepare stage=microphone_input failed error=\(error.localizedDescription, privacy: .public)")
                 if self.preparationID == token {
                     self.hardware = nil
                     await self.input.stop()
@@ -1431,7 +1435,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
                             guard self.conversation.id == session else { return }
                             switch event {
                             case .turnStarted: self.localTurnStarted(connection: connection)
-                            case .audio(let pcm): try await self.client.sendAudio(pcm, connection: connection)
+                            case .audio(let pcm):
+                                self.recentSpeech.append(pcm)
+                                try await self.client.sendAudio(pcm, connection: connection)
                             case .turnEnded: try await self.localTurnEnded(connection: connection)
                             }
                         }
@@ -1474,6 +1480,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     func stopConversation(state: ConversationListeningState = .paused) {
         conversationStartID = UUID()
+        recentSpeech.clear()
         closeConversationFeed()
         remoteInputDrain?.cancel(); remoteInputDrain = nil
         for record in remoteInputs.values { record.deadline?.cancel() }
