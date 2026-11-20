@@ -9,13 +9,37 @@ private actor FakeService {
     private(set) var seen: [Seen] = []
     private var registrations = 0
     var realtimeReplies: [(Int, String)] = []
+    private var forgotten: Set<String> = []
+    private var staleMints = 0
 
     func setRealtimeReplies(_ replies: [(Int, String)]) { realtimeReplies = replies }
+
+    /// Mints with this token fail as `unknown_install`. The first stale mint
+    /// waits for a second one, and the second waits until a mint with a
+    /// fresh token arrives, so both callers fail on the old token and the
+    /// later failure lands after the earlier caller registered again.
+    func forget(_ token: String) { forgotten.insert(token) }
+
+    private func until(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+    }
 
     func handle(_ request: URLRequest) async throws -> (Data, URLResponse) {
         let path = request.url?.path() ?? ""
         seen.append(Seen(path: path, authorization: request.value(forHTTPHeaderField: "Authorization")))
         let (status, body): (Int, String)
+        let bearer = request.value(forHTTPHeaderField: "Authorization")?.replacingOccurrences(of: "Bearer ", with: "")
+        if path == "/base/v1/realtime/client_secret", let bearer, forgotten.contains(bearer) {
+            staleMints += 1
+            if staleMints == 1 {
+                try await until { staleMints >= 2 }
+            } else {
+                try await until { seen.contains { $0.path == path && !forgotten.contains(($0.authorization ?? "").replacingOccurrences(of: "Bearer ", with: "")) } }
+            }
+            let body = #"{"error":{"code":"unknown_install","message":"This install isn't registered."}}"#
+            return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!)
+        }
         switch path {
         case "/base/v1/installs":
             registrations += 1
@@ -138,10 +162,7 @@ final class HostedCredentialsTests: XCTestCase {
 
     func testAStaleFailureKeepsAFresherRegistration() async throws {
         let service = FakeService(), tokens = TokenBox("jv1_forgotten")
-        await service.setRealtimeReplies([
-            (401, #"{"error":{"code":"unknown_install","message":"This install isn't registered."}}"#),
-            (401, #"{"error":{"code":"unknown_install","message":"This install isn't registered."}}"#),
-        ])
+        await service.forget("jv1_forgotten")
         let credentials = hosted(service, tokens: tokens)
         async let first = credentials.realtimeCredential()
         async let second = credentials.realtimeCredential()
