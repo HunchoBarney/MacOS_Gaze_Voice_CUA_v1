@@ -50,6 +50,16 @@ async function sameSecret(given: string, expected: string): Promise<boolean> {
   return given.length > 0 && difference === 0;
 }
 
+/** The network a registration counts against: the address for IPv4, its /64 for IPv6. */
+function network(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups = [...left, ...Array(Math.max(8 - left.length - right.length, 0)).fill("0"), ...right];
+  return groups.slice(0, 4).map((group) => parseInt(group, 16).toString(16)).join(":") + "::/64";
+}
+
 function newToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return "jv1_" + btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -120,7 +130,7 @@ export function createApp(deps: Deps) {
     const denial = await ledger.register({
       installID,
       tokenHash: await sha256Hex(token),
-      ipKey: await sha256Hex(`${config.adminToken}:${deps.clientIP(c) ?? "unknown"}`),
+      ipKey: await sha256Hex(`${config.adminToken}:${network(deps.clientIP(c) ?? "unknown")}`),
       limits: config.limits,
       now: now(),
     });

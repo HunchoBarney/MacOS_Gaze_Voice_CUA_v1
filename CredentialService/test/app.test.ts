@@ -98,6 +98,18 @@ describe("registration", () => {
     await h.register();
   });
 
+  it("counts an IPv6 /64 as one network", async () => {
+    const h = harness({ REGISTRATIONS_PER_IP_PER_DAY: "2" });
+    h.setIP("2001:db8:1:2::1");
+    await h.register();
+    h.setIP("2001:0db8:0001:0002:ffff:1:2:3");
+    await h.register();
+    h.setIP("2001:db8:1:2:abcd::9");
+    expect((await h.request("/v1/installs")).status).toBe(429);
+    h.setIP("2001:db8:1:3::1");
+    await h.register();
+  });
+
   it("caps new installs across all networks", async () => {
     const h = harness({ REGISTRATIONS_PER_DAY: "1" });
     await h.register();
