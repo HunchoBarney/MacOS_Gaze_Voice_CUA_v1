@@ -45,7 +45,7 @@ struct TerraClient: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .missingKey: return "Add an OpenAI API key in Jarvis settings to ask about pictures on screen."
+            case .missingKey: return "Add an OpenAI API key in Jarvis settings to use GPT-6.1 Terra."
             case .http(let status, let message): return "OpenAI returned \(status): \(message)"
             case .refused(let why): return "The model declined: \(why)"
             case .incomplete(let reason): return "The answer was cut off (\(reason))."
