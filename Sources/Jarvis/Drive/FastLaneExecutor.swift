@@ -2621,7 +2621,7 @@ extension DriveLoop {
 
     /// One `invoke_menu` dispatch behind its focus-borrow consent — shared
     /// by spoken menu paths and the exit-full-screen ladder's menu rung.
-    private func invokeMenu(_ path: [String], pid: Int, windowID: Int, name: String,
+    func invokeMenu(_ path: [String], pid: Int, windowID: Int, name: String,
                             bundle: String, session: String) async throws {
         // `invoke_menu` briefly focuses a background app — ask once per
         // bundle unless the standing grant covers input. `menuFocus`

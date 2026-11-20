@@ -2,6 +2,29 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Ask rarely, offer undo (KAR-69)
+
+- A consequential press Jarvis chose itself no longer asks first when the
+  app can take it back: Move to Trash in Finder, Delete and Archive in
+  Mail, Delete in Notes, TextEdit, Pages, Numbers and Keynote, and Send in
+  Mail inside its Undo Send delay. Jarvis presses, then says what it did
+  and "Say undo to bring it back"; the offer stands for 10 s from when it
+  is spoken (Mail: never past its delay, less 3 s), once per task.
+- Undo is the app's own ⌘Z menu item, read over Accessibility by its key
+  equivalent before and after the press (Apple platform API, no new
+  dependency). An offer stands only when the press changed that item, and
+  a spoken "undo" invokes that exact item in that app, and refuses if the
+  app shows anything else since.
+- Mail's delay is `UndoSendDelayTime` in the `com.apple.mail` domain. A
+  readable domain without the key is Mail's default 10 s; an unreadable
+  one, or Undo Send off, keeps the question.
+- Still asking: Pay, Call, Allow and other permission prompts, account
+  changes, unnamed presses, permanent or wholesale deletes, sends outside
+  Mail, and any press with nobody to hear the offer. The never list and the
+  password refusal run before any of this and are unchanged.
+- Not physically verified yet: the AX titles each app shows, and invoking
+  Undo by menu path in a background app.
+
 ## 2026-11-20 — Standby opens a session on the wake word
 
 - Standby keeps the voice lane's microphone open, as Hold fn already does,

@@ -11,8 +11,12 @@ import Foundation
 ///   send", "send it later"). A dictated message is not an instruction.
 /// - **Jarvis chose the press itself**: a step it picked mid-task that the
 ///   words didn't name, a keyboard send, a button with no name or a click
-///   at a spot on screen. It asks one short question first, and only a
-///   clear yes within 30 seconds presses that one control.
+///   at a spot on screen. Where the app can take it back (`UndoRegistry`:
+///   Move to Trash in Finder, Delete and Archive in Mail, Send in Mail
+///   inside its Undo Send delay, Delete in a document app) Jarvis presses
+///   and offers undo for 10 seconds, once per task. Otherwise it asks one
+///   short question first, and only a clear yes within 30 seconds presses
+///   that one control.
 /// - **The never list** (`CuaPolicy.neverReason`) refuses either way:
 ///   wiping the Mac, remote-access tools, gift cards, wire transfers, scam
 ///   links and numbers from warning popups.

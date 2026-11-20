@@ -137,6 +137,9 @@ public struct DriveResult: Sendable {
     /// loop's policy gate, read by `describe` so the remedy it reports is
     /// honest for that refusal class.
     public var consentBlock: DriveStatus.ConsentBlock?
+    /// A line to say for this outcome: it replaces "Done." on success and
+    /// follows the reason otherwise. An undo offer rides here.
+    public var spoken: String?
     public init(status: DriveStatus, history: [String] = [], pid: Int? = nil, windowID: Int? = nil,
                 bundleID: String? = nil, dispatchedEffect: Bool = false,
                 blockedReason: String? = nil,
