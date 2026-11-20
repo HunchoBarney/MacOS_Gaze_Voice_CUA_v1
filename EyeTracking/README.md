@@ -168,7 +168,7 @@ pnpm dev -- \
 - `--score-threshold`: Detection score threshold. For YOLO, this applies to Head and Mouth; Eye uses a fixed `0.20` threshold.
 - `--calibration-file`: Path for the calibration result. Default: `.gaze_calibration.json`.
 - `--calibrate`: Runs the pursuit calibration tour followed by a verification sweep, then saves the best fit.
-- `--calibration-tier full|standard|quick`: Calibration coverage. `full` (default) is a 17-point 4×4 tour that reaches the screen corners; `standard` is a 9-point 3×3 tour; `quick` is corners + center (~10s) for patching a drifted or moved setup. `⌘⇧G` (global hotkey) runs the `quick` tier at any time; `⌘⇧P` toggles tracking pause.
+- `--calibration-tier full|standard|quick`: Calibration coverage. `full` (default) is a 17-point 4×4 tour that reaches the screen corners; `standard` is a 9-point 3×3 tour; `quick` is corners + center (~10s) for patching a drifted or moved setup. The `Recalibrate` menu action (tray, Jarvis menu, voice "recalibrate", or `POST /control`) runs the `quick` tier at any time; `Pause Tracking` toggles the pause. The tracker registers no global hotkeys.
 - `--accuracy-test`: After calibration, runs a 9-point held-out accuracy test and writes `accuracy_report.json`.
 - `--gaze-filter saccade|oneeuro|ema`: Gaze marker filter. `saccade` (default) passes fast glances through unfiltered, eases fixations, and anchors sustained fixations (dwell lock). `oneeuro` is speed-adaptive; `ema` is fixed-alpha smoothing.
 - `--filter-mincutoff`: One Euro filter minimum cutoff frequency in Hz. Larger values track faster but jitter more. Default: `1.0`.
@@ -223,6 +223,12 @@ pnpm dev -- \
 --display-size-inch 31.5
 ```
 
+Every route except `/health` requires `Authorization: Bearer <token>` (the WebSocket upgrade too). The token is per launch: Jarvis passes it in `JARVIS_TRACKER_TOKEN`, otherwise the tracker generates one. Either way the tracker writes it to `.tracker_api_token` (mode 0600) beside the calibration file, so a local client reads it from there:
+
+```bash
+curl -H "Authorization: Bearer $(cat .tracker_api_token)" http://127.0.0.1:47892/snapshot/gaze
+```
+
 HTTP endpoints:
 
 ```text
@@ -246,11 +252,11 @@ POST http://127.0.0.1:47892/control
 
 The GET endpoints are read-only; `POST /control` is the single write path. Its JSON body is `{"action": "<name>", "value": <any>}` where `action` is one of `pause_toggle`, `recalibrate`, `dot_scale`, `dwell_lock`, `preview_toggle`, `status_toggle`, `inference_time_toggle`, `show_marker`, `implicit_sample`, or `quit`. Response codes:
 
-- `200 {"ok": true}` — a valid non-lifecycle action forwarded to the renderer (`recalibrate` runs the same path as the `⌘⇧G` hotkey).
+- `200 {"ok": true}` — a valid non-lifecycle action forwarded to the renderer (`recalibrate` runs the same path as the tray's `Recalibrate`).
 - `202 {"ok": true}` — `quit` only: acknowledged API-side, then the app quits on the next tick; it is never forwarded to the renderer.
 - `400` — `bad_request` (unparseable request target), `unknown_action`, `invalid_json`, `invalid_body`, or `invalid_value`. `invalid_value` is specific to `implicit_sample`: its `value` must be a normalized screen point `{"x_norm": 0..1, "y_norm": 0..1}` — a malformed point is rejected here rather than clamped into a bogus calibration label.
 - `409 {"error": "tracking_inactive"}` — `implicit_sample` declined because no live inference can consume the label (renderer down, modal UI owning the screen, tracker paused, or models never reported loaded). On accept it lands as the same `cursor_idle` message the idle sampler emits.
-- `405` — non-POST on `/control`, non-GET elsewhere. `403` — requests carrying an `Origin` header are rejected: the API is unauthenticated, so only originless local clients may call it. `413` — body over 64 KiB. `503 control_unavailable` — no control/quit handler wired (e.g. `quit` without an `onQuit` callback). Handlers may also return their own `{status, error}` 4xx/5xx result.
+- `405` — non-POST on `/control`, non-GET elsewhere. `401` — missing or wrong bearer token. `403` — requests carrying an `Origin` header are rejected, so a browser page can't call it even with a token. `413` — body over 64 KiB. `503 control_unavailable` — no control/quit handler wired (e.g. `quit` without an `onQuit` callback). Handlers may also return their own `{status, error}` 4xx/5xx result.
 
 `gaze` sample.
 
@@ -524,7 +530,7 @@ type ExternalSnapshot = {
   };
   status: StatusState | null;
   preview: PreviewState | null;
-  paused: boolean; // renderer-reported pause flag (⌘⇧P / pause_toggle)
+  paused: boolean; // renderer-reported pause flag (tray / pause_toggle)
   calibration_status: string | null; // renderer-reported calibration phase
   settings: Record<string, unknown> | null; // live settings.json contents
 };
@@ -700,7 +706,7 @@ pnpm dev -- --gaze-projection-mode binocular-convergence --calibration-file .gaz
 
 ## Tray & Settings
 
-In standalone runs (no `--no-tray`), a menu-bar tray icon shows the tracker state (`Tracking` / `Paused` / `No face` / `Calibrating` / `Needs calibration`) and offers `Recalibrate` (same path as `⌘⇧G`), a `Pause Tracking` / `Resume Tracking` toggle (same as `⌘⇧P`), dot-size and dwell-lock controls, diagnostic toggles (preview, status panel, inference time), and `Quit`.
+In standalone runs (no `--no-tray`), a menu-bar tray icon shows the tracker state (`Tracking` / `Paused` / `No face` / `Calibrating` / `Needs calibration`) and offers `Recalibrate`, a `Pause Tracking` / `Resume Tracking` toggle, dot-size and dwell-lock controls, diagnostic toggles (preview, status panel, inference time), and `Quit`.
 
 User-facing toggles persist to `settings.json`, written next to the calibration file (so a custom `--calibration-file` puts settings beside it). The file is created on first write; a missing or corrupt file is treated as `{}`. Shape:
 
@@ -736,7 +742,7 @@ Startup logs include display entries such as `Display 0` and `Display 1`. If the
 
 ## Pursuit Calibration
 
-The app can run without calibration. To calibrate, start it with `--calibrate` — or press `⌘⇧G` at any time for a quick patch.
+The app can run without calibration. To calibrate, start it with `--calibrate` — or choose `Recalibrate` at any time for a quick patch.
 
 ```bash
 pnpm dev -- --calibrate
@@ -746,7 +752,7 @@ Calibration is a *pursuit* tour: a target glides through waypoints while the app
 
 - `full` (default): 17-waypoint 4×4 grid including deep corners — the corners are where iris signal is thinnest, so they get real training data rather than extrapolation.
 - `standard`: 9-waypoint 3×3 grid.
-- `quick`: corners + center, ~10s. This is what `⌘⇧G` runs — a patch for a drifted or moved setup, refitted against the persisted sample pool rather than the 5 new points alone.
+- `quick`: corners + center, ~10s. This is what `Recalibrate` runs — a patch for a drifted or moved setup, refitted against the persisted sample pool rather than the 5 new points alone.
 
 After the tour, a verification sweep samples a second pass and gates the fit on median / p90 reprojection error; a failing gate retries without replacing a previous saved calibration.
 
@@ -754,7 +760,7 @@ The fit itself runs a regularized linear map over a ~40-dim feature vector (eye 
 
 **Continuous learning**: when the OS cursor sits idle while your gaze dwells on it, the tracker treats that agreement as a trusted label and refits silently in the background — the map keeps improving the longer you use it, and the sample pool persists across restarts.
 
-**Drift self-healing**: consistent one-directional rejection of implicit labels is read as a camera/laptop move; the measured offset is applied as a persistent `output_offset` so tracking stays correct without a recalibration prompt, then absorbed into the map by the next implicit refit. Only a saturated correction (something beyond a reposition) surfaces the `⌘⇧G` notice.
+**Drift self-healing**: consistent one-directional rejection of implicit labels is read as a camera/laptop move; the measured offset is applied as a persistent `output_offset` so tracking stays correct without a recalibration prompt, then absorbed into the map by the next implicit refit. Only a saturated correction (something beyond a reposition) surfaces the recalibrate notice.
 
 **Exit**: during calibration or the accuracy test, the `×` button (top-right) or `Escape` cancels cleanly — nothing partial is written.
 

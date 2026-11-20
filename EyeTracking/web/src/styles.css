@@ -593,7 +593,7 @@ body,
 }
 
 /* Non-modal drift warning — visible but never steals input (the overlay stays
-   click-through; recalibration is triggered by the ⌘⇧G global hotkey). */
+   click-through; recalibration comes from the menu or by voice). */
 .drift-notice {
   position: fixed;
   top: 28px;

@@ -265,4 +265,16 @@ final class TrackerArgumentsTests: XCTestCase {
              "--wasm-threads", "4",
              "--web-accelerator", "wasm", "--gaze-max-fps", "10"])
     }
+
+    /// Every API request carries the bearer token the tracker requires;
+    /// with no running tracker's token file in reach it is this launch's
+    /// own 32-byte token, the one a spawned child receives.
+    func testTrackerRequestsCarryTheLaunchToken() {
+        XCTAssertEqual(TrackerHost.launchToken.count, 64)
+        XCTAssertTrue(TrackerHost.launchToken.allSatisfy(\.isHexDigit))
+        let request = TrackerHost.authorized(URL(string: "http://127.0.0.1:\(TrackerHost.port)/snapshot")!)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"),
+                       "Bearer \(TrackerHost.apiToken())")
+        XCTAssertEqual(TrackerHost.apiToken(), TrackerHost.launchToken)
+    }
 }

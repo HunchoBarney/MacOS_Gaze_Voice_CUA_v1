@@ -385,7 +385,23 @@ struct GazeCandidateFeed: Sendable {
 
 /// AXPosition/AXSize → a CGRect in global top-left points — the same
 /// read WindowControls does privately, shared by the feed's own walks.
+/// Per-call budget for the feed's AX reads, in seconds. The feed runs on
+/// the main actor, so an app whose accessibility server hangs would
+/// otherwise stall the main thread (and every keystroke the event tap
+/// services there) for the system's 6 s default.
+let gazeAXTimeout: Float = 0.25
+
+/// An element with the feed's AX budget applied. The timeout is
+/// per-object: an element returned by another read starts at the system
+/// default, so every element the feed reads goes through here first.
+@discardableResult
+func gazeAXBudgeted(_ element: AXUIElement) -> AXUIElement {
+    AXUIElementSetMessagingTimeout(element, gazeAXTimeout)
+    return element
+}
+
 private func axFrame(of element: AXUIElement) -> CGRect? {
+    gazeAXBudgeted(element)
     var positionRef: CFTypeRef?
     var sizeRef: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef) == .success,
@@ -409,7 +425,7 @@ enum GazeAXWindow {
 
     static func element(pid: pid_t, matching target: CGRect) -> AXUIElement? {
         guard !target.isEmpty else { return nil }
-        let app = AXUIElementCreateApplication(pid)
+        let app = gazeAXBudgeted(AXUIElementCreateApplication(pid))
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
               let windows = ref as? [AXUIElement] else { return nil }
@@ -436,11 +452,11 @@ enum MenuBarAX {
         var out: [Item] = []
         // The active app's menu bar.
         if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
-            let app = AXUIElementCreateApplication(pid)
+            let app = gazeAXBudgeted(AXUIElementCreateApplication(pid))
             var ref: CFTypeRef?
             if AXUIElementCopyAttributeValue(app, kAXMenuBarAttribute as CFString, &ref) == .success,
                let barRef = ref {
-                let bar = barRef as! AXUIElement
+                let bar = gazeAXBudgeted(barRef as! AXUIElement)
                 var kids: CFTypeRef?
                 if AXUIElementCopyAttributeValue(bar, kAXChildrenAttribute as CFString, &kids) == .success,
                    let elements = kids as? [AXUIElement] {
@@ -457,7 +473,7 @@ enum MenuBarAX {
         var ref: CFTypeRef?
         if AXUIElementCopyAttributeValue(system, "AXExtrasMenuBar" as CFString, &ref) == .success,
            let barRef = ref {
-            let bar = barRef as! AXUIElement
+            let bar = gazeAXBudgeted(barRef as! AXUIElement)
             var kids: CFTypeRef?
             if AXUIElementCopyAttributeValue(bar, kAXChildrenAttribute as CFString, &kids) == .success,
                let elements = kids as? [AXUIElement] {
@@ -476,6 +492,7 @@ enum MenuBarAX {
     }
 
     private static func axString(_ element: AXUIElement, _ attribute: String) -> String? {
+        gazeAXBudgeted(element)
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
               let s = ref as? String else { return nil }

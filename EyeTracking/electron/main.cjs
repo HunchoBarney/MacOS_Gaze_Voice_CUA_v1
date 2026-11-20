@@ -1,4 +1,5 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, systemPreferences, Tray } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, systemPreferences, Tray } = require("electron");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { mouse, Button, Point } = require("@nut-tree-fork/nut-js");
@@ -485,10 +486,12 @@ function maybeStartExternalApi(args) {
   }
   const host = readOption(args, "--external-api-host", "127.0.0.1");
   const port = readPortOption(args, "--external-api-port", 47892);
+  const token = publishApiToken(args);
   externalApi = startExternalApiServer({
     store: gazeStateStore,
     host,
     port,
+    token,
     logger: console,
     onControl: handleControlAction,
     // POST /control quit — the host's polite shutdown path. Routes through
@@ -496,6 +499,27 @@ function maybeStartExternalApi(args) {
     // still runs instead of a bare SIGKILL.
     onQuit: () => app.quit()
   });
+}
+
+// The API token for this launch: the one Jarvis passed in
+// JARVIS_TRACKER_TOKEN, else a fresh random one. It is written owner-only
+// beside the calibration file, so a host that adopts an already-running
+// tracker can still authenticate; the variable is dropped so nothing this
+// process starts inherits it.
+function publishApiToken(args) {
+  const passed = process.env.JARVIS_TRACKER_TOKEN;
+  delete process.env.JARVIS_TRACKER_TOKEN;
+  const token = typeof passed === "string" && passed.length >= 32 ? passed : crypto.randomBytes(32).toString("hex");
+  const calibrationFile = resolveRepoPath(readOption(args, "--calibration-file", defaultCalibrationFile));
+  const tokenFile = path.join(path.dirname(calibrationFile), ".tracker_api_token");
+  try {
+    fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
+    fs.writeFileSync(tokenFile, token, { mode: 0o600 });
+    fs.chmodSync(tokenFile, 0o600);
+  } catch (error) {
+    console.error(`Failed to write the API token file: ${error.message}`);
+  }
+  return token;
 }
 
 function stopExternalApi() {
@@ -541,7 +565,7 @@ function sendToRendererChannel(channel, payload) {
   pendingMessages.push({ channel, payload });
 }
 
-// Menu-style control dispatch — POST /control, ⌘⇧P, and the tray menu all
+// Menu-style control dispatch — POST /control and the tray menu both
 // land here; the renderer turns the action into a UI state change and
 // reports it back through set-paused / report-state / set-settings.
 function dispatchMenuAction(action, value) {
@@ -552,7 +576,7 @@ function dispatchMenuAction(action, value) {
   sendToRendererChannel("backend-message", payload);
 }
 
-// The single recalibration path — ⌘⇧G, the tray menu, and POST /control
+// The single recalibration path — the tray menu and POST /control
 // share the status echo and the lip-click re-arm.
 function requestRecalibration(source) {
   sendToRenderer({ type: "status", level: "info", message: `recalibration requested (${source})` });
@@ -1474,45 +1498,11 @@ app.whenReady().then(async () => {
       console.error(`Failed to request macOS camera access: ${error.message}`);
     }
   }
-  // Global recalibration hotkey — the drift notice points users here. Works
-  // while the overlay is unfocused/click-through; never auto-triggers.
-  try {
-    const registered = globalShortcut.register("CommandOrControl+Shift+G", () => {
-      try {
-        requestRecalibration("⌘⇧G");
-      } catch (error) {
-        console.error(`Recalibrate hotkey dispatch failed: ${error}`);
-      }
-    });
-    if (!registered) {
-      // register() returns false when another app holds the shortcut —
-      // silent failure would strand the drift notice's only instruction.
-      console.error("⌘⇧G recalibration hotkey is held by another app; drift recalibration will not fire");
-    }
-  } catch (error) {
-    console.error(`Failed to register recalibration hotkey: ${error}`);
-  }
-  // Global pause hotkey — same guarded registration as ⌘⇧G; dispatches the
-  // identical menu_action the tray and POST /control send.
-  try {
-    const registered = globalShortcut.register("CommandOrControl+Shift+P", () => {
-      try {
-        dispatchMenuAction("pause_toggle");
-      } catch (error) {
-        console.error(`Pause hotkey dispatch failed: ${error}`);
-      }
-    });
-    if (!registered) {
-      console.error("⌘⇧P pause hotkey is held by another app; keyboard pause will not fire");
-    }
-  } catch (error) {
-    console.error(`Failed to register pause hotkey: ${error}`);
-  }
   createWindow();
   maybeCreateTray(cliArgs());
 }).catch((error) => {
   // A createWindow throw (bad --camera-resolution, zero displays) would
-  // otherwise leave a windowless app idling with the hotkey registered.
+  // otherwise leave a windowless app idling.
   console.error(`Startup failed: ${error instanceof Error ? error.stack || error.message : error}`);
   app.quit();
 });
@@ -1526,7 +1516,6 @@ app.on("window-all-closed", () => {
   if (isHostedMode()) {
     return;
   }
-  globalShortcut.unregisterAll();
   lipClickController?.releaseNow();
   if (cursorIdlePoll) {
     clearInterval(cursorIdlePoll);

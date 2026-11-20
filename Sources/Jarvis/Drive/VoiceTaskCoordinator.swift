@@ -2390,7 +2390,10 @@ final class VoiceTaskCoordinator {
             // A cancelled hint still runs to the end of its awaits —
             // never let a dead hold arm a pump behind endListeningHint.
             guard !Task.isCancelled else { return }
-            self.startGazePump()
+            // The always-on service already feeds the overlay every
+            // sample and owns reconnects and the stale dim — a second
+            // 15 Hz main-actor pump would only double-feed the dwell.
+            if !self.gazeService.running { self.startGazePump() }
             if let front = NSWorkspace.shared.frontmostApplication?.localizedName {
                 _ = await self.resolver.resolve(front)
             }
