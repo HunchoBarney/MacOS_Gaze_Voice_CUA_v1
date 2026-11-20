@@ -360,14 +360,6 @@ final class RealtimePlayer: @unchecked Sendable {
         }
     }
 
-    /// How much of the current item actually played — the truncation point.
-    /// playedMs is cumulative, so per-item progress is the delta since the
-    /// item started.
-    func playedMilliseconds() -> Int {
-        lock.lock(); defer { lock.unlock() }
-        return max(0, Int((playedMs - itemStartPlayedMs).rounded(.down)))
-    }
-
     /// Stop playback and drop everything queued — the local half of barge-in.
     /// Returns (itemID, playedMs) so the caller can truncate server-side.
     /// `untilResponseDone` is set when the interrupted response's done event

@@ -566,13 +566,6 @@ final class RealtimeVoiceClient {
         return itemID
     }
 
-    /// Attach a screen image the model can look at this turn.
-    func sendImage(jpegBase64: String, caption: String? = nil) async throws {
-        throw VoiceError("realtime_images_forbidden")
-    }
-
-    /// Remove a conversation item — used for keep-latest-1 screenshot hygiene
-    /// so old images stop re-billing and diluting attention every turn.
     /// Per-turn context injection. A small
     /// user-role note carrying facts about right now (local time, active
     /// app, what's waiting); instructions tell the model to use it silently.

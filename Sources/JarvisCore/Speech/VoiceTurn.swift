@@ -257,7 +257,6 @@ public struct VoiceResponseAuthority: Sendable {
     public init() {}
 
     public var boundTurn: VoiceTurnToken? { ticket?.admission?.turn }
-    public var boundResponseID: String? { ticket?.responseID }
     public var purpose: Purpose? { ticket?.purpose }
     public var inputItemID: String? { ticket?.inputItemID }
     public var waitingForRetirement: Bool { retiringCreation || !retiredResponses.isEmpty }

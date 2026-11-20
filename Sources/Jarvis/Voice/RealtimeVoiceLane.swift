@@ -263,9 +263,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         return session
     }()
-    /// Retired perception-lane seam — no images ride the socket, so
-    /// nothing calls it; it survives only for scripted tests.
-    var screenShotProvider: (() async -> Data?)?
     /// Facts about right now — local time, active app, what's waiting.
     /// Injected as a [context] note once per user turn; wired by
     /// VoiceController.
@@ -275,9 +272,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
     var respondOnCommit = true {
         didSet { if !respondOnCommit { speechSession.enterDictation() } }
     }
-    /// The turn-screenshot lane is deleted — permanently false, kept
-    /// only for scripted tests that pin the retirement.
-    var wantsTurnScreenshot: Bool { false }
     /// systemUptime at Fn-down, set by VoiceController before start() —
     /// the mic gate's press marker. The gate rings ~1s of pre-open tap
     /// audio and flushes only what follows this marker, so a slow
@@ -1525,14 +1519,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
         return session.name
     }
 
-    /// The detached pump's one trip back to the actor — a send that hit a
-    /// dead socket fails the owning capture only.
-    private func sendFailed(id: UUID, error: Error) {
-        guard active?.id == id, !Task.isCancelled else { return }
-        Self.log.notice("realtime_send_failed session=\(id.uuidString, privacy: .private) error=\(error.localizedDescription, privacy: .public)")
-        onEvent?(id, .failure("The voice connection dropped. Release Fn to retry."))
-    }
-
     /// Internal for tests: a stale handler (preparationID no longer current)
     /// must be a no-op — only the live input lifecycle may suspend.
     func interruptionHandler(session id: UUID) -> @Sendable () -> Void {
@@ -1709,29 +1695,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
-    /// The completed input transcript for THIS turn — computer_command's
-    /// heard-vs-called check wants the user's final words, but a function
-    /// call can outrun input_audio_transcription.completed. Waits up to
-    /// ~200ms when this turn had speech input; typed turns (no transcript
-    /// exists) and already-settled transcripts return immediately. Runs
-    /// inside dispatchTool's task — the event loop never blocks.
-    private func settledTranscript() async -> String? {
-        let deadline = ProcessInfo.processInfo.systemUptime + Self.transcriptSettleCap
-        while transcriptPending, turnTranscript == nil, !Task.isCancelled,
-              ProcessInfo.processInfo.systemUptime < deadline {
-            try? await Task.sleep(for: .milliseconds(25))
-        }
-        if transcriptPending, turnTranscript == nil {
-            Self.log.notice("transcript_wait_timeout session=\(self.turnID?.uuidString ?? "none", privacy: .private) — dispatching without the final transcript")
-        }
-        let text = turnTranscript ?? ""
-        return text.isEmpty ? nil : text
-    }
-
-    /// The transcript-wait cap — it only guards the heard-vs-called
-    /// diagnostic, so the budget stays small. Internal for tests.
-    static let transcriptSettleCap: TimeInterval = 0.2
-
     /// Turn bookkeeping after a tool result reached the model — split from
     /// the socket send so tests can drive it. A say-carrying contract
     /// result ends the turn without a second response
@@ -1887,7 +1850,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private func completeLocalDecision(_ admission: VoiceAdmission, reportAdmission: Bool = true) {
         guard turnID == admission.turn.id else { return }
-        speechSession.discardRemoteAudio()
         if reportAdmission && (admission.route == .clarify || admission.route == .refuse) {
             let message: String
             switch admission.reason {
@@ -1903,27 +1865,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
         turnID = nil
         prepareNext()
         flushSpeech()
-    }
-
-    /// The turn's screenshot + [context] note go out while the user is
-    /// still talking — the socket is idle during the hold, so the release
-    /// path is drain → commit → response.create. finish() awaits this
-    /// task before commitAudio so both land ahead of the audio item.
-    /// Advisory: a failed send is logged and the turn continues; a
-    /// cancelled or dictation-converted turn sends nothing. Internal for
-    /// tests — driven directly, no socket needed.
-    func sendTurnAssets(session id: UUID) async {
-        guard pendingReasoning?.turn.id == id else { return }
-        await injectTurnContext()
-    }
-
-    /// The per-turn [context] note — advisory, so a failed send never
-    /// wedges the turn; the previous confirmed note is deleted inside the
-    /// call and the new id lands via .itemCreated.
-    private func injectTurnContext() async {
-        guard let note = await contextProvider?(), !note.isEmpty else { return }
-        do { try await client.sendContextNote(note, replacing: lastContextItemID) }
-        catch { Self.log.notice("context_note_failed \(error.localizedDescription, privacy: .public)") }
     }
 
     /// Arms the drain defer: if the output engine wedges (device pulled,
@@ -2135,7 +2076,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
             } catch {
                 guard self.turnID == active.id else { return }
                 self.holding = false
-                self.speechSession.discardRemoteAudio()
                 self.onEvent?(active.id, .failure(error.localizedDescription))
             }
         }

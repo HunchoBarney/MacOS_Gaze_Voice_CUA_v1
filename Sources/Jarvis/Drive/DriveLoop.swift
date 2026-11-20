@@ -256,7 +256,7 @@ actor DriveLoop {
          explicitConsent: Bool = true,
          /// Read-only observation lane — the coordinator routes it over a
          /// second transport so an in-flight mutation can't starve the
-         /// next observe (`CuaConnectionPool` enforces read-only on the
+         /// next observe (the coordinator enforces read-only before the
          /// wire). Nil keeps every read on `call` — the serialized
          /// behavior tests and agent loops already have.
          callRead: Call? = nil,

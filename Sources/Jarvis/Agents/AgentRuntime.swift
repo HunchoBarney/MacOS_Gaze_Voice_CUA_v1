@@ -85,16 +85,6 @@ final class AgentRuntime: ObservableObject {
         return agent
     }
 
-    func removeAgent(_ agent: CompanionAgent) async throws {
-        await bridge.stop(slug: agent.slug)
-        try await store.remove(slug: agent.slug)
-        // Per-slug turn state dies with the agent — a late event must not
-        // linger on a turn that can never complete.
-        activeTurns[agent.slug] = nil
-        pendingSends[agent.slug] = nil
-        await refreshRoster()
-    }
-
     // MARK: Turns
 
     @discardableResult

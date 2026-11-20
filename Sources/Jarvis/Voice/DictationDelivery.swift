@@ -301,21 +301,6 @@ struct DictationDelivery: DictationDelivering {
             kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success
     }
 
-    /// The focused element's AXValue readback, when the app exposes it as a
-    /// string — nil means unreadable, which is never evidence of a failed
-    /// write (secure fields and masked editors simply don't mirror it).
-    static func focusedElementValue() -> String? {
-        let system = AXUIElementCreateSystemWide()
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        var contents: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(value as! AXUIElement,
-            kAXValueAttribute as CFString, &contents) == .success,
-              let text = contents as? String else { return nil }
-        return text
-    }
-
     /// Snapshot → set dictated text → ⌘V → restore. The restore waits out a
     /// settle beat so the frontmost app has consumed the paste before the
     /// user's prior clipboard contents go back. Residual race: the settle is

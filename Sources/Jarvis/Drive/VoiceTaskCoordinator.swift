@@ -664,7 +664,7 @@ final class VoiceTaskCoordinator {
         if let inFlight = connectReadTask { return try await inFlight.value }
         let task = Task<CuaConnection, Error> {
             let socket = try await CuaDaemonHost.shared.socket()
-            let conn = CuaConnectionPool.makeReadConnection()
+            let conn = CuaConnection()
             try await conn.connect(socket: socket)
             return conn
         }
@@ -1134,8 +1134,6 @@ final class VoiceTaskCoordinator {
             onChange()
         }
     }
-
-    func cancelSelected() { selectedID.map(cancel) }
 
     /// A parked `.choice` anywhere on the spine — a radial is up, so
     /// Escape must be consumable or the key leaks to the frontmost app
