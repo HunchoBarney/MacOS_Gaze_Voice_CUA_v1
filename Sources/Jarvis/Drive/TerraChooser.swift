@@ -77,7 +77,10 @@ enum TerraChooser {
             try Task.checkCancellation()
             guard !candidates.isEmpty, Set(candidates.map(\.id)).count == candidates.count else { return nil }
             let app = state["app"]?.string ?? ""
+            let owner = state["_app_identity"]
             guard !SensitiveContent.isVault(bundleID: app, appName: app),
+                  !SensitiveContent.isVault(bundleID: owner?["bundle_id"]?.string,
+                                            appName: owner?["name"]?.string ?? ""),
                   !SensitiveContent.isVault(bundleID: nil, appName: state["window"]?.string ?? "") else {
                 throw Refusal.passwordManager
             }
@@ -125,8 +128,18 @@ enum TerraChooser {
         }
         add("Clipboard or context", state["clipboard_or_context"]?.string)
         add("Looking at", state["gaze_hint"]?.string)
-        add("Screen", state["observed_content"]?.string)
-        add("Field values", state["screen_values"]?.string)
+        var screen = state["observed_content"]?.string
+        var values = state["screen_values"]?.string
+        if let rows = state["_rows"]?["shown"]?.array {
+            let text = DriveCandidates.observedText(
+                rows: rows.map { (label: $0["label"]?.string ?? "", value: $0["value"]?.string) },
+                omitted: state["_rows"]?["omitted"]?.integer ?? 0,
+                hide: SensitiveContent.isSensitiveLabel)
+            screen = text.content
+            values = text.values
+        }
+        add("Screen", screen)
+        add("Field values", values)
         let details = state["_candidate_details"]?.object ?? [:]
         lines.append("Options:")
         for candidate in candidates {
@@ -137,18 +150,22 @@ enum TerraChooser {
     }
 
     /// Hides the value in every "label: value" or "label=value" pair whose
-    /// label names a secret, then masks card numbers anywhere.
+    /// label names a secret, then masks card numbers anywhere. A label can
+    /// hold a separator itself ("Payment: CVV: 123"), so every prefix that
+    /// ends at one is a label candidate. Window rows reach the prompt
+    /// already redacted by label; this covers free text such as steps.
     static func redact(_ text: String) -> String {
         let lines = text.components(separatedBy: "\n").map { line in
             line.components(separatedBy: ", ").map { pair -> String in
-                let separators = [": ", "="].compactMap { separator in
-                    pair.range(of: separator).map { (separator, $0) }
+                var rest = pair.startIndex..<pair.endIndex
+                while let (separator, range) = [": ", "="].compactMap({ separator in
+                    pair.range(of: separator, range: rest).map { (separator, $0) }
+                }).min(by: { $0.1.lowerBound < $1.1.lowerBound }) {
+                    let label = String(pair[..<range.lowerBound])
+                    if SensitiveContent.isSensitiveLabel(label) { return label + separator + "[hidden]" }
+                    rest = range.upperBound..<pair.endIndex
                 }
-                guard let (separator, range) = separators.min(by: { $0.1.lowerBound < $1.1.lowerBound }) else {
-                    return pair
-                }
-                let label = String(pair[..<range.lowerBound])
-                return SensitiveContent.isSensitiveLabel(label) ? label + separator + "[hidden]" : pair
+                return pair
             }.joined(separator: ", ")
         }
         return SensitiveContent.maskCardNumbers(lines.joined(separator: "\n"))

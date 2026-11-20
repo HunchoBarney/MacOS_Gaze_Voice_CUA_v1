@@ -924,6 +924,26 @@ final class JevChooserTests: XCTestCase {
             candidates)
     }
 
+    func testJevNeverReceivesTheTerraOnlyRowsOrOwner() async throws {
+        FixtureProtocol.body = Data("{}".utf8)
+        FixtureProtocol.requestBodies = []
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FixtureProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let choose = JevChooser.make(client: JevClient(apiKey: "fixture-key", model: "jev-1.14.0", session: session))
+        _ = try? await choose(.object([
+            "goal": .string("save"), "current_instruction": .string("press Save"),
+            "_rows": .object(["shown": .array([]), "omitted": .number(0)]),
+            "_app_identity": .object(["name": .string("TextEdit")]),
+        ]), [("e1", "click 'Save' button"), ("done", "the goal is achieved")])
+        let body = try XCTUnwrap(FixtureProtocol.requestBodies.first)
+        let state = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: body)["state"]?.object)
+        XCTAssertNil(state["_rows"])
+        XCTAssertNil(state["_app_identity"])
+        XCTAssertEqual(state["current_instruction"]?.string, "press Save")
+    }
+
     func testProductionClientBatchesSelectionAndCandidateSupportOnce() async throws {
         let result = try await choose()
         XCTAssertEqual(FixtureProtocol.requests.count, 1)

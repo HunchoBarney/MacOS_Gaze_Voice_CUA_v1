@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import XCTest
 @testable import Jarvis
@@ -110,6 +111,58 @@ final class TerraChooserTests: XCTestCase {
         XCTAssertTrue(prompt.contains("City=Paris"))
         XCTAssertTrue(prompt.contains("Name on card: Ann Lee"))
         XCTAssertTrue(prompt.contains("Password=[hidden]"))
+    }
+
+    func testAWindowRowWithASensitiveLabelNeverSendsAnyPartOfItsValue() {
+        let rows: [(String, String?)] = [("Payment: CVV", "987"), ("Password", "hunter, two\nthree"),
+                                         ("City", "Paris"), ("Save", nil)]
+        let prompt = TerraChooser.prompt(state: .object([
+            "goal": .string("pay the bill"), "app": .string("Safari"),
+            "observed_content": .string("Payment: CVV: 987\nPassword: hunter, two\nthree"),
+            "screen_values": .string("Payment: CVV=987, Password=hunter, two\nthree"),
+            "_rows": .object([
+                "shown": .array(rows.map { .object(["label": .string($0.0), "value": $0.1.map(JSONValue.string) ?? .null]) }),
+                "omitted": .number(2),
+            ]),
+        ]), candidates: [("c0", "click 'Pay' button")])
+        for secret in ["987", "hunter", "two", "three"] {
+            XCTAssertFalse(prompt.contains(secret), "\(secret) leaked: \(prompt)")
+        }
+        for kept in ["Payment: CVV: [hidden]", "Password: [hidden]", "City: Paris", "City=Paris", "\nSave\n",
+                     "… 2 more element rows not listed"] {
+            XCTAssertTrue(prompt.contains(kept), "missing \(kept): \(prompt)")
+        }
+    }
+
+    func testALabelThatHoldsASeparatorIsStillReadAsALabel() {
+        XCTAssertEqual(TerraChooser.redact("Payment: CVV: 123, City: Paris"), "Payment: CVV: [hidden], City: Paris")
+        XCTAssertEqual(TerraChooser.redact("Card details: PIN=4321"), "Card details: PIN=[hidden]")
+        XCTAssertEqual(TerraChooser.redact("Order: 12: shipped"), "Order: 12: shipped")
+    }
+
+    func testThePasswordManagerCheckUsesTheBoundWindowsOwner() async {
+        let seen = LockedBox<[Data]>([])
+        let choose = TerraChooser.make(client: client(Self.payload(option: "c0", confidence: 1), seen: seen))
+        guard case .object(var fields) = state(app: "keychain", window: "login") else { return XCTFail() }
+        fields["_app_identity"] = .object(["bundle_id": .string("com.apple.keychainaccess"),
+                                           "name": .string("Keychain Access")])
+        do {
+            _ = try await choose(.object(fields), candidates)
+            XCTFail("expected a refusal")
+        } catch {
+            XCTAssertEqual(error as? TerraChooser.Refusal, .passwordManager)
+        }
+        XCTAssertTrue(seen.value.isEmpty)
+    }
+
+    func testThePickerStateNamesTheBoundWindowsOwner() {
+        let state = DriveCandidates.stateJSON(goal: "save", app: "text", window: "Untitled", options: [],
+                                              recentSteps: [], context: nil,
+                                              pid: Int(ProcessInfo.processInfo.processIdentifier))
+        XCTAssertEqual(state["_app_identity"]?["name"]?.string,
+                       NSRunningApplication.current.localizedName)
+        XCTAssertNil(DriveCandidates.stateJSON(goal: "save", app: "text", window: "Untitled", options: [],
+                                               recentSteps: [], context: nil)["_app_identity"])
     }
 
     func testStepsOfOneTaskShareTheirPromptPrefix() {

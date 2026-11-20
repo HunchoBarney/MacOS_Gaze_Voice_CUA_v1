@@ -436,6 +436,7 @@ actor JevDecider: Decider {
             recentSteps: obs.history.map { $0.summary },
             context: contextProvider?() ?? obs.task.context,
             snapshotID: snap.snapshotID,
+            pid: obs.task.window?.pid,
             fields: fields)
     }
 }

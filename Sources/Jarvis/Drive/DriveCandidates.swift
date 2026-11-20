@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import JarvisCore
@@ -77,6 +78,22 @@ enum DriveCandidates {
     /// the truncation so the model knows content exists beyond the listing.
     static let observedContentLimit = 140
 
+    /// The row text a picker reads: one "label: value" row per line, and
+    /// every "label=value" pair on one line. `hide` withholds a row's value
+    /// by its label, before any flattening can split it.
+    static func observedText(rows: [(label: String, value: String?)], omitted: Int,
+                             hide: (String) -> Bool = { _ in false }) -> (content: String, values: String?) {
+        let rows = rows.map { row in (label: row.label, value: row.value.map { hide(row.label) ? "[hidden]" : $0 }) }
+        var lines = ["Element rows from this window's accessibility tree — a row can name "
+            + "content scrolled out of view; only the picture shows what is rendered."]
+        lines += rows.map { $0.label + ($0.value.map { ": " + $0 } ?? "") }
+        if omitted > 0 {
+            lines.append("… \(omitted) more element rows not listed")
+        }
+        let values = rows.compactMap { row in row.value.map { "\(row.label)=\($0)" } }
+        return (lines.joined(separator: "\n"), values.isEmpty ? nil : values.joined(separator: ", "))
+    }
+
     static func observationFields(elements: [DriveLoop.Element], candidates: [Draft],
                                   goal: String, values: [String: String]) -> [String: JSONValue] {
         let visible = elements.filter { !isSecure(role: $0.role, label: $0.label) }
@@ -97,27 +114,20 @@ enum DriveCandidates {
             shown = visible.filter { keep.contains($0.index) }
             omitted = visible.count - shown.count
         }
-        var observedLines = [
-            "Element rows from this window's accessibility tree — a row can name "
-                + "content scrolled out of view; only the picture shows what is rendered."
-        ]
-        observedLines += shown.map {
-            $0.label + ($0.value.map { ": " + $0 } ?? "")
-        }
-        if omitted > 0 {
-            observedLines.append("… \(omitted) more element rows not listed")
-        }
+        let rows = shown.map { (label: $0.label, value: $0.value) }
+        let text = observedText(rows: rows, omitted: omitted)
         var fields: [String: JSONValue] = [
             "current_instruction": .string(goal),
-            "observed_content": .string(observedLines.joined(separator: "\n")),
+            "observed_content": .string(text.content),
             "supplied_field_labels": .array(values.keys.sorted().map(JSONValue.string)),
+            "_rows": .object([
+                "shown": .array(rows.map {
+                    .object(["label": .string($0.label), "value": $0.value.map(JSONValue.string) ?? .null])
+                }),
+                "omitted": .number(Double(omitted)),
+            ]),
         ]
-        let screenValues = shown.compactMap { element in
-            element.value.map { "\(element.label)=\($0)" }
-        }
-        if !screenValues.isEmpty {
-            fields["screen_values"] = .string(screenValues.joined(separator: ", "))
-        }
+        if let values = text.values { fields["screen_values"] = .string(values) }
         var candidateDetails: [String: JSONValue] = [:]
         for candidate in candidates {
             var details: [String: JSONValue] = ["bounds": .null]
@@ -554,6 +564,7 @@ enum DriveCandidates {
                           options: [String], recentSteps: [String],
                           context: String?,
                           snapshotID: String? = nil,
+                          pid: Int? = nil,
                           fields: [String: JSONValue] = [:]) -> JSONValue {
         var s: [String: JSONValue] = [
             "goal": .string(goal),
@@ -564,6 +575,12 @@ enum DriveCandidates {
             "snapshot_id": snapshotID.map(JSONValue.string) ?? .null,
         ]
         if let context { s["clipboard_or_context"] = .string(context) }
+        if let pid, let owner = NSRunningApplication(processIdentifier: pid_t(pid)) {
+            s["_app_identity"] = .object([
+                "bundle_id": owner.bundleIdentifier.map(JSONValue.string) ?? .null,
+                "name": owner.localizedName.map(JSONValue.string) ?? .null,
+            ])
+        }
         for (key, value) in fields where s[key] == nil { s[key] = value }
         if let details = s["_candidate_details"]?.object {
             s["_candidate_details"] = .object(details.mapValues { value in
