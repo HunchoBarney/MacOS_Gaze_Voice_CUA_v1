@@ -32,6 +32,7 @@ build:
 	swift build -c release
 
 test:
+	scripts/test-local-ci.sh
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
 	swift test --parallel
 	cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts
