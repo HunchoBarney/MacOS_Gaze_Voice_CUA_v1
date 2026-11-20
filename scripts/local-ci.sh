@@ -36,7 +36,7 @@ take_lock() {
     if mkdir "$LOCK" 2>/dev/null; then echo $$ >"$LOCK/pid"; return 0; fi
     local holder
     holder=$(cat "$LOCK/pid" 2>/dev/null)
-    if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then return 1; fi
+    if [ -n "$holder" ] && ps -p "$holder" -o command= 2>/dev/null | grep -q local-ci; then return 1; fi
     rm -rf "$LOCK" && mkdir "$LOCK" 2>/dev/null && echo $$ >"$LOCK/pid"
 }
 
@@ -47,7 +47,8 @@ release_lock() {
 resolve() {
     case $1 in
         [0-9]|[0-9][0-9]|[0-9][0-9][0-9]|[0-9][0-9][0-9][0-9])
-            "$GH" pr view "$1" -R "$REPO" --json headRefOid --jq .headRefOid ;;
+            "$GH" pr view "$1" -R "$REPO" --json headRefOid,isCrossRepository \
+                --jq 'if .isCrossRepository then "fork" else .headRefOid end' ;;
         *) "$GH" api "repos/$REPO/commits/$1" --jq .sha ;;
     esac
 }
@@ -76,9 +77,20 @@ summary() {
     echo "$out"
 }
 
+# SIGTERM a process group, then SIGKILL it if it is still alive after a grace period.
+stop_group() {
+    kill -TERM -- "-$1" 2>/dev/null || return 0
+    local i
+    for ((i = 0; i < $2; i++)); do
+        kill -0 -- "-$1" 2>/dev/null || return 0
+        sleep 1
+    done
+    kill -KILL -- "-$1" 2>/dev/null
+}
+
 test_pid=""
 on_signal() {
-    [ -n "$test_pid" ] && kill -TERM -- "-$test_pid" 2>/dev/null
+    [ -n "$test_pid" ] && stop_group "$test_pid" 10
     [ -n "${sha:-}" ] && post "$sha" error "cancelled on the Mac"
     exit 130
 }
@@ -89,7 +101,6 @@ run_sha() {
     local log=$LOGS/$sha.log short=${1:0:12}
     mkdir -p "$LOGS"
     : >"$log"
-    trap on_signal TERM INT HUP
     post "$sha" pending "waiting for the build lane" || { say "could not post status for $sha"; return 1; }
 
     local waited=0
@@ -121,17 +132,22 @@ run_sha() {
     (cd "$CHECKOUT" && exec nice -n 10 taskpolicy -c utility make test) >>"$log" 2>&1 &
     test_pid=$!
     set +m
-    (sleep "$TEST_TIMEOUT" && kill -TERM -- "-$test_pid") >/dev/null 2>&1 &
+    rm -f "$CI_HOME/timed-out"
+    (sleep "$TEST_TIMEOUT" && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$test_pid"; rc=$?
     test_pid=""
-    pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
+    if [ -e "$CI_HOME/timed-out" ]; then
+        wait "$watchdog"
+    else
+        pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
+    fi
     local minutes=$(((SECONDS - start + 59) / 60)) counts
     counts=$(summary "$log")
     say "make test exited $rc after $minutes min: $counts" | tee -a "$log"
     if [ "$rc" -eq 0 ]; then
         post "$sha" success "${counts:-make test passed} · ${minutes} min"
-    elif [ "$minutes" -ge $((TEST_TIMEOUT / 60)) ]; then
+    elif [ -e "$CI_HOME/timed-out" ]; then
         post "$sha" failure "timed out after $minutes min · log $short.log"
     else
         post "$sha" failure "make test failed${counts:+ · $counts} · log $short.log"
@@ -177,11 +193,14 @@ poll() {
     say "every head has a $CONTEXT status"
 }
 
+trap on_signal TERM INT HUP
+
 case ${1:-} in
     "" | -h | --help) sed -n '2,6p' "$0"; exit 2 ;;
     poll) poll ;;
     *)
         target=$(resolve "$1") && [ -n "$target" ] || { echo "cannot resolve $1" >&2; exit 2; }
+        [ "$target" = fork ] && { echo "refusing PR #$1: its head is in a fork" >&2; exit 2; }
         waited=0
         until take_lock; do
             [ "$waited" -ge "$LANE_TIMEOUT" ] && { echo "another local-ci job held the lock for $LANE_TIMEOUT s" >&2; exit 1; }

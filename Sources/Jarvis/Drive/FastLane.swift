@@ -96,9 +96,16 @@ struct FastAction: Sendable {
         /// again". The coordinator owns the replay log; the executor asks
         /// it through the injected seam and refuses honestly when empty.
         case repeatLast
-        /// "Where did X go" — locate a minimized/hidden/off-Space window
-        /// by app name or title fragment, report where it is, restore it.
+        /// "Where did X go" — find out why a window left the screen
+        /// (minimized, hidden, full screen, another desktop, off the edge,
+        /// buried, closed, quit, Stage Manager), fix it and say why. An
+        /// empty query ("where did my window go", "everything
+        /// disappeared") means the app in front.
         case locate(query: String)
+        /// Take the bound window out of macOS full screen: the AXFullScreen
+        /// attribute, then the window's full-screen button, then View →
+        /// Exit Full Screen, and only then ⌃⌘F — each rung read back.
+        case exitFullScreen
         /// A control named out loud — "click Send", "press Reply all". The
         /// executor matches the name against the front window's labelled
         /// controls; no gaze and no model call. Several equal matches get
@@ -129,6 +136,9 @@ struct FastAction: Sendable {
         case showNames
         /// A halo around the one control a "show me <name>" matched.
         case highlight
+        /// The glow on a consequential control as Jarvis presses it for
+        /// the person ("click Send"). Never parsed from speech.
+        case pressGlow
         case hideNumbers
         /// Pick chip N — resolves through the pending overlay state, so a
         /// spoken number only acts while chips are up.
@@ -310,6 +320,10 @@ struct FastAction: Sendable {
         // outranks it ("minimize in notes on this monitor" still names notes).
         let display = peelDisplayScope(normalized)
         var command = display.rest
+        // "the menu bar is gone" means full screen, not a menu called "the".
+        if let exit = table[command], case .exitFullScreen = exit.body {
+            return (exit, display.scoped ? Self.gazeDisplayQualifier : nil)
+        }
         // Menu frames carry their own "in the X menu" preposition — the
         // app-qualifier split would eat the tail as an app name, so the
         // frame parses before the split.
@@ -964,19 +978,39 @@ struct FastAction: Sendable {
     /// a search, never a window hunt.
     private static func parseLocate(_ command: String) -> FastAction? {
         var rest: String?
-        for prefix in ["where did ", "where is ", "wheres ", "bring back ", "find my "] {
+        for prefix in ["where did ", "where is ", "wheres ", "bring back ", "find my ", "i lost "] {
             if command.hasPrefix(prefix) { rest = String(command.dropFirst(prefix.count)); break }
+        }
+        // "my window disappeared" / "everything is gone" — the suffix forms
+        // only ever name windows or everything, never an app: "the sound is
+        // gone" is not a window hunt.
+        var suffixed = false
+        if rest == nil {
+            for suffix in [" disappeared", " is gone", " are gone", " went away", " vanished"]
+            where command.hasSuffix(suffix) {
+                rest = String(command.dropLast(suffix.count)); suffixed = true; break
+            }
         }
         guard var query = rest else { return nil }
         if query.hasSuffix(" go") { query = String(query.dropLast(3)) }
         // Packaging words are not the target — "where did my notes window
         // go" hunts "notes".
-        let words = query.split(separator: " ")
-            .map(String.init)
-            .filter { !["my", "the", "window", "windows", "app"].contains($0) }
+        let raw = query.split(separator: " ").map(String.init)
+        let words = raw.filter { !["my", "the", "window", "windows", "app", "all"].contains($0) }
         query = words.joined(separator: " ")
+        // "where did my window go" and "everything disappeared" name no app:
+        // the lane diagnoses the one in front.
+        let namesWindows = raw.contains("window") || raw.contains("windows") || query == "everything"
+        if query == "everything" { query = "" }
+        if suffixed, !query.isEmpty { return nil }
         // A pronoun or an empty remainder names nothing the lane can find.
-        guard !query.isEmpty, !["it", "this", "that", "there"].contains(query) else { return nil }
+        guard !query.isEmpty || namesWindows,
+              !["it", "this", "that", "there"].contains(query) else { return nil }
+        guard !query.isEmpty else {
+            return FastAction(body: .locate(query: ""), generic: true,
+                              description: "Finding your window",
+                              result: "Found your window", effect: .delivered)
+        }
         return FastAction(body: .locate(query: query), generic: true,
                           description: "Finding where “\(query)” went",
                           result: "Located “\(query)”", effect: .delivered)
@@ -1228,10 +1262,25 @@ struct FastAction: Sendable {
              "make it fullscreen", "make this fullscreen", "maximize", "maximise"],
             ["ctrl", "cmd", "f"], "⌃⌘F", "Entering full screen", "Entered full screen", .boundsToScreen,
             generic: true)
-        add(["exit full screen", "exit fullscreen", "leave full screen", "leave fullscreen",
-             "leave full-screen", "exit full-screen"],
-            ["ctrl", "cmd", "f"], "⌃⌘F", "Exiting full screen", "Exited full screen", .boundsFromScreen,
-            generic: true)
+        // Exit full screen is its own ladder, not a blind ⌃⌘F toggle — the
+        // chord would put a normal window INTO full screen. "The menu bar
+        // is gone" is how most people notice they're in it.
+        let exitFullScreen = FastAction(body: .exitFullScreen, generic: true,
+                                        description: "Exiting full screen",
+                                        result: "Exited full screen", effect: .boundsFromScreen)
+        for phrase in ["exit full screen", "exit fullscreen", "leave full screen", "leave fullscreen",
+                       "leave full-screen", "exit full-screen", "exit full screen mode",
+                       "get out of full screen", "get out of fullscreen", "come out of full screen",
+                       "turn off full screen", "turn off fullscreen", "turn full screen off",
+                       "take it out of full screen", "take this out of full screen",
+                       "make it a normal window", "make this a normal window",
+                       "make it a regular window", "make it a normal window again",
+                       "the menu bar is gone", "my menu bar is gone", "menu bar is gone",
+                       "the menu bar disappeared", "my menu bar disappeared",
+                       "where is the menu bar", "where did the menu bar go",
+                       "i cant see the menu bar", "bring back the menu bar"] {
+            t[phrase] = exitFullScreen
+        }
         addKey(["press enter", "press return", "hit enter", "hit return",
                 "press the enter key", "press the return key"], "return", "Return")
         addKey(["press escape", "press esc", "hit escape", "press the escape key"], "escape", "Escape")

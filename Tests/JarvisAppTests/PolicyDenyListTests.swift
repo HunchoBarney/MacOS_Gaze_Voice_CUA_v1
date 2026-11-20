@@ -2,10 +2,10 @@ import XCTest
 @testable import Jarvis
 import JarvisCore
 
-/// Contract for the expanded phrase list: consequential vocabulary that
-/// previously only the dwell lane refused now walls every path — the
-/// bare words match their inflections ("delete" covers "Delete Draft"),
-/// and a security dialog's "Allow" refuses like any protected phrase.
+/// Contract for the never list: what no grant, spoken command or yes
+/// unlocks. Ordinary consequential words (Send, Reply, Delete, Allow)
+/// are not on it; those press on the person's own words and ask first
+/// otherwise (ConsequenceTests).
 final class PolicyDenyListTests: XCTestCase {
 
     private func decide(_ tool: String, elementText: String,
@@ -14,13 +14,11 @@ final class PolicyDenyListTests: XCTestCase {
                          standingGrant: grant)
     }
 
-    /// Each expansion phrase refuses even under the standing grant —
-    /// deny ordering is unchanged, grant never precedes it.
-    func testExpandedPhrasesDenyUnderGrant() {
+    /// Each never-list phrase refuses even under the standing grant.
+    func testNeverListDeniesUnderGrant() {
         for text in [
-            "Move to Trash", "Delete", "Send", "Reply", "Reply All",
-            "Checkout", "Place your order", "Buy now", "Confirm purchase",
-            "Sign out", "Erase", "Format", "Reset",
+            "Empty Trash", "Erase This Mac", "Factory Reset", "Wire Transfer",
+            "Delete Account", "Allow Remote Access", "Download AnyDesk", "Buy gift card",
         ] {
             guard case .deny = decide("click", elementText: text) else {
                 return XCTFail("'\(text)' must deny under the standing grant")
@@ -28,42 +26,20 @@ final class PolicyDenyListTests: XCTestCase {
         }
     }
 
-    /// The security-dialog "Allow" — a privilege prompt must never be
-    /// answered by the loop, whichever app drew it.
-    func testAllowDialogRefuses() {
-        guard case .deny = decide("click",
-                                  elementText: "Allow — wants access to the microphone") else {
-            return XCTFail("an Allow consent dialog must deny")
+    /// The flat refusal of everyday words is gone: one policy, not two.
+    func testEverydayWordsAreNotOnTheList() {
+        for text in ["Move to Trash", "Delete", "Send", "Reply", "Reply All", "Checkout",
+                     "Place your order", "Buy now", "Sign out", "Allow", "Reset"] {
+            XCTAssertNil(CuaPolicy.deniedPhrase(in: text), text)
         }
-        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "Allow"))
     }
 
-    /// Bare entries deliberately cover their inflections — "deleted" and
-    /// "resend" are the same effect spelled differently.
-    func testBareWordsMatchInflections() {
-        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "Delete Draft"))
-        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "Resend message"))
-        XCTAssertNotNil(CuaPolicy.deniedPhrase(in: "Replying all"))
-    }
-
-    /// Separator-normalized matching is preserved through the hoist:
-    /// "Move-To-Trash" is the same phrase with hyphens for spaces.
-    func testNormalizedMatchingSurvivesHoist() {
-        XCTAssertEqual(CuaPolicy.deniedPhrase(in: "the Move-To-Trash item"),
-                       "move to trash")
-        XCTAssertEqual(CuaPolicy.deniedPhrase(in: "the Empty Trash menu item"),
-                       "empty trash")
+    /// Separator-normalized matching: "Erase-This-Mac" is the same phrase
+    /// with hyphens for spaces.
+    func testNormalizedMatching() {
+        XCTAssertEqual(CuaPolicy.deniedPhrase(in: "the Erase-This-Mac item"), "erase this mac")
+        XCTAssertEqual(CuaPolicy.deniedPhrase(in: "the Empty Trash menu item"), "empty trash")
         XCTAssertNil(CuaPolicy.deniedPhrase(in: ""))
-    }
-
-    /// First hit in list order reports the fuller phrase — "empty trash"
-    /// outranks the bare "delete" only when it actually appears; order in
-    /// `deniedPatterns` is the order the hoist preserves.
-    func testFirstHitReportsSpecificPhrase() {
-        XCTAssertEqual(CuaPolicy.deniedPhrase(in: "send payment now"),
-                       "send payment")
-        XCTAssertEqual(CuaPolicy.deniedPhrase(in: "send it"),
-                       "send")
     }
 
     /// The `[String]` corpus overload — the five-field IntentCandidate
@@ -72,22 +48,18 @@ final class PolicyDenyListTests: XCTestCase {
         XCTAssertNil(CuaPolicy.deniedPhrase(in: ["Save", "", "Notes"]))
         XCTAssertEqual(
             CuaPolicy.deniedPhrase(
-                in: ["Buy", "AXButton", "https://shop.example/checkout",
-                     "Shop", "Cart"]),
-            "checkout")
-        // Any field may carry the hit — app name as much as the label.
+                in: ["Buy", "AXButton", "https://shop.example/gift-card", "Shop", "Cart"]),
+            "gift card")
         XCTAssertEqual(CuaPolicy.deniedPhrase(in: ["OK", "", "", "Factory Reset"]),
                        "factory reset")
     }
 
-    /// A protected label inside `decide` still denies before the grant,
-    /// and a clean label still flows.
+    /// A never-list label inside `decide` denies before the grant, and a
+    /// clean label still flows.
     func testDecideOrderingUnchanged() {
-        guard case .deny = decide("click", elementText: "Sign out",
-                                  grant: true) else {
+        guard case .deny = decide("click", elementText: "Delete Account", grant: true) else {
             return XCTFail("deny must precede the grant")
         }
-        XCTAssertEqual(decide("click", elementText: "Save File", grant: true),
-                       .allow)
+        XCTAssertEqual(decide("click", elementText: "Save File", grant: true), .allow)
     }
 }
