@@ -33,6 +33,7 @@ build:
 test:
 	scripts/test-local-ci.sh
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
+	python3 -I ThirdParty/WebRTC/fetch.py "$(VENDOR)/WebRTC"
 	swift test --parallel
 	cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts
 	cd EyeTracking && corepack pnpm run typecheck
@@ -59,6 +60,7 @@ else
 # stage, sign, zip and checksum. build/Jarvis.app is overwritten every
 # time and only the newest $(KEEP_ZIPS) zips are kept.
 release: setup tracker
+	python3 -I ThirdParty/WebRTC/fetch.py "$(VENDOR)/WebRTC"
 	swift build -c release
 	ThirdParty/Cua/fetch-embedded-binaries.sh "$(VENDOR)"
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
@@ -75,6 +77,11 @@ release: setup tracker
 	cp "$(VENDOR)/Vosk/libvosk.dylib" "$(APP)/Contents/Resources/Vosk/libvosk.dylib"
 	ditto "$(VENDOR)/Vosk/model" "$(APP)/Contents/Resources/Vosk/model"
 	cp ThirdParty/Vosk/LICENSE ThirdParty/Vosk/README.md "$(APP)/Contents/Resources/ThirdParty/Vosk/"
+	mkdir -p "$(APP)/Contents/Frameworks" "$(APP)/Contents/Resources/ThirdParty/WebRTC"
+	ditto "$(VENDOR)/WebRTC/LiveKitWebRTC.xcframework/macos-arm64_x86_64/LiveKitWebRTC.framework" "$(APP)/Contents/Frameworks/LiveKitWebRTC.framework"
+	install_name_tool -add_rpath @executable_path/../Frameworks "$(APP)/Contents/MacOS/Jarvis"
+	cp "$(VENDOR)/WebRTC/LiveKitWebRTC.xcframework/LICENSE" "$(APP)/Contents/Resources/ThirdParty/WebRTC/LICENSE"
+	cp ThirdParty/WebRTC/README.md "$(APP)/Contents/Resources/ThirdParty/WebRTC/"
 	scripts/bundle-tracker.sh "$(APP)"
 	python3 scripts/check-packaged-tracker.py "$(APP)"
 	scripts/sign-app.sh "$(APP)"
