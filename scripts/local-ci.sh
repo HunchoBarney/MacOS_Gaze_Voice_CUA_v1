@@ -4,6 +4,7 @@
 #
 #   scripts/local-ci.sh <pr-number|sha|branch>   test one head now
 #   scripts/local-ci.sh poll                     test the newest untested head (launchd)
+#   scripts/local-ci.sh summary <log>            print the counts it would post for a log
 set -uo pipefail
 
 REPO=HunchoBarney/MacOS_Gaze_Voice_CUA_v1
@@ -53,38 +54,42 @@ resolve() {
     esac
 }
 
-# "swift <total>/<failed> fail · vitest <passed>/<all>". A parallel run's
+# "swift <total>/<failed> fail · vitest <passed>/<all>", with colour codes
+# stripped first and every vitest block (EyeTracking, CredentialService)
+# added up. A parallel run's
 # total is the last [N/N] progress line and counts only when every test ran;
 # a serial run's is XCTest's own summary.
 summary() {
-    local log=$1 part total=0 failed=0 skipped="" out=""
-    part=$(grep -aoE '^\[[0-9]+/[0-9]+\] Testing ' "$log" | tail -1)
+    local plain part total=0 failed=0 skipped="" out=""
+    plain=$(sed $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1")
+    part=$(grep -aoE '^\[[0-9]+/[0-9]+\] Testing ' <<<"$plain" | tail -1)
     if [ -n "$part" ]; then
         local ran listed
         ran=$(echo "$part" | sed -E 's/^\[([0-9]+)\/.*/\1/')
         listed=$(echo "$part" | sed -E 's/^\[[0-9]+\/([0-9]+)\].*/\1/')
         [ "$ran" = "$listed" ] && total=$listed
-        failed=$(grep -aoE "Test Case '-\[[^]]+\]' failed" "$log" | sort -u | wc -l | tr -d ' ')
+        failed=$(grep -aoE "Test Case '-\[[^]]+\]' failed" <<<"$plain" | sort -u | wc -l | tr -d ' ')
     fi
-    part=$(grep -aoE 'Executed [0-9]+ tests?, with .*[0-9]+ failures?' "$log" | tail -1)
+    part=$(grep -aoE 'Executed [0-9]+ tests?, with .*[0-9]+ failures?' <<<"$plain" | tail -1)
     if [ "$total" -eq 0 ] && [ -n "$part" ]; then
         total=$(echo "$part" | sed -E 's/Executed ([0-9]+).*/\1/')
         failed=$(echo "$part" | grep -oE '[0-9]+ failures?' | grep -oE '^[0-9]+')
         skipped=$(echo "$part" | grep -oE '[0-9]+ tests? skipped' | grep -oE '^[0-9]+' || true)
     fi
-    part=$(grep -aoE 'Test run with [0-9]+ tests? .*' "$log" | tail -1)
+    part=$(grep -aoE 'Test run with [0-9]+ tests? .*' <<<"$plain" | tail -1)
     if [ -n "$part" ]; then
         total=$((total + $(echo "$part" | sed -E 's/Test run with ([0-9]+).*/\1/')))
         failed=$((failed + $(echo "$part" | grep -oE '[0-9]+ issues?' | grep -oE '^[0-9]+' || echo 0)))
     fi
     [ "$total" -gt 0 ] && out="swift $total/$failed fail${skipped:+ ($skipped skipped)}"
-    part=$(grep -aE '^ *Tests +.*\([0-9]+\)' "$log" | tail -1)
-    if [ -n "$part" ]; then
-        local passed all
-        passed=$(echo "$part" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo 0)
-        all=$(echo "$part" | grep -oE '\([0-9]+\)' | tr -d '()')
-        out="${out:+$out · }vitest ${passed:-0}/$all"
-    fi
+    local passed=0 all=0 blocks=0 line
+    while read -r line; do
+        [ -n "$line" ] || continue
+        blocks=$((blocks + 1))
+        passed=$((passed + $(echo "$line" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo 0)))
+        all=$((all + $(echo "$line" | grep -oE '\([0-9]+\)' | tr -d '()')))
+    done <<<"$(grep -aE '^ *Tests +.*\([0-9]+\)' <<<"$plain")"
+    [ "$blocks" -gt 0 ] && out="${out:+$out · }vitest $passed/$all"
     echo "$out"
 }
 
@@ -211,8 +216,9 @@ poll() {
 trap on_signal TERM INT HUP
 
 case ${1:-} in
-    "" | -h | --help) sed -n '2,6p' "$0"; exit 2 ;;
+    "" | -h | --help) sed -n '2,7p' "$0"; exit 2 ;;
     poll) poll ;;
+    summary) summary "${2:?usage: local-ci.sh summary <log>}" ;;
     *)
         target=$(resolve "$1") && [ -n "$target" ] || { echo "cannot resolve $1" >&2; exit 2; }
         [ "$target" = fork ] && { echo "refusing PR #$1: its head is in a fork" >&2; exit 2; }
