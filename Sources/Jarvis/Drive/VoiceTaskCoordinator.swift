@@ -129,6 +129,9 @@ final class VoiceTaskCoordinator {
     /// Content-free latency spans; fixture runners may observe them without
     /// recording tool arguments, screen contents or credentials.
     var onLatencySpan: ((String, TimeInterval, TimeInterval) -> Void)?
+    /// When each work's command was handed over, until its first desktop
+    /// call closes the \`task.first_desktop_call\` span.
+    private var handoffAt: [UUID: TimeInterval] = [:]
     var onCommandStage: ((UUID?, UUID?, VoiceCommandTrace.Stage, VoiceCommandTrace.Tool?) -> Void)?
     var onNativeTextInsertion: ((UUID?, UUID, FocusedTextBinding.Insertion) -> Void)?
     /// task_event pushes into the realtime lane — (workID, payload, speak).
@@ -181,6 +184,8 @@ final class VoiceTaskCoordinator {
     private let resolver: AppResolver
     private let commandDriver: DriveLoop.Call?
     private let foregroundAppLauncher: ((String) async throws -> Int)?
+    private let desktopSpaces: DesktopSpaceSwitch.System
+    private let activateApp: (Int) -> Void
     var hasForegroundAppLauncher: Bool { foregroundAppLauncher != nil }
     private var connection: CuaConnection?
     private var connectTask: Task<CuaConnection, Error>?
@@ -301,8 +306,12 @@ final class VoiceTaskCoordinator {
     init(config: Config, jevAPIKey: @escaping () -> String,
          gazeService: GazeService? = nil, overlay: TargetOverlay? = nil,
          resolver: AppResolver? = nil, commandDriver: DriveLoop.Call? = nil,
-         foregroundAppLauncher: ((String) async throws -> Int)? = nil) {
+         foregroundAppLauncher: ((String) async throws -> Int)? = nil,
+         desktopSpaces: DesktopSpaceSwitch.System = .live,
+         activateApp: @escaping (Int) -> Void = DriveLoop.activateRunningApp) {
         self.config = config
+        self.desktopSpaces = desktopSpaces
+        self.activateApp = activateApp
         self.jevAPIKey = jevAPIKey
         self.resolver = resolver ?? AppResolver()
         self.commandDriver = commandDriver
@@ -935,6 +944,7 @@ final class VoiceTaskCoordinator {
         work.onConversationScroll = onConversationScroll
         if let guideGoal { startGuide(guideGoal, on: work) }
         tasks.append(work)
+        handoffAt[work.id] = started
         onCommandStage?(captureID, work.id, .workCreated, nil)
         selectedID = work.id
         work.worker = Task { [weak self] in
@@ -1399,6 +1409,7 @@ final class VoiceTaskCoordinator {
     // MARK: - Execution
 
     private func executeContinuousScroll(_ work: Work) async {
+        defer { handoffAt[work.id] = nil }
         work.continuousStartedAt = ProcessInfo.processInfo.systemUptime
         while work.active, !Task.isCancelled {
             guard work.scrollAuthorization?() == true else {
@@ -1430,6 +1441,7 @@ final class VoiceTaskCoordinator {
         let started = ProcessInfo.processInfo.systemUptime
         onCommandStage?(work.captureID, work.id, .executorBegin, nil)
         defer { onCommandStage?(work.captureID, work.id, .executorEnd, nil) }
+        defer { handoffAt[work.id] = nil }
         defer { onLatencySpan?("task.execution", started, ProcessInfo.processInfo.systemUptime) }
         feed.add(.route, "\(work.label) → drive loop")
         work.message = "Working…"
@@ -1512,6 +1524,7 @@ final class VoiceTaskCoordinator {
             nativeTextEvent: { [weak self] receipt in
                 await self?.recordNativeTextInsertion(receipt, turn: traceTurn, work: traceWork)
             },
+            activateApp: activateApp,
             foregroundAppLauncher: foregroundAppLauncher,
             gaze: { [weak self] in
                 // A live hold already owns the ~20Hz stream — reading it
@@ -1526,6 +1539,7 @@ final class VoiceTaskCoordinator {
                 // point fallback alive on a cold feed.
                 await self?.gazeService.commitTarget()
             },
+            desktopSpaces: desktopSpaces,
             overlayDispatch: { [weak self] verb, targets, point in
                 await self?.handleOverlayVerb(verb, targets: targets, gaze: point)
             },
@@ -1603,15 +1617,17 @@ final class VoiceTaskCoordinator {
         if keepScrolling, result.status == .done, result.dispatchedEffect, work.verifiedScroll != nil { return }
         let (outcome, say) = Self.describe(result, request: work.request)
         feed.add(.outcome, say)
+        let spoken = Self.spokenOutcome(outcome, say: say)
         taskEventSink(work.captureID,
                       VoiceToolResult(kind: VoiceToolResult.Kind.taskOutcome, status: VoiceToolResult.Status.ok,
-                                      say: VoiceToolResult.spoken(say, words: 30)).encoded(),
-                      true)
+                                      say: spoken ?? say).encoded(),
+                      spoken != nil)
         finish(work, outcome, say: say)
     }
 
     private func observedDriverCall(_ tool: String, _ args: [String: JSONValue],
                                     turn: UUID?, work: UUID, readOnly: Bool) async throws -> JSONValue {
+        firstDesktopCall(work)
         onCommandStage?(turn, work, .driverBegin, .init(tool))
         do {
             let result = try await (readOnly ? callRead(tool, args) : call(tool, args))
@@ -1624,7 +1640,19 @@ final class VoiceTaskCoordinator {
     }
 
     private func recordNativeStage(_ stage: VoiceCommandTrace.Stage, turn: UUID?, work: UUID) {
+        if [.nativeActivationBegin, .nativeUnhideBegin, .nativeForegroundReadBegin,
+            .nativeTextInsertionBegin, .nativeScrollBegin].contains(stage) {
+            firstDesktopCall(work)
+        }
         onCommandStage?(turn, work, stage, nil)
+    }
+
+    /// The command's hand-off (a final transcript or a model's delegation,
+    /// whichever voice stack sent it) to the first driver or native call
+    /// that reads or acts on the desktop.
+    private func firstDesktopCall(_ work: UUID) {
+        guard let start = handoffAt.removeValue(forKey: work) else { return }
+        onLatencySpan?("task.first_desktop_call", start, ProcessInfo.processInfo.systemUptime)
     }
 
     private func recordNativeTextInsertion(_ receipt: FocusedTextBinding.Insertion, turn: UUID?, work: UUID) {
@@ -1818,6 +1846,17 @@ final class VoiceTaskCoordinator {
         return !result.dispatchedEffect
     }
 
+    static let doneLine = "Done."
+
+    /// What a settled task says out loud: nothing for a clean success,
+    /// which the Glass chime and the press glow already mark, and the
+    /// headline of its line otherwise. A caveat or failure must still make
+    /// sense heard alone. nil = silent.
+    static func spokenOutcome(_ outcome: Work.Outcome, say: String) -> String? {
+        if case .done = outcome, say == doneLine { return nil }
+        return OutcomeWording.headline(say)
+    }
+
     /// DriveResult → (outcome, spoken line). `.done` is only reached with
     /// a confirmed effect behind it — the loop enforces that invariant.
     /// When the settle's own outcome line (the history tail the executor
@@ -1835,7 +1874,7 @@ final class VoiceTaskCoordinator {
                    tail.localizedCaseInsensitiveContains($0) }) {
                 return (.done, tail)
             }
-            return (.done, "Done.")
+            return (.done, Self.doneLine)
         case .alreadySatisfied:
             return (.alreadyDone, "That's already done.")
         case .blocked(let why), .blockedByConsent(let why):
@@ -2956,7 +2995,8 @@ final class VoiceTaskCoordinator {
             "that", "these", "those", "there", "here", "if", "but", "not", "no",
             "yes", "to", "for", "in", "on", "at", "of", "as", "by", "or", "and",
             "so", "do", "does", "did", "have", "has", "had", "shall", "should",
-            "may", "might", "must", "some", "any", "all"]
+            "may", "might", "must", "some", "any", "all",
+            "next", "previous", "last", "first", "new"]
         guard !nonActions.contains(w) else { return nil }
         let doubles: Set<String> = ["run", "stop", "quit", "set", "cut", "hit",
             "put", "shut", "sit", "win", "plan", "drag", "drop", "grab", "tap",

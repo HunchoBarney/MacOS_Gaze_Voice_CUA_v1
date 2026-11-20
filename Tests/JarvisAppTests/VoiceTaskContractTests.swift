@@ -47,6 +47,8 @@ final class VoiceTaskContractTests: XCTestCase {
     /// Non-verb instructions fall back to the raw request as the label.
     func testGerundPhraseFallback() {
         XCTAssertNil(VoiceTaskCoordinator.gerundPhrase(for: "   "))
+        XCTAssertNil(VoiceTaskCoordinator.gerundPhrase(for: "next desktop"), "never \"nexting desktop\"")
+        XCTAssertNil(VoiceTaskCoordinator.gerundPhrase(for: "new tab"), "never \"newing tab\"")
     }
 
     // MARK: Work row

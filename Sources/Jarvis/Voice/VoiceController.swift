@@ -330,6 +330,7 @@ final class VoiceController: ObservableObject {
         if usesRealtimeVoice {
             if let say = RealtimeVoiceLane.deterministicSay(text) { detail = say }
             guard microphoneEnabled, !handsFreePaused || manualOverride else { return }
+            if speak, config.ttsEnabled, let say = RealtimeVoiceLane.deterministicSay(text) { onSpokenLine?(say) }
             lane?.pushTaskEvent(text, speak: speak && config.ttsEnabled)
             return
         }
@@ -428,6 +429,11 @@ final class VoiceController: ObservableObject {
 
     private var speech: SpeechCapturing
     private let dictation: DictationDelivering
+    /// Every fixed line Jarvis hands to a voice, whichever voice speaks it.
+    /// The flow bench counts spoken words here.
+    var onSpokenLine: ((String) -> Void)?
+    private var fillerTurn: UUID?
+
     /// Spoken replies seam — nil or Config.ttsEnabled=false stays silent.
     var speaker: SpeechSynthesizing? {
         didSet {
@@ -468,6 +474,7 @@ final class VoiceController: ObservableObject {
     private let authorize: () async -> Bool
     private let timings: VoiceTimings
     private let frontmost: () -> String?
+    private let focusedWindow: () -> (pid: Int, bundle: String?, windowID: Int)?
     private var appObserver: AnyCancellable?
     private var subscriptions: Set<AnyCancellable> = []
     private var lastExternalApp: String?
@@ -533,11 +540,10 @@ final class VoiceController: ObservableObject {
         }
         context.entities = cachedVoiceEntities; context.agents = cachedVoiceAgents
         context.appRoles = cachedVoiceAppRoles
-        if let front = NSWorkspace.shared.frontmostApplication,
-           let id = FocusedTextBinding.capturedWindowID(pid: Int(front.processIdentifier)) {
-            context.windowID = id
-            context.targetAppID = front.bundleIdentifier
-            context.targetID = "window:\(front.processIdentifier):\(id)"
+        if let front = focusedWindow() {
+            context.windowID = front.windowID
+            context.targetAppID = front.bundle
+            context.targetID = "window:\(front.pid):\(front.windowID)"
             // The executor still validates the focused field before typing.
             context.editableTarget = true
         }
@@ -621,6 +627,7 @@ final class VoiceController: ObservableObject {
     init(config: Config? = nil, speech: SpeechCapturing? = nil,
          authorize: (() async -> Bool)? = nil,
          timings: VoiceTimings = VoiceTimings(), frontmost: (() -> String?)? = nil,
+         focusedWindow: (() -> (pid: Int, bundle: String?, windowID: Int)?)? = nil,
          cuaRuntime: VoiceTaskCoordinator? = nil,
          dictation: DictationDelivering = DictationDelivery(),
          speaker: SpeechSynthesizing? = nil,
@@ -642,6 +649,11 @@ final class VoiceController: ObservableObject {
             jevAPIKey: { [weak config] in config?.apiKey ?? "" })
         self.timings = timings
         self.frontmost = frontmost ?? { NSWorkspace.shared.frontmostApplication?.localizedName }
+        self.focusedWindow = focusedWindow ?? {
+            guard let front = NSWorkspace.shared.frontmostApplication,
+                  let id = FocusedTextBinding.capturedWindowID(pid: Int(front.processIdentifier)) else { return nil }
+            return (Int(front.processIdentifier), front.bundleIdentifier, id)
+        }
         if config.handsFreeEnabled, config.handsFreePaused { handsFreeState = .paused }
         lastExternalApp = self.frontmost()
         appObserver = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
@@ -775,6 +787,7 @@ final class VoiceController: ObservableObject {
                 }
             }.store(in: &subscriptions)
             lane.contextProvider = { [weak self] in await self?.turnContextNote() ?? "" }
+            lane.onFiller = { [weak self] id, line in self?.speakFiller(line, turn: id) }
             self.cua.taskEventSink = { [weak self, weak lane] capture, text, speak in
                 guard let self else { return }
                 if let capture, self.automaticCaptures.contains(capture) {
@@ -1753,12 +1766,14 @@ final class VoiceController: ObservableObject {
         // after Fn released and the status moved on to .executing.
         switch event {
         case .assistantDelta(let delta):
+            endFiller(turn: id)
             replyReceived = replyReceived || !delta.isEmpty
             replyDraft += delta
             detail = replyDraft
             if status == .finishing { status = .executing }
             return
         case .assistant(let text):
+            endFiller(turn: id)
             replyReceived = replyReceived || !text.isEmpty
             replyDraft = ""
             detail = text
@@ -1768,6 +1783,7 @@ final class VoiceController: ObservableObject {
             // second model turn, so the TTS seam voices `say` verbatim
             // and the card fills detail from it directly (no
             // assistantDone is coming to paint it).
+            endFiller(turn: id)
             detail = text
             replyReceived = replyReceived || !text.isEmpty
             speak(text)
@@ -1932,10 +1948,30 @@ final class VoiceController: ObservableObject {
         guard config.ttsEnabled, !text.isEmpty else { return }
         if usesRealtimeVoice {
             guard microphoneEnabled, !handsFreePaused || manualOverride else { return }
+            onSpokenLine?(text)
             (speech as? RealtimeVoiceLane)?.speakFeedback(text)
             return
         }
+        onSpokenLine?(text)
         speaker?.speak(text)
+    }
+
+    /// The slow-answer filler, under the same guards as `speak`. It plays
+    /// on the local voice: the lane's response slot is busy with the very
+    /// answer it waits on, so a pushed line would play after that answer.
+    private func speakFiller(_ text: String, turn id: UUID) {
+        guard sessionID == id, config.ttsEnabled, microphoneEnabled,
+              !handsFreePaused || manualOverride else { return }
+        fillerTurn = id
+        onSpokenLine?(text)
+        speaker?.speak(text)
+    }
+
+    /// The answer has started: a filler still playing stops under it.
+    private func endFiller(turn id: UUID) {
+        guard fillerTurn == id else { return }
+        fillerTurn = nil
+        speaker?.stop()
     }
 
     /// `voiced: false` — the realtime lane already played the reply's audio;
