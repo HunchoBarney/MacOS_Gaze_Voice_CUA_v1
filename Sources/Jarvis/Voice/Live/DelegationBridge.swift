@@ -10,8 +10,10 @@ struct DelegatedRequest: Sendable, Equatable {
     /// False after a Standby resume or in reply to an alert, where anyone
     /// in the room could have spoken: a consequential press asks first (D3).
     let speakerVerified: Bool
-    /// What "this" or "that" pointed at when it was said, if anything.
-    let referent: String?
+    /// When the first "this", "that", "here" or "it" was said, in
+    /// `ProcessInfo.systemUptime` seconds, so writing (L7) resolves it at
+    /// word time rather than call time.
+    let deicticTime: TimeInterval?
 }
 
 enum DelegationSpineReply: Sendable, Equatable {
@@ -225,11 +227,11 @@ final class DelegationBridge {
         let wordTime = Self.deicticStartMs(in: words).map { sessionStartUptime + Double($0) / 1000 }
         Task { [weak self] in
             guard let self else { return }
-            var referent: String?
-            if let wordTime, let resolveReferent { referent = await resolveReferent(wordTime) }
-            if let referent { self.send(.thinking, referent, for: key) }
+            if let wordTime, let resolveReferent, let referent = await resolveReferent(wordTime) {
+                self.send(.thinking, referent, for: key)
+            }
             let reply = await self.spine.begin(DelegatedRequest(id: id, text: text, speakerVerified: verified,
-                                                                referent: referent))
+                                                                deicticTime: wordTime))
             switch reply {
             case .started(let say):
                 self.send(.thinking, "Started: \(say). It isn't finished; don't say it's done until the result arrives.", for: key)
@@ -339,13 +341,15 @@ final class DelegationBridge {
 
 extension VoiceTaskCoordinator: DelegationSpine {
     /// Words that answer a parked question go to that question; anything
-    /// else is a new voice task, where the memory intents also live.
+    /// else is a new voice task, where the memory and writing intents also
+    /// live. The referent line stays out of `transcriptHint`: writing and
+    /// guide mode read that as the person's own words.
     func begin(_ request: DelegatedRequest) async -> DelegationSpineReply {
         if tasks.contains(where: \.awaitingAnswer), !VoiceAdmissionPolicy.explicitNewRequest(request.text) {
             return DelegationBridge.reply(fromPayload: await respondToTask(request.text) ?? "")
         }
         return DelegationBridge.reply(fromPayload: await beginVoiceTask(
-            request.text, transcriptHint: request.referent, captureID: request.id,
-            speakerVerified: request.speakerVerified))
+            request.text, captureID: request.id, speakerVerified: request.speakerVerified,
+            writing: WritingInput(deicticTime: request.deicticTime)))
     }
 }

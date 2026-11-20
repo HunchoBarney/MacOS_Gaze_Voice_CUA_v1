@@ -273,13 +273,19 @@ final class DelegationBridgeTests: XCTestCase {
             try await loop.consentGate(tool: "click", args: [:], elementText: "Send", denied: [], confirmed: &confirmed)
             XCTFail("the words don't cover the press")
         } catch DriveLoop.Abort.declined {}
+        do {
+            try await loop.gateExplicit("click", corpus: "Mail", denied: [], confirmed: &confirmed, press: "")
+            XCTFail("a click with no label asks too")
+        } catch DriveLoop.Abort.declined {}
         XCTAssertEqual(asked, [.confirm(Consequence.send.question(target: "Send")),
-                               .confirm(Consequence.send.question(target: "Send"))])
+                               .confirm(Consequence.send.question(target: "Send")),
+                               .confirm(Consequence.unnamed.question(target: ""))])
 
         asked = []
         await loop.bindSpokenGoal("click Send")
         try await loop.gateExplicit("click", corpus: "Send Mail", denied: [], confirmed: &confirmed, press: "Send")
         try await loop.consentGate(tool: "click", args: [:], elementText: "Send", denied: [], confirmed: &confirmed)
+        try await loop.gateExplicit("click", corpus: "Mail", denied: [], confirmed: &confirmed, press: "")
         XCTAssertTrue(asked.isEmpty, "the person who said the name presses at once")
     }
 
@@ -290,7 +296,7 @@ final class DelegationBridgeTests: XCTestCase {
         try await replay([started(), said("click", 2000, 2400), said("this", 2500, 2800),
                           delegation("del_1", at: 2900)].joined(separator: "\n"))
         XCTAssertEqual(resolvedAt, [102.5], "session start at uptime 100, word at 2500 ms")
-        XCTAssertEqual(spine.requests.first?.referent, "Looking at: the Send button in Mail")
+        XCTAssertEqual(spine.requests.first?.deicticTime, 102.5, "writing resolves \"this\" at the same moment")
         XCTAssertEqual(session.appends.first?.content, "Looking at: the Send button in Mail")
         XCTAssertEqual(session.appends.first?.delegationID, "del_1")
     }
