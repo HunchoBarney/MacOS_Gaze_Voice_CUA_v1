@@ -525,7 +525,7 @@ final class DesktopSwitchPhraseTests: XCTestCase {
             ("next desktop", .go(.step(.next))), ("go to the previous space", .go(.step(.previous))),
             ("go to my full-screen Safari", .go(.fullScreen(app: "safari"))),
             ("switch to full screen notes", .go(.fullScreen(app: "notes"))),
-            ("go to safari full screen", .go(.fullScreen(app: "safari"))),
+            ("go to safari full screen", .go(.fullScreen(app: "safari"))), ("open desktop 2", .go(.number(2))),
             ("Which desktop am I on?", .which), ("what desktop is this", .which),
             ("show me my desktops", .show), ("how many desktops do I have", .show),
             ("move this window to Desktop 2", .moveWindow(to: 2)),
@@ -545,7 +545,8 @@ final class DesktopSwitchPhraseTests: XCTestCase {
                        "go to Desktop 2 on the other monitor", "next window", "go to desktop 40",
                        "full screen safari", "go to full screen", "remove the photo",
                        "remove the extra spaces", "delete extra spaces", "remove the empty spaces",
-                       "move this to desktop", "put it on desktop", "send this to desktop"] {
+                       "move this to desktop", "put it on desktop", "send this to desktop",
+                       "open safari in full screen", "open safari full screen", "open full screen notes"] {
             XCTAssertNil(verb(phrase), phrase)
         }
         guard let showDesktop = FastAction.parse("show desktop"), case .systemHotkey = showDesktop.action.body else {

@@ -1093,7 +1093,7 @@ struct FastAction: Sendable {
         let goes = strip(command, ["go back to ", "go over to ", "go to ", "switch over to ", "switch to ",
                                    "take me to ", "bring me to ", "jump to ", "change to ", "move to ",
                                    "show me ", "open "])
-        guard let target = goes.flatMap({ desktopTarget($0, fullScreen: true) })
+        guard let target = goes.flatMap({ desktopTarget($0, fullScreen: !command.hasPrefix("open ")) })
                 ?? desktopTarget(command, fullScreen: false) else { return nil }
         switch target {
         case .number(let number):
