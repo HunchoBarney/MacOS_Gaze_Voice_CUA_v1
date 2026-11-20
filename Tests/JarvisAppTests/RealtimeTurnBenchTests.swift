@@ -21,7 +21,7 @@ import JarvisCore
 /// reported `usage` and is appended to a ledger outside the repository;
 /// the run stops before a turn that could cross either cap. The API key
 /// comes from OPENAI_API_KEY, set at launch from the Keychain
-/// (\`security find-generic-password -s com.chriswozniczek.jevvoice -a openAIAPIKey -w\`);
+/// (\`security find-generic-password -s com.karanvirkang.jarvis -a openAIAPIKey -w\`);
 /// without it the key is read in-process from the Keychain with user
 /// interaction disabled, so a permission prompt fails the run instead of
 /// appearing. It is never printed or written.
