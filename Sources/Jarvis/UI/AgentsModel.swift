@@ -175,7 +175,7 @@ final class AgentsViewModel: ObservableObject {
 
     /// The bound roster, or the persisted agents.json materialized off the
     /// main actor — AgentStore's init does a blocking read and constructing
-    /// it eagerly would stall launch (VoiceWindows builds this model inline).
+    /// it eagerly would stall launch (AppWindows builds this model inline).
     private func rosterProvider() async -> any AgentRosterProviding {
         if let roster { return roster }
         let loaded = await Task.detached { AgentStore(directory: AgentWorkspace.root()) }.value

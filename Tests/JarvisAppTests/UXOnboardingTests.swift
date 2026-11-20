@@ -1,120 +1,111 @@
 import XCTest
 @testable import Jarvis
 
-/// The onboarding checklist is probe-driven: rows flip on refresh, the
-/// card hides when all clear or dismissed, and fix buttons run their
-/// injected actions then re-poll. Probes are stubbed — no TCC, no tracker.
+/// The first run: microphone, Accessibility, then a try-it step. Grants
+/// move the user on by themselves; refusals offer a way out. Probes are
+/// stubbed — no TCC.
 @MainActor
 final class UXOnboardingTests: XCTestCase {
 
-    private func model() -> OnboardingChecklistModel {
-        let suite = "ux-onboarding-\(UUID().uuidString)"
-        return OnboardingChecklistModel(defaults: UserDefaults(suiteName: suite)!)
-    }
-
-    /// Everything pending → the card shows, rows are undone, and the
-    /// try-it line tracks the FIRST unfinished row.
-    func testAllPendingShowsCard() async {
-        let m = model()
-        // Stub every probe off — the real TCC/tracker state of the host
-        // must not flip rows in a unit test.
-        m.microphoneGranted = { false }
+    private func model(engine: Bool = false) -> FirstRunModel {
+        let m = FirstRunModel(policy: ListeningPolicy(wakeWordAvailable: engine))
+        m.microphoneGrant = { .notAsked }
         m.accessibilityGranted = { false }
-        m.screenRecordingGranted = { false }
-        m.trackerEnabled = { false }
-        m.trackerRunning = { false }
-        m.voiceKeyConfigured = { false }
-        await m.refresh()
-        XCTAssertTrue(m.visible)
-        XCTAssertFalse(m.allClear)
-        XCTAssertEqual(m.rows.count, OnboardingChecklistModel.RowID.allCases.count)
-        XCTAssertTrue(m.rows.allSatisfy { !$0.done })
-        // First unfinished row is microphone → its prompt.
-        XCTAssertEqual(m.pendingTryIt, m.rows.first?.tryIt)
-        XCTAssertNotNil(m.pendingTryIt)
+        m.requestMicrophone = {}
+        m.requestAccessibility = {}
+        m.openSystemSettings = { _ in }
+        return m
     }
 
-    /// Grants flip their rows on the next refresh; all-clear retires the
-    /// card without any dismissal.
-    func testRowsFlipAndAllClearHides() async {
+    /// Three numbered steps; the orange-dot screen stays hidden until a
+    /// wake-word engine exists.
+    func testThreeStepsWithoutWakeWordEngine() {
         let m = model()
-        m.microphoneGranted = { true }
-        m.accessibilityGranted = { true }
-        m.screenRecordingGranted = { true }
-        m.trackerEnabled = { true }
-        m.trackerRunning = { true }
-        m.voiceKeyConfigured = { true }
-        await m.refresh()
-
-        XCTAssertTrue(m.allClear)
-        XCTAssertFalse(m.visible)
-        XCTAssertTrue(m.rows.allSatisfy(\.done))
-        XCTAssertNil(m.pendingTryIt)
+        XCTAssertEqual(m.steps, [.microphone, .accessibility, .tryIt])
+        XCTAssertEqual(m.step, .microphone)
+        XCTAssertEqual(m.position?.number, 1)
+        XCTAssertEqual(m.position?.of, 3)
     }
 
-    /// The tracker row needs BOTH the config toggle and a live host — an
-    /// enabled-but-stopped tracker still reads undone.
-    func testTrackerRowNeedsRunning() async {
-        let m = model()
-        m.trackerEnabled = { true }
-        m.trackerRunning = { false }
-        await m.refresh()
-        let row = m.rows.first { $0.id == .tracker }
-        XCTAssertEqual(row?.done, false)
-
-        m.trackerRunning = { true }
-        await m.refresh()
-        XCTAssertEqual(m.rows.first { $0.id == .tracker }?.done, true)
+    func testStandbyIntroLeadsOnlyWithEngine() {
+        let m = model(engine: true)
+        XCTAssertEqual(m.steps, [.standbyIntro, .microphone, .accessibility, .tryIt])
+        XCTAssertEqual(m.step, .standbyIntro)
+        XCTAssertNil(m.position, "the intro isn't a numbered step")
+        m.allow()
+        XCTAssertEqual(m.step, .microphone)
+        XCTAssertEqual(m.position?.number, 1)
     }
 
-    /// A fix runs the injected action then refreshes — the row flips only
-    /// because the probe now reports granted (honest repaint, no optimism).
-    func testFixRunsActionAndRepaints() async {
+    /// A grant that lands while the page is up moves the user on.
+    func testMicrophoneGrantAdvances() async {
         let m = model()
         var granted = false
-        var afterFixCalled = false
-        m.microphoneGranted = { granted }
+        m.microphoneGrant = { granted ? .granted : .notAsked }
         m.requestMicrophone = { granted = true }
-        m.afterFix = { afterFixCalled = true }
-
-        m.fix(.microphone)
-        // fix() hops through a Task — give it a turn to run the request,
-        // the afterFix callback, and the refresh.
-        try? await Task.sleep(for: .milliseconds(150))
-
-        XCTAssertTrue(afterFixCalled)
-        await m.refresh()
-        XCTAssertEqual(m.rows.first { $0.id == .microphone }?.done, true)
+        m.allow()
+        XCTAssertEqual(m.microphone, .waiting)
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(m.step, .accessibility)
+        XCTAssertEqual(m.microphone, .granted)
     }
 
-    /// "Set up later" persists — a fresh model over the same defaults
-    /// stays hidden even with rows undone.
-    func testDismissalPersists() async {
-        let suite = "ux-onboarding-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        let first = OnboardingChecklistModel(defaults: defaults)
-        await first.refresh()
-        XCTAssertTrue(first.visible)
-        first.dismissed = true
-        XCTAssertFalse(first.visible)
-
-        let second = OnboardingChecklistModel(defaults: defaults)
-        XCTAssertTrue(second.dismissed)
-        await second.refresh()
-        XCTAssertFalse(second.visible)
-        XCTAssertTrue(defaults.bool(forKey: OnboardingChecklistModel.dismissedKey))
-    }
-
-    func testVoiceSetupRequiresAKeyInsteadOfLocalModels() async {
+    /// A refused microphone stays on the page and the button opens System
+    /// Settings instead of asking again.
+    func testRefusedMicrophoneOpensSystemSettings() {
         let m = model()
-        m.voiceKeyConfigured = { false }
-        await m.refresh()
-        let row = m.rows.first { $0.id == .voiceService }
-        XCTAssertEqual(row?.title, "OpenAI API key")
-        XCTAssertEqual(row?.done, false)
-        XCTAssertNil(row?.fixLabel)
-        m.voiceKeyConfigured = { true }
-        await m.refresh()
-        XCTAssertEqual(m.rows.first { $0.id == .voiceService }?.done, true)
+        var opened: [Permission] = []
+        m.microphoneGrant = { .refused }
+        m.openSystemSettings = { opened.append($0) }
+        m.refresh()
+        XCTAssertEqual(m.microphone, .refused)
+        XCTAssertEqual(m.step, .microphone)
+        m.allow()
+        XCTAssertEqual(opened, [.microphone])
+        XCTAssertEqual(m.step, .microphone)
+    }
+
+    /// Accessibility waits after the request, then moves on when the
+    /// switch is turned on in System Settings — nothing to press.
+    func testAccessibilityWaitsThenAdvancesOnItsOwn() async {
+        let m = model()
+        m.microphoneGrant = { .granted }
+        m.refresh()
+        XCTAssertEqual(m.step, .accessibility)
+        m.allow()
+        XCTAssertEqual(m.accessibility, .waiting)
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(m.step, .accessibility, "still waiting until the switch is on")
+        m.accessibilityGranted = { true }
+        m.refresh()
+        XCTAssertEqual(m.step, .tryIt)
+    }
+
+    /// Opening Calculator during the try-it step counts; other apps and
+    /// other steps don't.
+    func testTryItWatchesForCalculator() {
+        let m = model()
+        m.applicationLaunched(bundleID: "com.apple.calculator")
+        XCTAssertFalse(m.triedIt, "too early")
+        m.microphoneGrant = { .granted }
+        m.accessibilityGranted = { true }
+        m.refresh()
+        m.refresh()
+        XCTAssertEqual(m.step, .tryIt)
+        m.applicationLaunched(bundleID: "com.apple.Safari")
+        XCTAssertFalse(m.triedIt)
+        m.applicationLaunched(bundleID: "com.apple.calculator")
+        XCTAssertTrue(m.triedIt)
+    }
+
+    /// "Not now" skips a permission without granting it.
+    func testNotNowSkipsAhead() {
+        let m = model()
+        m.advance()
+        XCTAssertEqual(m.step, .accessibility)
+        m.advance()
+        XCTAssertEqual(m.step, .tryIt)
+        m.advance()
+        XCTAssertEqual(m.step, .tryIt, "the last step stays put")
     }
 }

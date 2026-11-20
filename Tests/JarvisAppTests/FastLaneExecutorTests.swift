@@ -1470,9 +1470,9 @@ final class FastLaneExecutorTests: XCTestCase {
                 return DriveResult(status: .done, history: ["numbered"],
                                    dispatchedEffect: true)
             })
-        let result = await loop.run(DriveTask(goal: "show numbers"), session: "t")
+        let result = await loop.run(DriveTask(goal: "show names"), session: "t")
         XCTAssertEqual(result.status, .done)
-        XCTAssertEqual(gotVerb, .showNumbers)
+        XCTAssertEqual(gotVerb, .showNames)
         XCTAssertEqual(gotTargets.count, 1)
         // Screenshot metadata must not move or halve native AX rectangles.
         XCTAssertEqual(gotTargets[0].frame, CGRect(x: 400, y: 300, width: 60, height: 30))
@@ -1488,11 +1488,11 @@ final class FastLaneExecutorTests: XCTestCase {
         let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200))
-        let result = await loop.run(DriveTask(goal: "show numbers"), session: "t")
+        let result = await loop.run(DriveTask(goal: "show names"), session: "t")
         guard case .blocked(let reason) = result.status else {
             return XCTFail("expected blocked, got \(result.status)")
         }
-        XCTAssertTrue(reason.contains("nothing was numbered"), reason)
+        XCTAssertTrue(reason.contains("can't put names on the screen"), reason)
     }
 
     /// An unlabeled field still has something to say — its value. The
@@ -1670,5 +1670,134 @@ final class FastLaneExecutorTests: XCTestCase {
                        "https://a.b/c")
         XCTAssertNil(ActionCatalog.firstDomainURL(in: "open report.pdf in Preview"))
         XCTAssertNil(ActionCatalog.firstDomainURL(in: "open Calculator"))
+    }
+
+    // MARK: - named targets (voice-only)
+
+    private func namedFixture(_ labels: [(String, Double)]) -> FakeDriver {
+        let driver = FakeDriver()
+        driver.responses["list_apps"] = [apps([appRow("Mail", "com.apple.mail", pid: 42)])]
+        driver.responses["list_windows"] = Array(repeating: windows([
+            windowRow(id: 7, pid: 42, app: "Mail", title: "New Message",
+                      x: 0, y: 0, w: 900, h: 700)]), count: 3)
+        let elements: [JSONValue] = labels.enumerated().map { index, item in
+            .object(["element_index": .number(Double(index + 1)), "role": .string("button"),
+                     "label": .string(item.0), "element_token": .string("tok\(index + 1)"),
+                     "frame": .object(["x": .number(item.1), "y": .number(40),
+                                       "w": .number(60), "h": .number(30)]),
+                     "actions": .array([.string("AXPress")])])
+        }
+        driver.responses["get_window_state"] = Array(repeating: .object([
+            "window_bounds": .object(["x": .number(0), "y": .number(0),
+                                      "width": .number(900), "height": .number(700)]),
+            "elements": .array(elements)]), count: 3)
+        return driver
+    }
+
+    /// "click Save" with one Save on screen presses it — no gaze, no
+    /// numbers.
+    func testClickNameWithOneMatchClicksIt() async {
+        let saved = DriveLoop.gazeEnabled
+        DriveLoop.gazeEnabled = { false }
+        defer { DriveLoop.gazeEnabled = saved }
+        let driver = namedFixture([("Save", 100), ("Cancel", 200)])
+        var overlayCalls = 0
+        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+                             choose: { _, _ in nil }, ask: nil, granted: { true },
+                             overlayDispatch: { _, _, _ in overlayCalls += 1; return nil },
+                             frontmostBundleID: { "com.apple.mail" })
+        let result = await loop.run(DriveTask(goal: "click save"), session: "t")
+        XCTAssertEqual(result.status, .done)
+        let clicks = driver.calls.filter { $0.tool == "click" }
+        XCTAssertEqual(clicks.count, 1)
+        XCTAssertEqual(clicks.first?.args["element_token"], .string("tok1"))
+        XCTAssertEqual(clicks.first?.args["pid"], .number(42))
+        XCTAssertEqual(overlayCalls, 0)
+    }
+
+    /// Two matches: nothing is clicked, numbers go up over just those two,
+    /// and Jarvis asks which.
+    func testClickNameWithTwoMatchesNumbersThemAndAsks() async {
+        let saved = DriveLoop.gazeEnabled
+        DriveLoop.gazeEnabled = { false }
+        defer { DriveLoop.gazeEnabled = saved }
+        let driver = namedFixture([("Save", 100), ("Save", 400), ("Cancel", 200)])
+        var gotVerb: FastAction.OverlayVerb?
+        var gotTargets: [(frame: CGRect, label: String)] = []
+        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+                             choose: { _, _ in nil }, ask: nil, granted: { true },
+                             overlayDispatch: { verb, targets, _ in
+                                 gotVerb = verb; gotTargets = targets
+                                 return DriveResult(status: .done, history: [], dispatchedEffect: true)
+                             },
+                             frontmostBundleID: { "com.apple.mail" })
+        let result = await loop.run(DriveTask(goal: "click save"), session: "t")
+        XCTAssertTrue(driver.calls.filter { $0.tool == "click" }.isEmpty)
+        XCTAssertEqual(gotVerb, .showNumbers)
+        XCTAssertEqual(gotTargets.map(\.label), ["Save", "Save"])
+        guard case .blocked(let question) = result.status else {
+            return XCTFail("expected a question, got \(result.status)")
+        }
+        XCTAssertEqual(question, "I can see two things called Save. One or two?")
+    }
+
+    /// "show me Save" highlights the one match and never clicks.
+    func testShowMeNameHighlights() async {
+        let saved = DriveLoop.gazeEnabled
+        DriveLoop.gazeEnabled = { false }
+        defer { DriveLoop.gazeEnabled = saved }
+        let driver = namedFixture([("Save", 100)])
+        var gotVerb: FastAction.OverlayVerb?
+        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+                             choose: { _, _ in nil }, ask: nil, granted: { true },
+                             overlayDispatch: { verb, _, _ in
+                                 gotVerb = verb
+                                 return DriveResult(status: .done, history: [], dispatchedEffect: true)
+                             },
+                             frontmostBundleID: { "com.apple.mail" })
+        let result = await loop.run(DriveTask(goal: "show me save"), session: "t")
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(gotVerb, .highlight)
+        XCTAssertTrue(driver.calls.filter { $0.tool == "click" }.isEmpty)
+    }
+
+    /// With eye tracking off, "click this" says what to say instead and
+    /// never reads the tracker.
+    func testGazeClickWithEyesOffSuggestsSayingTheName() async {
+        let saved = DriveLoop.gazeEnabled
+        DriveLoop.gazeEnabled = { false }
+        defer { DriveLoop.gazeEnabled = saved }
+        let driver = FakeDriver()
+        var gazeReads = 0
+        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+                             choose: { _, _ in nil }, ask: nil, granted: { true },
+                             gaze: { gazeReads += 1
+                                     return GazeSample(x: 1, y: 1, confidence: 0.9, state: "dwell", updatedAt: Date()) })
+        let result = await loop.run(DriveTask(goal: "click this"), session: "t")
+        guard case .blocked(let reason) = result.status else {
+            return XCTFail("expected blocked, got \(result.status)")
+        }
+        XCTAssertEqual(reason, DriveLoop.eyesOffReply(.click))
+        XCTAssertTrue(reason.contains("click Save"))
+        XCTAssertEqual(gazeReads, 0)
+        XCTAssertTrue(driver.calls.filter { $0.tool == "click" }.isEmpty)
+    }
+
+    /// "type X here" with eye tracking off types at the insertion point
+    /// of the bound window instead of refusing for want of a gaze point.
+    func testTypeHereWithEyesOffUsesTheCursor() async {
+        let saved = DriveLoop.gazeEnabled
+        DriveLoop.gazeEnabled = { false }
+        defer { DriveLoop.gazeEnabled = saved }
+        let driver = FakeDriver(), payload = "Jev audit alpha"
+        let loop = boundTypeLoop(driver)
+        var task = DriveTask(goal: "type \(payload) here", application: "fixture.bound", pid: 42, windowID: 7)
+        task.values["text"] = payload
+        let result = await loop.run(task, session: "type-here")
+        XCTAssertEqual(result.status, .done)
+        XCTAssertFalse(driver.calls.contains { $0.tool == "click" }, "no click at a gaze point")
+        let typed = driver.calls.filter { $0.tool == "type_text" }
+        XCTAssertEqual(typed.count, 1)
+        XCTAssertEqual(typed.first?.args["text"], .string(payload))
     }
 }

@@ -807,10 +807,11 @@ final class VoiceTaskCoordinator {
                 say: VoiceToolResult.spoken(Self.recap(of: last), words: 30)).encoded()
         }
         if Self.helpPhrases.contains(phrase) {
-            overlay.showCheatSheet(lines: Self.cheatSheet)
+            let gaze = config.gazeTracking
+            overlay.showCheatSheet(lines: Self.cheatSheet(gaze: gaze))
             feed.add(.note, "showed the command cheat sheet")
             return VoiceToolResult(status: VoiceToolResult.Status.ok,
-                                   say: Self.helpSummary).encoded()
+                                   say: Self.helpSummary(gaze: gaze)).encoded()
         }
         if tasks.contains(where: { $0.active && $0.request.lowercased() == normalized }) {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
@@ -828,7 +829,7 @@ final class VoiceTaskCoordinator {
         if missingKey {
             if !missingKeyNoted {
                 missingKeyNoted = true
-                feed.add(.note, "No Jev API key — deterministic commands still work; model-driven tasks will fail.")
+                feed.add(.note, "Jarvis isn't fully connected yet. Simple commands work; bigger tasks won't.")
             }
         } else {
             missingKeyNoted = false
@@ -1839,7 +1840,7 @@ final class VoiceTaskCoordinator {
             // reasons keep the generic line.
             if reason == .lowConfidence {
                 return (.blocked(reason.rawValue),
-                        "I'm not sure enough to act — say 'show numbers' to pick it yourself.")
+                        "I'm not sure which one you mean. Say “show names”, then “click” and the name.")
             }
             return (.blocked(reason.rawValue),
                     "I couldn't pick a confident next step.")
@@ -1866,10 +1867,29 @@ final class VoiceTaskCoordinator {
                                    gaze point: CGPoint?) async -> DriveResult {
         if let point { gazeIngest(point) }
         switch verb {
-        case .showNumbers, .showNumbersAll:
-            // The executor already scoped the target set; both verbs show
-            // exactly what they were handed. A pick clicks the chip's
-            // frame center — same path whether dwell or a spoken index.
+        case .showNames:
+            // Names are for reading, not picking — the user answers with
+            // "click <name>", so the set arms no pick path.
+            clearOverlayPick()
+            let shown = overlay.showNames(targets: Self.nameChips(targets))
+            guard shown > 0 else {
+                return DriveResult(status: .blocked("Nothing in this window has a name I can show."),
+                                   blockedReason: "no named overlay targets")
+            }
+            return DriveResult(status: .done, history: ["showed \(shown) names"],
+                               dispatchedEffect: true)
+        case .highlight:
+            guard let target = targets.first else {
+                return DriveResult(status: .blocked("Nothing to point at."),
+                                   blockedReason: "no overlay targets")
+            }
+            overlay.showHalo(frame: target.frame)
+            return DriveResult(status: .done, history: ["highlighted \(target.label)"],
+                               dispatchedEffect: true)
+        case .showNumbers:
+            // The executor hands exactly the matches of an ambiguous
+            // name. A pick clicks the chip's frame center — same path
+            // whether dwell or a spoken index.
             guard !targets.isEmpty else {
                 return DriveResult(status: .blocked("Nothing on screen to number."),
                                    blockedReason: "no overlay targets")
@@ -1923,6 +1943,29 @@ final class VoiceTaskCoordinator {
             return DriveResult(status: .done, history: ["picked target \(n)"],
                                dispatchedEffect: true)
         }
+    }
+
+    /// The labels worth drawing: one per control (a button's own text
+    /// collapses into the button), named, short enough to read, and
+    /// capped so a dense window stays legible.
+    static func nameChips(_ targets: [(frame: CGRect, label: String)])
+        -> [(frame: CGRect, label: String)] {
+        let candidates = targets.map {
+            NamedTargetMatch.Candidate(label: $0.label, frame: $0.frame, pressable: true)
+        }
+        var seen: [(label: String, frame: CGRect)] = []
+        var chips: [(frame: CGRect, label: String)] = []
+        for (i, target) in targets.enumerated() {
+            let label = target.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty, NamedTargetMatch.normalize(label).count > 0 else { continue }
+            let centre = CGPoint(x: candidates[i].frame.midX, y: candidates[i].frame.midY)
+            if seen.contains(where: { $0.frame.contains(centre)
+                && NamedTargetMatch.normalize($0.label) == NamedTargetMatch.normalize(label) }) { continue }
+            seen.append((label, target.frame))
+            chips.append((target.frame, label.count > 28 ? String(label.prefix(27)) + "…" : label))
+            if chips.count == 40 { break }
+        }
+        return chips
     }
 
     /// A picked chip clicks its frame's center through the driver's
@@ -2592,23 +2635,30 @@ final class VoiceTaskCoordinator {
         return "I \(tail.joined(separator: "; then ")). \(outcome)"
     }
 
-    /// The spoken answer to "what can I say" — the lane families, terse.
-    private static let helpSummary =
-        "You can open, hide, or quit apps, click what you're looking at, "
-        + "say show numbers then click two, pause or recalibrate tracking, "
-        + "hand work to an agent, or hold Fn and Control to dictate."
+    /// The spoken answer to "what can I say" — voice first, with the
+    /// eye-tracking verbs only when eye tracking is on.
+    static func helpSummary(gaze: Bool) -> String {
+        var say = "Just tell me what you want. Open or quit an app, click a button by its name, "
+            + "like “click Save”, scroll, or type something. Say “show names” to see what you can click."
+        if gaze { say += " Eye tracking's on too, so you can look at something and say “click this”." }
+        return say
+    }
 
-    /// The overlay cheat sheet — one line per lane family.
-    private static let cheatSheet: [String] = [
-        "open / hide / minimize / quit <app>",
-        "click this · open this · what is this",
-        "show numbers · click two · hide numbers",
-        "pause tracking · recalibrate · disable tracking",
-        "type <text> here · scroll down",
-        "ask <agent> to <task> · stop <agent>",
-        "cancel that · do that again",
-        "hold Fn+Ctrl to dictate text",
-    ]
+    /// The overlay cheat sheet — voice lines first, gaze lines only when
+    /// eye tracking is on.
+    static func cheatSheet(gaze: Bool) -> [String] {
+        var lines = [
+            "open Safari · hide Mail · quit Notes",
+            "click Save · show me Save · show names",
+            "scroll down · new tab · go back",
+            "type <text> · start dictating",
+            "do that again · cancel that · what did you do",
+            "ask <agent> to <task> · stop <agent>",
+            "pause listening",
+        ]
+        if gaze { lines += ["click this · what is this · recalibrate"] }
+        return lines
+    }
 
     /// Where a `respond_to_task` hint lands in the parked list — oldest
     /// first. Positional words ("first", "second", "last") beat

@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// spawning duplicate driver daemons and overlays.
     private var instanceLock: FileHandle?
     private var statusItem: NSStatusItem!
-    private var windows: VoiceWindows!
+    private var windows: AppWindows!
     private let speechOutput = SpeechOutput()
     private lazy var controller = VoiceController(config: Config.shared, speaker: speechOutput)
     private let diagnostics = DiagnosticsReporter()
@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eyesRestart: NSMenuItem?
     private var eyesPause: NSMenuItem?
     private var eyesRecalibrate: NSMenuItem?
+    private var pauseListening: NSMenuItem?
+    private var statusSymbol = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard acquireInstanceLock() else {
@@ -54,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Config and can block on a keychain prompt.
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jarvis")
-        windows = VoiceWindows(controller: controller, microphones: microphones, input: input)
+        windows = AppWindows(controller: controller, microphones: microphones, input: input)
         let menu = NSMenu()
         let settings = menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
@@ -62,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         activity.target = self
         let agents = menu.addItem(withTitle: "Agents", action: #selector(showAgents), keyEquivalent: "")
         agents.target = self
+        pauseListening = menu.addItem(withTitle: "Pause Listening", action: #selector(togglePauseListening), keyEquivalent: "")
+        pauseListening?.target = self
         menu.addItem(.separator())
         // The host owns the one menu-bar icon — the tracker's own tray is
         // suppressed at spawn (--no-tray), so its controls live here.
@@ -87,6 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         applyEyesState()
         refreshAskBadge()
+        refreshStatusIcon()
+        controller.objectWillChange.sink { [weak self] in
+            DispatchQueue.main.async { self?.refreshStatusIcon() }
+        }.store(in: &subscriptions)
 
         if let session = CGSessionCopyCurrentDictionary() as? [String: Any] {
             sessionActive = session[kCGSessionOnConsoleKey as String] as? Bool ?? false
@@ -227,8 +235,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.refreshPermissions()
         if ProcessInfo.processInfo.arguments.contains("--settings") {
             windows.show(.voice)
-        } else if !controller.missingPermissions.isEmpty || !input.ready {
-            controller.showSetup("Finish setup in Voice settings. " + input.message)
+        } else if !controller.config.firstRunCompleted {
+            if Permission.microphone.isGranted && Permission.accessibility.isGranted {
+                controller.config.firstRunCompleted = true
+            } else {
+                windows.showFirstRun()
+            }
+        } else if !controller.missingPermissions.isEmpty {
+            controller.showSetup("Jarvis needs a permission before it can help. Open Settings to fix it.")
+        } else if !input.ready {
+            controller.showSetup(input.message)
         }
     }
 
@@ -422,7 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
     @objc private func showSettings() { windows.show(.voice) }
-    @objc private func showEyeSettings() { windows.show(.commands) }
+    @objc private func showEyeSettings() { windows.show(.voice, anchor: .eyeTracking) }
     @objc private func showActivity() { windows.show(.activity) }
     @objc private func showAgents() { windows.showAgents() }
 
@@ -566,6 +582,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.title = pending > 0 ? " ·\(pending)" : ""
     }
 
+    /// The menu-bar icon carries every resting state: listening, paused,
+    /// waiting for fn, or can't hear. The on-screen tab covers the rest.
+    private func refreshStatusIcon() {
+        let (symbol, description): (String, String)
+        if controller.missingPermissions.contains(.microphone) {
+            (symbol, description) = ("mic.slash", "Jarvis can't hear you. Microphone access is off.")
+        } else if !controller.handsFreeEnabled {
+            (symbol, description) = ("waveform", "Jarvis. Hold fn to talk.")
+        } else if controller.handsFreeListening || controller.handsFreeState == .preparing {
+            (symbol, description) = ("waveform", "Jarvis is listening")
+        } else if case .unavailable = controller.handsFreeState {
+            (symbol, description) = ("mic.slash", "Jarvis can't hear you right now")
+        } else {
+            (symbol, description) = ("pause.circle", "Jarvis is paused")
+        }
+        let key = symbol + description
+        guard key != statusSymbol else { return }
+        statusSymbol = key
+        statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+        statusItem.button?.toolTip = description
+    }
+
+    @objc private func togglePauseListening() {
+        if controller.handsFreeListening { controller.pauseHandsFree() } else { controller.resumeHandsFree() }
+    }
+
     /// One snapshot read, then repaint — cancelled reads can't paint over
     /// a newer one.
     private func refreshEyes() {
@@ -582,6 +624,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Polling stays cheap: one read on open, then a slow timer only
     /// while the menu is actually tracking — never a hot loop.
     func menuWillOpen(_ menu: NSMenu) {
+        pauseListening?.isHidden = !controller.handsFreeEnabled
+        pauseListening?.title = controller.handsFreeListening ? "Pause Listening" : "Resume Listening"
         applyEyesState()
         refreshEyes()
         refreshAskBadge()

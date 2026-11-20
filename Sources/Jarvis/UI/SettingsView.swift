@@ -4,408 +4,415 @@ import ServiceManagement
 @MainActor
 final class SettingsNavigation: ObservableObject {
     enum Section: String, CaseIterable, Identifiable {
-        case voice = "Voice", commands = "Commands", activity = "Activity"
+        case voice = "Settings", activity = "Activity"
         var id: String { rawValue }
-        var symbol: String { switch self { case .voice: return "waveform"; case .commands: return "command"; case .activity: return "clock" } }
+        var symbol: String { switch self { case .voice: return "gearshape"; case .activity: return "clock" } }
         var subtitle: String {
             switch self {
-            case .voice: return "Your voice, one key away."
-            case .commands: return "Choose how your Mac responds."
-            case .activity: return "Review what you said and what happened."
+            case .voice: return "How Jarvis listens, talks and helps."
+            case .activity: return "What you asked and what Jarvis did."
             }
         }
     }
+    enum Anchor: String { case eyeTracking, permissions }
     @Published var section: Section = .voice
+    /// Part of the page to bring into view when the window opens.
+    @Published var anchor: Anchor?
 }
 
+/// One page of settings, in the order people reach for them.
 struct SettingsView: View {
     @ObservedObject var controller: VoiceController
     @ObservedObject var config: Config
     @ObservedObject var microphones: MicrophoneCatalog
     @ObservedObject var input: FnInputMonitor
     @ObservedObject var navigation: SettingsNavigation
-    var collapse: () -> Void
     @StateObject private var accuracyCheck = AccuracyCheck()
-    @State private var apiKeyDraft = ""
-    @State private var apiKeySaved = false
-    @State private var openAIKeyDraft = ""
-    @State private var openAIKeySaved = false
-    /// Tracker-side settings — optimistic local copies, read back from
-    /// `/snapshot.settings` when the card appears. `eyeSettingsTouched`
-    /// marks a user edit so a late read can't overwrite a newer choice.
+    /// Eye-tracker settings — optimistic local copies, read back from the
+    /// tracker when the section appears. `eyeSettingsTouched` marks a user
+    /// edit so a late read can't overwrite a newer choice.
     @State private var eyeDotScale = 1.0
     /// Tracker default is ON — an unset `dwell_lock` leaves the runtime's
-    /// `anchorEnabled = true` in charge (electron/main.cjs checks the tray
-    /// item with `!== false`). Mirroring that keeps an un-read-back card
-    /// from claiming the anchor is off while the tracker is locking.
+    /// anchor on, so an un-read-back toggle mustn't claim it's off.
     @State private var eyeDwellLock = true
-    /// Gaze-cursor visibility — default hidden (Vision Pro-style); this
-    /// mirrors the tracker's `gaze_dot_visible` setting.
     @State private var eyeDotVisible = false
     @State private var eyeSettingsTouched = false
-    /// Dwell auto-click — app-side UserDefaults; the service reloads on
-    /// the write (`DwellPolicy.modeKey`, values are `DwellPolicy.Mode`
-    /// raws). Defaults match `DwellPolicy.load()`.
     @State private var dwellMode = DwellPolicy.load().mode.rawValue
+    @State private var openAIKeyDraft = ""
+    @State private var openAIKeySaved = false
+    @State private var typeSafeKeyDraft = ""
+    @State private var typeSafeKeySaved = false
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 28) {
                 HStack(spacing: 10) {
                     Image(systemName: "waveform").font(.system(size: 23, weight: .semibold)).foregroundStyle(.mint)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Jarvis").font(.system(size: 16, weight: .semibold))
-                        Text("Made for your Mac").font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
+                        .accessibilityHidden(true)
+                    Text("Jarvis").font(.system(size: 17, weight: .semibold))
                 }.padding(.top, 18)
                 VStack(spacing: 5) {
                     ForEach(SettingsNavigation.Section.allCases) { section in
                         Button {
-                            if navigation.section == .voice && section != .voice { controller.stopMicrophoneTest() }
+                            if section != .voice { controller.stopMicrophoneTest() }
                             navigation.section = section
                         } label: {
                             Label(section.rawValue, systemImage: section.symbol)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 14, weight: .medium))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12).padding(.vertical, 10)
                                 .background(navigation.section == section ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                        }.buttonStyle(.plain)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(navigation.section == section ? .isSelected : [])
                     }
                 }
                 Spacer()
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(config.handsFreeEnabled ? "JUST SPEAK" : "HOLD fn TO SPEAK")
-                        .font(.system(size: 10, weight: .semibold)).tracking(0.7)
-                    Text(config.handsFreeEnabled ? "Jarvis listens hands-free.\nHold fn for a manual turn." : "Release to finish.\nEscape to cancel.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
-                }.padding(.bottom, 12)
             }.padding(.horizontal, 18).frame(width: 170).background(.ultraThinMaterial)
             Divider()
             ScrollViewReader { proxy in
               ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     VStack(alignment: .leading, spacing: 7) {
-                        HStack {
-                            Text(navigation.section.rawValue).font(.system(size: 28, weight: .semibold))
-                            Spacer()
-                            Button(action: collapse) {
-                                Label("Collapse", systemImage: "arrow.down.right.and.arrow.up.left")
-                            }.help("Return to the pill").accessibilityLabel("Collapse to pill")
-                        }
-                        Text(navigation.section.subtitle).font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text(navigation.section.rawValue).font(.system(size: 28, weight: .semibold))
+                            .accessibilityAddTraits(.isHeader)
+                        Text(navigation.section.subtitle).font(.system(size: 14)).foregroundStyle(.secondary)
                     }.padding(.top, 8).id("settingsTop")
                     switch navigation.section {
-                    case .voice: voiceSettings
-                    case .commands: commandSettings
+                    case .voice: settings
                     case .activity: ActivityView(controller: controller)
                     }
                     Spacer(minLength: 8)
                 }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
               }.background(Color(nsColor: .windowBackgroundColor))
-                .onAppear { proxy.scrollTo("settingsTop", anchor: .top) }
-                .onChange(of: navigation.section) { proxy.scrollTo("settingsTop", anchor: .top) }
+                .onAppear { scroll(proxy) }
+                .onChange(of: navigation.section) { scroll(proxy) }
+                .onChange(of: navigation.anchor) { scroll(proxy) }
             }
         }
         .frame(minWidth: 740, minHeight: 520)
         .tint(.accentColor)
+        .onAppear { config.codexAuth.refresh() }
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy) {
+        if navigation.section == .voice, let anchor = navigation.anchor {
+            proxy.scrollTo(anchor.rawValue, anchor: .top)
+            navigation.anchor = nil
+        } else {
+            proxy.scrollTo("settingsTop", anchor: .top)
+        }
+    }
+
+    private var settings: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            listening
+            replies
+            doingThings
+            eyeTracking.id(SettingsNavigation.Anchor.eyeTracking.rawValue)
+            permissions.id(SettingsNavigation.Anchor.permissions.rawValue)
+            general
+            if !config.hostedCredentialsConfigured { advanced }
+        }
+    }
+
+    // MARK: - Listening
+
+    private var listening: some View {
+        SettingsSection(title: "Listening", symbol: "ear") {
+            Picker("How Jarvis listens", selection: $config.listeningMode) {
+                ForEach(ListeningPolicy.current.offeredModes, id: \.self) { mode in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(mode.title).font(.system(size: 14))
+                        Text(mode.detail).font(.system(size: 13)).foregroundStyle(.secondary)
+                    }
+                    .tag(mode)
+                    .padding(.vertical, 3)
+                }
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+            .accessibilityLabel("How Jarvis listens")
+            if config.handsFreeEnabled {
+                HStack {
+                    Text(controller.handsFreeLabel).font(.system(size: 14))
+                    Spacer()
+                    Button(controller.handsFreeListening ? "Pause listening" : "Start listening") {
+                        if controller.handsFreeListening { controller.pauseHandsFree() }
+                        else { controller.resumeHandsFree() }
+                    }
+                }
+                if case .unavailable(let reason) = controller.handsFreeState {
+                    Note(reason, tint: .orange)
+                }
+            }
+            if !input.ready {
+                Note(input.message, tint: .orange)
+                HStack {
+                    Button("Open Keyboard Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!) }
+                    Button("Check again") { input.refresh(); controller.refreshPermissions() }
+                }
+            }
+            Divider()
+            Picker("Microphone", selection: $config.microphoneUID) {
+                Text("Mac default (" + microphones.defaultName + ")").tag("")
+                ForEach(microphones.devices) { device in Text(device.name).tag(device.uid) }
+                if !config.microphoneUID.isEmpty && !microphones.devices.contains(where: { $0.uid == config.microphoneUID }) {
+                    Text("Microphone not connected").tag(config.microphoneUID)
+                }
+            }
+            HStack {
+                Button(controller.isMicrophoneTest ? "Stop test" : "Test microphone") {
+                    controller.isMicrophoneTest ? controller.stopMicrophoneTest() : controller.startMicrophoneTest()
+                }.disabled(!controller.canBegin && !controller.isMicrophoneTest)
+                Spacer()
+                LevelMeter(level: controller.isMicrophoneTest ? controller.audioLevel : 0)
+            }
+            if controller.isMicrophoneTest {
+                Note(controller.inputName.isEmpty ? "Starting the microphone…" : "Say something. Jarvis won't do anything during the test.")
+            } else if case .error(let message) = controller.status {
+                Note(message, tint: .orange)
+            }
+            Note("While Jarvis is listening, what you say is sent to OpenAI so Jarvis can understand it. Pause listening to stop. Eye tracking never leaves your Mac.")
+        }
+    }
+
+    // MARK: - Replies
+
+    private var replies: some View {
+        SettingsSection(title: "Replies", symbol: "speaker.wave.2") {
+            Toggle("Say replies out loud", isOn: $config.ttsEnabled)
+            Toggle("Play sounds", isOn: $config.sounds)
+        }
+    }
+
+    // MARK: - Doing things for you
+
+    private var doingThings: some View {
+        SettingsSection(title: "Doing things for you", symbol: "hand.tap") {
+            Toggle("Do it as soon as I finish speaking", isOn: $config.autoExecute)
+            Note(config.autoExecute
+                 ? "Jarvis acts on what you said straight away."
+                 : "Jarvis shows what it heard and waits for you to say go.")
+            Toggle("Don't ask before changing things", isOn: $config.alwaysAllowComputerUse)
+            Note(config.alwaysAllowComputerUse
+                 ? "Jarvis clicks and types without checking with you first."
+                 : "Jarvis checks with you before it changes something.")
+            Toggle("Show where Jarvis clicks", isOn: $config.agentCursorEnabled)
+            Toggle("Get help with unusual requests", isOn: $config.semanticAppSuggestions)
+            Note("When Jarvis isn't sure which app you mean, it asks an online helper. Only your words and the names of your apps are sent.")
+            Note("Jarvis won't delete things or buy things for you.")
+            Divider()
+            AgentSignIn(auth: config.codexAuth)
+            Divider()
+            HStack {
+                Button("Forget what I've allowed") { CuaStandingGrants.reset() }
+                Spacer()
+            }
+            Note("Jarvis remembers things you've allowed, like reading a web page, so it doesn't ask twice. This makes it ask again.")
+        }
+    }
+
+    // MARK: - Eye tracking
+
+    private var eyeTracking: some View {
+        SettingsSection(title: "Eye tracking", symbol: "eye") {
+            Toggle("Use eye tracking", isOn: $config.gazeTracking)
+            Note("Look at something and say “click that”. Uses the camera; nothing it sees leaves your Mac. Everything works by voice without it.")
+            if config.gazeTracking {
+                Picker("Dot size", selection: Binding(
+                    get: { eyeDotScale },
+                    set: { value in
+                        eyeSettingsTouched = true
+                        eyeDotScale = value
+                        Task { try? await TrackerControl.post(action: "dot_scale", value: value) }
+                    })) {
+                    Text("Small").tag(0.8)
+                    Text("Medium").tag(1.0)
+                    Text("Large").tag(1.25)
+                }.pickerStyle(.segmented)
+                Toggle("Show a dot where I'm looking", isOn: Binding(
+                    get: { eyeDotVisible },
+                    set: { value in
+                        eyeSettingsTouched = true
+                        eyeDotVisible = value
+                        Task { try? await TrackerControl.post(action: "gaze_dot", value: value) }
+                    }))
+                Note("When it's off, the thing you're looking at lights up instead.")
+                Toggle("Hold the highlight steady", isOn: Binding(
+                    get: { eyeDwellLock },
+                    set: { value in
+                        eyeSettingsTouched = true
+                        eyeDwellLock = value
+                        Task { try? await TrackerControl.post(action: "dwell_lock", value: value) }
+                    }))
+                Picker("Click by looking", selection: Binding(
+                    get: { dwellMode },
+                    set: { value in
+                        guard let mode = DwellPolicy.Mode(rawValue: value) else { return }
+                        var policy = DwellPolicy.load()
+                        policy.mode = mode
+                        policy.save()
+                        dwellMode = policy.mode.rawValue
+                        Task { @MainActor in GazeService.shared.reloadPolicy() }
+                    })) {
+                    Text("Off").tag(DwellPolicy.Mode.off.rawValue)
+                    Text("Buttons only").tag(DwellPolicy.Mode.safe.rawValue)
+                    Text("Anything").tag(DwellPolicy.Mode.all.rawValue)
+                }.pickerStyle(.segmented)
+                Note("Keep your eyes on something for a moment and Jarvis clicks it.")
+                Toggle("Tap fn to click what I'm looking at", isOn: $config.tapToGazeClick)
+                HStack {
+                    Button("Check eye-tracking accuracy") { accuracyCheck.start() }
+                        .disabled(accuracyCheck.running)
+                    if accuracyCheck.running { ProgressView().controlSize(.small) }
+                }
+                if !accuracyCheck.message.isEmpty { Note(accuracyCheck.message) }
+            }
+        }
+        .task(id: config.gazeTracking) {
+            guard config.gazeTracking, let status = try? await TrackerControl().status() else { return }
+            // A read that resolved after the user edited must not paint
+            // over the newer choice.
+            guard !eyeSettingsTouched else { return }
+            if let scale = status.dotScale {
+                eyeDotScale = [0.8, 1.0, 1.25].min(by: { abs($0 - scale) < abs($1 - scale) }) ?? scale
+            }
+            if let lock = status.dwellLock { eyeDwellLock = lock }
+            if let visible = status.dotVisible { eyeDotVisible = visible }
+        }
+    }
+
+    // MARK: - Permissions
+
+    private var permissions: some View {
+        SettingsSection(title: "Permissions", symbol: "hand.raised") {
+            ForEach(Permission.required(gaze: config.gazeTracking)) { permission in
+                let missing = controller.missingPermissions.contains(permission)
+                HStack {
+                    Image(systemName: missing ? "exclamationmark.circle" : "checkmark.circle.fill")
+                        .foregroundStyle(missing ? Color.orange : Color.mint)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(permission.rawValue).font(.system(size: 14))
+                        Text(missing ? permission.purpose : "Allowed").font(.system(size: 13)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if missing {
+                        Button(permission.canPrompt ? "Allow" : "Open System Settings") {
+                            Task { await permission.request(); controller.refreshPermissions(); input.refresh() }
+                        }
+                        .accessibilityLabel((permission.canPrompt ? "Allow " : "Open System Settings for ") + permission.rawValue)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    // MARK: - General
+
+    private var general: some View {
+        SettingsSection(title: "General", symbol: "gearshape") {
+            Toggle("Open Jarvis when I log in", isOn: $config.launchAtLogin)
+            if let status = loginServiceStatusText { Note(status) }
+            if let error = config.launchAtLoginError { Note(error, tint: .orange) }
+        }
+    }
+
+    // MARK: - Advanced
+
+    /// Keys typed on this Mac — only until Jarvis's own sign-in exists.
+    private var advanced: some View {
+        DisclosureGroup("Advanced") {
+            VStack(alignment: .leading, spacing: 12) {
+                Note("Until Jarvis connects for you, it needs your own keys: OpenAI to hear and answer you, TypeSafe to understand requests. They stay in your Mac's Keychain.")
+                keyField("OpenAI key", placeholder: "sk-…", draft: $openAIKeyDraft, saved: openAIKeySaved) {
+                    openAIKeySaved = config.saveOpenAIAPIKey(openAIKeyDraft)
+                }
+                keyField("TypeSafe key", placeholder: "ts-…", draft: $typeSafeKeyDraft, saved: typeSafeKeySaved) {
+                    typeSafeKeySaved = config.saveAPIKey(typeSafeKeyDraft)
+                }
+                if let error = config.apiKeyError { Note(error, tint: .orange) }
+            }
+            .padding(.top, 10)
+        }
+        .font(.system(size: 14))
+        .padding(.horizontal, 4)
         .onAppear {
-            apiKeyDraft = config.apiKey
             openAIKeyDraft = config.openAIAPIKey
-            config.codexAuth.refresh()
+            typeSafeKeyDraft = config.apiKey
         }
-        .onChange(of: apiKeyDraft) { apiKeySaved = false }
         .onChange(of: openAIKeyDraft) { openAIKeySaved = false }
+        .onChange(of: typeSafeKeyDraft) { typeSafeKeySaved = false }
     }
 
-    private var voiceSettings: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            OnboardingChecklistCard(afterFix: {
-                controller.refreshPermissions()
-                input.refresh()
-            })
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Voice", systemImage: "bolt.horizontal.circle").font(.headline)
-                    Text("OpenAI API key").font(.callout)
-                    HStack {
-                        SecureField("sk-…", text: $openAIKeyDraft).textFieldStyle(.roundedBorder).onSubmit(saveOpenAIKey)
-                        Button("Save", action: saveOpenAIKey).buttonStyle(.borderedProminent)
-                    }
-                    if openAIKeySaved {
-                        Text(openAIKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("OpenAI handles live speech and replies. Jev and native Mac controls handle your tasks. Your key is stored in macOS Keychain.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Speak replies aloud", isOn: $config.ttsEnabled)
-                    Toggle("Hands-free conversation", isOn: $config.handsFreeEnabled)
-                    if config.handsFreeEnabled {
-                        HStack {
-                            Label(controller.handsFreeLabel, systemImage: "waveform")
-                            Spacer()
-                            Button(controller.handsFreeListening ? "Pause" : "Resume") {
-                                if controller.handsFreeListening { controller.pauseHandsFree() }
-                                else { controller.resumeHandsFree() }
-                            }
-                        }
-                        Text(controller.handsFreeDetail).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Toggle("Use TypeSafe for unfamiliar requests", isOn: $config.semanticAppSuggestions)
-                    Text("Enabled by default using your saved TypeSafe key. "
-                         + "Sends unfamiliar final request text, app names/identities "
-                         + "and default browser/mail app roles to TypeSafe. "
-                         + "Clear requests to open or focus an app run without another approval. "
-                         + "Unclear targets ask which app. Other requests keep the existing workflow.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+    private func keyField(_ title: String, placeholder: String, draft: Binding<String>,
+                          saved: Bool, save: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 14))
+            HStack {
+                SecureField(placeholder, text: draft).textFieldStyle(.roundedBorder).onSubmit(save)
+                    .accessibilityLabel(title)
+                Button("Save", action: save)
             }
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("Push to talk", systemImage: "keyboard").font(.headline)
-                    HStack(alignment: .top, spacing: 20) {
-                        Text("fn").font(.system(size: 27, weight: .medium)).frame(width: 58, height: 54)
-                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.12)))
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Hold. Speak. Release.").font(.system(size: 14, weight: .medium))
-                            Text(input.message).font(.callout).foregroundStyle(input.ready ? Color.secondary : Color.orange)
-                            Text("If the Globe key opens emoji or Dictation, set “Press 🌐 key to” to “Do Nothing” in Keyboard settings.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    HStack {
-                        Button("Keyboard settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!) }
-                        Button("Check shortcut") { input.refresh(); controller.refreshPermissions() }
-                    }.controlSize(.small)
-                }
-            }
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("Microphone", systemImage: "mic").font(.headline)
-                    Picker("Input", selection: $config.microphoneUID) {
-                        Text("System Default — \(microphones.defaultName)").tag("")
-                        ForEach(microphones.devices) { device in Text(device.name).tag(device.uid) }
-                        if !config.microphoneUID.isEmpty && !microphones.devices.contains(where: { $0.uid == config.microphoneUID }) {
-                            Text("Selected microphone unavailable").tag(config.microphoneUID)
-                        }
-                    }.labelsHidden()
-                    Text("While hands-free listening is on, microphone audio goes to OpenAI. Pause listening to stop sending audio. Fn is an optional manual turn. Changing input ends the current capture.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(controller.microphoneReadiness).font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Button(controller.isMicrophoneTest ? "Stop test" : "Test microphone") {
-                            controller.isMicrophoneTest ? controller.stopMicrophoneTest() : controller.startMicrophoneTest()
-                        }.disabled(!controller.canBegin && !controller.isMicrophoneTest)
-                        Spacer()
-                        VoiceWaveform(level: controller.isMicrophoneTest ? controller.audioLevel : 0, color: .mint)
-                    }
-                    if controller.isMicrophoneTest {
-                        Text(controller.inputName.isEmpty ? "Starting microphone…" : "Listening to \(controller.inputName). No command will run.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else if case .error(let message) = controller.status {
-                        Text(message).font(.caption).foregroundStyle(.orange)
-                    }
-                }
-            }
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("Permissions", systemImage: "hand.raised").font(.headline)
-                    ForEach(Permission.allCases) { permission in
-                        HStack {
-                            Image(systemName: controller.missingPermissions.contains(permission) ? "circle" : "checkmark.circle.fill")
-                                .foregroundStyle(controller.missingPermissions.contains(permission) ? Color.secondary : Color.mint)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(permission.rawValue).font(.callout)
-                                Text(permission.purpose).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if controller.missingPermissions.contains(permission) {
-                                Button(permission.canPrompt ? "Allow" : "Open settings") {
-                                    Task { await permission.request(); controller.refreshPermissions(); input.refresh() }
-                                }.controlSize(.small)
-                            }
-                        }
-                    }
-                }
-            }
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("App", systemImage: "app").font(.headline)
-                    Toggle("Launch at login", isOn: $config.launchAtLogin)
-                    Text(loginServiceStatusText)
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let error = config.launchAtLoginError {
-                        Text(error).font(.caption).foregroundStyle(.orange)
-                    }
-                }
-            }
+            if saved { Note(draft.wrappedValue.isEmpty ? "Removed." : "Saved.") }
         }
     }
 
-    /// The login-item row reports what ServiceManagement actually holds —
-    /// never just the toggle's desired state.
-    private var loginServiceStatusText: String {
+    /// What ServiceManagement actually holds, only when it needs saying.
+    private var loginServiceStatusText: String? {
         switch config.loginServiceStatus {
-        case .enabled:
-            return "Registered — Jarvis opens when you log in."
         case .requiresApproval:
-            return "Needs approval — allow Jarvis in System Settings → General → Login Items."
-        case .notRegistered:
-            return "Not registered — Jarvis won't start at login."
+            return "Allow Jarvis in System Settings, under General, then Login Items."
         case .notFound:
-            return "Unavailable outside an installed app bundle."
+            return "This works once Jarvis is in your Applications folder."
+        case .enabled, .notRegistered:
+            return nil
         @unknown default:
-            return ""
+            return nil
         }
     }
-
-    private var commandSettings: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Jev connection", systemImage: "bolt").font(.headline)
-                    Text("TypeSafe API key").font(.callout)
-                    HStack {
-                        SecureField("ts-…", text: $apiKeyDraft).textFieldStyle(.roundedBorder).onSubmit(saveAPIKey)
-                        Button("Save", action: saveAPIKey).buttonStyle(.borderedProminent)
-                    }
-                    Text("Stored in macOS Keychain. Clear the field and save to remove the stored key.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let error = config.apiKeyError { Text(error).font(.caption).foregroundStyle(.orange) }
-                    else if apiKeySaved { Text(apiKeyDraft.isEmpty ? "Saved key removed" : "Saved in Keychain").font(.caption).foregroundStyle(.secondary) }
-                }
-            }
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Computer control", systemImage: "cursorarrow.motionlines").font(.headline)
-                    Toggle("Show agent cursor", isOn: $config.agentCursorEnabled)
-                    Text(config.agentCursorEnabled
-                         ? "The agent cursor glides to each action it can place. Accessibility-only actions still act directly — the driver cannot draw a pointer for a call that has no on-screen point."
-                         : "Actions dispatch directly to the target without an animated cursor. Every click follows this rule — the mode never mixes.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Interface sounds", isOn: $config.sounds)
-                    Toggle("Persistent number chips", isOn: $config.persistentNumbers)
-                }
-            }
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Eye tracking", systemImage: "eye").font(.headline)
-                    Toggle("Track my eyes", isOn: $config.gazeTracking)
-                    Text("Launches the bundled tracker so gaze verbs — “click”, “what is this” — act where you're looking. Off leaves the tracker closed and those verbs decline.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Picker("Dot size", selection: Binding(
-                        get: { eyeDotScale },
-                        set: { value in
-                            eyeSettingsTouched = true
-                            eyeDotScale = value
-                            Task { try? await TrackerControl.post(action: "dot_scale", value: value) }
-                        })) {
-                        Text("Small").tag(0.8)
-                        Text("Default").tag(1.0)
-                        Text("Large").tag(1.25)
-                    }.pickerStyle(.segmented)
-                    Toggle("Show gaze dot", isOn: Binding(
-                        get: { eyeDotVisible },
-                        set: { value in
-                            eyeSettingsTouched = true
-                            eyeDotVisible = value
-                            Task { try? await TrackerControl.post(action: "gaze_dot", value: value) }
-                        }))
-                    Text("Off is the Vision Pro posture — the thing you're looking at highlights itself instead of a dot chasing your eyes. Turn it on while you dial in accuracy.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Dwell lock", isOn: Binding(
-                        get: { eyeDwellLock },
-                        set: { value in
-                            eyeSettingsTouched = true
-                            eyeDwellLock = value
-                            Task { try? await TrackerControl.post(action: "dwell_lock", value: value) }
-                        }))
-                    Picker("Dwell auto-click", selection: Binding(
-                        get: { dwellMode },
-                        set: { value in
-                            guard let mode = DwellPolicy.Mode(rawValue: value) else { return }
-                            var policy = DwellPolicy.load()
-                            policy.mode = mode
-                            policy.save()
-                            dwellMode = policy.mode.rawValue
-                            Task { @MainActor in GazeService.shared.reloadPolicy() }
-                        })) {
-                        Text("Off").tag(DwellPolicy.Mode.off.rawValue)
-                        Text("Safe").tag(DwellPolicy.Mode.safe.rawValue)
-                        Text("All").tag(DwellPolicy.Mode.all.rawValue)
-                    }.pickerStyle(.segmented)
-                    Text("Holding your gaze clicks for you — Safe only on verified controls, All adds windows and text hits, Off keeps gaze verbs voice-only. Denied phrases never fire.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Tap Fn to click what I'm looking at", isOn: $config.tapToGazeClick)
-                    Text("A Fn tap while your eyes are on a target clicks it directly — no voice turn needed. Off keeps Fn taps as ordinary captures.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("Dot size and dwell lock are tracker-side settings — read back when this opens, applied on change.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Button("Check eye-tracking accuracy") { accuracyCheck.start() }
-                            .disabled(accuracyCheck.running || !config.gazeTracking)
-                        if accuracyCheck.running { ProgressView().controlSize(.small) }
-                    }
-                    Text(accuracyCheck.message).font(.caption).foregroundStyle(.secondary)
-                }
-                .task {
-                    guard let status = try? await TrackerControl().status() else { return }
-                    // A read that resolved after the user edited must not
-                    // paint over the newer choice.
-                    guard !eyeSettingsTouched else { return }
-                    if let scale = status.dotScale {
-                        eyeDotScale = [0.8, 1.0, 1.25].min(by: { abs($0 - scale) < abs($1 - scale) }) ?? scale
-                    }
-                    if let lock = status.dwellLock { eyeDwellLock = lock }
-                    if let visible = status.dotVisible { eyeDotVisible = visible }
-                }
-            }
-            PlannerCard(auth: config.codexAuth, config: config)
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 16) {
-                    Label("Command confirmation", systemImage: "checkmark.shield").font(.headline)
-                    Toggle("Run commands automatically", isOn: $config.autoExecute)
-                    Text("Completed commands can run while you hold Fn. Release to finish remaining speech and dictated text. Turn this off to review commands before they run.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Always allow computer use", isOn: $config.alwaysAllowComputerUse)
-                    Text(config.alwaysAllowComputerUse
-                         ? "Input actions run without asking — every task and delegated agent included. Deny lists and focus rules still apply."
-                         : "Actions that change something ask first. Turn this on to approve all computer use up front.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("Deletion and purchasing are not supported by this app.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("Reset remembered permissions") { CuaStandingGrants.reset() }.controlSize(.small)
-                    Text("Capabilities you approve — like browser page access or menu focus per app — are remembered so they are never re-asked. Reset to be asked again.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            VoiceCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("On-device", systemImage: "cpu").font(.headline)
-                    Text("Eye tracking runs entirely on this Mac; camera frames never leave it. Speech is not recognized on-device: while you speak, audio goes to OpenAI, which returns the transcript and spoken replies.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("A command runs only after your whole request is final. If speech or a target is uncertain, Jarvis asks or refuses instead of guessing.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func saveAPIKey() { apiKeySaved = config.saveAPIKey(apiKeyDraft) }
-    private func saveOpenAIKey() { openAIKeySaved = config.saveOpenAIAPIKey(openAIKeyDraft) }
 }
 
-/// Planner lane card — ChatGPT sign-in through the vendored codex binary
-/// plus the live planner toggle. Watches CodexAuth directly so the spinner,
-/// device code and status line update as the flow progresses.
-private struct PlannerCard: View {
-    @ObservedObject var auth: CodexAuth
-    @ObservedObject var config: Config
+/// A titled block of settings on the one page.
+private struct SettingsSection<Content: View>: View {
+    let title: String
+    let symbol: String
+    @ViewBuilder var content: Content
 
     var body: some View {
-        VoiceCard {
+        JarvisCard {
             VStack(alignment: .leading, spacing: 12) {
-                Label("Planner", systemImage: "sparkles").font(.headline)
+                Label(title, systemImage: symbol).font(.system(size: 17, weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                content.font(.system(size: 14))
+            }
+        }
+    }
+}
+
+/// Secondary text under a setting, at a size people can read.
+private struct Note: View {
+    let text: String
+    var tint: Color = .secondary
+    init(_ text: String, tint: Color = .secondary) { self.text = text; self.tint = tint }
+
+    var body: some View {
+        Text(text).font(.system(size: 13)).foregroundStyle(tint)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// ChatGPT sign-in for helper agents. Watches CodexAuth directly so the
+/// spinner, sign-in code and status line update as the flow progresses.
+private struct AgentSignIn: View {
+    @ObservedObject var auth: CodexAuth
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+                Text("Helper agents").font(.system(size: 14, weight: .medium))
                 HStack(spacing: 8) {
                     statusLine
                     Spacer()
@@ -418,18 +425,13 @@ private struct PlannerCard: View {
                     }
                 }
                 if !auth.binaryAvailable {
-                    Text("The bundled agent runtime is missing — rebuild the app bundle to sign in.")
-                        .font(.caption).foregroundStyle(.orange)
+                    Note("This copy of Jarvis can't sign in. Reinstalling Jarvis fixes it.", tint: .orange)
                 } else if let code = auth.signInCode {
-                    Text("A sign-in page opened in your browser — enter code \(code) there. It's on your clipboard.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Note("A sign-in page opened in your browser. Enter the code " + code + " there; it's already copied.")
                 } else if auth.signInOpenedTerminal {
-                    Text("Finish signing in in the Terminal window that opened; this updates when it completes.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Note("Finish signing in in the window that opened. This updates when you're done.")
                 }
-                Text("Signs in Codex for delegated agents. Multi-step voice requests plan through your text provider or OpenAI key — no sign-in needed.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+                Note("Sign in with ChatGPT to let Jarvis hand longer jobs to helper agents. Everyday requests don't need it.")
         }
     }
 
@@ -444,7 +446,7 @@ private struct PlannerCard: View {
                 Text("Not signed in").font(.callout)
             case .unreachable:
                 Image(systemName: "exclamationmark.circle").foregroundStyle(.orange)
-                Text("Codex runtime unavailable").font(.callout)
+                Text("Can't reach sign-in right now").font(.callout)
             }
         }
     }

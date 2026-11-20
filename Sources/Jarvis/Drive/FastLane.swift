@@ -99,6 +99,13 @@ struct FastAction: Sendable {
         /// "Where did X go" — locate a minimized/hidden/off-Space window
         /// by app name or title fragment, report where it is, restore it.
         case locate(query: String)
+        /// A control named out loud — "click Send", "press Reply all". The
+        /// executor matches the name against the front window's labelled
+        /// controls; no gaze and no model call. Several equal matches get
+        /// numbers, and no match falls through to the drive loop.
+        case clickNamed(String)
+        /// "show me Send" — highlights the named control without acting.
+        case showNamed(String)
         /// Dictation mode control — "start dictating" latches the literal
         /// capture lane, "stop dictating" ends it. Carries no text itself:
         /// the executor hands the bool to the coordinator's
@@ -112,14 +119,16 @@ struct FastAction: Sendable {
         case left, right, fill
     }
 
-    /// Aim overlay verbs — the numbered-targeting capability, scoped to
-    /// what the user is looking at rather than a wall of labels.
+    /// Overlay verbs — names over the front window's controls, numbers
+    /// only when a spoken name matches several of them.
     enum OverlayVerb: Equatable, Sendable {
-        /// Chips over the candidates of the window under the gaze point
-        /// (pointer/frontmost when no tracker).
+        /// Numbered chips over exactly the targets handed in — the matches
+        /// of an ambiguous "click <name>". No phrase asks for it directly.
         case showNumbers
-        /// Chips over every on-screen candidate — the explicit "everywhere".
-        case showNumbersAll
+        /// Each labelled control in the front window shows its name.
+        case showNames
+        /// A halo around the one control a "show me <name>" matched.
+        case highlight
         case hideNumbers
         /// Pick chip N — resolves through the pending overlay state, so a
         /// spoken number only acts while chips are up.
@@ -305,6 +314,12 @@ struct FastAction: Sendable {
             return (menu, display.scoped ? Self.gazeDisplayQualifier : nil)
         }
         var qualifier: String?
+        // "click on Save" names a control, not an app: the qualifier split
+        // would leave a bare gaze "click" aimed at an app called Save.
+        if let split = splitAppQualifier(command), gazeTable[split.command] != nil,
+           let named = parseNamed(command) {
+            return (named, display.scoped ? Self.gazeDisplayQualifier : nil)
+        }
         if let split = splitAppQualifier(command) {
             command = split.command
             qualifier = split.qualifier
@@ -312,6 +327,8 @@ struct FastAction: Sendable {
         // Verb-first app control parses the post-peel command so "minimize the
         // window in notes" keeps its ⌘M+qualifier meaning; a phrase that peels
         // a qualifier AND leaves a verb-first tail is ambiguous — the loop owns it.
+        // "hide names" is the overlay, never an app called Names.
+        if qualifier == nil, let overlay = overlayTable[command] { return (overlay, nil) }
         if qualifier == nil, let control = parseAppControl(command) { return control }
         if qualifier == nil, display.scoped { qualifier = Self.gazeDisplayQualifier }
         guard let action = table[command] else {
@@ -347,6 +364,7 @@ struct FastAction: Sendable {
             if let dictation = dictationTable[command] {
                 return (dictation, qualifier)
             }
+            if let named = parseNamed(command) { return (named, qualifier) }
             return nil
         }
         // "minimize this"/"close it"/"hide this app" — the pronoun names
@@ -894,6 +912,34 @@ struct FastAction: Sendable {
                           result: "Clicked number \(n)", effect: .delivered)
     }
 
+    /// "click Send" / "press Reply all" / "show me Send" — a control named
+    /// out loud. Gaze referents ("click this"), numbers ("click 2") and
+    /// key presses ("press enter") all match earlier tables, so what
+    /// reaches here names a control. Role words ("the Send button") are
+    /// packaging, not part of the name.
+    static func parseNamed(_ command: String) -> FastAction? {
+        let verbs: [(prefix: String, click: Bool)] = [
+            ("click on ", true), ("click ", true), ("press ", true),
+            ("tap on ", true), ("tap ", true), ("show me ", false), ("point to ", false)
+        ]
+        guard let verb = verbs.first(where: { command.hasPrefix($0.prefix) }) else { return nil }
+        var words = command.dropFirst(verb.prefix.count).split(separator: " ").map(String.init)
+        if let first = words.first, ["the", "a", "an"].contains(first) { words.removeFirst() }
+        if words.count > 1, let last = words.last,
+           ["button", "link", "tab", "checkbox", "item"].contains(last) { words.removeLast() }
+        let name = words.joined(separator: " ")
+        guard !name.isEmpty, words.count <= 6,
+              !["this", "that", "it", "here", "there", "them", "me", "something"].contains(name),
+              Int(name) == nil, numberWords[name] == nil else { return nil }
+        return verb.click
+            ? FastAction(body: .clickNamed(name), generic: true,
+                         description: "Clicking \(name)", result: "Clicked \(name)",
+                         effect: .delivered, directlyRequested: true)
+            : FastAction(body: .showNamed(name), generic: true,
+                         description: "Finding \(name)", result: "Showed \(name)",
+                         effect: .delivered, directlyRequested: true)
+    }
+
     /// `where did <X> go` / `wheres <X>` / `bring back <X>` / `find my <X>`
     /// — locate a window that left the screen. Only the where-framed and
     /// possessive forms lane here: bare "find" stays ⌘F and "find X" stays
@@ -1365,13 +1411,12 @@ struct FastAction: Sendable {
                                     effect: .delivered)
             for phrase in phrases { t[phrase] = action }
         }
-        add(["show numbers", "show me the numbers", "show the numbers", "numbers"],
-            .showNumbers, "Showing the numbered targets", "Showed the numbers")
-        add(["show numbers everywhere", "numbers everywhere", "all numbers",
-             "show all numbers", "show numbers on everything"],
-            .showNumbersAll, "Showing numbers everywhere", "Showed numbers everywhere")
-        add(["hide numbers", "clear numbers", "hide the numbers"],
-            .hideNumbers, "Hiding the numbers", "Hid the numbers")
+        add(["show names", "show the names", "show me the names", "show labels",
+             "show the labels", "what can i click", "show numbers", "show the numbers"],
+            .showNames, "Showing the names", "Showed the names")
+        add(["hide names", "hide the names", "hide labels", "hide the labels",
+             "hide numbers", "clear numbers", "hide the numbers"],
+            .hideNumbers, "Hiding the names", "Hid the names")
         return t
     }()
 
@@ -1717,3 +1762,55 @@ enum ActionCatalog {
         return (text, range, opening)
     }
 }
+
+
+/// Which on-screen controls a spoken name means. An exact label wins, then
+/// a label that starts with the name, then one that holds it as whole
+/// words. A label that only repeats a pressable control it sits inside
+/// (a button's own text) collapses into that control, so one button never
+/// reads as two. Several equal matches stay several: the caller numbers them.
+enum NamedTargetMatch {
+    struct Candidate: Equatable, Sendable {
+        let label: String
+        let frame: CGRect
+        let pressable: Bool
+    }
+
+    static func normalize(_ text: String) -> String {
+        let scalars = text.lowercased().unicodeScalars.map {
+            CharacterSet.alphanumerics.contains($0) ? Character($0) : " "
+        }
+        return String(scalars).split(separator: " ").joined(separator: " ")
+    }
+
+    /// Indices into `candidates` of the controls the name matches.
+    static func matches(_ name: String, in candidates: [Candidate]) -> [Int] {
+        let query = normalize(name)
+        guard !query.isEmpty else { return [] }
+        let labels = candidates.map { normalize($0.label) }
+        let tiers: [(String) -> Bool] = [
+            { $0 == query },
+            { $0.hasPrefix(query + " ") },
+            { (" " + $0 + " ").contains(" " + query + " ") }
+        ]
+        for tier in tiers {
+            let hits = labels.indices.filter { !labels[$0].isEmpty && tier(labels[$0]) }
+            if !hits.isEmpty { return collapse(hits, in: candidates) }
+        }
+        return []
+    }
+
+    /// Drops every candidate whose centre lies inside another kept
+    /// candidate that is pressable — the text inside a button is the button.
+    static func collapse(_ indices: [Int], in candidates: [Candidate]) -> [Int] {
+        indices.filter { i in
+            let centre = CGPoint(x: candidates[i].frame.midX, y: candidates[i].frame.midY)
+            return !indices.contains { j in
+                j != i && candidates[j].pressable && candidates[j].frame.contains(centre)
+                    && (!candidates[i].pressable || candidates[j].frame.width * candidates[j].frame.height
+                        > candidates[i].frame.width * candidates[i].frame.height)
+            }
+        }
+    }
+}
+

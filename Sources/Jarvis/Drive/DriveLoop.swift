@@ -619,7 +619,7 @@ actor DriveLoop {
             }
             let directLiteral: Bool
             if requiresCapturedTextTarget, let parsed = FastAction.parse(task.goal),
-               parsed.appQualifier == nil, !parsed.action.deictic, case .type = parsed.action.body {
+               parsed.appQualifier == nil, !Self.pointsByGaze(parsed.action), case .type = parsed.action.body {
                 directLiteral = true
                 guard task.windowID != nil, task.application != nil,
                       task.values["text"] != nil else {
@@ -654,14 +654,14 @@ actor DriveLoop {
                     appHint: task.application, frontmostBundle: frontmostBundleID())
                 let boundLiteral: Bool
                 if let parsed = FastAction.parse(task.goal), parsed.appQualifier == nil,
-                   !parsed.action.deictic, case .type(let text) = parsed.action.body,
+                   !Self.pointsByGaze(parsed.action), case .type(let text) = parsed.action.body,
                    task.values["text"] == text, local?.bundle == requested,
                    case .type(let localText)? = local?.action?.body, localText == text {
                     boundLiteral = true
                 } else { boundLiteral = false }
                 let boundHotkey: Bool
                 if let parsed = FastAction.parse(task.goal), parsed.appQualifier == nil,
-                   !parsed.action.deictic, case .hotkey(let keys, _) = parsed.action.body,
+                   !Self.pointsByGaze(parsed.action), case .hotkey(let keys, _) = parsed.action.body,
                    local?.bundle == requested, frontmostBundleID() == requested,
                    case .hotkey(let localKeys, _)? = local?.action?.body, localKeys == keys {
                     boundHotkey = true
@@ -1235,7 +1235,7 @@ actor DriveLoop {
                  .repeatLast, .locate, .dictation, .webSearch, .navigateURL:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,
-                 .menu, .windowFrame:
+                 .menu, .windowFrame, .clickNamed, .showNamed:
                 return true
             }
         }

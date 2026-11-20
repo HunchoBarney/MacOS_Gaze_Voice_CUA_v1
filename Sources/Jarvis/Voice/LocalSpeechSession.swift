@@ -60,7 +60,7 @@ enum VoiceAdmissionPolicy {
             }
             if !stripped { break }
         }
-        if FastAction.parse(command) != nil { return command }
+        if let parsed = FastAction.parse(command), !namesApp(parsed.action, context: context) { return command }
         if let parsed = FastAction.parseOpen(command),
            !namedCandidates(parsed.query.components(separatedBy: " and ")[0], context: context).isEmpty {
             // Preserve both unique and ambiguous original names before
@@ -98,6 +98,13 @@ enum VoiceAdmissionPolicy {
             }
         }
         return FastAction.parseOpen(command) == nil ? original : command
+    }
+
+    /// "show me Chrome" brings an app forward; "show me Save" points at
+    /// a control. An app the Mac knows by that name wins.
+    private static func namesApp(_ action: FastAction, context: VoiceAdmissionContext) -> Bool {
+        guard case .showNamed(let name) = action.body else { return false }
+        return !namedCandidates(name, context: context).isEmpty
     }
 
     private static func focusInflection(_ command: String, context: VoiceAdmissionContext) -> String? {
@@ -253,7 +260,7 @@ enum VoiceAdmissionPolicy {
             return blocked(.clarify, "ungrounded_target")
         }
 
-        if let parsed = FastAction.parse(text) {
+        if let parsed = FastAction.parse(text), !namesApp(parsed.action, context: context) {
             if let qualifier = parsed.appQualifier,
                !context.entities.contains(where: { normalized($0.name) == normalized(qualifier) }) {
                 if t.hasPrefix("search for ") {

@@ -827,7 +827,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         let key = apiKey().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            throw VoiceError("Add your OpenAI API key in Voice settings to talk to Jev.")
+            throw VoiceError("Jarvis isn't connected to its voice service yet, so it can't hear you.")
         }
         client.teardown()
         lastSessionError = nil
@@ -1188,7 +1188,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             defer { if self.preparationID == token { self.preparation = nil } }
             do {
                 try Task.checkCancellation()
-                guard Permission.microphone.isGranted else { throw VoiceError("Microphone access is needed. Open Voice settings.") }
+                guard Permission.microphone.isGranted else { throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.") }
                 let device = try MicrophoneCatalog.resolve(uid: uid)
                 let inputStarted = ProcessInfo.processInfo.systemUptime
                 Self.log.notice("prepare stage=microphone_input begin")
@@ -1254,7 +1254,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         onConversationState?(.preparing)
         do {
             guard playbackRoutingReady?() == true else {
-                throw VoiceError("Hands-free playback is unavailable. Hold Fn to speak.")
+                throw VoiceError("I can't listen all the time with this audio setup. Hold fn to talk instead.")
             }
             guard conversationStartID == request, !Task.isCancelled else { throw CancellationError() }
             if !duplexRequested {
@@ -1270,7 +1270,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                   let hardware, let outputs = hardware.playback,
                   outputs.realtime.isReady(), outputs.system.isReady(), outputs.local.isReady(),
                   playbackRoutingReady?() == true else {
-                throw VoiceError("Hands-free voice is unavailable with this audio device. Hold Fn to speak.")
+                throw VoiceError("I can't listen all the time with this audio device. Hold fn to talk instead.")
             }
             guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000,
                                              channels: 1, interleaved: true) else {
@@ -1308,7 +1308,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 Task { @MainActor [weak self] in
                     guard let self, self.conversation.id == session else { return }
                     guard outputs.realtime.isReady(), outputs.system.isReady(), outputs.local.isReady() else {
-                        self.stopConversation(state: .unavailable("The listening audio stopped. Resume hands-free voice to try again."))
+                        self.stopConversation(state: .unavailable("The microphone stopped. Choose Start listening in Settings to try again."))
                         await self.suspend()
                         return
                     }
@@ -1881,7 +1881,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             switch admission.reason {
             case "negated_request": message = "I won't act on that request."
             case "ambiguous_ask", "ask_changed": message = "Which current task are you answering?"
-            case "empty_transcript": message = "I didn't catch that — start speaking once the pill shows Listening."
+            case "empty_transcript": message = "I didn't catch that. Try again once you see Listening at the top of the screen."
             default: message = "Please clarify the intended target or value."
             }
             onEvent?(admission.turn.id, .toolSay(message))

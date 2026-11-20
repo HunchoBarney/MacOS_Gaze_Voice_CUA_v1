@@ -344,6 +344,10 @@ extension DriveLoop {
                 return try await dispatchWebSearch(url, task: task, history: &history)
             case .gaze(let verb):
                 feed(action.description)
+                guard Self.gazeEnabled() else {
+                    return settle(.blocked(Self.eyesOffReply(verb)), task, history,
+                                  blockedReason: "eye tracking off")
+                }
                 // Gaze referents dispatch on the gaze session — the same
                 // label the candidate feed's reads mint element tokens
                 // under, and a cursorless lane the coordinator's
@@ -408,7 +412,7 @@ extension DriveLoop {
         // frontmost app's focused one. A dead tracker refuses like a
         // deictic type: retargeting the frontmost window is a mutation
         // the user didn't point at.
-        if let action = resolved.action, action.deictic,
+        if let action = resolved.action, Self.pointsByGaze(action),
            let control = Self.deicticWindowControl(for: action) {
             return try await runDeicticWindowControl(control, action: action, task: task,
                                                      session: session, history: &history,
@@ -532,7 +536,7 @@ extension DriveLoop {
         var retainedTextTarget: FocusedTextBinding.Capture?
         var nativeTextWindow: FocusedTextBinding.WindowSnapshot?
         if requiresCapturedTextTarget, case .type(let payload) = action.body,
-           !action.deictic, !resolved.displayScoped, task.windowName == nil,
+           !Self.pointsByGaze(action), !resolved.displayScoped, task.windowName == nil,
            !BrowserSupport.isBrowser(bundleID: bundle),
            task.application == bundle, task.values["text"] == payload,
            CuaPolicy.deniedInTypedPayload(payload) == nil, let pinned = task.windowID {
@@ -600,6 +604,12 @@ extension DriveLoop {
             return try await runWindowSnap(snap, action: action, pid: pid,
                                            windowID: windowID, name: name, bundle: bundle,
                                            task: task, session: session, history: &history)
+        case .clickNamed(let spoken), .showNamed(let spoken):
+            var clicks = false
+            if case .clickNamed = action.body { clicks = true }
+            return try await runNamedTarget(spoken, clicks: clicks, pid: pid, windowID: windowID,
+                                            windowTitle: windowTitle, task: task, session: session,
+                                            history: &history, confirmed: &confirmed)
         case .scroll(let direction, let pages):
             return try await runVerifiedScroll(direction: direction, pages: pages, task: task,
                 window: WindowRef(pid: pid, windowID: windowID), name: name, bundle: bundle,
@@ -609,7 +619,7 @@ extension DriveLoop {
             // or unsure tracker must not retarget the bound/frontmost
             // window: typing into it is a mutation the user didn't
             // point at. Non-deictic type keeps the bound-window path.
-            if action.deictic {
+            if Self.pointsByGaze(action) {
                 let sample: GazeSample
                 do {
                     sample = try await gazeSample()
@@ -872,6 +882,31 @@ extension DriveLoop {
     /// `TrackerControl.transport` and `displayFrames`).
     static var trackerState: () async -> TrackerHost.State = {
         await TrackerHost.shared.state
+    }
+
+    /// Whether the user turned eye tracking on. Off, gaze referents answer
+    /// with what to say instead, and "here"/"this" mean the insertion
+    /// point and the front window. Reads the stored switch so any thread
+    /// can ask; tests replace it.
+    static var gazeEnabled: () -> Bool = {
+        UserDefaults.standard.bool(forKey: "gazeTracking")
+    }
+
+    /// "here"/"this" aim at the user's eyes only while eye tracking is on;
+    /// otherwise they mean the insertion point and the front window.
+    static func pointsByGaze(_ action: FastAction) -> Bool {
+        action.deictic && gazeEnabled()
+    }
+
+    /// The reply when a gaze referent arrives with eye tracking off — the
+    /// next thing to say, never a push back to eye tracking.
+    static func eyesOffReply(_ verb: FastAction.GazeVerb) -> String {
+        switch verb {
+        case .describe:
+            return "Eye tracking's off, so I can't tell what you're looking at. Say “show names” and I'll label what's on screen."
+        case .click, .rightClick, .doubleClick:
+            return "Eye tracking's off, so I can't tell what you're looking at. Just tell me the button, like “click Save”."
+        }
     }
 
     /// The process-state word, when it beats any HTTP-derived remedy —
@@ -1655,34 +1690,33 @@ extension DriveLoop {
 
     // MARK: - Overlay and locate lanes
 
-    /// Aim-overlay verbs — the numbered chips resolve app-side through the
-    /// injected `overlayDispatch` seam (TargetOverlay on the coordinator),
-    /// never through the driver. The referent window is the one under the
-    /// gaze point, then the pointer's, then the frontmost window — an
-    /// overlay verb tolerates a dead tracker because the chips land where
-    /// the user can see them either way. A nil seam means nothing can draw
-    /// numbers; the refusal says so instead of pretending chips went up.
+    /// Overlay verbs — names, a highlight, or numbers over an ambiguous
+    /// name's matches — resolve app-side through the injected
+    /// `overlayDispatch` seam (TargetOverlay on the coordinator), never
+    /// through the driver. The window is the one under the user's eyes
+    /// when eye tracking is on and answering, otherwise the frontmost
+    /// window. A nil seam means nothing can draw; the refusal says so
+    /// instead of pretending labels went up.
     private func runOverlayVerb(_ verb: FastAction.OverlayVerb, task: DriveTask,
                                 session: String, history: inout [String]) async throws -> DriveResult {
         guard let overlayDispatch else {
-            return settle(.blocked("The overlay isn't available — nothing was numbered."),
+            return settle(.blocked("I can't put names on the screen right now."),
                           task, history, blockedReason: "overlay seam absent")
         }
-        let point = (try? await gazeSample()).map { CGPoint(x: $0.x, y: $0.y) }
-            ?? ScreenGeometry.appKitToTopLeft(NSEvent.mouseLocation)
+        let gaze = Self.gazeEnabled()
+            ? (try? await gazeSample()).map { CGPoint(x: $0.x, y: $0.y) } : nil
         switch verb {
-        case .showNumbers, .showNumbersAll:
+        case .showNames, .showNumbers, .highlight:
             // Show verbs need real targets — an unreadable window or an
-            // empty tree is an honest "nothing to number", not a silent
+            // empty tree is an honest "nothing to name", not a silent
             // overlay.
-            let targets = try await collectOverlayTargets(
-                allWindows: verb == .showNumbersAll, point: point, session: session)
+            let targets = try await collectOverlayTargets(gaze: gaze, session: session)
             guard !targets.isEmpty else {
-                return settle(.blocked("There's nothing on that surface to number."),
+                return settle(.blocked("I can't find anything with a name in this window."),
                               task, history, blockedReason: "no overlay targets")
             }
-            guard let result = await overlayDispatch(verb, targets, point) else {
-                return settle(.blocked("The overlay isn't available — nothing was numbered."),
+            guard let result = await overlayDispatch(verb, targets, gaze) else {
+                return settle(.blocked("I can't put names on the screen right now."),
                               task, history, blockedReason: "overlay declined")
             }
             return result
@@ -1690,66 +1724,110 @@ extension DriveLoop {
             // Pick/hide verbs ride the overlay's own pending state — the
             // targets here are best-effort context, so a failed snapshot
             // doesn't veto the pick.
-            let targets = (try? await collectOverlayTargets(
-                allWindows: false, point: point, session: session)) ?? []
-            guard let result = await overlayDispatch(verb, targets, point) else {
-                return settle(.blocked("The overlay isn't available — nothing was numbered."),
+            let targets = (try? await collectOverlayTargets(gaze: gaze, session: session)) ?? []
+            guard let result = await overlayDispatch(verb, targets, gaze) else {
+                return settle(.blocked("I can't put names on the screen right now."),
                               task, history, blockedReason: "overlay declined")
             }
             return result
         }
     }
 
-    /// The target windows for an overlay verb: "everywhere" is every
-    /// on-screen window topmost-first (bounded — a snapshot per window
-    /// still costs a roundtrip), a scoped show is the window under the
-    /// point with the frontmost window's app as the last honest referent.
-    private func collectOverlayTargets(allWindows: Bool, point: CGPoint,
+    /// The one window an overlay verb labels: the window under the user's
+    /// eyes when eye tracking is on and answering, otherwise the
+    /// frontmost window — the one a voice-only user is talking about.
+    private func collectOverlayTargets(gaze: CGPoint?,
                                      session: String) async throws -> [(frame: CGRect, label: String)] {
-        var windows: [(pid: Int, wid: Int)] = []
-        if allWindows {
-            // Topmost-first: z_index is higher = closer to the front, so
-            // the sort descends and the cap keeps the windows a user can
-            // actually see — not the eight buried ones. Own-pid rows are
-            // dropped so chips never number Jarvis itself.
-            windows = try await allWindowRows(session: session)
-                .filter { $0["is_on_screen"] != .bool(false)
-                          && $0["pid"]?.integer != Self.ownPID }
-                .sorted { ($0["z_index"]?.integer ?? Int.min) > ($1["z_index"]?.integer ?? Int.min) }
-                .prefix(8)
-                .compactMap { row in
-                    guard let pid = row["pid"]?.integer,
-                          let wid = row["window_id"]?.integer else { return nil }
-                    return (pid, wid)
-                }
-        } else {
-            var target = try await windowAtPoint(point, session: session)
-            if target == nil, let bundle = frontmostBundleID(),
-               let pid = Self.runningPID(bundle: bundle, in: []),
-               let wid = Self.bestWindowID(
-                    in: try await listedWindowRows(pid: pid, session: session)) {
-                target = GazeWindowTarget(pid: pid, windowID: wid,
-                                          app: bundle, title: "")
-            }
-            if let target { windows = [(target.pid, target.windowID)] }
+        var target: GazeWindowTarget?
+        if let gaze { target = try await windowAtPoint(gaze, session: session) }
+        if target == nil, let bundle = frontmostBundleID(),
+           let pid = Self.runningPID(bundle: bundle, in: []),
+           let wid = Self.bestWindowID(
+                in: try await listedWindowRows(pid: pid, session: session)) {
+            target = GazeWindowTarget(pid: pid, windowID: wid, app: bundle, title: "")
         }
-        // Each window's snapshot is an independent read — overlap them.
-        // The group keeps z-order by carrying each row's index through,
-        // so chip numbering still reads front-to-back.
-        return try await withThrowingTaskGroup(
-            of: (Int, [(frame: CGRect, label: String)]).self
-        ) { group in
-            for (index, window) in windows.enumerated() {
-                group.addTask { [self] in
-                    (index, try await self.overlayTargets(pid: window.pid,
-                                                          windowID: window.wid,
-                                                          session: session))
-                }
-            }
-            var grouped: [(Int, [(frame: CGRect, label: String)])] = []
-            for try await item in group { grouped.append(item) }
-            return grouped.sorted { $0.0 < $1.0 }.flatMap(\.1)
+        guard let target else { return [] }
+        return try await overlayTargets(pid: target.pid, windowID: target.windowID, session: session)
+    }
+
+    /// "click Send" / "show me Send" — the spoken name against the window's
+    /// labelled controls. One match clicks (or is highlighted); several get
+    /// numbers and a question; none returns nil so the drive loop can try
+    /// a description the labels don't carry.
+    private func runNamedTarget(_ spoken: String, clicks: Bool, pid: Int, windowID: Int,
+                                windowTitle: String, task: DriveTask, session: String,
+                                history: inout [String], confirmed: inout Bool) async throws -> DriveResult? {
+        let snap = try await observe("get_window_state",
+            ["pid": .number(Double(pid)), "window_id": .number(Double(windowID)),
+             "include_screenshot": .bool(false), "max_elements": .number(220),
+             "session": .string(session)])
+        let elements = Self.elements(from: snap["structuredContent"] ?? snap).compactMap { e -> (Element, CGRect)? in
+            guard Self.overlayActionable(e), let frame = Self.nativeAXScreenRect(e) else { return nil }
+            return (e, frame)
         }
+        let candidates = elements.map { e, frame in
+            NamedTargetMatch.Candidate(label: e.label.isEmpty ? (e.value ?? "") : e.label,
+                                       frame: frame, pressable: !e.actions.isEmpty)
+        }
+        let hits = NamedTargetMatch.matches(spoken, in: candidates)
+        guard !hits.isEmpty else {
+            history.append("No control called \(spoken) in this window.")
+            return nil
+        }
+        let targets = hits.map { (frame: candidates[$0].frame, label: candidates[$0].label) }
+        let label = candidates[hits[0]].label
+        if clicks, hits.count == 1, let hit = hits.first {
+            let (element, frame) = elements[hit]
+            try await gateExplicit("click", corpus: "\(label) \(windowTitle)",
+                                   denied: task.deny, confirmed: &confirmed)
+            var args: [String: JSONValue] = ["session": .string(session)]
+            if let token = element.token, !token.isEmpty {
+                args["pid"] = .number(Double(pid))
+                args["window_id"] = .number(Double(windowID))
+                args["element_token"] = .string(token)
+                args["delivery_mode"] = .string("background")
+            } else {
+                let px = Self.desktopPixels(CGPoint(x: frame.midX, y: frame.midY))
+                args["scope"] = .string("desktop")
+                args["x"] = .number(px.x)
+                args["y"] = .number(px.y)
+            }
+            do {
+                _ = try await call("click", args)
+            } catch let error as DriverConnectionError {
+                if case .toolRefused(_, _, let detail) = error {
+                    return settle(.blocked(detail), task, history, pid: pid, windowID: windowID)
+                }
+                throw error
+            }
+            return done("Clicked \(label).", task, history, pid: pid, windowID: windowID, effect: true)
+        }
+        let verb: FastAction.OverlayVerb = hits.count == 1 ? .highlight : .showNumbers
+        guard let overlayDispatch,
+              let shown = await overlayDispatch(verb, targets, nil),
+              case .done = shown.status else {
+            return settle(.blocked(hits.count == 1
+                                   ? "I found \(label), but I can't point at it right now."
+                                   : "I can see \(hits.count) things called \(label), but I can't number them right now."),
+                          task, history, pid: pid, windowID: windowID, blockedReason: "overlay declined")
+        }
+        if hits.count == 1 {
+            return done("That's \(label).", task, history, pid: pid, windowID: windowID)
+        }
+        return settle(.blocked(Self.whichOneReply(label: label, count: hits.count)),
+                      task, history, pid: pid, windowID: windowID, blockedReason: "ambiguous name")
+    }
+
+    /// "I can see two things called Send. One or two?" — the question after
+    /// numbers go up over an ambiguous name.
+    static func whichOneReply(label: String, count: Int) -> String {
+        let words = ["one", "two", "three", "four", "five"]
+        guard count <= words.count else {
+            return "I can see \(count) things called \(label). Say the number of the one you want."
+        }
+        let options = words.prefix(count).map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        let spoken = options.dropLast().joined(separator: ", ") + " or " + options.last!.lowercased()
+        return "I can see \(words[count - 1]) things called \(label). \(spoken)?"
     }
 
     /// The window's actionable elements as top-left screen rects — element
@@ -2897,7 +2975,7 @@ extension DriveLoop {
             }
         case .gaze: return "click"
         case .tracker: return "tracker control"
-        case .overlay: return "click"
+        case .overlay, .clickNamed, .showNamed: return "click"
         case .repeatLast: return "repeat last action"
         case .locate: return "list_windows"
         case .dictation: return "dictation"

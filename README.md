@@ -46,4 +46,3 @@ Crash and hang reports from MetricKit are kept in
 
 This project started from
 [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).
-FluidVoice attribution is in [ThirdParty/FluidVoice](ThirdParty/FluidVoice/NOTICE.md).

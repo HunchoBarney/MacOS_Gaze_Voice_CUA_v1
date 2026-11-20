@@ -66,6 +66,10 @@ final class TargetOverlay {
     /// the fovea.
     nonisolated static let ringDwellFloor: Double = 0.65
 
+    /// System Reduce Motion — morphs and the confirm ring land without
+    /// travelling. Tests swap in a fixed answer.
+    var reduceMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
     /// Monotonic seconds for the dwell clock — tests swap in a fake.
     var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
@@ -369,17 +373,20 @@ final class TargetOverlay {
 
     // MARK: Chips (numbers + radial share one pool)
 
-    /// Dark compact pill — a 1-based number with an optional caption.
+    /// Dark compact pill — a 1-based number with an optional caption, or
+    /// a name alone when `index` is 0.
     private struct TargetChip: View {
         let index: Int
         var caption: String? = nil
         var body: some View {
             HStack(spacing: 5) {
-                Text("\(index)")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                if index > 0 {
+                    Text("\(index)")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                }
                 if let caption, !caption.isEmpty {
                     Text(caption)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
                 }
             }
@@ -471,6 +478,28 @@ final class TargetOverlay {
                  index: i + 1, caption: nil)
             }
         armChips(specs, dismissOnPick: !persistent, onPick: onPick)
+    }
+
+    /// Name chips on each target's top-left corner — read-only labels the
+    /// user answers with "click <name>", so nothing dwell-picks them.
+    /// Returns how many went up.
+    @discardableResult
+    func showNames(targets: [(frame: CGRect, label: String)]) -> Int {
+        clearChips()
+        for (i, target) in targets.prefix(Self.maxNumberChips).enumerated() {
+            let (panel, hosting) = chipPanel(at: i)
+            hosting.rootView = TargetChip(index: 0, caption: target.label)
+            let fit = hosting.fittingSize
+            let size = CGSize(width: max(fit.width, Self.minChipSide),
+                              height: max(fit.height, Self.minChipSide))
+            let rect = CGRect(x: target.frame.minX + Self.numberNudge.x,
+                              y: target.frame.minY + Self.numberNudge.y - size.height / 2,
+                              width: size.width, height: size.height)
+            panel.alphaValue = 1
+            panel.setFrame(Self.appKitFrame(for: rect), display: true)
+            panel.orderFrontRegardless()
+        }
+        return min(targets.count, Self.maxNumberChips)
     }
 
     /// Retract ONLY the chip pick set — a resolved pick (or a gaze
@@ -574,6 +603,7 @@ final class TargetOverlay {
             for l in [base, fill] {
                 l.frame = container.bounds
                 l.path = toPath
+                guard duration > 0 else { continue }
                 let anim = CABasicAnimation(keyPath: "path")
                 anim.fromValue = fromPath
                 anim.toValue = toPath
@@ -602,6 +632,7 @@ final class TargetOverlay {
             CATransaction.setDisableActions(true)
             container.opacity = alpha
             CATransaction.commit()
+            guard duration > 0 else { return }
             let anim = CABasicAnimation(keyPath: "opacity")
             anim.fromValue = NSNumber(value: current)
             anim.toValue = NSNumber(value: alpha)
@@ -637,7 +668,7 @@ final class TargetOverlay {
         ringProgress = 0
         presentRing(duration: Self.ringMorphSeconds)
         ringView?.setProgress(0)
-        ringView?.fade(to: 1, duration: Self.ringMorphSeconds)
+        ringView?.fade(to: 1, duration: reduceMotion() ? 0 : Self.ringMorphSeconds)
         applyRingAlpha()
         if ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
     }
@@ -672,7 +703,7 @@ final class TargetOverlay {
                            duration: Self.ringMorphSeconds)
         ringRect = nil
         presentRing(duration: Self.ringMorphSeconds)
-        ringView?.fade(to: 0, duration: Self.ringMorphSeconds)
+        ringView?.fade(to: 0, duration: reduceMotion() ? 0 : Self.ringMorphSeconds)
         let generation = ringGeneration
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.ringMorphSeconds * 1e9) + 80_000_000)
@@ -702,7 +733,7 @@ final class TargetOverlay {
             .insetBy(dx: -Self.ringPanelPad, dy: -Self.ringPanelPad)
         ringPanel?.setFrame(Self.appKitFrame(for: canvas), display: true)
         ringView?.morph(from: ringMorph.from, to: ringMorph.to,
-                        in: canvas, duration: duration)
+                        in: canvas, duration: reduceMotion() ? 0 : duration)
     }
 
     private func retireRing() {
@@ -732,7 +763,7 @@ final class TargetOverlay {
         }
         @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
-        func fire(duration: CFTimeInterval) {
+        func fire(duration: CFTimeInterval, travel: Bool = true) {
             func ellipse(_ d: CGFloat) -> CGPath {
                 CGPath(ellipseIn: CGRect(x: bounds.midX - d / 2, y: bounds.midY - d / 2,
                                          width: d, height: d), transform: nil)
@@ -745,7 +776,7 @@ final class TargetOverlay {
             let fade = CABasicAnimation(keyPath: "opacity")
             fade.fromValue = 1.0 as NSNumber
             fade.toValue = 0.0 as NSNumber
-            for anim in [grow, fade] {
+            for anim in travel ? [grow, fade] : [fade] {
                 anim.duration = duration
                 anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 ring.add(anim, forKey: anim.keyPath)
@@ -765,7 +796,7 @@ final class TargetOverlay {
         panel.contentView = ring
         panel.setFrame(Self.appKitFrame(for: rect), display: true)
         panel.orderFrontRegardless()
-        ring.fire(duration: Self.flashSeconds)
+        ring.fire(duration: Self.flashSeconds, travel: !reduceMotion())
         Task { [weak panel] in
             try? await Task.sleep(nanoseconds: UInt64(Self.flashSeconds * 1e9) + 80_000_000)
             panel?.orderOut(nil)
@@ -779,24 +810,18 @@ final class TargetOverlay {
     private struct CheatSheet: View {
         let lines: [String]
         var body: some View {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(lines.indices, id: \.self) { line(lines[$0]) }
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Things you can say").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                ForEach(lines.indices, id: \.self) {
+                    Text(lines[$0]).font(.system(size: 15))
+                }
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 16).padding(.vertical, 14)
+            .background(Color(white: 0.1).opacity(0.92), in: RoundedRectangle(cornerRadius: 12))
             .colorScheme(.dark)
-        }
-        /// "Category: phrase" renders the category bold, the rest plain.
-        private func line(_ s: String) -> Text {
-            var attributed = AttributedString(s)
-            attributed.font = .system(size: 11)
-            if let colon = s.firstIndex(of: ":") {
-                let end = attributed.index(attributed.startIndex,
-                    offsetByCharacters: s.distance(from: s.startIndex, to: colon))
-                attributed[attributed.startIndex..<end].font = .system(size: 11, weight: .semibold)
-            }
-            return Text(attributed)
+            .accessibilityElement(children: .combine)
         }
     }
 
