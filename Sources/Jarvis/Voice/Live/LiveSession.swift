@@ -81,11 +81,14 @@ final class LiveSession: LiveSessionSending {
         }
         do {
             let offer = try await transport.offer()
+            try stillConnecting()
             step("offer")
             let answer = try await broker.createSession(offer: offer, config: config)
+            try stillConnecting()
             step("create")
             sessionID = answer.id
             try await transport.accept(answer: answer.sdp)
+            try stillConnecting()
             step("answer")
         } catch {
             end(LiveSessionEnding(reason: .connectionLost, usage: nil))
@@ -175,6 +178,12 @@ final class LiveSession: LiveSessionSending {
         default: break
         }
         onEvent?(event)
+    }
+
+    /// A close while start awaits ends the session; start then stops rather
+    /// than create a session or wait for one nobody wants.
+    private func stillConnecting() throws {
+        guard phase == .connecting else { throw LiveSessionError.endedBeforeStart }
     }
 
     private func finishStart(_ result: Result<Void, Error>) {

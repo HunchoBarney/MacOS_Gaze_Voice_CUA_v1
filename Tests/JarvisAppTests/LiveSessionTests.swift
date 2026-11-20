@@ -249,5 +249,44 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(transport.closes, 1)
     }
 
+    func testACloseDuringStartEndsItWithoutCreatingTheSession() async throws {
+        final class SlowOffer: LiveTransport, @unchecked Sendable {
+            let incoming = AsyncStream<LiveTransportEvent> { _ in }
+            var release: CheckedContinuation<Void, Never>?
+            var accepted = false
+            func offer() async throws -> String {
+                await withCheckedContinuation { release = $0 }
+                return "offer-sdp"
+            }
+            func accept(answer: String) async throws { accepted = true }
+            func send(_ message: Data) throws {}
+            func close() {}
+        }
+        final class Counting: LiveSessionCreating, @unchecked Sendable {
+            var calls = 0
+            func createSession(offer: String, config: LiveSessionConfig) async throws -> LiveSessionAnswer {
+                calls += 1
+                return LiveSessionAnswer(id: "live_123", sdp: "answer-sdp")
+            }
+        }
+        let transport = SlowOffer()
+        let broker = Counting()
+        let live = LiveSession(transport: transport, broker: broker, config: LiveSessionConfig(instructions: ""))
+        let starting = Task { try await live.start(timeout: .seconds(30)) }
+        try await waitUntil { transport.release != nil }
+        let ending = await live.close()
+        XCTAssertEqual(ending, LiveSessionEnding(reason: .closeRequested, usage: nil))
+        transport.release?.resume()
+        do {
+            try await starting.value
+            XCTFail("start should fail once closed")
+        } catch {
+            XCTAssertEqual(error as? LiveSessionError, .endedBeforeStart)
+        }
+        XCTAssertEqual(broker.calls, 0, "no session is created after the close")
+        XCTAssertFalse(transport.accepted)
+        XCTAssertEqual(live.phase, .ended(ending))
+    }
+
     private final class Captured: @unchecked Sendable { var request: URLRequest? }
 }
