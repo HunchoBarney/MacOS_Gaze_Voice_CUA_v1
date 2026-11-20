@@ -15,8 +15,13 @@ built from source and pinned by the artefact's SHA-256:
   the host, so every connection is refused (fail closed).
 - Build: `cargo build --release --locked -p cua-driver` with the toolchain
   in upstream's `rust-toolchain.toml` (1.97.1), `CUA_DRIVER_GIT_SHA` set to
-  the commit, and every machine path remapped. See
+  the commit, every machine path remapped, and the fixed build directory
+  `/private/tmp/jarvis-cua-driver-<commit>`. Cargo hashes the absolute path of
+  the `libs/cua/crates` path dependencies into their crate metadata, so a build
+  in any other directory produces a different binary. See
   [`fetch-embedded-binaries.sh`](fetch-embedded-binaries.sh).
+- Artefact: `0bb686e1e44b5e80c26f6666b29e6a613621d25f4cc7dd407e19794193186b1c`, reproduced by two clean
+  builds from fresh clones.
 - Pins: `vendored_binaries.cua-driver` in
   [`source-manifest.json`](source-manifest.json) records the commit, the
   patch hash and the artefact hash. A mismatch on any of them fails the build.

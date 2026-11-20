@@ -37,7 +37,10 @@ fetch() { # url dest
 # patch (host-connections-only.patch), built here and pinned by the
 # artefact's own SHA-256. The build is reproducible: a locked dependency
 # graph, the toolchain upstream pins in rust-toolchain.toml, a fixed git
-# revision and every machine-specific path remapped. A cached build that
+# revision, every machine-specific path remapped, and one fixed build
+# directory: Cargo hashes the absolute path of the path dependencies under
+# libs/cua/crates into their crate metadata, so a build anywhere else gets a
+# different binary. A cached build that
 # matches the pin is reused. Needs rustup (it installs the pinned
 # toolchain on first use) and network for the clone and crates.
 DRIVER_SHA="$(field cua-driver sha256)"
@@ -46,12 +49,14 @@ if ! { [ -f "$DRIVER_OUT" ] && [ "$(sha256 "$DRIVER_OUT")" = "$DRIVER_SHA" ]; };
   COMMIT="$(field cua-driver commit)"
   PATCH="$ROOT/$(field cua-driver patch)"
   verify "$PATCH" "$(field cua-driver patch_sha256)" "cua-driver patch"
-  SRC="$CACHE/cua-$COMMIT"
+  SRC="/private/tmp/jarvis-cua-driver-$COMMIT"
   if [ ! -d "$SRC/.git" ]; then
     rm -rf "$SRC"
     git clone --quiet --filter=blob:none --no-checkout --depth 1 \
       --branch "$(field cua-driver tag)" "$(field cua-driver repository)" "$SRC"
-    git -C "$SRC" sparse-checkout set libs/cua-driver/rust
+    git -C "$SRC" sparse-checkout set --no-cone /libs/cua-driver/rust/ \
+      /libs/cua/Cargo.toml /libs/cua/crates/cua-agent-setup/ /libs/cua/crates/cua-home/ /libs/cua/crates/cua-telemetry/ \
+      /libs/cua/skills/ /libs/images/sandbox-images.json /libs/cua/crates/cua-teleport/src/ux/targets.json
   fi
   [ "$(git -C "$SRC" rev-parse HEAD)" = "$COMMIT" ] || {
     echo "cua-driver $(field cua-driver tag) is not the pinned commit $COMMIT. Refusing to build it." >&2
@@ -60,9 +65,9 @@ if ! { [ -f "$DRIVER_OUT" ] && [ "$(sha256 "$DRIVER_OUT")" = "$DRIVER_SHA" ]; };
   git -C "$SRC" checkout --quiet --force HEAD
   git -C "$SRC" apply "$PATCH"
   RUST="$SRC/libs/cua-driver/rust"
-  TARGET="$CACHE/cua-target"
+  TARGET="$SRC-target"
   ( cd "$RUST" && CARGO_TARGET_DIR="$TARGET" CUA_DRIVER_GIT_SHA="$COMMIT" \
-      RUSTFLAGS="--remap-path-prefix=$RUST=/cua-driver --remap-path-prefix=$TARGET=/target --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$HOME/.rustup=/rustup" \
+      RUSTFLAGS="--remap-path-prefix=$SRC=/cua --remap-path-prefix=$TARGET=/target --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$HOME/.rustup=/rustup" \
       cargo build --release --locked -p cua-driver )
   cp "$TARGET/release/cua-driver" "$DRIVER_OUT"
 fi

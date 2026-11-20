@@ -21,21 +21,21 @@ final class CuaHostStreamTests: XCTestCase {
         init(reply: @escaping @Sendable (String) -> [String]?) throws {
             let directory = try XCTUnwrap(CuaSocketDirectory.create(in: "/tmp"))
             path = directory + "/d.sock"
-            listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+            let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
             var address = sockaddr_un()
             address.sun_family = sa_family_t(AF_UNIX)
             let bytes = Array(path.utf8)
             withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
             let bound = withUnsafePointer(to: &address) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                    Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
                 }
             }
             XCTAssertEqual(bound, 0)
-            XCTAssertEqual(Darwin.listen(listener, 1), 0)
-            let listener = self.listener
+            XCTAssertEqual(Darwin.listen(fd, 1), 0)
+            listener = fd
             Thread.detachNewThread { [self] in
-                let peer = Darwin.accept(listener, nil, nil)
+                let peer = Darwin.accept(fd, nil, nil)
                 guard peer >= 0 else { return }
                 defer { Darwin.close(peer) }
                 var buffer = Data()

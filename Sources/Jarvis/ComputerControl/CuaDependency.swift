@@ -13,7 +13,7 @@ enum CuaDependency {
     /// (swift run, tests) fall back to the installed driver.
     static var bundledExecutable: URL? { Bundle.main.url(forResource: "cua-driver", withExtension: nil) }
     static var executable: URL { bundledExecutable ?? installedExecutable }
-    static let executableSHA256 = "b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8"
+    static let executableSHA256 = "0bb686e1e44b5e80c26f6666b29e6a613621d25f4cc7dd407e19794193186b1c"
     /// Signing is part of `make app`, so the embedded copy can never match the
     /// upstream byte hash. The build records the post-signing digest here and
     /// the outer app signature seals it; unpackaged bundles have no embedded
