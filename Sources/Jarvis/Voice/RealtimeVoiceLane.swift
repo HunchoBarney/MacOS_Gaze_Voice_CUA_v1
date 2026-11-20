@@ -315,7 +315,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var filler: (turn: UUID, task: Task<Void, Never>)?
     private var fillerSpokenTurn: UUID?
 
-    private let apiKey: () -> String
+    private let credential: () async throws -> RealtimeCredential?
     private let client: RealtimeVoiceClient
     private let player = RealtimePlayer()
     private let input = MicrophoneInput()
@@ -549,9 +549,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
-    init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
+    /// `credential` is asked once per new socket: a developer's own key,
+    /// or a fresh client secret from Jarvis's service.
+    init(credential: @escaping () async throws -> RealtimeCredential?, client: RealtimeVoiceClient? = nil,
          admissionOwner: LocalSpeechSession? = nil) {
-        self.apiKey = apiKey
+        self.credential = credential
         self.duplexRequested = true
         self.admissionOwner = admissionOwner
         self.client = client ?? RealtimeVoiceClient()
@@ -584,6 +586,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 self.prepareNext()
             }
         }
+    }
+
+    /// Straight to OpenAI with this key; an empty one reports the missing key.
+    convenience init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
+                     admissionOwner: LocalSpeechSession? = nil) {
+        self.init(credential: { RealtimeCredential(key: apiKey(), model: nil) },
+                  client: client, admissionOwner: admissionOwner)
     }
 
     static func requestAuthorization() async -> Bool {
@@ -904,8 +913,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
             replayOutcomes()
             return
         }
-        let key = apiKey().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
+        let credential = try await credential()
+        // Minting a client secret goes to the network; a caller that
+        // connected meanwhile owns the socket now.
+        if client.isReady, !responseAuthority.requiresReconnect,
+           client.connectedAt.map({ Date().timeIntervalSince($0) <= 50 * 60 }) == true {
+            return try await ensureConnected(inputMode: inputMode)
+        }
+        guard let credential,
+              case let key = credential.key.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
             throw VoiceError(OutcomeWording.missingVoiceKey)
         }
         client.teardown()
@@ -913,7 +929,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // A rebuilt session resets the call_id namespace — the dedupe set's
         // lifetime ends with the socket it belonged to.
         handledCalls = []
-        try await client.connect(apiKey: key, inputMode: inputMode ?? .conversation)
+        try await client.connect(apiKey: key, model: credential.model ?? RealtimeVoiceClient.defaultModel,
+                                 inputMode: inputMode ?? .conversation)
         seenInputItems = []
         responseAuthority.connect(client.connectionID)
         replayOutcomes()
