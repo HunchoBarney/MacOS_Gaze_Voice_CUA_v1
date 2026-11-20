@@ -37,6 +37,9 @@ Corepack. Run EyeTracking tests from `EyeTracking/`, where
   flags and mutate macOS. Run them through `scripts/with-desktop-lock.py`,
   one owner at a time. Simulated tests never prove physical Fn, microphone
   or packaged-app behaviour.
+- Unit tests never reach the real microphone: under XCTest it reads as
+  refused and never opens, whatever the launching app was granted. A live
+  test that needs it also sets `JARVIS_LIVE_MIC=1`.
 - `codesign --verify --deep --strict` fails spuriously inside a synced
   `~/Documents` checkout (com.apple.provenance). Verify a copy outside it.
 - `make test` runs each XCTest case in its own process, one per CPU core, and
