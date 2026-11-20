@@ -52,7 +52,8 @@ final class WritingByInstruction {
     var referent: (TimeInterval?) async -> Referent?
     var compose: (Referent) async throws -> String
     /// Presses send for a placed draft and returns the spine's payload.
-    var send: (Draft) async -> String
+    /// The flag is `WritingInput.speakerVerified` for the "send it".
+    var send: (Draft, Bool) async -> String
     /// Puts lines on screen; an empty list hides them.
     var show: ([String]) -> Void
     var note: (String) -> Void
@@ -64,7 +65,7 @@ final class WritingByInstruction {
          readField: @escaping () async -> Field? = { WritingByInstruction.focusedField() },
          referent: @escaping (TimeInterval?) async -> Referent? = { _ in WritingByInstruction.focusedReferent() },
          compose: @escaping (Referent) async throws -> String,
-         send: @escaping (Draft) async -> String,
+         send: @escaping (Draft, Bool) async -> String,
          show: @escaping ([String]) -> Void = { _ in },
          note: @escaping (String) -> Void = { _ in }) {
         self.enabled = enabled
@@ -91,7 +92,7 @@ final class WritingByInstruction {
                 return yes ? await type(text) : Self.result(VoiceToolResult.Status.cancelled, "Okay, I won't type it.")
             }
         case .draft(let draft)?:
-            if intent == .sendDraft { return await sendDraft(draft) }
+            if intent == .sendDraft { return await sendDraft(draft, speakerVerified: input.speakerVerified) }
             if !draft.placed, intent == nil, let yes = WritingInstruction.confirmation(utterance) {
                 guard yes else {
                     pending = nil
@@ -197,7 +198,7 @@ final class WritingByInstruction {
                            "Draft's in, not sent. It starts: \(Self.firstLine(draft.text)) Say send it to send.")
     }
 
-    private func sendDraft(_ draft: Draft) async -> String {
+    private func sendDraft(_ draft: Draft, speakerVerified: Bool) async -> String {
         guard draft.placed else {
             return Self.result(VoiceToolResult.Status.question,
                                "The draft isn't in a reply field yet. Click into the reply and say type it.")
@@ -209,7 +210,7 @@ final class WritingByInstruction {
         }
         pending = nil
         show([])
-        return await send(draft)
+        return await send(draft, speakerVerified)
     }
 
     private static func result(_ status: String, _ say: String, kind: String? = nil) -> String {

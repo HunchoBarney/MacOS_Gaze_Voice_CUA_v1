@@ -17,6 +17,7 @@ final class WritingByInstructionTests: XCTestCase {
         var inserts: [String] = []
         var shown: [[String]] = []
         var sent: [WritingByInstruction.Draft] = []
+        var sentVerified: [Bool] = []
         var composed = 0
     }
 
@@ -45,8 +46,9 @@ final class WritingByInstructionTests: XCTestCase {
             },
             referent: { _ in referent },
             compose: { _ in desk.composed += 1; return reply },
-            send: { draft in
+            send: { draft, verified in
                 desk.sent.append(draft)
+                desk.sentVerified.append(verified)
                 return VoiceToolResult(status: VoiceToolResult.Status.ok, say: "Sent.").encoded()
             },
             show: { desk.shown.append($0) })
@@ -237,7 +239,18 @@ final class WritingByInstructionTests: XCTestCase {
         let sent = await writing.handle("send it")
         XCTAssertEqual(field(sent, "say"), "Sent.")
         XCTAssertEqual(desk.sent.map(\.text), ["Yes, see you at 5.\nI'll bring the notes."])
+        XCTAssertEqual(desk.sentVerified, [true])
         XCTAssertNil(writing.pending)
+    }
+
+    func testSendItFromAnUnverifiedSpeakerCarriesThatToTheSend() async {
+        let desk = FakeDesk()
+        let writing = writer(desk, local: nil)
+        _ = await writing.handle("come up with a reply for this")
+        var input = WritingInput()
+        input.speakerVerified = false
+        _ = await writing.handle("send it", input: input)
+        XCTAssertEqual(desk.sentVerified, [false], "after Standby, Send asks first (D3)")
     }
 
     func testSendItRefusesOnceTheDraftLeftTheField() async {
