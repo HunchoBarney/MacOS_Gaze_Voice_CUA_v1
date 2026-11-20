@@ -706,7 +706,6 @@ final class JevChooserTests: XCTestCase {
                 "done": result?.doneVote.map(JSONValue.bool) ?? .null,
                 "latency": result?.latencyMs.map(JSONValue.number) ?? .null,
                 "probabilities": .object((result?.probabilities ?? [:]).mapValues(JSONValue.number)),
-                "proposed": result?.proposedActionID.map(JSONValue.string) ?? .null,
                 "support": .object((result?.actionSupport ?? [:]).mapValues(JSONValue.number)),
                 "rejection": result?.actionRejection.map { .string($0.rawValue) } ?? .null,
             ])
@@ -922,6 +921,24 @@ final class JevChooserTests: XCTestCase {
         return try await JevChooser.make(client: client)(
             .object(["goal": .string("save"), "current_instruction": .string("press Save")]),
             candidates)
+    }
+
+    func testVoiceRouterAsksThePinnedJevVersion() async throws {
+        FixtureProtocol.body = try JSONSerialization.data(withJSONObject: [
+            "model": JevChooser.model, "answers": [:] as [String: Any]
+        ])
+        FixtureProtocol.requests = []
+        FixtureProtocol.requestBodies = []
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FixtureProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let router = VoiceSemanticRouter.live(apiKey: "fixture-key", session: session)
+        _ = try? await router.infer(.object(["goal": .string("open mail")]), [:])
+        let body = try XCTUnwrap(FixtureProtocol.requestBodies.first)
+        let object = try JSONDecoder().decode(JSONValue.self, from: body)
+        XCTAssertEqual(object["model"]?.string, "jev-1.14.0")
+        XCTAssertEqual(JevChooser.model, "jev-1.14.0")
     }
 
     func testProductionClientBatchesSelectionAndCandidateSupportOnce() async throws {

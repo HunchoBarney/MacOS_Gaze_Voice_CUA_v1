@@ -804,6 +804,82 @@ final class FastLaneExecutorTests: XCTestCase {
         }
     }
 
+    /// KAR-12: a native launch that reached macOS but left no observable
+    /// process is unconfirmed, not failed — said plainly, sent once.
+    @MainActor
+    func testUnobservedNativeLaunchIsUnconfirmedNotFailed() async throws {
+        let driver = FakeDriver(), launches = LockedBox(0)
+        let loop = coldFocusLoop(driver, observed: { _ in nil }) { _ in
+            launches.set(launches.value + 1)
+            throw DriverConnectionError.refused("Owned fixture failure")
+        }
+        var history: [String] = [], confirmed = false
+        let result = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: nil, openVerb: "open", name: "AuditFixture", bundle: "fixture.audit"),
+            task: DriveTask(goal: "open AuditFixture", foreground: true),
+            session: "native-unobserved", history: &history, confirmed: &confirmed)
+        let unwrapped = try XCTUnwrap(result)
+        XCTAssertEqual(unwrapped.blockedReason, DriveLoop.launchUnverifiedReason)
+        let (outcome, say) = VoiceTaskCoordinator.describe(unwrapped, request: "open AuditFixture")
+        XCTAssertEqual(say, "I asked AuditFixture to open but couldn't confirm it did.")
+        guard case .uncertain = outcome else { return XCTFail("an unobserved launch is uncertain, got \(outcome)") }
+        XCTAssertEqual(launches.value, 1, "an unobserved launch is never sent again")
+        XCTAssertTrue(driver.calls.isEmpty, "no SDK launch after a native request")
+    }
+
+    /// An app that isn't installed is refused before any launch request,
+    /// so it is a plain failure, never an unconfirmed launch.
+    @MainActor
+    func testMissingAppIsNotReportedAsUnconfirmedLaunch() async throws {
+        let driver = FakeDriver(), observations = LockedBox(0)
+        let loop = coldFocusLoop(driver, observed: { _ in observations.set(observations.value + 1); return nil }) { _ in
+            throw DriveLoop.ApplicationNotInstalled()
+        }
+        var history: [String] = [], confirmed = false
+        let result = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: nil, openVerb: "open", name: "AuditFixture", bundle: "fixture.audit"),
+            task: DriveTask(goal: "open AuditFixture", foreground: true),
+            session: "native-missing", history: &history, confirmed: &confirmed)
+        let unwrapped = try XCTUnwrap(result)
+        XCTAssertNotEqual(unwrapped.blockedReason, DriveLoop.launchUnverifiedReason)
+        let (outcome, say) = VoiceTaskCoordinator.describe(unwrapped, request: "open AuditFixture")
+        XCTAssertEqual(say, "AuditFixture isn't installed on this Mac.")
+        guard case .blocked = outcome else { return XCTFail("a missing app is a failure, got \(outcome)") }
+        XCTAssertEqual(observations.value, 0)
+        XCTAssertTrue(driver.calls.isEmpty, "no SDK launch for a missing app")
+    }
+
+    /// KAR-12: the driver's background launch came back "effect unknown"
+    /// and no process appeared — one launch, one observation, the same
+    /// plain unconfirmed line.
+    @MainActor
+    func testUnobservedBackgroundLaunchIsUnconfirmedNotFailed() async throws {
+        let driver = FakeDriver(), observations = LockedBox(0)
+        let loop = DriveLoop(call: { tool, args in
+            if tool == "launch_app" {
+                _ = try driver.call(tool, args)
+                throw CuaUncertainOutcome(tool: tool, result: .object(["effect": .string("unknown")]))
+            }
+            return try driver.call(tool, args)
+        }, choose: { _, _ in XCTFail("a launch must not invoke a model"); return nil },
+        ask: { _ in XCTFail("instruction supplies consent"); return nil }, granted: { false },
+        observeLaunchedPID: { _ in observations.set(observations.value + 1); return nil })
+        var history: [String] = [], confirmed = false
+        let result = try await loop.runFastLane(
+            DriveLoop.FastResolution(action: nil, openVerb: "open", name: "AuditFixture",
+                                     bundle: "invalid.jarvis.fixture.unobserved"),
+            task: DriveTask(goal: "open AuditFixture"),
+            session: "background-unobserved", history: &history, confirmed: &confirmed)
+        let unwrapped = try XCTUnwrap(result)
+        XCTAssertEqual(unwrapped.blockedReason, DriveLoop.launchUnverifiedReason)
+        XCTAssertFalse(unwrapped.dispatchedEffect)
+        let (outcome, say) = VoiceTaskCoordinator.describe(unwrapped, request: "open AuditFixture")
+        XCTAssertEqual(say, "I asked AuditFixture to open but couldn't confirm it did.")
+        guard case .uncertain = outcome else { return XCTFail("an unobserved launch is uncertain, got \(outcome)") }
+        XCTAssertEqual(driver.calls.filter { $0.tool == "launch_app" }.count, 1, "never retried")
+        XCTAssertEqual(observations.value, 1)
+    }
+
     func testNativeSemanticFocusKeepsTraceScopedToTheRun() async {
         let stages = LockedBox([String]())
         let loop = DriveLoop(call: { _, _ in XCTFail("Exact native focus needs no SDK read"); return .object([:]) },

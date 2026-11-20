@@ -35,7 +35,8 @@ final class ScreenQuestionTests: XCTestCase {
         let scope = try XCTUnwrap((parameters["properties"] as? [String: Any])?["scope"] as? [String: Any])
         XCTAssertEqual(scope["enum"] as? [String], ["window", "screen"])
         XCTAssertEqual(parameters["required"] as? [String], ["question"])
-        XCTAssertTrue(RealtimeVoiceClient.instructions.contains("Let me look."))
+        XCTAssertFalse(RealtimeVoiceClient.instructions.contains("Let me look."))
+        XCTAssertTrue(RealtimeVoiceClient.instructions.contains("with no preamble"))
         XCTAssertTrue(RealtimeVoiceClient.instructions.contains("never claim to see pixels"))
     }
 

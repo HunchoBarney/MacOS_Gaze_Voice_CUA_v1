@@ -38,10 +38,35 @@ Local CI runs it again at every PR head and on main, and posts the
    what differs from the last head the lane built.
 3. It runs your command there and releases the lock.
 
+When the crew's shared queue `~/.capy/work/lane/lane.sh` is installed,
+`lane-test.sh` hands over to it. It works the same way, but waiters run in
+the order they arrived instead of whichever polls first, and
+`LANE_PRIORITY=high` (main-blocking jobs) goes to the front. Local CI
+doesn't use the queue or the lane lock: it only waits for that `pgrep -x`
+to come back empty.
+`~/.capy/work/lane/lane.sh --status` shows the running job, how long it has
+run, and the queue in order.
+
+The installed queue is a copy of `scripts/lane.sh`. After changing it, run
+`scripts/test-lane.sh` (fake commands, no Swift) and install it with
+`install -m 755 scripts/lane.sh ~/.capy/work/lane/lane.sh.new && mv ~/.capy/work/lane/lane.sh.new ~/.capy/work/lane/lane.sh`.
+Never edit the installed file in place. Each job also runs from its own
+private copy, so a deploy can't change a waiting job. A job that holds the
+lock keeps it until it has run, even when a high-priority ticket arrives
+while it waits for another build, and stopping the queue stops every process
+the job started.
+
 Don't build in your own worktree as well: that adds a second cold `.build`
 (400 MB–1.4 GB) and holds the lane for minutes. Local CI keeps its own
 checkout under `~/.capy/work/local-ci`. Never point either at the owner's
 checkout.
+
+## End-to-end flows
+
+`make e2e` runs five flows on a signed Jarvis through e2e's macOS engine
+(`e2e/README.md`). They launch Jarvis, speak aloud and use the owner's
+Realtime key, so they run only on the owner's go, under the desktop lock.
+They are not part of `make test` or local CI.
 
 ## Keeping tests parallel-safe
 

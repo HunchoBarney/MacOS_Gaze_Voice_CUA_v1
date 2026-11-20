@@ -2,6 +2,97 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — The Mac ends hands-free turns
+
+- Hands-free (and Standby once woken) no longer uses Realtime's
+  `semantic_vad`: `turn_detection` is null in every input mode. The Silero
+  gate ends the turn after `VoiceActivityGate.Tuning.endOfTurn` of quiet
+  (0.6 s, rounded up to whole 256 ms chunks: 0.77 s) and the lane sends
+  `input_audio_buffer.commit`; the server's `committed` names the item the
+  turn binds to. The gate sends no trailing silence. This supersedes the
+  hangover and silence tail in "Hands-free uploads only speech".
+- Measured before (JARA-41, 24 paid turns): semantic VAD cut 3 turns inside
+  450–500 ms pauses and committed at p90 3.3 s after speech. A pause shorter
+  than `endOfTurn` can't fill the quiet chunks the gate needs, so it no
+  longer splits a turn.
+
+## 2026-11-20 — Equivalent phrasings through a small command grammar
+
+- "get Safari open", "hop over to desktop 2", "label everything", "I can't
+  find Notes", "hit Save" and "read my screen" are read by
+  `CommandGrammar`: lead-ins ("I want to", "let's", "help me"), a verb
+  class, an object and a particle, rewritten to the canonical command the
+  fast lane already parses. A rewrite is used only when that canonical
+  command parses to the family's action, and a phrase that already parses
+  is left alone, so the grammar adds phrasings without changing existing
+  commands. Screen questions are classified, not rewritten, so the question
+  reaches the screen reader verbatim. Jev's semantic router stays the
+  fallback for what the grammar can't read.
+- No maintained intent grammar fits a Swift app: Home Assistant's hassil
+  (Apache-2.0) is the closest, but it is Python, and Apple's NaturalLanguage
+  framework tags words without matching intents. The grammar is about 250
+  lines over the existing parsers.
+- Measured in `CommandPhrasingTests` (pass = same admission and fast action
+  as the canonical command; "!" rows must differ): design set 40/86 on main
+  → 86/86; same-author held-out set 32/72 → 71/72; a blind set written by
+  an agent that never saw the parser 51/72 → 66/72.
+
+## 2026-11-20 — A fifth end-to-end flow: "stop" mid-scroll
+
+- `stop-scroll` says "Hey Jarvis, scroll down", "keep scrolling", then "stop"
+  while the scroll repeats, and checks that the fixture list stops and stays
+  put. The task is the ongoing scroll because its three commands are decided
+  on the Mac with no model call, so the flow is deterministic apart from
+  hearing the lines. A stop in the middle of a model-planned task is not
+  covered: when the stop lands would depend on the model's pace.
+
+## 2026-11-20 — End-to-end flows run on e2e's macOS engine
+
+- Four flows on a signed build (`e2e/`, `make e2e`): the first run, "show
+  names" then a click, a question about the window, and the wake word. Every
+  turn starts with "Hey Jarvis"; nothing presses Fn. Only what Swift seam tests can't reach; they run only on the
+  owner's go, under the desktop lock, and put the Mac back afterwards.
+- Runner: e2e 0.24.0 (Apache-2.0). Engine: `@e2e-dev/desktop` from
+  e2e-inc/e2e#1953 at 7e0b7d2 (Apache-2.0, not yet released), built locally
+  against `@e2e-dev/core` 0.24.0. It drives agent-desktop 1.3.1 (Vercel Labs,
+  Apache-2.0), downloaded and checked against its SHA-256. Our code is the
+  adapter: the flows, a small native helper that counts and quits apps, a
+  fixture window, and the harness that saves and restores the Mac's state.
+- The checks read the Mac or Jarvis's ordinary windows, never Cua: Jarvis
+  acts through Cua, so testing it with Cua would share its failure modes.
+- Rejected: our own Cua engine for e2e (duplicates upstream's), XCUITest
+  (needs an Xcode UI-test target).
+
+## 2026-11-20 — Local CI queues in the build lane
+
+- Local CI no longer skips a tick when the lane is busy. Each head's
+  \`make test\` takes a high-priority ticket in \`~/.capy/work/lane/lane.sh\`
+  and runs in local CI's own checkout (\`LANE_NO_MIRROR=1\`), so it goes
+  ahead of focused jobs without preempting the one running. One local-ci job
+  still runs at a time. A lane that never frees up posts \`error\`, which
+  local CI retries an hour later, not \`failure\`.
+
+## 2026-11-20 — The owner's keys live in a Cloudflare Worker
+
+- People using Jarvis never hold an OpenAI or TypeSafe key. `CredentialService/`
+  is a Cloudflare Worker (owner's choice) named `jarvis-keys` on workers.dev.
+  Each install registers anonymously for a token kept in Keychain; no sign-in.
+- Realtime: the Worker mints an OpenAI client secret (`/v1/realtime/client_secrets`,
+  60 s to start a session, model pinned) and the app opens its socket to
+  OpenAI with it. Responses (Terra) and Jev (TypeSafe) calls go through the
+  Worker, which allows only the configured models and refuses tools and
+  streaming on Responses.
+- Limits live in one SQLite-backed Durable Object, so checks and charges are
+  strongly consistent; KV is eventually consistent and can't hold a limit.
+  Per install: requests per minute per route and estimated spend per UTC
+  day ($1 default). Global: $20 a day, new installs per network and per day,
+  a `PAUSED` variable and an admin pause, and per-install revoke.
+- Open source: Hono 4.13.19 (MIT) for routing, Wrangler 4.165.0 (MIT or
+  Apache-2.0) to run and deploy. Our code is the ledger and the proxy rules.
+- Realtime spend is an estimate per minted secret, because the socket goes
+  straight to OpenAI. A relay through the Worker would measure it exactly
+  but adds a hop to every audio frame.
+
 ## 2026-11-20 — Standby opens a session on the wake word
 
 - Standby keeps the voice lane's microphone open, as Hold fn already does,
@@ -89,8 +180,9 @@ Settled choices, newest first. Change one only with a new entry here.
 
 - **Providers:** OpenAI (Realtime voice) and TypeSafe (Jev) only. Jev is the
   primary semantic chooser; direct grounded operations need no model call.
-- **Screenshots:** never sent to Realtime; pixels only when a decider needs
-  them, one capture reused per step.
+- **Screenshots:** no model receives them. Jev and screen questions decide
+  from the accessibility tree and on-screen text; giving a decider pixels
+  again is a new decision.
 - **Eye tracking:** gaze targets, it never actuates. Deciders receive the
   resolved target identity, never raw gaze coordinates. Dwell is an
   accessibility opt-in, off by default. Every gaze flow also works without
