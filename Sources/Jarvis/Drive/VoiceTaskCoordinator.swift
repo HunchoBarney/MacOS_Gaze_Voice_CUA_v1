@@ -2824,7 +2824,8 @@ final class VoiceTaskCoordinator {
             "that", "these", "those", "there", "here", "if", "but", "not", "no",
             "yes", "to", "for", "in", "on", "at", "of", "as", "by", "or", "and",
             "so", "do", "does", "did", "have", "has", "had", "shall", "should",
-            "may", "might", "must", "some", "any", "all"]
+            "may", "might", "must", "some", "any", "all",
+            "next", "previous", "last", "first", "new"]
         guard !nonActions.contains(w) else { return nil }
         let doubles: Set<String> = ["run", "stop", "quit", "set", "cut", "hit",
             "put", "shut", "sit", "win", "plan", "drag", "drop", "grab", "tap",
