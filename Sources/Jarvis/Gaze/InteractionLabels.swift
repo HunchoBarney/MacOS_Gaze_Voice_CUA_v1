@@ -75,13 +75,16 @@ final class InteractionLabels {
     /// space), or nil when there's no plain text caret to read. Secure
     /// fields are skipped outright.
     nonisolated static func caretRect() -> CGRect? {
+        // Off the main actor. The timeout goes on the focused element only:
+        // set on the system-wide element it would become the whole
+        // process's AX timeout.
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.15)
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
         else { return nil }
         let field = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(field, 0.15)
         var subrole: CFTypeRef?
         if AXUIElementCopyAttributeValue(field, kAXSubroleAttribute as CFString, &subrole) == .success,
            subrole as? String == kAXSecureTextFieldSubrole as String { return nil }
