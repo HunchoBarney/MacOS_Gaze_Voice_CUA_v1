@@ -1902,6 +1902,12 @@ extension DriveLoop {
                     return settle(.blocked("I can't find anything called \(query) — say 'what can I say' to see what I understand."),
                                   task, history, blockedReason: "locate found nothing")
                 }
+                // Reopening or launching needs the app's exact name: "where
+                // is the cursor" must not open Cursor.app on a near match.
+                guard Self.namesApp(query, app.name) else {
+                    return settle(.blocked("I can't find a window called \u{201C}\(query)\u{201D}. The closest app I know is \(app.name). Say \u{201C}open \(app.name)\u{201D} if that's the one."),
+                                  task, history, blockedReason: "locate near match")
+                }
                 pid = app.pid.flatMap { $0 > 0 ? $0 : nil }
                 bundle = app.bundle
                 name = app.name
@@ -2095,6 +2101,20 @@ extension DriveLoop {
     }
 
     /// A row's `bounds` as a rect, or nil when any edge is missing.
+    /// Whether a spoken name is exactly the app's name, ignoring case,
+    /// accents, a leading "the" and a trailing "app".
+    static func namesApp(_ spoken: String, _ app: String) -> Bool {
+        func bare(_ text: String) -> String {
+            var words = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                .replacingOccurrences(of: ".app", with: "")
+                .split(whereSeparator: \.isWhitespace).map(String.init)
+            if words.first == "the" { words.removeFirst() }
+            if words.last == "app" { words.removeLast() }
+            return words.joined(separator: " ")
+        }
+        return !bare(spoken).isEmpty && bare(spoken) == bare(app)
+    }
+
     static func rowFrame(_ row: JSONValue) -> CGRect? {
         guard let bounds = row["bounds"], let x = num(bounds["x"]), let y = num(bounds["y"]),
               let w = num(bounds["width"]), let h = num(bounds["height"]) else { return nil }
@@ -2117,6 +2137,19 @@ extension DriveLoop {
             guard let row = try await windowRow(pid: pid, windowID: windowID, session: session),
                   let frame = Self.rowFrame(row) else { return nil }
             return LostWindow.isDisplaySized(frame, on: displays)
+        }
+        /// The state once it has stopped changing: four reads in a row
+        /// agree, so a rung that lands after its own poll gave up is seen
+        /// before the next rung toggles it back.
+        func settledFullScreen() async throws -> Bool? {
+            var last = try await isFullScreen(), streak = 1
+            for _ in 0..<16 where streak < 4 {
+                try await Task.sleep(for: .milliseconds(150))
+                let now = try await isFullScreen()
+                streak = now == last ? streak + 1 : 1
+                last = now
+            }
+            return streak >= 4 ? last : nil
         }
         guard try await isFullScreen() == true else {
             return done("\(name) isn't full screen right now.", task, history,
@@ -2143,8 +2176,8 @@ extension DriveLoop {
                 return true
             }),
         ]
-        for rung in rungs {
-            if try await isFullScreen() != true { break }
+        for (index, rung) in rungs.enumerated() {
+            if try await (index == 0 ? isFullScreen() : settledFullScreen()) != true { break }
             guard try await rung.attempt() else {
                 history.append("Exit full screen: \(rung.label) unavailable.")
                 continue
@@ -2156,7 +2189,7 @@ extension DriveLoop {
             }
             history.append("Exit full screen: \(rung.label) didn't take.")
         }
-        if try await isFullScreen() == false {
+        if try await settledFullScreen() == false {
             return done("\(name) is a normal window again.", task, history,
                         pid: pid, windowID: windowID, bundleID: bundle, effect: true)
         }
@@ -3292,20 +3325,12 @@ extension DriveLoop {
     }
 
     /// Whether the window's bounds cover an attached screen — the observable
-    /// state of macOS full screen. A couple of points of tolerance absorbs
-    /// fractional Retina geometry.
+    /// state of macOS full screen, by the same rule the lost-window
+    /// diagnosis uses (`LostWindow.isDisplaySized`) against the top-left
+    /// display frames.
     static func boundsCoverAScreen(_ bounds: JSONValue?) -> Bool {
-        func number(_ value: JSONValue?) -> Double? {
-            guard case let .number(v)? = value, v.isFinite else { return nil }
-            return v
-        }
-        guard let x = number(bounds?["x"]), let y = number(bounds?["y"]),
-              let w = number(bounds?["width"]), let h = number(bounds?["height"]) else { return false }
-        return NSScreen.screens.contains { screen in
-            let f = screen.frame
-            return abs(x - f.origin.x) < 3 && abs(y - f.origin.y) < 3
-                && abs(w - f.width) < 3 && abs(h - f.height) < 3
-        }
+        guard let bounds, let frame = rowFrame(.object(["bounds": bounds])) else { return false }
+        return LostWindow.isDisplaySized(frame, on: displayFrames().map(\.frame))
     }
 
     /// Host equality with a subdomain allowance: "www.apple.com" satisfies
