@@ -113,7 +113,12 @@ case ("web-url", 2):
 case ("extra", 2), ("extra", 3):
     let bar = attribute(application(arguments[1]), kAXExtrasMenuBarAttribute).map { $0 as! AXUIElement }
     guard let item = bar.flatMap({ elements($0, kAXChildrenAttribute).first }) else { fail("\(arguments[1]) has no menu-bar extra", 1) }
-    guard press(item) else { fail("couldn't open the menu-bar extra", 1) }
+    // AppKit tracks the menu inside the press, so the press usually times out
+    // with cannotComplete while the menu is already open. A short timeout
+    // keeps that wait brief; a missing menu then fails below by name.
+    AXUIElementSetMessagingTimeout(item, 1)
+    let opened = AXUIElementPerformAction(item, kAXPressAction as CFString)
+    guard opened == .success || opened == .cannotComplete else { fail("couldn't open the menu-bar extra (\(opened.rawValue))", 1) }
     wait(0.5)
     let menu = elements(item, kAXChildrenAttribute).first
     let items = menu.map { elements($0, kAXChildrenAttribute) } ?? []
