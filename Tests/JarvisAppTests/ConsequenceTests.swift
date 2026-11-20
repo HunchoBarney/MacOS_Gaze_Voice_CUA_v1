@@ -85,12 +85,20 @@ final class ConsequenceTests: XCTestCase {
         for goal in ["click Send but make it quick", "reply to Mom saying I'm not coming and send it",
                      "saying no worries and send it", "text Bob wait for me and send it",
                      "reply to Mom saying \u{201C}don't wait up\u{201D} and send it",
-                     "click the button that says Send"] {
+                     "click the button that says Send", "saying I'll be there later and send it",
+                     "go ahead and send it", "reply saying \u{201C}don't wait up\u{201D} and send it",
+                     "send the email to my boss instead of Mom"] {
             XCTAssertTrue(Consequence.covers(goal: goal, control: "Send"), goal)
         }
         XCTAssertTrue(Consequence.covers(goal: "reply to Mom saying I'm not coming and send it", control: "Reply"))
         for goal in ["draft a reply but don't send it", "send it later", "send it but not yet",
-                     "never send that", "reply to Mom saying I'll send it later"] {
+                     "never send that", "reply to Mom saying I'll send it later",
+                     "I don't want you to send it", "you shouldn't send it", "don't go ahead and send it",
+                     "draft it, I'll send it myself", "send Bob a message saying hi but don't send it yet",
+                     "send Bob a message saying hi, don't send it", "please don't actually send it",
+                     "do not under any circumstances send it", "can't send it yet",
+                     "don't send it until I check", "reply saying ok and don't send it",
+                     "wouldn't send it", "let me send it"] {
             XCTAssertFalse(Consequence.covers(goal: goal, control: "Send"), goal)
         }
         XCTAssertFalse(Consequence.covers(goal: "delete everything except the photos", control: "Delete"))

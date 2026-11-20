@@ -363,12 +363,20 @@ struct VisualTarget: Sendable, Equatable {
     let boxConfidence: Double?
     let distributions: [String: [String: Double]]
     let elementText: String
-    /// The on-screen labels under the click point, and nothing the model
-    /// guessed: a press is judged by what is really there.
+    /// The label of the smallest control under the click point, never
+    /// a window, group or toolbar around it and never the model's guess:
+    /// a press is judged by what is really there, and "" when that has
+    /// no name.
     let pressLabel: String
     let subjectAnchor: UUID
     let subjectProbability: Double?
     let nativeElement: VisualNativeElement?
+
+    /// Elements that hold controls rather than being one: their title
+    /// ("Re: dinner") never names what a click inside them presses.
+    static let containerRoles: Set<String> = ["AXWindow", "AXSheet", "AXGroup", "AXToolbar", "AXScrollArea",
+                                               "AXSplitGroup", "AXTabGroup", "AXWebArea", "AXLayoutArea",
+                                               "AXApplication"]
 
     static let keys: [String: (String, [String])] = [
         "enter": ("enter", []), "tab": ("tab", []), "previous_field": ("tab", ["shift"]),
@@ -457,7 +465,12 @@ struct VisualTarget: Sendable, Equatable {
             $0.frame?.contains(global) == true
         }.map(\.label) ?? []
         elementText = ((control.map { [$0.policyText] } ?? []) + labels).joined(separator: " ")
-        pressLabel = labels.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: " ")
+        let controls: [(label: String, area: CGFloat)] = (observation.axSnapshot?.elements ?? []).compactMap {
+            guard !Self.containerRoles.contains($0.role), let rect = $0.frame, rect.contains(global) else { return nil }
+            return ($0.label, rect.width * rect.height)
+        }
+        let pressed: String = controls.min { $0.area < $1.area }?.label ?? ""
+        pressLabel = pressed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var request: ActuationRequest {

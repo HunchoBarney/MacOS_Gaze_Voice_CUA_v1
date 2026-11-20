@@ -1424,6 +1424,27 @@ final class JevVisionTests: XCTestCase {
                                         standingGrant: true), .askFirst(.unnamed))
     }
 
+    /// JARA-38: the window's title never labels an unlabelled icon in it.
+    /// The press is judged by the smallest control under the point.
+    func testVisualClickJudgesTheControlNotTheWindowAroundIt() async throws {
+        for (label, expected) in [("", Consequence.unnamed), ("Send", .send)] {
+            var observation = try visualObservation()
+            observation.axSnapshot?.elements = [
+                AXElement(index: 0, token: nil, role: "AXWindow", label: "Re: dinner", value: nil,
+                          frame: CGRect(x: -100_000, y: -100_000, width: 200_000, height: 200_000), actions: []),
+                AXElement(index: 1, token: nil, role: "AXToolbar", label: "Message", value: nil,
+                          frame: CGRect(x: -50_000, y: -50_000, width: 100_000, height: 100_000), actions: []),
+                AXElement(index: 2, token: nil, role: "AXButton", label: label, value: nil,
+                          frame: CGRect(x: -10_000, y: -10_000, width: 20_000, height: 20_000), actions: ["AXPress"]),
+            ]
+            let decision = try await visualDecision(VisualModel(.purchase), observation)
+            guard case .act(let request) = decision else { return XCTFail("\(label): \(decision)") }
+            XCTAssertEqual(request.pressText, label)
+            XCTAssertEqual(CuaPolicy.consequentialPress(tool: request.tool, args: request.args,
+                                                        elementText: request.pressText)?.consequence, expected, label)
+        }
+    }
+
     func testEditableVoteCannotOverrideContradictoryControlIdentity() async throws {
         var observation = try visualObservation()
         observation.task.values = ["a": "first", "b": "second", "z": "exact text"]

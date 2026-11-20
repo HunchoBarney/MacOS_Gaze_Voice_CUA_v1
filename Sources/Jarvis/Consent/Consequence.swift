@@ -63,13 +63,24 @@ enum Consequence: String, CaseIterable, Sendable {
 
     /// Refusals that sit just before the control's own verb in the same
     /// clause: "don't send", "without sending", "rather than deleting".
-    private static let refusalsBefore = ["don t", "dont", "do not", "not", "never", "no", "without",
-                                         "instead of", "rather than", "won t", "stop", "hold off"]
+    /// The bare "t" is every n't contraction ("don't", "shouldn't",
+    /// "can't"); "I'll", "let me" and "myself" mean the person will press
+    /// it themselves.
+    private static let refusalsBefore = ["t", "dont", "do not", "not", "never", "no", "without",
+                                         "instead of", "rather than", "stop", "hold off", "skip", "avoid",
+                                         "i ll", "i will", "let me"]
     /// Words that put the control's verb off or redirect it when they
     /// follow it closely: "send it later", "send it to Dad instead",
     /// "send it but not yet", "delete everything except the photos".
-    private static let refusalsAfter = ["later", "not", "yet", "instead", "tomorrow", "never", "wait", "except"]
+    private static let refusalsAfter = ["later", "not", "yet", "instead", "tomorrow", "never", "wait", "except",
+                                        "myself"]
     private static let clauseBreaks: Set<String> = ["and", "then", "but", "so", "or"]
+    /// "go ahead and send", "try and send": that "and" joins one request,
+    /// so a refusal before it still reaches the verb.
+    private static let joinedByAnd: Set<String> = ["ahead", "try", "just", "go"]
+    /// A refusal right before the verb counts even inside what looks like
+    /// a dictated message: "saying hi but don't send it yet".
+    private static let closeRefusals: Set<String> = ["t", "dont", "not", "never", "no"]
     /// Where a dictated message starts. It runs to the last "and" or
     /// "then" after it, or to the end: "reply to Mom saying I'm not
     /// coming and send it" dictates "I'm not coming".
@@ -110,10 +121,14 @@ enum Consequence: String, CaseIterable, Sendable {
 
     /// Whether a refusal attaches to the control's verb at this spot.
     private static func refused(_ words: [String], at start: Int, length: Int) -> Bool {
-        let clause = words[max(0, start - 4)..<start].reversed().prefix { !clauseBreaks.contains($0) }
+        var from = start
+        while from > 0, !clauseBreaks.contains(words[from - 1])
+                || (words[from - 1] == "and" && from >= 2 && joinedByAnd.contains(words[from - 2])) {
+            from -= 1
+        }
         let after = words[(start + length)..<min(words.count, start + length + 4)]
             .prefix { $0 != "and" && $0 != "then" }
-        let before = " " + clause.reversed().joined(separator: " ") + " "
+        let before = " " + words[from..<start].joined(separator: " ") + " "
         let following = " " + after.joined(separator: " ") + " "
         return refusalsBefore.contains { before.contains(" \($0) ") }
             || refusalsAfter.contains { following.contains(" \($0) ") }
@@ -128,10 +143,13 @@ enum Consequence: String, CaseIterable, Sendable {
     /// coming"), don't count against it.
     static func covers(goal: String, control label: String) -> Bool {
         guard let (consequence, phrase) = match(control: label) else { return false }
-        let tokens = instructionWords(goal)
         let names = ([phrase] + (sameControl[phrase] ?? [])).map { CuaPolicy.normalize($0) }
+        let spoken = CuaPolicy.normalize(goal.lowercased()).split(separator: " ").map(String.init)
+        let tokens = instructionWords(goal)
         let refusal = names.flatMap(forms).contains { form in
-            tokens.indices.contains { tokens[$0...].starts(with: form) && refused(tokens, at: $0, length: form.count) }
+            spoken.indices.contains {
+                spoken[$0...].starts(with: form) && !closeRefusals.isDisjoint(with: spoken[max(0, $0 - 2)..<$0])
+            } || tokens.indices.contains { tokens[$0...].starts(with: form) && refused(tokens, at: $0, length: form.count) }
         }
         if refusal { return false }
         let words = " " + tokens.joined(separator: " ") + " "
