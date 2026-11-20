@@ -52,17 +52,40 @@ final class LiveWorkflowTests: XCTestCase {
             return explicit
         }
         // The running app keeps its live socket in a jarvis-cua-* directory
-        // in $TMPDIR; take the newest.
+        // in $TMPDIR. A crashed run leaves its directory and socket file
+        // behind, so take the newest socket that still accepts a connection.
         let tmp = NSTemporaryDirectory()
         if let found = try? FileManager.default.contentsOfDirectory(atPath: tmp)
             .filter({ $0.hasPrefix("jarvis-cua-") })
-            .compactMap({ CuaSocketDirectory.liveSocket(in: tmp + $0) }).sorted().last {
+            .compactMap({ CuaSocketDirectory.liveSocket(in: tmp + $0) })
+            .filter(Self.acceptsConnections)
+            .max(by: { Self.modified($0) < Self.modified($1) }) {
             return found
         }
         // Nothing running — mint a daemon in this process. Driver calls then
         // run under the TEST host's TCC identity, so grant-dependent tools
         // may refuse; launch/list/activate paths still exercise for real.
         return try await CuaDaemonHost.shared.socket()
+    }
+
+    private static func modified(_ path: String) -> Date {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
+    }
+
+    private static func acceptsConnections(_ path: String) -> Bool {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        guard bytes.count < MemoryLayout.size(ofValue: address.sun_path) else { return false }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
+        return withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
+            }
+        }
     }
 
     private static func liveDesktopRequested(environment: [String: String]) -> Bool {
