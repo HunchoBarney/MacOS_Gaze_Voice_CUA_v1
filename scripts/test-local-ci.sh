@@ -233,4 +233,13 @@ req_check "rerun: a tested head queues from the request" '[ "$(cat "$dir/req-rer
 req_pick_is rerun "pr#2"
 req_pick_is rerun requested
 
+mkdir -p "$dir/req-nopost/seen" && git init -q "$dir/req-nopost/checkout"
+: >"$dir/req-nopost/heads"
+echo "cccc success" >"$dir/req-nopost/posted"
+sed 's/^\(    \*"-X POST"\*)\).*/\1 exit 1 ;;/' "$dir/gh-req" >"$dir/gh-nopost" && chmod +x "$dir/gh-nopost"
+REQ_HOME=$dir/req-nopost LOCAL_CI_HOME=$dir/req-nopost GH=$dir/gh-nopost "$here/local-ci.sh" cccc </dev/null >/dev/null 2>&1
+rc=$?
+req_check "nopost: a request whose status can't be posted fails and records nothing" \
+    '[ $rc -eq 1 ] && [ ! -e "$dir/req-nopost/requested/cccc" ]'
+
 exit $((failures > 0))
