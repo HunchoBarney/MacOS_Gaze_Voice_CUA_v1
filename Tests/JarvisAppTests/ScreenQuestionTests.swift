@@ -150,17 +150,43 @@ final class ScreenQuestionTests: XCTestCase {
     /// Only screen text owes a spoken follow-up; an accepted executor
     /// result with an empty summary would otherwise narrate a task that has
     /// only just started, and its verified outcome would be spoken twice.
+    /// The lane here has no session, so an owed answer can't be requested:
+    /// only screen text owes one, and it ends in the fixed line.
     func testAcceptedSaylessExecutorResultRequestsNoFollowUp() {
         let lane = RealtimeVoiceLane(apiKey: { "test-key" })
         let id = UUID()
         lane.turnID = id
+        var events: [String] = []
+        lane.onEvent = { _, event in events.append("\(event)") }
         let accepted = VoiceToolCatalog.result(status: "accepted", summary: "")
         XCTAssertNil(RealtimeVoiceLane.deterministicSay(accepted))
         XCTAssertFalse(ScreenQuestion.isScreenAnswer(accepted))
         lane.settleToolCall(output: accepted, session: id)
         XCTAssertFalse(lane.toolRelayOwed)
+        XCTAssertTrue(events.isEmpty, "an accepted result owes nothing, so nothing is said: \(events)")
         lane.settleToolCall(output: ScreenQuestion.output("Question: q"), session: id)
-        XCTAssertTrue(lane.toolRelayOwed)
+        XCTAssertEqual(events, ["\(SpeechEvent.toolSay(ScreenQuestion.failure))", "\(SpeechEvent.turnEnded)"])
+    }
+
+    /// JARA-38's #538 note: a refused answer request must not leave the
+    /// turn open until the next hold.
+    func testRefusedAnswerRequestSaysSoAndEndsTheTurn() {
+        let lane = RealtimeVoiceLane(apiKey: { "test-key" })
+        let id = UUID()
+        lane.turnID = id
+        lane.screenItems = ["scr-1"]
+        var said: [String] = []
+        var ended = false
+        lane.onEvent = { _, event in
+            if case .toolSay(let line) = event { said.append(line) }
+            if case .turnEnded = event { ended = true }
+        }
+        lane.settleToolCall(output: ScreenQuestion.output("Question: what is this"), session: id)
+        XCTAssertEqual(said, [ScreenQuestion.failure])
+        XCTAssertTrue(ended)
+        XCTAssertFalse(lane.toolRelayOwed)
+        XCTAssertNil(lane.turnID)
+        XCTAssertTrue(lane.screenItems.isEmpty, "the screen text is dropped with the answer")
     }
 
     // MARK: - Glow on the named control
