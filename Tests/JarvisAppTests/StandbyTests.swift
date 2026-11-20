@@ -175,6 +175,23 @@ final class StandbyTests: XCTestCase {
         XCTAssertEqual(controller.handsFreeState, .standby, "the test hands the engine back to Standby")
     }
 
+    func testStandbyRestsWhileJarvisSaysThePhrase() async {
+        let (controller, wake) = standby()
+        controller.armStandby()
+        var listeningWhileSpeaking: Bool?
+        controller.testWakeWord { _ in
+            listeningWhileSpeaking = wake.heard != nil
+            wake.heard?(ProcessInfo.processInfo.systemUptime)
+            controller.armStandby()
+        }
+        await poll(seconds: 2) { controller.wakeTest == .listening }
+        XCTAssertEqual(listeningWhileSpeaking, false, "Jarvis's own voice can't wake a session")
+        XCTAssertEqual(wake.starts, 2, "only the test starts the engine while it runs")
+        wake.heard?(ProcessInfo.processInfo.systemUptime)
+        await poll(seconds: 2) { controller.wakeTest == .heard }
+        XCTAssertEqual(controller.handsFreeState, .standby)
+    }
+
     func testTypedNamesAreCheckedBeforeTheEngine() {
         XCTAssertNil(AssistantName.problem(with: "  Nova  "))
         XCTAssertNil(AssistantName.problem(with: "Mary-Jane O'Neil"))

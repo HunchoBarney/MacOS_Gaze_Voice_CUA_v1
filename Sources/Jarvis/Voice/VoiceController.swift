@@ -941,7 +941,7 @@ final class VoiceController: ObservableObject {
 
     private func startHandsFree(since: TimeInterval? = nil) {
         guard config.handsFreeEnabled || wakeSession != nil, !handsFreePaused, !manualOverride, microphoneEnabled,
-              !held, !physicalFnDown, !isMicrophoneTest,
+              !held, !physicalFnDown, !isMicrophoneTest, !wakeTestRunning,
               handsFreeTask == nil, let lane = speech as? RealtimeVoiceLane,
               lane.conversation.id == nil else { return }
         // Without its key Jarvis can't hear anything: say so on the card,
@@ -975,7 +975,7 @@ final class VoiceController: ObservableObject {
     func armStandby() {
         watchOtherMicrophoneUse()
         guard standbyChosen, !standbyArmed, wakeSession == nil, !handsFreePaused, !manualOverride,
-              microphoneEnabled, !held, !physicalFnDown, !isMicrophoneTest, !otherAppListening,
+              microphoneEnabled, !held, !physicalFnDown, !isMicrophoneTest, !wakeTestRunning, !otherAppListening,
               let lane = speech as? RealtimeVoiceLane, lane.conversation.id == nil,
               let detector = ListeningPolicy.wakeWord else { return }
         guard !config.openAIAPIKey.isEmpty || config.hostedCredentialsConfigured else {
@@ -999,18 +999,19 @@ final class VoiceController: ObservableObject {
     enum WakeTest: Equatable { case speaking, listening, heard, missed, failed(String) }
     @Published private(set) var wakeTest: WakeTest?
     private var wakeTestTask: Task<Void, Never>?
+    private var wakeTestRunning: Bool { wakeTest == .speaking || wakeTest == .listening }
 
     func testWakeWord(say: @escaping @MainActor (String) async -> Void) {
-        guard wakeTest != .speaking, wakeTest != .listening, let detector = ListeningPolicy.wakeWord,
+        guard !wakeTestRunning, let detector = ListeningPolicy.wakeWord,
               let lane = speech as? RealtimeVoiceLane else { return }
         let name = config.assistantName
+        wakeTest = .speaking
+        stopHandsFree(state: .off)
         wakeTestTask = Task { [weak self] in
             guard let self else { return }
-            self.wakeTest = .speaking
             self.prepareMicrophone()
             await say("Hey \(name)")
             guard !Task.isCancelled else { return }
-            self.stopHandsFree(state: .off)
             var heard = false
             do {
                 try detector.start(name: name) { _ in heard = true }
