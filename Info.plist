@@ -24,6 +24,10 @@
 	<string>Jarvis sends your speech to OpenAI so you can talk to your Mac and dictate.</string>
 	<key>JarvisInputProvider</key>
 	<string>openai-realtime</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Jarvis tells you when a meeting is about to start or two meetings overlap. Your calendar stays on this Mac.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Jarvis tells you when a reminder you set comes due and can mark it done. Your reminders stay on this Mac.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Jarvis uses the camera for eye tracking, so you can aim at things with your eyes. Video stays on this Mac.</string>
 </dict>

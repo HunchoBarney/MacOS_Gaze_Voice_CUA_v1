@@ -267,6 +267,9 @@ final class VoiceTaskCoordinator {
     /// task's previousContext and every delegation message. Production
     /// wires it to `gazeService.referentContext`; tests inject a line.
     var gazeContextProvider: () async -> String? = { nil }
+    /// Proactivity answers "what's up", "what did I miss", watch requests
+    /// and replies to a spoken alert before the utterance becomes a task.
+    var proactiveIntercept: ((String) -> ProactiveIntercept?)?
     /// The candidate enumerator the service drives — built over `call`
     /// by `configureGazeService`; nil means the feed reports empty.
     private var gazeFeed: GazeCandidateFeed?
@@ -779,6 +782,15 @@ final class VoiceTaskCoordinator {
             }
         }
         let phrase = Self.normalizedPhrase(trimmed)
+        if windowScroll == nil, let intercept = proactiveIntercept?(trimmed) {
+            switch intercept {
+            case .say(let line):
+                return VoiceToolResult(status: VoiceToolResult.Status.ok, say: line).encoded()
+            case .request(let request):
+                return await beginVoiceTask(request, app: app, frontmostHint: frontmostHint, captureID: captureID,
+                                            admissionIsCurrent: admissionIsCurrent)
+            }
+        }
         // Utterances about existing work aren't tasks — each answers from
         // the task log (or shows the cheat sheet) and creates no Work row.
         if windowScroll == nil, Self.repeatPhrases.contains(phrase) {
