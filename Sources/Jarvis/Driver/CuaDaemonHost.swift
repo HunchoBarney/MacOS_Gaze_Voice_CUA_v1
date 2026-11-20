@@ -3,10 +3,11 @@ import JarvisCore
 
 /// Where the daemon's sockets live: one directory per app run, made by
 /// mkdtemp (mode 0700, random name) in the per-user temp folder. Nothing
-/// publishes its path in a well-known file; the app hands it to its own
-/// agent MCP children as `--cua-dir`. The private directory is not the
-/// access control: the daemon runs with `--host-connections-only` and closes
-/// every peer that is not this app process, its parent.
+/// publishes its path in a well-known file, and agent MCP children never
+/// learn it: they reach the app through `AgentDriveHost` instead. The
+/// private directory is not the access control: the daemon runs with
+/// `--host-connections-only` and closes every peer that is not this app
+/// process, its parent.
 enum CuaSocketDirectory {
     static let current: String? = create(in: NSTemporaryDirectory())
 
@@ -175,9 +176,10 @@ final class EmbeddedDaemon {
 }
 
 /// One daemon for the whole app. Every consumer in this process (voice
-/// session, read-only sibling, setup probes) opens its own CuaConnection
-/// stream on this socket — the daemon serves N connections concurrently by
-/// design. Other processes, agent MCP children included, are refused.
+/// session, read-only sibling, each agent's drive, setup probes) opens its
+/// own CuaConnection stream on this socket — the daemon serves N connections
+/// concurrently by design. Other processes, agent MCP children included, are
+/// refused.
 ///
 /// Health model: `socket()` re-mints a dead daemon lazily (child exited or
 /// socket file gone). A daemon that's alive but refusing every tool is sick,

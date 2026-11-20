@@ -5,18 +5,14 @@ import JarvisCore
 /// `Jarvis --mcp-stdio --agent <slug>` — the MCP server every agent's
 /// codex app-server spawns to reach computer use. Newline-delimited
 /// JSON-RPC over stdio (the MCP stdio transport). Exposes `drive_until`
-/// and `suggest_action`, both running the same DriveLoop the voice path
-/// runs against the app's shared daemon.
+/// and `suggest_action`.
 ///
-/// Trust model (per the megaplan):
-/// - The daemon socket path arrives via the well-known file the app
-///   rewrites on every re-mint — never a baked-in path that goes stale.
-/// - Consent is the app's policy file: the standing grant and nothing
-///   else. No grant → mutation calls refuse with guidance; the deny list
-///   is code-compiled and identical for voice and agents.
-/// - `TYPESAFE_API_KEY` (and `TYPESAFE_BASE_URL` when it is this Mac's
-///   token for Jarvis's credential service) reaches this process through
-///   codex's `env_vars` pass-through — never written into config.toml.
+/// Trust model: the child holds no daemon connection, consent state or
+/// model key. It checks the arguments and hands each call to the app over
+/// `AgentDriveHost`'s private socket (`--agent-host`), authenticated by the
+/// per-agent token Codex passes through `env_vars`. The app runs the same
+/// DriveLoop the voice path runs, on its own daemon connection, under the
+/// standing grant and the compiled deny lists.
 enum CuaDriveServer {
     /// The app's support root — the policy file and agent asks live here,
     /// shared with AgentWorkspace's parent directory.
@@ -34,9 +30,6 @@ enum CuaDriveServer {
         try await driver.connect(socket: socket)
         session.rebind()
     }
-
-    /// {"standingGrant": Bool} — rewritten by the app when the setting moves.
-    static var policyFile: URL { supportDir.appendingPathComponent("policy.json") }
 
     /// One connection's session label. The daemon binds a session to the
     /// transport that first admits it and only that transport may revive
@@ -65,7 +58,8 @@ enum CuaDriveServer {
     /// RunLoop.main can pump stdin and stdio writes stay ordered.
     static func main() -> Never {
         let slug = Self.argument("--agent") ?? "agent"
-        Task { await serve(agent: slug); exit(0) }
+        let host = Self.argument("--agent-host")
+        Task { await serve(agent: slug, host: host); exit(0) }
         RunLoop.main.run()
         fatalError("unreachable")
     }
@@ -76,27 +70,9 @@ enum CuaDriveServer {
         return args[i + 1]
     }
 
-    /// The live daemon socket, looked up in the private directory the app
-    /// passed as `--cua-dir` each time, since every re-mint moves it.
-    private static func socketPath() throws -> String {
-        guard let directory = argument("--cua-dir"),
-              let socket = CuaSocketDirectory.liveSocket(in: directory) else {
-            throw DriverConnectionError.unavailable
-        }
-        return socket
-    }
-
-    private static func standingGrant() -> Bool {
-        guard let data = try? Data(contentsOf: policyFile),
-              let object = try? JSONDecoder().decode(JSONValue.self, from: data) else { return false }
-        return object["standingGrant"]?.bool ?? false
-    }
-
     // MARK: - Serve loop
 
-    private static func serve(agent slug: String) async {
-        let driver = CuaConnection()
-        let session = AgentSession(agent: slug)
+    private static func serve(agent slug: String, host: String?) async {
         let liveCalls = Mutex<[String: Task<Void, Never>]>([:])
         // A blocking read pump on a background queue — AsyncBytes stalled
         // after the first line in practice, while `availableData` on a
@@ -145,8 +121,8 @@ enum CuaDriveServer {
                 guard let id, let idKey else { break }
                 let name = frame["params"]?["name"]?.string ?? ""
                 let args = frame["params"]?["arguments"] ?? .object([:])
-                let task = Task { [driver] in
-                    let result = await callTool(name, args: args, session: session, driver: driver)
+                let task = Task {
+                    let result = await forward(name, args: args, agent: slug, host: host)
                     liveCalls.withLock { $0[idKey] = nil }
                     respond(id, result)
                 }
@@ -160,7 +136,6 @@ enum CuaDriveServer {
             }
         }
         for task in liveCalls.withLock({ $0.values.map { $0 } }) { task.cancel() }
-        await driver.close()
     }
 
     private static let taskInputSchema: JSONValue = .object([
@@ -272,67 +247,112 @@ enum CuaDriveServer {
                              successContains: strings("success_contains"))
     }
 
-    private static func callTool(_ name: String, args: JSONValue,
-                                 session: AgentSession, driver: CuaConnection) async -> JSONValue {
-        let task: DriveTask
+    /// Child side: refuse what the app would refuse anyway, then hand the
+    /// call to the app and relay its result.
+    private static func forward(_ name: String, args: JSONValue,
+                                agent slug: String, host: String?) async -> JSONValue {
+        guard name == "drive_until" || name == "suggest_action" else { return toolError("Unknown tool \(name).") }
         do {
-            task = try decodeTask(args)
+            _ = try decodeTask(args)
         } catch {
             return toolError(error.localizedDescription)
         }
-
-        let apiKey = ProcessInfo.processInfo.environment["TYPESAFE_API_KEY"] ?? ""
-        guard !apiKey.isEmpty else {
-            return toolError("TYPESAFE_API_KEY is not configured for this agent.")
+        guard let host, let token = ProcessInfo.processInfo.environment[AgentDriveHost.tokenVariable],
+              !token.isEmpty else {
+            return toolError("Jarvis didn't start this agent's computer use. Restart the agent from Jarvis.")
         }
-
         do {
-            let socket = try socketPath()
-            try await bindTransport(driver, session: session, socket: socket)
-            let call: DriveLoop.Call = { tool, callArgs in
-                do {
-                    return try await driver.call(tool, arguments: callArgs)
-                } catch let error as DriverConnectionError {
-                    if error == .closed, CuaConnection.isReadOnly(tool, arguments: callArgs),
-                       let fresh = try? socketPath(), fresh != socket,
-                       (try? await bindTransport(driver, session: session, socket: fresh)) != nil {
-                        // The reconnected transport is a new session
-                        // owner — the old label is tombstoned to the
-                        // dead one, so the retry rides a fresh label.
-                        var callArgs = callArgs
-                        if callArgs["session"] != nil {
-                            callArgs["session"] = .string(session.label)
-                        }
-                        return try await driver.call(tool, arguments: callArgs)
-                    }
-                    throw error
-                }
-            }
-            // Park + notify: the ask lands in the shared asks dir, the app
-            // surfaces it (feed + overlay), and the answer file resumes us.
-            // Timeout or dismissal reads as decline — never silent approval.
-            // Agent-authored goals are autonomous effects, not a spoken
-            // command — `explicitConsent: false` puts every fast-lane and
-            // bind-phase dispatch on the standing grant / per-task
-            // confirm like the model-picked loop candidates.
-            let baseURL = ProcessInfo.processInfo.environment["TYPESAFE_BASE_URL"].flatMap(URL.init(string:))
-            let loop = DriveLoop(call: call, choose: JevChooser.make(apiKey: apiKey,
-                                                                     baseURL: baseURL ?? JevClient.systemOneURL),
-                                 ask: { await AgentAskChannel.request($0, agent: session.slug) },
-                                 granted: { standingGrant() },
-                                 explicitConsent: false,
-                                 config: .init(windowOnly: task.windowID != nil))
-            if name == "suggest_action" {
-                let text = try await loop.preview(task, session: session.label)
-                return toolText(text)
-            }
-            guard name == "drive_until" else { return toolError("Unknown tool \(name).") }
-            let result = await loop.run(task, session: session.label)
-            return toolText(describe(result))
+            return try await AgentDriveHost.forward(socket: host, request: .object([
+                "agent": .string(slug), "token": .string(token),
+                "tool": .string(name), "arguments": args]))
         } catch is CancellationError {
             return toolError("Cancelled.")
         } catch {
-            return toolError(error.localizedDescription)
+            return toolError("Jarvis isn't answering. Check that it's running, then try again.")
+        }
+    }
+
+    /// Host side: each agent's DriveLoop runs in the app on that agent's
+    /// own daemon connection and session label, so its cursor is its own.
+    final class Drives: @unchecked Sendable {
+        typealias Chooser = @Sendable () -> DriveLoop.Choose
+        private final class Drive {
+            let session: AgentSession
+            let driver = CuaConnection()
+            init(agent: String) { session = AgentSession(agent: agent) }
+        }
+        private let drives = Mutex<[String: Drive]>([:])
+        private let chooser: Chooser
+        private let granted: @Sendable () -> Bool
+        private let ask: @Sendable (String, DriveLoop.Ask) async -> String?
+        private let socket: @Sendable () async throws -> String
+
+        init(chooser: @escaping Chooser, granted: @escaping @Sendable () -> Bool,
+             ask: @escaping @Sendable (String, DriveLoop.Ask) async -> String? = {
+                 await AgentAskChannel.request($1, agent: $0)
+             },
+             socket: @escaping @Sendable () async throws -> String = { try await CuaDaemonHost.shared.socket() }) {
+            self.chooser = chooser
+            self.granted = granted
+            self.ask = ask
+            self.socket = socket
+        }
+
+        func run(agent slug: String, tool name: String, arguments args: JSONValue) async -> JSONValue {
+            guard name == "drive_until" || name == "suggest_action" else { return toolError("Unknown tool \(name).") }
+            let task: DriveTask
+            do {
+                task = try decodeTask(args)
+            } catch {
+                return toolError(error.localizedDescription)
+            }
+            let drive = drives.withLock { drives in
+                if let drive = drives[slug] { return drive }
+                let drive = Drive(agent: slug)
+                drives[slug] = drive
+                return drive
+            }
+            let session = drive.session, driver = drive.driver, socket = self.socket, ask = self.ask
+            do {
+                try await bindTransport(driver, session: session, socket: socket())
+                let call: DriveLoop.Call = { tool, callArgs in
+                    do {
+                        return try await driver.call(tool, arguments: callArgs)
+                    } catch let error as DriverConnectionError {
+                        if error == .closed, CuaConnection.isReadOnly(tool, arguments: callArgs),
+                           let fresh = try? await socket(),
+                           (try? await bindTransport(driver, session: session, socket: fresh)) != nil {
+                            // The reconnected transport is a new session
+                            // owner — the old label is tombstoned to the
+                            // dead one, so the retry rides a fresh label.
+                            var callArgs = callArgs
+                            if callArgs["session"] != nil {
+                                callArgs["session"] = .string(session.label)
+                            }
+                            return try await driver.call(tool, arguments: callArgs)
+                        }
+                        throw error
+                    }
+                }
+                // Agent-authored goals are autonomous effects, not a spoken
+                // command — `explicitConsent: false` puts every fast-lane and
+                // bind-phase dispatch on the standing grant / per-task
+                // confirm like the model-picked loop candidates. A parked
+                // ask that times out is a decline, never silent approval.
+                let loop = DriveLoop(call: call, choose: chooser(),
+                                     ask: { await ask(slug, $0) },
+                                     granted: granted,
+                                     explicitConsent: false,
+                                     config: .init(windowOnly: task.windowID != nil))
+                if name == "suggest_action" {
+                    return toolText(try await loop.preview(task, session: session.label))
+                }
+                return toolText(describe(await loop.run(task, session: session.label)))
+            } catch is CancellationError {
+                return toolError("Cancelled.")
+            } catch {
+                return toolError(error.localizedDescription)
+            }
         }
     }
 
@@ -381,15 +401,8 @@ enum CuaDriveServer {
         }
     }
 
-    private static func toolText(_ text: String) -> JSONValue {
-        .object(["content": .array([.object([
-            "type": .string("text"), "text": .string(text)])])])
-    }
-    private static func toolError(_ text: String) -> JSONValue {
-        .object(["content": .array([.object([
-            "type": .string("text"), "text": .string(text)])]),
-            "isError": .bool(true)])
-    }
+    private static func toolText(_ text: String) -> JSONValue { AgentDriveHost.toolText(text) }
+    private static func toolError(_ text: String) -> JSONValue { AgentDriveHost.toolError(text) }
 
     // MARK: - Wire
 

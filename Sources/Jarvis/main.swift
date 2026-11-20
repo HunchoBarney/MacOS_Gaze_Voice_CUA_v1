@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var controller = VoiceController(config: Config.shared, speaker: speechOutput)
     private let diagnostics = DiagnosticsReporter()
     private var agentRuntime: AgentRuntime?
+    private var agentDriveHost: AgentDriveHost?
     private let microphones = MicrophoneCatalog()
     private let input = FnInputMonitor()
     private var subscriptions: Set<AnyCancellable> = []
@@ -393,21 +394,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Each agent's codex gets a stdio MCP server entry — the same
         // binary re-execed as `Jarvis --mcp-stdio --agent <slug>`, told
-        // where the private daemon socket directory is — plus
-        // the Jev credential in its environment so codex's `env_vars`
-        // pass-through hands it to the MCP child without touching disk.
-        // It is read live at spawn so a mid-session key set works.
+        // where the app's agent socket is — plus that agent's token in
+        // its environment, which codex's `env_vars` pass-through hands to
+        // the MCP child without touching disk. The child forwards every
+        // call here, and the app runs the loop with its own keys and grant.
+        let drives = CuaDriveServer.Drives(
+            chooser: {
+                { state, candidates in
+                    let route = try await Config.shared.jevRoute()
+                    let choose = route.map { JevChooser.make(apiKey: $0.bearer, baseURL: $0.url) }
+                        ?? JevChooser.make(apiKey: "")
+                    return try await choose(state, candidates)
+                }
+            },
+            granted: { Config.shared.alwaysAllowComputerUse })
+        let host = agentDriveHost ?? AgentDriveHost { agent, tool, arguments in
+            await drives.run(agent: agent, tool: tool, arguments: arguments)
+        }
+        agentDriveHost = host
         runtime.start(
             mcpServersFor: { agent in
                 [CodexMCPServer(name: "jev-drive",
                                 command: Bundle.main.executablePath
                                     ?? ProcessInfo.processInfo.arguments[0],
                                 args: ["--mcp-stdio", "--agent", agent.slug]
-                                    + (CuaSocketDirectory.current.map { ["--cua-dir", $0] } ?? []),
-                                envVars: ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL"],
+                                    + (host.map { ["--agent-host", $0.socketPath] } ?? []),
+                                envVars: [AgentDriveHost.tokenVariable],
                                 cwd: agent.workspacePath)]
             },
-            environmentFor: { _ in Config.shared.jevEnvironment })
+            environmentFor: { agent in
+                host.map { [AgentDriveHost.tokenVariable: $0.token(for: agent.slug)] } ?? [:]
+            })
         // The runtime owns the single event-stream consumer, fanning
         // events out to the UI here.
         windows.agents.bind(roster: runtime.store, runtime: runtime)
