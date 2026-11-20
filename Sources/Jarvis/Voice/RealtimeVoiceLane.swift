@@ -822,7 +822,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         let key = apiKey().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
-            throw VoiceError("Jarvis isn't connected to its voice service yet, so it can't hear you.")
+            throw VoiceError(OutcomeWording.missingVoiceKey)
         }
         client.teardown()
         lastSessionError = nil

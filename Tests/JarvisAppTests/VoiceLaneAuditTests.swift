@@ -697,4 +697,24 @@ final class VoiceLaneAuditTests: XCTestCase {
             "Something weird happened at /Users/x/secret"),
             "That didn't work, sorry.")
     }
+
+    /// JARA-38: a missing key says so plainly and points at Settings, instead
+    /// of "give it a second and try again", and the problem card offers
+    /// Open Settings for it.
+    func testMissingKeyIsNotADeadEnd() {
+        let key = "I need my key set up first. It's in Settings, under Advanced."
+        XCTAssertEqual(OutcomeWording.spokenFailure(OutcomeWording.missingVoiceKey), key)
+        XCTAssertEqual(OutcomeWording.spokenFailure(
+            "The voice model is unavailable: " + OutcomeWording.missingVoiceKey), key)
+        XCTAssertEqual(OutcomeWording.spokenFailure(OutcomeWording.missingUnderstandingKey), key)
+        XCTAssertEqual(OutcomeWording.readable(OutcomeWording.missingVoiceKey), OutcomeWording.missingVoiceKey)
+        XCTAssertTrue(OutcomeWording.missingVoiceKey.contains("Settings"))
+
+        let config = testConfig()
+        XCTAssertTrue(config.needsKeys)
+        XCTAssertTrue(config.saveOpenAIAPIKey("sk-test"))
+        XCTAssertTrue(config.needsKeys, "the TypeSafe key is still missing")
+        XCTAssertTrue(config.saveAPIKey("ts-test"))
+        XCTAssertFalse(config.needsKeys)
+    }
 }

@@ -22,6 +22,9 @@ enum OutcomeWording {
         "needs_choice": "There's more than one way to do that. Can you be more specific?",
     ]
 
+    static let missingVoiceKey = "Jarvis needs its OpenAI key before it can hear you. Add it in Settings, under Advanced."
+    static let missingUnderstandingKey = "Jarvis needs its TypeSafe key before it can understand that. Add it in Settings, under Advanced."
+
     private static let lostTouch = "I lost touch with your Mac's controls for a moment. Try that again."
     private static let generic = "That didn't work, sorry. Try saying it another way."
 
@@ -81,6 +84,9 @@ enum OutcomeWording {
         if m.contains("window server") { return "Your Mac didn't let me do that. Try again in a moment." }
         if m.contains("microphone") || m.contains("permission") || m.contains("access is needed") {
             return "I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone."
+        }
+        if m.contains("under advanced") {
+            return "I need my key set up first. It's in Settings, under Advanced."
         }
         if m.contains("speech") || m.contains("try again") || m.contains("catch") {
             return "Sorry, I didn't catch that."

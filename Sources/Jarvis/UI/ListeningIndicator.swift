@@ -45,7 +45,7 @@ enum IndicatorPhase: Equatable {
 /// Words and width change instantly; only the microphone level moves.
 struct ListeningIndicatorView: View {
     @ObservedObject var controller: VoiceController
-    var openSettings: () -> Void = {}
+    var openSettings: (SettingsNavigation.Anchor) -> Void = { _ in }
 
     private var phase: IndicatorPhase { IndicatorPhase.current(controller) }
 
@@ -123,10 +123,10 @@ struct ListeningIndicatorView: View {
 }
 
 /// What went wrong, in the words Jarvis said, with a way to fix it when
-/// the fix is a permission.
+/// the fix is a permission or a missing key.
 private struct ProblemCard: View {
     @ObservedObject var controller: VoiceController
-    var openSettings: () -> Void
+    var openSettings: (SettingsNavigation.Anchor) -> Void
 
     private var message: String {
         if case .error(let text) = controller.status { return text }
@@ -142,8 +142,11 @@ private struct ProblemCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                if !controller.missingPermissions.isEmpty {
-                    Button("Open Settings", action: openSettings).buttonStyle(.borderedProminent)
+                if !controller.missingPermissions.isEmpty || controller.config.needsKeys {
+                    Button("Open Settings") {
+                        openSettings(controller.missingPermissions.isEmpty ? .advanced : .permissions)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
                 Button("Dismiss", action: controller.cancelCaptureAttempt).keyboardShortcut(.cancelAction)
                 Spacer()

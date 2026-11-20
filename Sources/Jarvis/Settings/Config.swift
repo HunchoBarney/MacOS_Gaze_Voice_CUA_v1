@@ -21,6 +21,9 @@ final class Config: ObservableObject {
     /// True once Jarvis signs in to hosted credentials (KAR-38). Until
     /// then the keys above are typed into Settings → Advanced.
     var hostedCredentialsConfigured: Bool { false }
+    /// A key Jarvis needs is missing and can only be typed into Settings →
+    /// Advanced, until hosted credentials exist.
+    var needsKeys: Bool { !hostedCredentialsConfigured && (openAIAPIKey.isEmpty || apiKey.isEmpty) }
 
     @Published var microphoneUID: String {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
