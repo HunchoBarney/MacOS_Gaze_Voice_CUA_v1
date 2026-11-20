@@ -144,6 +144,23 @@ final class ScreenQuestionTests: XCTestCase {
         XCTAssertEqual(value["kind"]?.string, "screen_text")
         XCTAssertEqual(value["screen"]?.string, "Question: q\nApp: Mail")
         XCTAssertNil(RealtimeVoiceLane.deterministicSay(output), "the model must answer, not the host")
+        XCTAssertTrue(ScreenQuestion.isScreenAnswer(output))
+    }
+
+    /// Only screen text owes a spoken follow-up; an accepted executor
+    /// result with an empty summary would otherwise narrate a task that has
+    /// only just started, and its verified outcome would be spoken twice.
+    func testAcceptedSaylessExecutorResultRequestsNoFollowUp() {
+        let lane = RealtimeVoiceLane(apiKey: { "test-key" })
+        let id = UUID()
+        lane.turnID = id
+        let accepted = VoiceToolCatalog.result(status: "accepted", summary: "")
+        XCTAssertNil(RealtimeVoiceLane.deterministicSay(accepted))
+        XCTAssertFalse(ScreenQuestion.isScreenAnswer(accepted))
+        lane.settleToolCall(output: accepted, session: id)
+        XCTAssertFalse(lane.toolRelayOwed)
+        lane.settleToolCall(output: ScreenQuestion.output("Question: q"), session: id)
+        XCTAssertTrue(lane.toolRelayOwed)
     }
 
     // MARK: - Glow on the named control
@@ -158,6 +175,10 @@ final class ScreenQuestionTests: XCTestCase {
         let twins = digest([ScreenNode(role: "AXButton", title: "Reply", frame: rect(10)),
                             ScreenNode(role: "AXButton", title: "Reply", frame: rect(40))])
         XCTAssertNil(ScreenQuestion.pointedRef(answer: "Press Reply.", in: twins), "two Replies can't be told apart")
+        let short = digest([ScreenNode(role: "AXButton", title: "OK", frame: rect(10)),
+                            ScreenNode(role: "AXButton", title: "Go", frame: rect(40))])
+        XCTAssertNil(ScreenQuestion.pointedRef(answer: "Press OK.", in: short), "two-letter labels match too much")
+        XCTAssertNil(ScreenQuestion.pointedRef(answer: "Click Go.", in: short))
     }
 
     // MARK: - Gaze "what is this"

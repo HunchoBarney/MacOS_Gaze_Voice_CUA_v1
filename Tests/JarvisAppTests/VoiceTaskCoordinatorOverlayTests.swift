@@ -57,6 +57,25 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
         return condition()
     }
 
+    // MARK: - halo ownership
+
+    /// The answer glow shares the gaze halo, but a tracker outage or a
+    /// look away only retires gaze hints: the answer stays until its own
+    /// timer ends.
+    func testStaleGazeLeavesTheAnswerGlowAlone() async {
+        let overlay = TargetOverlay()
+        let coordinator = coordinator(overlay: overlay)
+        coordinator.glowAnswer(frame: CGRect(x: 40, y: 60, width: 80, height: 28), for: .milliseconds(200))
+        coordinator.retireStaleGazeHalo(stale: 30)
+        XCTAssertTrue(overlay.haloArmed, "stale gaze must not wipe the answer glow")
+        let retired = await waitFor { !coordinator.answerGlowing && !overlay.haloArmed }
+        XCTAssertTrue(retired, "the answer glow retires on its own timer")
+        overlay.showHalo(frame: CGRect(x: 0, y: 0, width: 20, height: 20))
+        coordinator.retireStaleGazeHalo(stale: 30)
+        XCTAssertFalse(overlay.haloArmed, "a gaze hint still goes once gaze is stale")
+        overlay.hideAll()
+    }
+
     // MARK: - disarm must not kill the ring it just acquired
 
     /// The scorer's `.acquire` presents the ring AND resolves the

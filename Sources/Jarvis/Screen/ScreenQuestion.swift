@@ -76,15 +76,21 @@ enum ScreenQuestion {
         return String(decoding: data, as: UTF8.self)
     }
 
+    static func isScreenAnswer(_ output: String) -> Bool {
+        guard let data = output.data(using: .utf8),
+              let fields = try? JSONDecoder().decode([String: String].self, from: data) else { return false }
+        return fields["kind"] == "screen_text"
+    }
+
     /// The control an answer points at: the one named item whose label the
     /// answer says, longest label first ("Send Later" over "Send"). Plain
-    /// text never glows, and two items with the same label can't be told
-    /// apart.
+    /// text and labels under three letters ("OK", "Go") never glow, and two
+    /// items with the same label can't be told apart.
     static func pointedRef(answer: String, in digest: ScreenDigest) -> String? {
         let spoken = words(answer)
         let named = digest.items.compactMap { item -> (ref: String, label: String)? in
             let label = words(item.text)
-            guard item.kind != "text", label.count > 3, spoken.contains(label) else { return nil }
+            guard item.kind != "text", label.filter(\.isLetter).count >= 3, spoken.contains(label) else { return nil }
             return (item.ref, label)
         }
         guard let longest = named.map(\.label.count).max() else { return nil }

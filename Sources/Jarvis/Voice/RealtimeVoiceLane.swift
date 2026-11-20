@@ -444,8 +444,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// Last injected [context] note — each turn replaces it rather than
     /// stacking stale frontmost-app/time facts on top of each other.
     private var lastContextItemID: String?
-    /// A say-less tool result is waiting for the model to answer from it.
-    private var toolRelayOwed = false
+    /// A screen-text result is waiting for the model to answer from it.
+    /// Internal for tests.
+    var toolRelayOwed = false
     /// Screen-text tool results still in the conversation — deleted once
     /// the answer settles, so window text never outlives its turn.
     /// Internal for tests.
@@ -1786,7 +1787,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
             }
             return
         }
-        toolRelayOwed = true
+        // Only screen text owes a spoken follow-up. An accepted executor
+        // result with an empty summary must not be narrated: its verified
+        // outcome arrives later as its own push.
+        if ScreenQuestion.isScreenAnswer(output) { toolRelayOwed = true }
         awaitingTurnEnd = true
         requestResponseWhenFree()
     }
