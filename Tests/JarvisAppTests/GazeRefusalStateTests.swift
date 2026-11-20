@@ -7,6 +7,9 @@ import JarvisCore
 /// a frozen preview can't hold the menu at "Tracking", and a deictic
 /// type refuses instead of typing into a window nobody looked at.
 final class GazeRefusalStateTests: XCTestCase {
+    override func setUp() {
+        useGazeTrackingOn()
+    }
 
     // MARK: - Fixtures
 

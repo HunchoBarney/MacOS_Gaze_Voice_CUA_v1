@@ -6,6 +6,9 @@ import JarvisCore
 /// tracker point, and refuse honestly when the tracker can't say where the
 /// user is looking.
 final class GazeLaneTests: XCTestCase {
+    override func setUp() {
+        useGazeTrackingOn()
+    }
 
     // MARK: - Parse + resolve
 

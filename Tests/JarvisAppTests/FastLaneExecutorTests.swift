@@ -11,6 +11,7 @@ import JarvisCore
 final class FastLaneExecutorTests: XCTestCase {
     override func setUp() {
         usePrivateStandingGrants()
+        useGazeTrackingOn()
     }
 
     func testVerifiedCapturedOwnerAvoidsResolverButMissingOrChangedOwnerDoesNot() async {
