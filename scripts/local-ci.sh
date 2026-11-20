@@ -14,13 +14,13 @@ CHECKOUT=$CI_HOME/checkout
 LOGS=$CI_HOME/logs
 LOCK=$CI_HOME/lock
 LANE_TIMEOUT=${LOCAL_CI_LANE_TIMEOUT:-3600}
+LANE_SH=${LOCAL_CI_LANE:-$HOME/.capy/work/lane/lane.sh}
 TEST_TIMEOUT=${LOCAL_CI_TEST_TIMEOUT:-5400}
 RETRY_ERROR_AFTER=3600
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 GH=${GH:-$(command -v gh || echo "$HOME/.local/bin/gh")}
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
-lane_busy() { pgrep -x 'swift-build|swift-test|swift-frontend|xcodebuild' >/dev/null; }
 
 post() {
     "$GH" api -X POST "repos/$REPO/statuses/$1" -f state="$2" -f context="$CONTEXT" \
@@ -117,17 +117,7 @@ run_sha() {
     local log=$LOGS/$sha.log short=${1:0:12}
     mkdir -p "$LOGS"
     : >"$log"
-    post "$sha" pending "waiting for the build lane" || { say "could not post status for $sha"; return 1; }
-
-    local waited=0
-    while lane_busy; do
-        if [ "$waited" -ge "$LANE_TIMEOUT" ]; then
-            say "build lane busy for $LANE_TIMEOUT s" | tee -a "$log"
-            post "$sha" error "build lane busy for $((LANE_TIMEOUT / 60)) min; will retry"
-            return 1
-        fi
-        sleep 30; waited=$((waited + 30))
-    done
+    post "$sha" pending "checking out" || { say "could not post status for $sha"; return 1; }
 
     say "checking out $sha" | tee -a "$log"
     if [ ! -d "$CHECKOUT/.git" ]; then
@@ -141,15 +131,23 @@ run_sha() {
         post "$sha" error "checkout failed · log $short.log"; return 1
     fi
 
-    post "$sha" pending "running make test"
+    if [ ! -x "$LANE_SH" ]; then
+        say "no build lane at $LANE_SH" | tee -a "$log"
+        post "$sha" error "no build lane at $LANE_SH; will retry"
+        return 1
+    fi
+    # The build lane serves local CI ahead of every normal job, in this
+    # checkout rather than the lane's mirror.
+    post "$sha" pending "queued in the build lane for make test"
     say "make test at $sha" | tee -a "$log"
     local start=$SECONDS rc
     set -m
-    (cd "$CHECKOUT" && exec nice -n 10 make test) >>"$log" 2>&1 &
+    (cd "$CHECKOUT" && LANE_PRIORITY=high LANE_NO_MIRROR=1 JARVIS_LANE_TIMEOUT=$LANE_TIMEOUT \
+        exec nice -n 10 "$LANE_SH" make test) >>"$log" 2>&1 &
     test_pid=$!
     set +m
     rm -f "$CI_HOME/timed-out"
-    (sleep "$TEST_TIMEOUT" && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
+    (sleep $((LANE_TIMEOUT + TEST_TIMEOUT)) && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$test_pid"; rc=$?
     test_pid=""
@@ -159,6 +157,11 @@ run_sha() {
         pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
     fi
     local minutes=$(((SECONDS - start + 59) / 60)) counts
+    if grep -aq '^lane: gave up after' "$log"; then
+        say "the build lane did not free up in $LANE_TIMEOUT s" | tee -a "$log"
+        post "$sha" error "build lane busy for $((LANE_TIMEOUT / 60)) min; will retry"
+        return 1
+    fi
     counts=$(summary "$log")
     if [ "$rc" -eq 0 ] && ! [[ $counts == swift* && $counts == *vitest* ]]; then
         say "make test exited 0 but the log has no complete swift and vitest count" | tee -a "$log"
@@ -197,7 +200,6 @@ needs_run() {
 }
 
 poll() {
-    if lane_busy; then say "build lane busy; next tick"; return 0; fi
     take_lock || { say "another local-ci job is running"; return 0; }
     trap release_lock EXIT
     local list ts sha label
