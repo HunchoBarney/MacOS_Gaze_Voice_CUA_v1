@@ -57,6 +57,12 @@ final class VoiceTaskCoordinator {
         /// a fresh radial every `stallAskTimeout`. Clears when real
         /// dispatch activity lands, so the NEXT wedged stretch asks again.
         var stallAsked = false
+        /// Guide mode: the walkthrough this work shows, its listen-only
+        /// observer of the person's clicks and keyboard progress, and the
+        /// step on screen now (the callout's model).
+        var guide: GuideSession?
+        var guideObserver: UserActionSource?
+        var guideStep: GuideStep?
 
         enum Outcome: Equatable, Sendable {
             case done, alreadyDone, blocked(String), failed(String),
@@ -495,7 +501,7 @@ final class VoiceTaskCoordinator {
 
     private func checkStalledWork() {
         let now = Date()
-        for work in tasks where work.active && work.ask == nil && !work.stallAsked {
+        for work in tasks where work.active && work.ask == nil && !work.stallAsked && work.guide == nil {
             let quiet = now.timeIntervalSince(work.lastActivity)
             if !work.stalled, quiet > Self.stallTimeout {
                 work.stalled = true
@@ -787,6 +793,16 @@ final class VoiceTaskCoordinator {
                                        say: "The scrolling request or target changed.").encoded()
             }
         }
+        // A running walkthrough hears its own controls first: "just do it",
+        // "do this one", "repeat", "slower", "go back", "close it", "undo".
+        // "Stop" keeps the universal cancel below.
+        if windowScroll == nil, let guide = activeGuide,
+           let control = GuideControl.parse(trimmed, offerPending: await guide.offerPending),
+           control != .stop {
+            feed.add(.route, "\"\(trimmed)\" → guide \(control)")
+            let say = await guide.hear(control)
+            return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
+        }
         let phrase = Self.normalizedPhrase(trimmed)
         // Utterances about existing work aren't tasks — each answers from
         // the task log (or shows the cheat sheet) and creates no Work row.
@@ -895,11 +911,13 @@ final class VoiceTaskCoordinator {
                                 routed.map { "Intent lane: \($0.lane.rawValue) — \($0.reason)" }]
             .compactMap { $0 })
             .joined(separator: "\n") : ""
-        let spec = Self.voiceTaskSpec(trimmed, app: app, frontmostHint: frontmostHint,
+        let guideGoal = windowScroll == nil
+            ? Self.guideGoal(instruction: trimmed, transcript: transcriptHint) : nil
+        let spec = Self.voiceTaskSpec(guideGoal ?? trimmed, app: app, frontmostHint: frontmostHint,
             previousContext: previousContext.isEmpty ? nil : previousContext,
             values: values, windowID: pinnedWindowID)
 
-        let label = Self.gerundPhrase(for: trimmed) ?? trimmed
+        let label = guideGoal.map { "Showing how to \($0)" } ?? Self.gerundPhrase(for: trimmed) ?? trimmed
         guard !Task.isCancelled, admissionIsCurrent() else {
             onCommandStage?(captureID, nil, .cancelled, nil)
             return VoiceToolResult(status: VoiceToolResult.Status.cancelled, say: "Cancelled.").encoded()
@@ -924,6 +942,7 @@ final class VoiceTaskCoordinator {
         work.continuousScroll = continuousScroll
         work.scrollAuthorization = admissionIsCurrent
         work.onConversationScroll = onConversationScroll
+        if let guideGoal { startGuide(guideGoal, on: work) }
         tasks.append(work)
         handoffAt[work.id] = started
         onCommandStage?(captureID, work.id, .workCreated, nil)
@@ -935,7 +954,8 @@ final class VoiceTaskCoordinator {
         // The provenance echo names the referent so a misread is caught in
         // the half-second before work starts; referent-free tasks keep the
         // gerund ack.
-        let ack = routed.flatMap { $0.referent != nil ? IntentRouter.provenanceEcho($0) : nil } ?? label
+        let ack = guideGoal != nil ? "Let me look."
+            : routed.flatMap { $0.referent != nil ? IntentRouter.provenanceEcho($0) : nil } ?? label
         return VoiceToolResult(status: VoiceToolResult.Status.started, say: ack).encoded()
     }
 
@@ -1532,6 +1552,7 @@ final class VoiceTaskCoordinator {
                 guard let work, work.active, !Task.isCancelled else { return }
                 work.verifiedScroll = witness
             },
+            guide: work.guide,
             feed: { [weak self, weak work] s in
                 Task { @MainActor in
                     self?.feed.add(.dispatch, s)
@@ -1568,7 +1589,24 @@ final class VoiceTaskCoordinator {
             feed.add(.note, "\(work.label) — the computer-control connection restarted; trying once more")
             result = await runWork()
         }
+        // The person moved to another app or window mid-walkthrough: bind
+        // what's in front now and carry on from the live state.
+        var rebinds = 0
+        while work.guide != nil, work.active, !Task.isCancelled, rebinds < Self.guideRebindLimit,
+              result.blockedReason == GuideSession.rebindReason {
+            rebinds += 1
+            let front = NSWorkspace.shared.frontmostApplication
+            work.spec.pid = front.map { Int($0.processIdentifier) }
+            work.spec.application = front?.bundleIdentifier
+            work.spec.windowID = nil
+            feed.add(.route, "\(work.label) — following the person to \(front?.localizedName ?? "the front app")")
+            result = await runWork()
+        }
         guard work.active else { return }
+        if let guide = work.guide {
+            await finishGuide(guide, result: result, on: work)
+            return
+        }
         work.elapsedMs = (ProcessInfo.processInfo.systemUptime - (work.continuousStartedAt ?? started)) * 1000
         work.history = result.history
         work.dispatchedEffect = result.dispatchedEffect || (keepScrolling && work.dispatchedEffect)
@@ -1744,6 +1782,7 @@ final class VoiceTaskCoordinator {
         // would resurface an unanswerable card forever.
         work.ask = nil
         work.agentAskID = nil
+        if let guide = work.guide { endGuide(guide, on: work) }
         work.active = false
         work.outcome = outcome
         wakeConversationWaiters(work.id, .finished(outcome))
@@ -2445,7 +2484,7 @@ final class VoiceTaskCoordinator {
         let hint = listenHintTask
         hint?.cancel(); listenHintTask = nil
         gazePump?.cancel(); gazePump = nil
-        if !answerGlowing { overlay.hideHalo() }
+        if !answerGlowing && !guideGlowing { overlay.hideHalo() }
         overlay.gazeLost(false)
         let generation = listenHintGeneration
         Task {
@@ -2571,7 +2610,7 @@ final class VoiceTaskCoordinator {
     /// A gaze hint goes once gaze has been stale past the limit; an answer
     /// glow is not a gaze hint and stays.
     func retireStaleGazeHalo(stale: TimeInterval) {
-        guard !answerGlowing, overlay.haloArmed, stale > Self.haloStaleLimit else { return }
+        guard !answerGlowing, !guideGlowing, overlay.haloArmed, stale > Self.haloStaleLimit else { return }
         overlay.hideHalo()
     }
 
@@ -2586,7 +2625,7 @@ final class VoiceTaskCoordinator {
                   "session": .string(Self.gazeSession)]),
               !Task.isCancelled else { return }
         let content = snap["structuredContent"] ?? snap
-        guard let frame = Self.haloFrame(at: point, in: content), !answerGlowing else { return }
+        guard let frame = Self.haloFrame(at: point, in: content), !answerGlowing, !guideGlowing else { return }
         overlay.showHalo(frame: frame)
     }
 
@@ -2782,6 +2821,117 @@ final class VoiceTaskCoordinator {
         return .unparseable
     }
 
+    // MARK: - Guide mode
+
+    /// The glow on a guide step stays until the step resolves; gaze hints
+    /// leave it alone.
+    private(set) var guideGlowing = false
+    static let guideRebindLimit = 3
+
+    /// The running walkthrough, if any.
+    var activeGuide: GuideSession? {
+        tasks.last(where: { $0.active && $0.guide != nil })?.guide
+    }
+
+    /// "show me how to …" in the instruction, or in the person's own words
+    /// when the model passed a bare instruction. The desktop lane's own
+    /// guides ("how do I move this window to Desktop 2") keep their lane.
+    nonisolated static func guideGoal(instruction: String, transcript: String?) -> String? {
+        if let parsed = FastAction.parse(instruction), case .desktop = parsed.action.body { return nil }
+        if let goal = GuideRequest.goal(in: instruction) { return goal }
+        guard let transcript, GuideRequest.goal(in: transcript) != nil else { return nil }
+        return instruction
+    }
+
+    private func startGuide(_ goal: String, on work: Work) {
+        let id = work.id
+        let guide = GuideSession(goal: goal, present: { [weak self] effect in
+            await self?.presentGuide(effect, workID: id)
+        })
+        if let context = guide.hintContext {
+            work.spec.previousContext = [work.spec.previousContext, context].compactMap { $0 }.joined(separator: "\n")
+        }
+        work.guide = guide
+        let observer = UserActionObserver()
+        let watched = work.spec.pid ?? NSWorkspace.shared.frontmostApplication.map { Int($0.processIdentifier) } ?? 0
+        observer.start(watching: watched) { action in
+            Task { await guide.send(.action(action)) }
+        }
+        work.guideObserver = observer
+        Task { await guide.startTicking() }
+    }
+
+    /// Glow, pulse, speak or clear for the walkthrough. A pulse is the
+    /// existing press glow, which honours Reduce Motion.
+    func presentGuide(_ effect: GuideEffect, workID: UUID) {
+        guard let work = tasks.first(where: { $0.id == workID }), work.active else { return }
+        work.lastActivity = Date()
+        switch effect {
+        case .point(let step):
+            work.guideStep = step
+            if let frame = step.target?.frame {
+                guideGlowing = true
+                overlay.showHalo(frame: frame)
+            }
+            onChange()
+        case .pulse(let frame):
+            overlay.glowPress(frame: frame)
+        case .say(let line):
+            feed.add(.note, line)
+            taskEventSink(work.captureID,
+                          VoiceToolResult(kind: VoiceToolResult.Kind.guideStep, status: VoiceToolResult.Status.ok,
+                                          say: VoiceToolResult.spoken(line, words: 40)).encoded(),
+                          true)
+        case .clear:
+            work.guideStep = nil
+            if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+            onChange()
+        }
+    }
+
+    private func endGuide(_ guide: GuideSession, on work: Work) {
+        work.guideObserver?.stop()
+        work.guideObserver = nil
+        work.guideStep = nil
+        if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+        Task { await guide.end() }
+    }
+
+    /// A finished walkthrough: say so, then offer the steps as a note. A
+    /// yes starts an ordinary task in Notes with the steps as its literal
+    /// text, so the note rides the same consented drive path as any task.
+    private func finishGuide(_ guide: GuideSession, result: DriveResult, on work: Work) async {
+        let steps = await guide.completed
+        endGuide(guide, on: work)
+        work.guide = nil
+        switch result.status {
+        case .done, .alreadySatisfied:
+            let say = steps.isEmpty ? "That's already done." : "That's everything. You did it."
+            feed.add(.outcome, say)
+            taskEventSink(work.captureID,
+                          VoiceToolResult(kind: steps.isEmpty ? VoiceToolResult.Kind.taskOutcome
+                                                              : VoiceToolResult.Kind.guideStep,
+                                          status: VoiceToolResult.Status.ok, say: say).encoded(), true)
+            guard !steps.isEmpty else {
+                finish(work, .alreadyDone, say: say)
+                return
+            }
+            let answer = await park(.confirm(GuideNote.offer), on: work)
+            finish(work, .done, say: say)
+            guard answer == "yes" else { return }
+            let note = GuideNote(goal: guide.goal, steps: steps)
+            _ = await beginVoiceTask(GuideNote.instruction, app: "com.apple.Notes",
+                                     literalText: note.text, captureID: work.captureID)
+        default:
+            let (outcome, say) = Self.describe(result, request: work.request)
+            feed.add(.outcome, say)
+            taskEventSink(work.captureID,
+                          VoiceToolResult(kind: VoiceToolResult.Kind.taskOutcome, status: VoiceToolResult.Status.ok,
+                                          say: VoiceToolResult.spoken(say, words: 30)).encoded(), true)
+            finish(work, outcome, say: say)
+        }
+    }
+
     // MARK: - Intent helpers
 
     /// Pure construction shared by admission and the driver-boundary tests.
@@ -2905,6 +3055,7 @@ struct VoiceToolResult {
     enum Kind {
         static let taskOutcome = "task_outcome"
         static let taskQuestion = "task_question"
+        static let guideStep = "guide_step"
     }
 
     enum Status {

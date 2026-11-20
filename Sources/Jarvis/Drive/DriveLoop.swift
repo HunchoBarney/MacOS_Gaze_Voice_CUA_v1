@@ -24,6 +24,12 @@ actor DriveLoop {
         case choice(prompt: String, options: [String])
     }
 
+    /// How a chosen step lands. `.act` dispatches it; `.show` (guide
+    /// mode) points at it, waits for the person to do it and verifies the
+    /// effect. The walkthrough's `GuideSession` holds the live mode, so
+    /// "just do it" flips a running loop from the current step.
+    enum ExecutionMode: Sendable, Equatable { case act, show }
+
     /// The chooser's answer: the picked candidate id plus the model's own
     /// confidence (nil = no score — treated as ungated so stub choosers and
     /// non-scoring lanes keep working). `doneVote` carries the same-call
@@ -248,6 +254,9 @@ actor DriveLoop {
     /// Injectable so tests never need to steal the real desktop's focus.
     let frontmostPID: () -> Int?
     let frontmostWindowID: () -> Int?
+    /// Guide mode: set, the loop runs in `.show` and hands each chosen
+    /// step to the walkthrough instead of dispatching it.
+    let guide: GuideSession?
     private let feedOut: (String) -> Void
     private static let log = Logger(subsystem: "com.karanvirkang.jarvis",
                                     category: "drive-loop")
@@ -360,6 +369,7 @@ actor DriveLoop {
          freshScrollContinuation: Bool = false,
          scrollContinuationIsCurrent: (@Sendable () async -> Bool)? = nil,
          onVerifiedScroll: (@Sendable (NativeWindowObservation.VerifiedScroll) async -> Void)? = nil,
+         guide: GuideSession? = nil,
          feed: @escaping (String) -> Void = { _ in }) {
         // Session resurrection, serialized per label (see
         // SessionResurrector): the daemon tombstones a session when its
@@ -488,6 +498,7 @@ actor DriveLoop {
         self.frontmostBundleID = frontmostBundleID
         self.frontmostPID = frontmostPID
         self.frontmostWindowID = frontmostWindowID
+        self.guide = guide
         self.feedOut = feed
     }
 
@@ -696,7 +707,8 @@ actor DriveLoop {
                 apps = needsInventory ? await appInventory(session: session) : []
             }
             let frontmost = frontmostBundleID()
-            if var fast = Self.resolveFastLane(goal: task.goal, apps: apps,
+            if guide == nil,
+               var fast = Self.resolveFastLane(goal: task.goal, apps: apps,
                                                appHint: task.application,
                                                frontmostBundle: frontmost),
                config.allowParsedScroll || !fast.isScroll,
@@ -747,7 +759,7 @@ actor DriveLoop {
                 // nonsense the driver can only refuse; bind whatever is
                 // in front instead.
                 let deictic = task.application == nil
-                    && (Self.isDeicticGoal(task.goal)
+                    && (guide != nil || Self.isDeicticGoal(task.goal)
                         || (resolved.map { $0.bundle == nil && $0.pid == nil } ?? true))
                 if deictic {
                     if let front = frontmostBundleID(),
@@ -966,12 +978,27 @@ actor DriveLoop {
                     }),
                 actuate: { [weak self] request in
                     guard let self else { throw DriverConnectionError.closed }
+                    if let guide = self.guide {
+                        return try await self.guideRound(request, guide: guide, box: box, task: task,
+                                                         window: bound, session: session)
+                    }
                     return try await self.actuate(request, box: box, task: task,
                                                   pid: pid, windowID: windowID,
                                                   session: session)
                 },
                 consent: { [weak self] request, _ in
                     guard let self else { return .allow }
+                    // Show mode: the person's own click is the consent, so
+                    // only a permanent refusal (the never list) stands. A
+                    // step Jarvis does after all asks fresh in guidedActuate.
+                    if let guide = self.guide, await guide.mode == .show {
+                        box.guideShowConsent = true
+                        let ruling = await self.consentRuling(request, denied: task.deny,
+                                                              pid: pid, windowID: windowID, box: box)
+                        if case .deny = ruling { return ruling }
+                        return .allow
+                    }
+                    box.guideShowConsent = false
                     return await self.consentRuling(request, denied: task.deny,
                                                     pid: pid, windowID: windowID,
                                                     box: box)
@@ -1798,6 +1825,8 @@ extension DriveLoop {
         var contextIsClipboard = false
         var confirmed = false
         var consentBlock: DriveStatus.ConsentBlock = .permanent
+        /// This round's consent ran in show mode, so nothing was asked yet.
+        var guideShowConsent = false
         init(browser: BrowserSupport.Binding?) { self.browser = browser }
     }
 
@@ -2282,6 +2311,8 @@ extension DriveLoop {
         case is CuaUncertainOutcome:
             return (.blocked("The action was delivered but its result could not be verified — the target state is unknown."),
                     "dispatched but unverifiable", nil)
+        case is GuideSession.Rebind:
+            return (.blocked("We moved to another window."), GuideSession.rebindReason, nil)
         case let error as DriverConnectionError:
             if error.isDeadSession || error.isSessionRestarted {
                 return (.blocked(Self.sessionRestartedMessage),
@@ -2303,6 +2334,129 @@ extension DriveLoop {
         case nil:
             return (.blocked(fallback), fallback, nil)
         }
+    }
+
+    // MARK: - Guide mode
+
+    /// One round in guide mode. Show mode points at Jev's choice and waits
+    /// for the person; Jarvis acts only when told to ("do this one", "just
+    /// do it", a yes to the offer), and then through the consented path.
+    func guideRound(_ request: ActuationRequest, guide: GuideSession, box: RoundBox,
+                    task: DriveTask, window: WindowRef, session: String) async throws -> TaskLoop.ActOutcome {
+        let askedAlready = !box.guideShowConsent
+        guard let action = Self.guideAction(for: request, values: task.values) else {
+            return askedAlready
+                ? try await actuate(request, box: box, task: task, pid: window.pid,
+                                    windowID: window.windowID, session: session)
+                : try await guidedActuate(request, box: box, task: task, window: window, session: session)
+        }
+        var reply = await guide.perform(action, observe: { [weak self] in
+            await self?.guideScene(window: window, session: session)
+        })
+        while true {
+            try Task.checkCancellation()
+            switch reply {
+            case .done:
+                feed("guide: the person did it — \(request.summary)")
+                return .init(effect: "person_acted", verified: true,
+                             detail: "the person did this step and its effect was seen")
+            case .act:
+                feed("guide: doing it for the person — \(request.summary)")
+                // Act mode from the start of this round: TaskLoop already
+                // ran consent. A flip mid-wait asks now, as do mode would.
+                return askedAlready
+                    ? try await actuate(request, box: box, task: task, pid: window.pid,
+                                        windowID: window.windowID, session: session)
+                    : try await guidedActuate(request, box: box, task: task, window: window, session: session)
+            case .press(let key):
+                let press = ActuationRequest(
+                    effect: .tool, tool: "press_key",
+                    args: ["key": .string(key.combo), "delivery_mode": .string("background"),
+                           "pid": .number(Double(window.pid)), "window_id": .number(Double(window.windowID))],
+                    elementText: request.elementText, summary: "press \(key.combo)")
+                _ = try await guidedActuate(press, box: box, task: task, window: window, session: session)
+                reply = await guide.resume(after: key)
+            case .replan(let rebind):
+                if rebind { throw GuideSession.Rebind() }
+                return .init(effect: "replan", verified: false,
+                             detail: "the screen changed under the step — choosing again", dispatched: false)
+            case .stop:
+                throw CancellationError()
+            }
+        }
+    }
+
+    /// A step Jarvis does after all, mid-walkthrough: the same CuaPolicy
+    /// ruling TaskLoop applies, then the same dispatch path, whose
+    /// consequential-press ask (#525) runs unchanged inside it.
+    private func guidedActuate(_ request: ActuationRequest, box: RoundBox, task: DriveTask,
+                               window: WindowRef, session: String) async throws -> TaskLoop.ActOutcome {
+        if let text = request.elementText,
+           let hit = task.deny.first(where: { text.lowercased().contains($0.lowercased()) }) {
+            throw Abort.denied("Refused: '\(hit)' is blocked for this task.")
+        }
+        switch consentRuling(request, denied: task.deny, pid: window.pid, windowID: window.windowID, box: box) {
+        case .allow:
+            break
+        case .deny(let reason):
+            if case .consent(let why) = reason { throw Abort.denied(why) }
+            throw Abort.denied("\(reason)")
+        case .needsConfirm(let prompt, let options, let verdict):
+            guard let ask else { throw Abort.missingGrant }
+            let answer = await ask(options.isEmpty ? .question(prompt) : .choice(prompt: prompt, options: options))
+            let ruled = Self.consentVerdict(answer, optionCount: options.count)
+            verdict?(ruled)
+            guard ruled != .no else { throw Abort.declined }
+        }
+        return try await actuate(request, box: box, task: task, pid: window.pid,
+                                 windowID: window.windowID, session: session)
+    }
+
+    /// What guide mode can point at for this request; nil for tools with
+    /// nothing to show (a tab switch, a clipboard read, window controls).
+    static func guideAction(for request: ActuationRequest, values: [String: String]) -> GuideAction? {
+        guard request.effect == .tool else { return nil }
+        switch request.tool {
+        case "click", "double_click", "browser_click", "type_text", "set_value", "browser_type":
+            guard let element = request.args["_element"].flatMap(DriveCandidates.element(fromJSON:)) else {
+                return nil
+            }
+            let typing = ["type_text", "set_value", "browser_type"].contains(request.tool)
+                ? request.args["text"]?.string ?? request.args["value"]?.string ?? values["text"] : nil
+            let frame = Self.nativeAXScreenRect(element)
+            return .element(GuideElement(role: element.role, label: element.label,
+                                         value: element.role.lowercased().contains("secure") ? nil : element.value,
+                                         frame: frame), typing: typing)
+        case "press_key", "hotkey":
+            if let key = request.args["key"]?.string { return .key(key) }
+            return request.args["keys"]?.array.map { .key($0.compactMap(\.string).joined(separator: "+")) }
+        case "invoke_menu":
+            return request.args["path"]?.array.map { .menu($0.compactMap(\.string)) }
+        case "scroll":
+            return .scroll(request.args["direction"]?.string ?? "down")
+        default:
+            return nil
+        }
+    }
+
+    /// The bound window as guide mode sees it, plus whichever app and
+    /// window is in front now.
+    func guideScene(window: WindowRef, session: String) async -> GuideScene? {
+        let source = DriveCaptureSource(observe: { try await self.observe($0, $1) },
+                                        window: window, session: session, nativeRead: nativeReadOnly)
+        guard let snap = try? await source.axTree(of: window, depth: .standard) else { return nil }
+        let elements = snap.elements.map { e in
+            GuideElement(role: e.role, label: e.label,
+                         value: e.role.lowercased().contains("secure") ? nil : e.value, frame: e.frame)
+        }
+        let front = frontmostPID() ?? window.pid
+        let framed = elements.compactMap(\.frame).filter { $0.width > 0 && $0.height > 0 }
+        let windowFrame = elements.first { StepPhrasing.role($0.role) == "window" }?.frame
+            ?? framed.dropFirst().reduce(framed.first) { $0?.union($1) }
+        return GuideScene(pid: front,
+                          windowID: front == window.pid ? frontmostWindowID() ?? window.windowID : nil,
+                          appName: NSRunningApplication(processIdentifier: pid_t(front))?.localizedName,
+                          windowTitle: snap.windowTitle, windowFrame: windowFrame, elements: elements)
     }
 
     /// "What should I type into <label>?" → <label>.
