@@ -22,6 +22,20 @@
 #   LANE_STATE            queue directory (default ~/.capy/work/lane/queue)
 set -uo pipefail
 
+# Bash reads a script as it runs, so a waiting job runs from a private copy
+# and a deploy can never change the lines it hasn't read yet. Deploy with
+# a temporary file and mv, never by editing the installed file in place.
+if [ -z "${LANE_SELF_COPY:-}" ]; then
+    for stale in "${TMPDIR:-/tmp}"/lane.*.??????; do
+        owner=${stale#"${TMPDIR:-/tmp}"/lane.}; owner=${owner%%.*}
+        [ -f "$stale" ] && ! kill -0 "$owner" 2>/dev/null && rm -f "$stale"
+    done
+    copy=$(mktemp "${TMPDIR:-/tmp}/lane.$.XXXXXX") || exit 1
+    cat "$0" >"$copy" || exit 1
+    LANE_SELF_COPY=$copy exec /bin/bash "$copy" "$@"
+fi
+trap 'rm -f "$LANE_SELF_COPY"' EXIT
+
 LANE_HOME=${JARVIS_LANE_HOME:-$HOME/.capy/work/build-lane}
 LANE=$LANE_HOME/checkout
 LOCK=$LANE_HOME/lock
@@ -112,6 +126,7 @@ cleanup() {
     [ -n "$CHILD" ] && kill -TERM -- "-$CHILD" 2>/dev/null
     rm -f "$TICKET" "$QUEUE/.ticket-$$"
     [ "$LOCKED" = 1 ] && rm -rf "$LOCK"
+    rm -f "$LANE_SELF_COPY"
 }
 trap cleanup EXIT
 trap 'exit 130' INT

@@ -85,5 +85,14 @@ start=$(date +%s)
 wait
 check "both run, holder first, within 10 s (got $(grep start "$LOG" | awk '{print $2}' | tr -d '\n'))" '[ "$(grep start "$LOG" | awk "{print \$2}" | tr -d "\n")" = PQ ] && [ $(( $(date +%s) - start )) -le 10 ]'
 
+# 9. Rewriting the installed script in place doesn't break a waiting job
+: >"$LOG"
+cp "$L" "$T/lane-copy.sh"
+"$T/lane-copy.sh" bash -c 'job R 2' >/dev/null & sleep 1.2
+"$T/lane-copy.sh" bash -c 'job S 0.2' >/dev/null 2>"$T/err9" & sleep 0.6
+printf 'echo broken; if true; then\n' >"$T/lane-copy.sh"
+wait
+check "waiting job survives an in-place edit (got $(grep start "$LOG" | awk '{print $2}' | tr -d '\n'))" '[ "$(grep start "$LOG" | awk "{print \$2}" | tr -d "\n")" = RS ] && ! grep -q "syntax error" "$T/err9"'
+
 rm -rf "$T"
 exit $fail

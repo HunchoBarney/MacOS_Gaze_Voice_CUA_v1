@@ -49,7 +49,9 @@ run, and the queue in order.
 
 The installed queue is a copy of `scripts/lane.sh`. After changing it, run
 `scripts/test-lane.sh` (fake commands, no Swift) and install it with
-`install -m 755 scripts/lane.sh ~/.capy/work/lane/lane.sh`. A job that holds the
+`install -m 755 scripts/lane.sh ~/.capy/work/lane/lane.sh.new && mv ~/.capy/work/lane/lane.sh.new ~/.capy/work/lane/lane.sh`.
+Never edit the installed file in place. Each job also runs from its own
+private copy, so a deploy can't change a waiting job. A job that holds the
 lock keeps it until it has run, even when a high-priority ticket arrives
 while it waits for another build, and stopping the queue stops every process
 the job started.
