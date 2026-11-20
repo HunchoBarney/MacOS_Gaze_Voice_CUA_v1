@@ -798,7 +798,8 @@ final class VoiceController: ObservableObject {
                     }
                     if let data = text.data(using: .utf8),
                        let value = try? JSONDecoder().decode(JSONValue.self, from: data),
-                       value["kind"]?.string == VoiceToolResult.Kind.taskQuestion,
+                       [VoiceToolResult.Kind.taskQuestion, VoiceToolResult.Kind.guideStep]
+                           .contains(value["kind"]?.string ?? ""),
                        let say = RealtimeVoiceLane.deterministicSay(text) {
                         self.detail = say
                         if speak { self.speak(say) }
