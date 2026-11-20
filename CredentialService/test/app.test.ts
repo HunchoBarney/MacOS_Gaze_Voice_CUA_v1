@@ -28,6 +28,9 @@ function harness(vars: Record<string, string> = {}) {
     if (call.url.endsWith("/v1/responses")) {
       return Response.json({ output: [], usage: { input_tokens: 1_000_000, output_tokens: 100_000 } });
     }
+    if (call.url.endsWith("/v1/live/sessions")) {
+      return Response.json({ session: { id: "live_fixture" }, transport: { type: "webrtc", sdp: "v=0 answer" } }, { status: 201 });
+    }
     return Response.json({ answers: {} });
   };
   let clock = Date.UTC(2026, 10, 20, 12, 0, 0);
@@ -72,6 +75,7 @@ function harness(vars: Record<string, string> = {}) {
 
 const terra = { model: "gpt-6.1-terra", input: [], max_output_tokens: 1000 };
 const jev = { model: "jev-1.14.0", state: {}, questions: {} };
+const live = { sdp: "v=0 offer" };
 
 describe("registration", () => {
   it("returns a token the service stores only as a hash", async () => {
@@ -153,6 +157,117 @@ describe("realtime client secrets", () => {
     const text = await response.text();
     expect(text).not.toContain("sk-owner");
     expect(JSON.parse(text).error.code).toBe("upstream_error");
+  });
+});
+
+describe("Live sessions", () => {
+  it("opens a client-delegated session for the pinned model with the owner's key", async () => {
+    const h = harness({ LIVE_SESSION_CENTS: "8" });
+    const { installID, token } = await h.register();
+    const input = [{ type: "message", role: "user", content: [{ type: "input_text", text: "Earlier: open Notes" }] }];
+    const response = await h.request("/v1/live/sessions", {
+      token,
+      body: {
+        ...live, instructions: "Be brief.", input, voice: "cedar", idle_timeout_s: 8,
+        wake_policy: { type: "speech", vad_threshold: 0.6 }, acknowledgement_delay_ms: 800,
+      },
+    });
+    expect(response.status).toBe(201);
+    expect(await body(response)).toEqual({ sessionID: "live_fixture", sdp: "v=0 answer", model: "gpt-live-1.1" });
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0].url).toBe("https://api.openai.com/v1/live/sessions");
+    expect(h.calls[0].headers.authorization).toBe(`Bearer ${OPENAI_KEY}`);
+    expect(h.calls[0].body).toEqual({
+      session: {
+        model: "gpt-live-1.1",
+        delegation: { type: "client", acknowledgement_delay_ms: 800 },
+        store: false,
+        safety_identifier: installID,
+        instructions: "Be brief.",
+        input,
+        idle_timeout_s: 8,
+        wake_policy: { type: "speech", vad_threshold: 0.6 },
+        audio: { output: { voice: "cedar" } },
+      },
+      transport: { type: "webrtc", sdp: "v=0 offer" },
+    });
+    const usage = await body(await h.admin("/admin/usage", "GET"));
+    expect(usage.top).toEqual([{ installID, cents: 8 }]);
+  });
+
+  it("sends only the offer when the app sets nothing else", async () => {
+    const h = harness();
+    const { installID, token } = await h.register();
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+    expect(h.calls[0].body.session).toEqual({
+      model: "gpt-live-1.1", delegation: { type: "client" }, store: false, safety_identifier: installID,
+    });
+  });
+
+  it("refuses a missing offer and every field the service decides, without calling upstream or charging", async () => {
+    const h = harness({ LIVE_PER_MINUTE: "100" });
+    const { token } = await h.register();
+    for (const extra of [
+      { model: "gpt-live-1" }, { delegation: { type: "responses" } }, { store: true }, { triggers: [] },
+      { client: { data_channel: { allowed_client_events: "all" } } }, { tools: [] }, { safety_identifier: "x" },
+      { audio: { output: { voice: "cedar" } } }, { session: {} },
+    ]) {
+      const response = await h.request("/v1/live/sessions", { token, body: { ...live, ...extra } });
+      expect(response.status).toBe(400);
+      expect((await body(response)).error.code).toBe("field_not_allowed");
+    }
+    for (const offer of [{}, { sdp: "" }, { sdp: 7 }]) {
+      const response = await h.request("/v1/live/sessions", { token, body: offer });
+      expect(response.status).toBe(400);
+      expect((await body(response)).error.code).toBe("bad_request");
+    }
+    const tooLarge = await h.request("/v1/live/sessions", { token, body: { sdp: "a".repeat(256 * 1024) } });
+    expect(tooLarge.status).toBe(413);
+    expect(h.calls).toHaveLength(0);
+    expect((await body(await h.admin("/admin/usage", "GET"))).globalCents).toBe(0);
+  });
+
+  it("passes a provider's 400 through, maps other failures, and refunds them all", async () => {
+    const h = harness();
+    const { token } = await h.register();
+    h.setReply(() => Response.json({ error: { message: "Invalid SDP offer" } }, { status: 400 }));
+    const rejected = await h.request("/v1/live/sessions", { token, body: live });
+    expect(rejected.status).toBe(400);
+    expect((await body(rejected)).error.message).toBe("Invalid SDP offer");
+    h.setReply(() => Response.json({ error: { message: "Incorrect API key provided: sk-owner" } }, { status: 401 }));
+    const unauthorized = await h.request("/v1/live/sessions", { token, body: live });
+    expect(unauthorized.status).toBe(502);
+    expect(await unauthorized.text()).not.toContain("sk-owner");
+    h.setReply(() => new Response("slow down", { status: 429 }));
+    const busy = await h.request("/v1/live/sessions", { token, body: live });
+    expect(busy.status).toBe(503);
+    expect((await body(busy)).error.code).toBe("upstream_busy");
+    h.setReply(() => Response.json({ session: { id: "live_fixture" } }, { status: 201 }));
+    expect((await body(await h.request("/v1/live/sessions", { token, body: live }))).error.code).toBe("upstream_error");
+    expect((await body(await h.admin("/admin/usage", "GET"))).globalCents).toBe(0);
+  });
+
+  it("has its own per-minute limit and shares the install's daily spend", async () => {
+    const h = harness({ LIVE_PER_MINUTE: "1", LIVE_SESSION_CENTS: "30", REALTIME_SESSION_CENTS: "25", INSTALL_DAILY_CENTS: "60" });
+    const { token } = await h.register();
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+    const limited = await h.request("/v1/live/sessions", { token, body: live });
+    expect((await body(limited)).error.code).toBe("rate_limited");
+    expect((await h.request("/v1/realtime/client_secret", { token })).status).toBe(200);
+    h.advance(60_000);
+    const over = await h.request("/v1/live/sessions", { token, body: live });
+    expect(over.status).toBe(429);
+    expect((await body(over)).error.code).toBe("daily_limit");
+    expect(h.calls.filter((call) => call.url.endsWith("/v1/live/sessions"))).toHaveLength(1);
+  });
+
+  it("refuses an unknown install and a paused service", async () => {
+    const h = harness({ PAUSED: "1" });
+    expect((await h.request("/v1/live/sessions", { token: "jv1_" + "A".repeat(43), body: live })).status).toBe(503);
+    const open = harness();
+    const response = await open.request("/v1/live/sessions", { token: "jv1_" + "A".repeat(43), body: live });
+    expect((await body(response)).error.code).toBe("unknown_install");
+    expect(h.calls.length + open.calls.length).toBe(0);
   });
 });
 
@@ -357,6 +472,7 @@ describe("configuration", () => {
       h.request("/v1/realtime/client_secret", { token }),
       h.request("/v1/responses", { token, body: terra }),
       h.request("/v1/jev", { token, body: jev }),
+      h.request("/v1/live/sessions", { token, body: live }),
       h.admin("/admin/usage", "GET"),
       h.request("/health", { method: "GET" }),
     ].map(async (response) => (await response).text()));

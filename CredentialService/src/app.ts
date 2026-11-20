@@ -18,6 +18,9 @@ const RESPONSES_FIELDS_ALLOWED = new Set([
   "model", "input", "instructions", "reasoning", "max_output_tokens", "text", "store", "stream",
   "metadata", "temperature", "top_p", "truncation", "prompt_cache_key", "safety_identifier", "user",
 ]);
+const LIVE_FIELDS_ALLOWED = new Set([
+  "sdp", "instructions", "input", "voice", "idle_timeout_s", "wake_policy", "acknowledgement_delay_ms",
+]);
 const UNKNOWN_INSTALL: Denial = { status: 401, code: "unknown_install", message: "This install isn't registered." };
 
 function fail(c: Context, denial: Denial): Response {
@@ -83,8 +86,9 @@ function tokens(value: unknown): number {
 
 /**
  * The HTTP surface. Installs register for an opaque token, then mint
- * Realtime client secrets and call Responses and Jev through the
- * service, which holds the owner's keys and never returns them.
+ * Realtime client secrets, open GPT-Live sessions and call Responses and
+ * Jev through the service, which holds the owner's keys and never returns
+ * them.
  */
 export function createApp(deps: Deps) {
   const { config, ledger, upstream } = deps;
@@ -176,6 +180,51 @@ export function createApp(deps: Deps) {
     }
     c.set("spentCents", config.prices.realtimeSessionCents);
     return c.json({ value: secret.value, expiresAt: secret.expires_at, model: config.realtimeModel });
+  });
+
+  /**
+   * Opens a GPT-Live WebRTC session for the Mac's SDP offer and returns the
+   * answer. The service fixes the model, client delegation (the app does
+   * every action), no stored session and no Decisions triggers; the app
+   * chooses only the conversation fields in LIVE_FIELDS_ALLOWED.
+   */
+  app.post("/v1/live/sessions", admitted("live", config.prices.liveSessionCents), async (c) => {
+    const parsed = await readJSON(c, config.maxLiveBytes);
+    if ("denial" in parsed) return fail(c, parsed.denial);
+    const request = parsed.value;
+    const field = Object.keys(request).find((name) => !LIVE_FIELDS_ALLOWED.has(name));
+    if (field) return fail(c, { status: 400, code: "field_not_allowed", message: `\`${field}\` isn't allowed.` });
+    if (typeof request.sdp !== "string" || !request.sdp.trim()) {
+      return fail(c, { status: 400, code: "bad_request", message: "An SDP offer is required in `sdp`." });
+    }
+    const delegation: Record<string, unknown> = { type: "client" };
+    if (request.acknowledgement_delay_ms !== undefined) delegation.acknowledgement_delay_ms = request.acknowledgement_delay_ms;
+    const session: Record<string, unknown> = {
+      model: config.liveModel,
+      delegation,
+      store: false,
+      safety_identifier: c.get("installID"),
+    };
+    for (const name of ["instructions", "input", "idle_timeout_s", "wake_policy"]) {
+      if (request[name] !== undefined) session[name] = request[name];
+    }
+    if (request.voice !== undefined) session.audio = { output: { voice: request.voice } };
+
+    const reply = await upstream(`${config.openAIBaseURL}/v1/live/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${config.openAIKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ session, transport: { type: "webrtc", sdp: request.sdp } }),
+    });
+    const text = await reply.text();
+    if (reply.status === 400) return c.body(text, 400, { "content-type": "application/json" });
+    if (!reply.ok) return fail(c, upstreamFailure(reply.status));
+    let created: { session?: { id?: unknown }; transport?: { sdp?: unknown } } | undefined;
+    try { created = JSON.parse(text); } catch {}
+    if (typeof created?.session?.id !== "string" || typeof created.transport?.sdp !== "string") {
+      return fail(c, { status: 502, code: "upstream_error", message: "The model provider returned no SDP answer." });
+    }
+    c.set("spentCents", config.prices.liveSessionCents);
+    return c.json({ sessionID: created.session.id, sdp: created.transport.sdp, model: config.liveModel }, 201);
   });
 
   app.post("/v1/responses", admitted("responses", config.prices.responsesReserveCents), async (c) => {
