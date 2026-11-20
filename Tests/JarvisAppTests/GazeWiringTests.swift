@@ -73,7 +73,7 @@ final class GazeDelegationTests: XCTestCase {
         let config = Config(defaults: UserDefaults(suiteName: suite)!,
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(),
                             environment: [:])
-        return VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        return VoiceTaskCoordinator(config: config, jevRoute: { nil },
                                     gazeService: GazeService(
                                         stream: GazeStream(frames: {
                                             AsyncThrowingStream { _ in }

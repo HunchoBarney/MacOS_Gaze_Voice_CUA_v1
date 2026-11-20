@@ -7,10 +7,10 @@ import JarvisCore
 /// shared: screen questions use it today and KAR-43's screen agents can
 /// take it as is.
 ///
-/// The key comes from a closure (`Config.openAIAPIKey` in the app: the
-/// `OPENAI_API_KEY` environment variable, then Keychain) and is only ever
-/// put in the `Authorization` header. Nothing here logs a request or a
-/// response body.
+/// The route comes from a closure (`Config.responsesRoute` in the app:
+/// OpenAI with a developer's own key, else the Responses proxy on Jarvis's
+/// credential service) and its bearer is only ever put in the
+/// `Authorization` header. Nothing here logs a request or a response body.
 struct TerraClient: Sendable {
     static let model = "gpt-6.1-terra"
     static let endpoint = URL(string: "https://api.openai.com/v1/responses")!
@@ -82,19 +82,29 @@ struct TerraClient: Sendable {
         }
     }
 
-    let apiKey: @Sendable () -> String?
+    let route: @Sendable () async throws -> ServiceRoute?
     var transport: Transport = { try await URLSession.shared.data(for: $0) }
     var timeout: TimeInterval = 20
     /// Called once per answered request with what it billed, before the
     /// answer is read, so a refusal or a cut-off still counts.
     var onUsage: (@Sendable (Usage) -> Void)?
 
+    init(route: @escaping @Sendable () async throws -> ServiceRoute?) {
+        self.route = route
+    }
+
+    /// Straight to OpenAI with this key.
+    init(apiKey: @escaping @Sendable () -> String?) {
+        self.route = { apiKey().map { ServiceRoute(url: TerraClient.endpoint, bearer: $0) } }
+    }
+
     /// Sends one request and returns the JSON object Terra produced.
     func respond(_ request: Request) async throws -> JSONValue {
-        guard let key = apiKey()?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
+        guard let route = try await route(),
+              case let key = route.bearer.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
             throw Failure.missingKey
         }
-        var urlRequest = URLRequest(url: Self.endpoint, timeoutInterval: timeout)
+        var urlRequest = URLRequest(url: route.url, timeoutInterval: timeout)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")

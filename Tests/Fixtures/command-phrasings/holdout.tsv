@@ -1,0 +1,75 @@
+# KAR-18 held-out phrase set. Written with the design set, before the grammar,
+# and never tuned against: it is run once at the end and its rate is reported.
+# id	family	phrase	expect
+HO01	open	could you launch Notes	=open Notes
+HO02	open	please bring up Calculator	=open Calculator
+HO03	open	get Spotify running	=open Spotify
+HO04	open	fire Mail up	=open Mail
+HO05	open	I'd like to use Safari	=open Safari
+HO06	open	open the Messages app	=open Messages
+HO07	open	go ahead and start Notes	=open Notes
+HO08	open	can you pull Mail up	=open Mail
+HO09	open	boot Calculator up	=open Calculator
+HO10	open	let's get Spotify open	=open Spotify
+HO11	open	I need Safari	=open Safari
+HO12	open	get Notes up and running	=open Notes
+HO13	open	start the Calculator app	=open Calculator
+HO14	open	spin up Safari	=open Safari
+HO15	open	open up the Mail app please	=open Mail
+HC01	click	tap the Send button	=click Send
+HC02	click	hit Send	=click Send
+HC03	click	click on the OK button	=click OK
+HC04	click	press the button called Save	=click Save
+HC05	click	push Save	=click Save
+HC06	click	go ahead and press Send	=click Send
+HC07	click	click the Send link	=click Send
+HC08	click	select the Save option	=click Save
+HC09	click	can you click Save for me	=click Save
+HN01	names	show me the labels	=show names
+HN02	names	label the buttons	=show names
+HN03	names	show numbers on everything	=show names
+HN04	names	put labels on the screen	=show names
+HN05	names	what can I click on	=show names
+HN06	names	show me what's clickable	=show names
+HN07	names	names on	=show names
+HN08	names	turn the labels off	=hide names
+HN09	names	clear the labels	=hide names
+HN10	names	number everything	=show names
+HF01	find	where's my Safari window	=where is Safari
+HF02	find	where did Mail go	=where is Mail
+HF03	find	I lost Calculator	=where is Calculator
+HF04	find	help me find my Notes window	=where is Notes
+HF05	find	can you find Spotify	=where is Spotify
+HF06	find	locate my Mail window	=where is Mail
+HF07	find	where'd Safari go	=where is Safari
+HD01	desktop	move to desktop 3	=go to desktop 3
+HD02	desktop	send me to desktop 2	=go to desktop 2
+HD03	desktop	flip over to desktop two	=go to desktop 2
+HD04	desktop	can we go to the third desktop	=go to desktop 3
+HD05	desktop	take me over to space 2	=go to desktop 2
+HD06	desktop	go over to my second desktop	=go to desktop 2
+HD07	desktop	head to desktop 4	=go to desktop 4
+HD08	desktop	switch over to the next desktop	=go to the next desktop
+HD09	desktop	bring me to desktop 3	=go to desktop 3
+HD10	desktop	I'd like to go to desktop 2	=go to desktop 2
+HS01	screen	what am I looking at on my screen	=what's on my screen
+HS02	screen	explain what's on my screen	=what's on my screen
+HS03	screen	read what's on the screen	=what's on my screen
+HS04	screen	what does this page say	=what's on my screen
+HS05	screen	tell me what's in this window	=what's on my screen
+HS06	screen	give me a summary of my screen	=what's on my screen
+HS07	screen	what's on the monitor	=what's on my screen
+HS08	screen	what can you see on my screen	=what's on my screen
+HS09	screen	check my screen and tell me what's there	=what's on my screen
+HX01	open	don't launch Notes	!open Notes
+HX02	open	is Mail running?	!open Mail
+HX03	open	I opened Safari	!open Safari
+HX04	open	quit Safari	!open Safari
+HX05	open	never open Spotify	!open Spotify
+HX06	click	don't press Send	!click Send
+HX07	click	was Save clicked?	!click Save
+HX08	names	why are the names showing?	!show names
+HX09	desktop	don't switch to desktop 2	!go to desktop 2
+HX10	desktop	am I on desktop 2?	!go to desktop 2
+HX11	screen	lock my screen	!what's on my screen
+HX12	screen	record my screen	!what's on my screen
