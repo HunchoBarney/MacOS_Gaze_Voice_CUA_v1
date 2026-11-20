@@ -14,7 +14,10 @@ export interface Deps {
 type Env = { Variables: { installID: string } };
 
 const TOKEN = /^jv1_[A-Za-z0-9_-]{43}$/;
-const RESPONSES_FIELDS_NOT_ALLOWED = ["background", "conversation", "previous_response_id", "prompt", "tools", "tool_choice"];
+const RESPONSES_FIELDS_ALLOWED = new Set([
+  "model", "input", "instructions", "reasoning", "max_output_tokens", "text", "store", "stream",
+  "metadata", "temperature", "top_p", "truncation", "prompt_cache_key", "safety_identifier", "user",
+]);
 const UNKNOWN_INSTALL: Denial = { status: 401, code: "unknown_install", message: "This install isn't registered." };
 
 function fail(c: Context, denial: Denial): Response {
@@ -159,8 +162,8 @@ export function createApp(deps: Deps) {
     if (typeof request.model !== "string" || !config.responsesModels.includes(request.model)) {
       return fail(c, { status: 400, code: "model_not_allowed", message: "That model isn't offered." });
     }
-    const field = RESPONSES_FIELDS_NOT_ALLOWED.find((name) => request[name] !== undefined)
-      ?? (request.stream === true ? "stream" : undefined);
+    const field = Object.keys(request).find((name) => !RESPONSES_FIELDS_ALLOWED.has(name))
+      ?? (request.stream !== undefined && request.stream !== false ? "stream" : undefined);
     if (field) return fail(c, { status: 400, code: "field_not_allowed", message: `\`${field}\` isn't allowed.` });
     request.store = false;
     const asked = tokens(request.max_output_tokens) || config.maxOutputTokens;

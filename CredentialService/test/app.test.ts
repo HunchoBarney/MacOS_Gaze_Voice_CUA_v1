@@ -258,12 +258,25 @@ describe("Responses proxy", () => {
       { ...terra, tools: [{ type: "web_search" }] },
       { ...terra, stream: true },
       { ...terra, previous_response_id: "resp_1" },
+      { ...terra, service_tier: "priority" },
+      { ...terra, include: ["file_search_call.results"] },
       [terra],
       "not json",
     ]) {
       expect((await h.request("/v1/responses", { token, body })).status).toBe(400);
     }
     expect(h.calls).toHaveLength(0);
+  });
+
+  it("accepts the fields TerraClient sends", async () => {
+    const h = harness();
+    const { token } = await h.register();
+    const request = {
+      ...terra, store: false, instructions: "Answer.", reasoning: { effort: "low" },
+      text: { format: { type: "json_schema", name: "answer", schema: {}, strict: true } },
+    };
+    expect((await h.request("/v1/responses", { token, body: request })).status).toBe(200);
+    expect(h.calls[0].body).toEqual(request);
   });
 
   it("refuses an oversized body before calling upstream", async () => {
