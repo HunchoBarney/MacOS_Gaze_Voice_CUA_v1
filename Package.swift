@@ -6,6 +6,8 @@ import PackageDescription
 // ThirdParty/WebRTC/fetch.py has put its macOS slice in build/vendor/WebRTC
 // (`make test` and `make release` run it). Without it the app builds
 // without that transport, so a focused `swift test` never needs the download.
+// SwiftPM caches this manifest's result regardless of the file, so the make
+// targets that fetch it build with --manifest-cache none.
 let webRTC = "build/vendor/WebRTC/LiveKitWebRTC.xcframework"
 let hasWebRTC = FileManager.default.fileExists(atPath: Context.packageDirectory + "/" + webRTC)
 

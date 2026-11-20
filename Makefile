@@ -34,7 +34,7 @@ test:
 	scripts/test-local-ci.sh
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
 	python3 -I ThirdParty/WebRTC/fetch.py "$(VENDOR)/WebRTC"
-	swift test --parallel
+	swift test --parallel --manifest-cache none
 	cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts
 	cd EyeTracking && corepack pnpm run typecheck
 	cd EyeTracking && corepack pnpm test
@@ -61,7 +61,7 @@ else
 # time and only the newest $(KEEP_ZIPS) zips are kept.
 release: setup tracker
 	python3 -I ThirdParty/WebRTC/fetch.py "$(VENDOR)/WebRTC"
-	swift build -c release
+	swift build -c release --manifest-cache none
 	ThirdParty/Cua/fetch-embedded-binaries.sh "$(VENDOR)"
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
 	rm -rf "$(APP)"
