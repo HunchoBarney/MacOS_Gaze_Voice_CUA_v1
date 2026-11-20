@@ -300,9 +300,6 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private let outputGate = Atomic<Bool>(true)
 
     private let apiKey: () -> String
-    /// Whether macOS lets Jarvis use the microphone: the real permission in
-    /// the app, a fixed answer in tests so they never open a real device.
-    private let microphoneAccess: () -> Bool
     private let client: RealtimeVoiceClient
     private let player = RealtimePlayer()
     private let input = MicrophoneInput()
@@ -533,10 +530,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
-         admissionOwner: LocalSpeechSession? = nil,
-         microphoneAccess: @escaping () -> Bool = { Permission.microphone.isGranted }) {
+         admissionOwner: LocalSpeechSession? = nil) {
         self.apiKey = apiKey
-        self.microphoneAccess = microphoneAccess
         self.duplexRequested = true
         self.admissionOwner = admissionOwner
         self.client = client ?? RealtimeVoiceClient()
@@ -1228,7 +1223,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             defer { if self.preparationID == token { self.preparation = nil } }
             do {
                 try Task.checkCancellation()
-                guard self.microphoneAccess() else { throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.") }
+                guard Permission.microphone.isGranted else { throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.") }
                 let device = try MicrophoneCatalog.resolve(uid: uid)
                 let inputStarted = ProcessInfo.processInfo.systemUptime
                 Self.log.notice("prepare stage=microphone_input begin")

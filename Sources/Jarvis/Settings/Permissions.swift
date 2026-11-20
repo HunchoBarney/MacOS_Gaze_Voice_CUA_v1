@@ -39,6 +39,7 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
     var isGranted: Bool {
         switch self {
         case .microphone:
+            if MicrophoneTestGuard.blocksRealMicrophone { return false }
             if #available(macOS 14, *) {
                 return AVAudioApplication.shared.recordPermission == .granted
             }
@@ -56,6 +57,7 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
     var canPrompt: Bool {
         switch self {
         case .microphone:
+            if MicrophoneTestGuard.blocksRealMicrophone { return false }
             if #available(macOS 14, *) {
                 return AVAudioApplication.shared.recordPermission == .undetermined
             }
@@ -86,7 +88,7 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
     /// Triggers the system prompt where one is still available, otherwise opens System Settings.
     @MainActor
     func request() async {
-        guard !isGranted else { return }
+        guard !isGranted, self != .microphone || !MicrophoneTestGuard.blocksRealMicrophone else { return }
         if self == .screenRecording {
             // CGRequestScreenCaptureAccess puts the app in the Screen
             // Recording list and can raise a one-time alert on newer macOS,
@@ -161,4 +163,13 @@ final class PermissionStatusMonitor {
         stopped = true
         invalidate()
     }
+}
+
+/// Unit tests never reach the Mac's microphone: under XCTest it reads as
+/// refused, is never requested and never opens, whatever the person has
+/// granted the app that launched the tests. A live test opts in with
+/// JARVIS_LIVE_MIC=1.
+enum MicrophoneTestGuard {
+    static let blocksRealMicrophone = NSClassFromString("XCTestCase") != nil
+        && ProcessInfo.processInfo.environment["JARVIS_LIVE_MIC"] != "1"
 }

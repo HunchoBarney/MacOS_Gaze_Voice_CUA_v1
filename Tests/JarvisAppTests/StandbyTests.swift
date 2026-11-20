@@ -49,10 +49,7 @@ final class StandbyTests: XCTestCase {
         config.listeningMode = .standby
         var timings = VoiceTimings()
         timings.wakeSessionQuiet = 0.5
-        // Microphone access is answered here, not by macOS: with a real grant
-        // the wake session would open the Mac's microphone and a socket.
-        let lane = RealtimeVoiceLane(apiKey: { "test-key" }, microphoneAccess: { false })
-        let controller = VoiceController(config: config, speech: lane,
+        let controller = VoiceController(config: config, speech: RealtimeVoiceLane(apiKey: { "test-key" }),
                                          authorize: { true }, timings: timings, cuaRuntime: testCoordinator(config),
                                          otherAppUsesMicrophone: { microphoneUsers.otherApp })
         addTeardownBlock { await controller.shutdown() }
