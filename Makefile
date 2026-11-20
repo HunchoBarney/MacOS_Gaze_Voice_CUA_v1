@@ -106,7 +106,7 @@ local: install
 	    (echo "Jarvis exited right after launch — run \"$(LOCAL_APP)/Contents/MacOS/Jarvis\" to see why" >&2; exit 1)
 	@echo "Jarvis is running"
 
-# Phase 0 flow benchmark (bench/flows/README.md): typed transcripts through
+# Phase 0 flow benchmark (Tests/JarvisAppTests/FlowBenchTests.swift): typed transcripts through
 # the production path against a fixture desk, no model call, no desktop
 # change. Rows append to bench/results/flows.jsonl under BENCH_LABEL.
 BENCH_LABEL ?= $(COMMIT)
