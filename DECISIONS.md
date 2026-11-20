@@ -136,8 +136,9 @@ Settled choices, newest first. Change one only with a new entry here.
 
 - **Providers:** OpenAI (Realtime voice) and TypeSafe (Jev) only. Jev is the
   primary semantic chooser; direct grounded operations need no model call.
-- **Screenshots:** never sent to Realtime; pixels only when a decider needs
-  them, one capture reused per step.
+- **Screenshots:** no model receives them. Jev and screen questions decide
+  from the accessibility tree and on-screen text; giving a decider pixels
+  again is a new decision.
 - **Eye tracking:** gaze targets, it never actuates. Deciders receive the
   resolved target identity, never raw gaze coordinates. Dwell is an
   accessibility opt-in, off by default. Every gaze flow also works without
