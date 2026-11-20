@@ -1,0 +1,74 @@
+# KAR-18 blind held-out set, written by a separate agent that never read the parser,
+# the grammar or the other sets. Measured only, never tuned against.
+B01	open	Open Safari.	=open Safari
+B02	open	Could you open Notes for me?	=open Notes
+B03	open	Launch Calculator.	=open Calculator
+B04	open	I'd like to open Mail, please.	=open Mail
+B05	open	Can you pull up Messages?	=open Messages
+B06	open	Start Spotify.	=open Spotify
+B07	open	Let's open up Safari.	=open Safari
+B08	open	Hey, fire up Spotify.	=open Spotify
+B09	open	Please bring up the Calculator app.	=open Calculator
+B10	open	Go ahead and launch Notes.	=open Notes
+B11	click	Click Save.	=click Save
+B12	click	Click the Send button.	=click Send
+B13	click	Press OK.	=click OK
+B14	click	Could you click on Save for me?	=click Save
+B15	click	Hit send.	=click Send
+B16	click	Tap the OK button, please.	=click OK
+B17	click	Go ahead and press Save.	=click Save
+B18	click	Can you click OK?	=click OK
+B19	click	Let's hit the Send button.	=click Send
+B20	click	Click on the save button.	=click Save
+B21	names	Show names.	=show names
+B22	names	Show me the names.	=show names
+B23	names	Can you show the names?	=show names
+B24	names	Turn on names.	=show names
+B25	names	Show the numbers on everything I can click.	=show names
+B26	names	Hide names.	=hide names
+B27	names	Hide the names, please.	=hide names
+B28	names	Turn off the names.	=hide names
+B29	names	Okay, get rid of the names.	=hide names
+B30	names	Could you hide the labels?	=hide names
+B31	find	Where is Notes?	=where is Notes
+B32	find	Where's Safari?	=where is Safari
+B33	find	Where did my Mail window go?	=where is Mail
+B34	find	Can you find Calculator?	=where is Calculator
+B35	find	I can't find Messages, where is it?	=where is Messages
+B36	find	Where'd Spotify go?	=where is Spotify
+B37	find	Find the Notes window.	=where is Notes
+B38	find	Help me find Safari.	=where is Safari
+B39	find	Where is the Mail app?	=where is Mail
+B40	find	Hmm, where's my Calculator window?	=where is Calculator
+B41	desktop	Go to desktop 2.	=go to desktop 2
+B42	desktop	Switch to desktop three.	=go to desktop 3
+B43	desktop	Take me to desktop 2, please.	=go to desktop 2
+B44	desktop	Could you move to desktop 3?	=go to desktop 3
+B45	desktop	Go to the next desktop.	=go to the next desktop
+B46	desktop	Next desktop.	=go to the next desktop
+B47	desktop	Switch to the next space.	=go to the next desktop
+B48	desktop	Let's go to desktop two.	=go to desktop 2
+B49	desktop	Show me desktop 3.	=go to desktop 3
+B50	desktop	Move over to the next desktop, please.	=go to the next desktop
+B51	screen	What's on my screen?	=what's on my screen
+B52	screen	What is on my screen right now?	=what's on my screen
+B53	screen	What am I looking at?	=what's on my screen
+B54	screen	Can you tell me what's on the screen?	=what's on my screen
+B55	screen	Describe my screen.	=what's on my screen
+B56	screen	What's on this page?	=what's on my screen
+B57	screen	What does this window say?	=what's on my screen
+B58	screen	Read me what's on the screen.	=what's on my screen
+B59	screen	Tell me what you see on my screen.	=what's on my screen
+B60	screen	What's showing in this window?	=what's on my screen
+B61	open	Don't open Safari.	!open Safari
+B62	open	Is Spotify open?	!open Spotify
+B63	open	Close Mail.	!open Mail
+B64	open	I already opened Notes.	!open Notes
+B65	click	Don't click Send.	!click Send
+B66	click	Did you click Save?	!click Save
+B67	click	What does OK do?	!click OK
+B68	names	Don't show names.	!show names
+B69	names	Are the names hidden?	!hide names
+B70	find	Notes is right there.	!where is Notes
+B71	desktop	Which desktop am I on?	!go to the next desktop
+B72	screen	Take a screenshot of my screen.	!what's on my screen

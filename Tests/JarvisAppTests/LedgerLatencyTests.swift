@@ -32,6 +32,20 @@ final class LedgerLatencyTests: XCTestCase {
         ledger.record(DecisionFeed.Entry(at: ledger.wall(), kind: kind, text: text))
     }
 
+    /// The coordinator's hand-off span lands without an Fn hold: it opens
+    /// a task record, keeps the first value, and ignores other spans.
+    func testFirstDesktopCallSpanOpensATaskRecord() {
+        ledger.coordinatorSpan("driver.list_windows", 100, 100.5)
+        ledger.coordinatorSpan("task.first_desktop_call", 100, 100.25)
+        ledger.coordinatorSpan("task.first_desktop_call", 100, 101)
+        ledger.closeCurrent(reason: "settled")
+        let records = ledger.completedInteractions
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.origin, .task)
+        XCTAssertEqual(records.first?.spans["handoff_to_desktop_call_ms"] ?? -1, 250, accuracy: 0.5)
+        XCTAssertNil(records.first?.spans["driver.list_windows"])
+    }
+
     /// The canonical hold→commit→transcript→dispatch→effect interaction
     /// fills every primary span plus one round's decide/dispatch pair.
     func testFullHoldPipelineProducesSpans() {
