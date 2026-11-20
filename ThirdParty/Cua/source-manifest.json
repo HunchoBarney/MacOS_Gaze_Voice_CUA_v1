@@ -13,13 +13,13 @@
       "sha256": "b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8"
     },
     "codex": {
-      "version": "0.160.0",
+      "version": "0.170.0",
       "package": "@openai/codex-darwin-arm64",
-      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.0-darwin-arm64.tgz",
-      "tarball_sha256": "fc789bcd655d903f92e1a23c8dc5315ba38f43b3586eafb7bd3b195970b57466",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.170.0-darwin-arm64.tgz",
+      "tarball_sha256": "ab7ba154261db88eef760dfe69978fbb67018c2e1200ff536dc8c51ed9c758b5",
       "vendor_root": "package/vendor/aarch64-apple-darwin",
       "entrypoint": "bin/codex",
-      "sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b"
+      "sha256": "9248cfeebec9b4cc3034d5114caab10fbf426cbfa79dba410c5fa1b72762abd6"
     }
   },
   "files": {
