@@ -12,6 +12,8 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
     private var responses: [String] = []
     private var failTextSends = false
     private var commits = 0
+    private var holdCommits = false
+    private var held: [(item: String, eventID: String?)] = []
     private let identity = UUID().uuidString
     private let acknowledgeUpdates: Bool
     private let sessionAcknowledgement: JSONValue?
@@ -41,7 +43,11 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
             }
         case "input_audio_buffer.commit":
             commits += 1
-            try push(["type": .string("input_audio_buffer.committed"), "item_id": .string(audioItemID())])
+            if holdCommits {
+                held.append((audioItemID(), frame["event_id"]?.string))
+            } else {
+                try push(["type": .string("input_audio_buffer.committed"), "item_id": .string(audioItemID())])
+            }
         case "response.create":
             let id = identity + "-\(responses.count + 1)"
             responses.append(id)
@@ -74,6 +80,20 @@ private actor RecordedVoiceWire: RealtimeVoiceWire {
     func audioItemID() -> String { "audio-\(identity)-\(commits)" }
     func commitCount() -> Int { written.filter { $0["type"]?.string == "input_audio_buffer.commit" }.count }
     func setTextSendFailure(_ value: Bool) { failTextSends = value }
+    /// Held commits wait for confirmHeld or rejectHeld, oldest first.
+    func setHoldCommits(_ value: Bool) { holdCommits = value }
+    @discardableResult
+    func confirmHeld() throws -> String {
+        let commit = held.removeFirst()
+        try push(["type": .string("input_audio_buffer.committed"), "item_id": .string(commit.item)])
+        return commit.item
+    }
+    func rejectHeld() throws {
+        let commit = held.removeFirst()
+        try push(["type": .string("error"), "error": .object([
+            "type": .string("invalid_request_error"), "message": .string("Commit refused."),
+            "event_id": .string(commit.eventID ?? "")])])
+    }
 }
 
 @MainActor
@@ -175,6 +195,80 @@ final class VoiceOneBrainTests: XCTestCase {
         lane.stopConversation()
         XCTAssertEqual(executed, ["scroll down", "scroll up"], "turns finish in speaking order, each once")
         XCTAssertEqual(began, 2)
+        client.teardown()
+    }
+
+    private func scriptedConversation(_ wire: RecordedVoiceWire) async throws
+        -> (lane: RealtimeVoiceLane, client: RealtimeVoiceClient, executed: () -> [String]) {
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-not-a-real-key" }, client: client)
+        var context = self.context()
+        context.targetAppID = "fixture.editor"
+        var executed: [String] = []
+        lane.conversation.readContext = { context }
+        lane.conversation.interpret = { _, _, _ in .init(kind: .clarify) }
+        lane.conversation.execute = { command in
+            executed.append(command.text)
+            return .init(verified: true, waitingForAnswer: false, message: "")
+        }
+        lane.conversation.onControl = { _ in }
+        try await lane.prepareRealtimeTransport(.conversation)
+        try lane.beginRealtimeConversation(session: UUID())
+        return (lane, client, { executed })
+    }
+
+    private func transcript(_ item: String, _ text: String) -> [String: JSONValue] {
+        ["type": .string("conversation.item.input_audio_transcription.completed"),
+         "item_id": .string(item), "transcript": .string(text)]
+    }
+
+    /// A turn whose commit is confirmed after it expired keeps its place in
+    /// the queue: the late confirmation is dropped, never bound to the next
+    /// turn, and that turn still gets its own item and transcript.
+    func testALateCommitConfirmationNeverBindsTheNextTurn() async throws {
+        let wire = RecordedVoiceWire()
+        await wire.setHoldCommits(true)
+        let (lane, client, executed) = try await scriptedConversation(wire)
+        lane.commitConfirmationTimeout = .milliseconds(300)
+        let connection = client.connectionID
+
+        lane.localTurnStarted(connection: connection)
+        try await lane.localTurnEnded(connection: connection)
+        try await Task.sleep(for: .milliseconds(450))
+        lane.localTurnStarted(connection: connection)
+        try await lane.localTurnEnded(connection: connection)
+        let late = try await wire.confirmHeld()
+        let current = try await wire.confirmHeld()
+        try await wire.push(transcript(late, "scroll down"))
+        try await wire.push(transcript(current, "scroll up"))
+        await waitFor { executed().count == 1 }
+        try await Task.sleep(for: .milliseconds(100))
+        lane.stopConversation()
+        XCTAssertEqual(executed(), ["scroll up"], "the expired turn's late confirmation and transcript are dropped")
+        client.teardown()
+    }
+
+    /// A refused commit never gets a confirmation, so its slot must leave
+    /// the queue; otherwise the next turn's confirmation would be eaten.
+    func testARejectedCommitFreesItsPlaceForTheNextTurn() async throws {
+        let wire = RecordedVoiceWire()
+        await wire.setHoldCommits(true)
+        let (lane, client, executed) = try await scriptedConversation(wire)
+        let connection = client.connectionID
+
+        lane.localTurnStarted(connection: connection)
+        try await lane.localTurnEnded(connection: connection)
+        let frames = await wire.frames()
+        XCTAssertNotNil(frames.last { $0["type"]?.string == "input_audio_buffer.commit" }?["event_id"]?.string,
+                        "each commit carries its turn's event id")
+        try await wire.rejectHeld()
+        lane.localTurnStarted(connection: connection)
+        try await lane.localTurnEnded(connection: connection)
+        let item = try await wire.confirmHeld()
+        try await wire.push(transcript(item, "scroll up"))
+        await waitFor { executed().count == 1 }
+        lane.stopConversation()
+        XCTAssertEqual(executed(), ["scroll up"])
         client.teardown()
     }
 

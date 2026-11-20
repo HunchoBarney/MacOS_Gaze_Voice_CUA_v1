@@ -315,7 +315,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var filler: (turn: UUID, task: Task<Void, Never>)?
     private var fillerSpokenTurn: UUID?
 
-    private let apiKey: () -> String
+    private let credential: () async throws -> RealtimeCredential?
     private let client: RealtimeVoiceClient
     private let player = RealtimePlayer()
     private let input = MicrophoneInput()
@@ -343,6 +343,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var remoteInputOrder: [String] = []
     private var localSpeakingKey: String?
     private var awaitingCommit: [String] = []
+    /// How long a turn waits for its commit and then its transcript.
+    /// Internal for tests.
+    var commitConfirmationTimeout: Duration = .seconds(8)
     private var remoteInputDrain: Task<Void, Never>?
     private var remoteReplyTurn: UUID?
     private var remoteReplyContinuation: CheckedContinuation<Void, Error>?
@@ -546,9 +549,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
-    init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
+    /// `credential` is asked once per new socket: a developer's own key,
+    /// or a fresh client secret from Jarvis's service.
+    init(credential: @escaping () async throws -> RealtimeCredential?, client: RealtimeVoiceClient? = nil,
          admissionOwner: LocalSpeechSession? = nil) {
-        self.apiKey = apiKey
+        self.credential = credential
         self.duplexRequested = true
         self.admissionOwner = admissionOwner
         self.client = client ?? RealtimeVoiceClient()
@@ -581,6 +586,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 self.prepareNext()
             }
         }
+    }
+
+    /// Straight to OpenAI with this key; an empty one reports the missing key.
+    convenience init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
+                     admissionOwner: LocalSpeechSession? = nil) {
+        self.init(credential: { RealtimeCredential(key: apiKey(), model: nil) },
+                  client: client, admissionOwner: admissionOwner)
     }
 
     static func requestAuthorization() async -> Bool {
@@ -624,6 +636,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private func handleWire(_ envelope: RealtimeVoiceClient.WireEnvelope) {
         guard envelope.connectionID == client.connectionID else { return }
+        for case .rejected(let eventID) in envelope.events { rejectedCommit(eventID) }
         if handleRemoteInput(envelope) { return }
         if envelope.kind == "session.updated" {
             responseAuthority.connect(envelope.connectionID)
@@ -900,8 +913,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
             replayOutcomes()
             return
         }
-        let key = apiKey().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
+        let credential = try await credential()
+        // Minting a client secret goes to the network; a caller that
+        // connected meanwhile owns the socket now.
+        if client.isReady, !responseAuthority.requiresReconnect,
+           client.connectedAt.map({ Date().timeIntervalSince($0) <= 50 * 60 }) == true {
+            return try await ensureConnected(inputMode: inputMode)
+        }
+        guard let credential,
+              case let key = credential.key.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
             throw VoiceError(OutcomeWording.missingVoiceKey)
         }
         client.teardown()
@@ -909,7 +929,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // A rebuilt session resets the call_id namespace — the dedupe set's
         // lifetime ends with the socket it belonged to.
         handledCalls = []
-        try await client.connect(apiKey: key, inputMode: inputMode ?? .conversation)
+        try await client.connect(apiKey: key, model: credential.model ?? RealtimeVoiceClient.defaultModel,
+                                 inputMode: inputMode ?? .conversation)
         seenInputItems = []
         responseAuthority.connect(client.connectionID)
         replayOutcomes()
@@ -1007,20 +1028,35 @@ final class RealtimeVoiceLane: SpeechCapturing {
         guard var record = remoteInputs[key] else { flushSpeech(); return }
         record.deadline = expiry(key)
         remoteInputs[key] = record
-        awaitingCommit.append(key)
         guard client.connectionID == connection else { throw VoiceError("The realtime connection changed mid-turn.") }
-        try await client.commitAudio()
+        awaitingCommit.append(key)
+        do {
+            try await client.commitAudio(eventID: key)
+        } catch {
+            awaitingCommit.removeAll { $0 == key }
+            throw error
+        }
+    }
+
+    /// The server refused a turn's commit, so no confirmation will come for
+    /// it: its slot leaves the queue and the turn is dropped.
+    private func rejectedCommit(_ eventID: String) {
+        guard let slot = awaitingCommit.firstIndex(of: eventID) else { return }
+        awaitingCommit.remove(at: slot)
+        expireRemoteInput(eventID)
     }
 
     private func expiry(_ key: String) -> Task<Void, Never> {
         Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(8)) } catch { return }
+            do { try await Task.sleep(for: self?.commitConfirmationTimeout ?? .seconds(8)) } catch { return }
             self?.expireRemoteInput(key)
         }
     }
 
+    /// A turn that expires before its commit is confirmed keeps its slot in
+    /// `awaitingCommit`: confirmations arrive in commit order, so the late
+    /// one consumes that slot and is dropped instead of binding the next turn.
     private func expireRemoteInput(_ item: String) {
-        awaitingCommit.removeAll { $0 == item }
         if let record = remoteInputs.removeValue(forKey: item) {
             record.deadline?.cancel()
             conversation.discardExternal(record.capture)
@@ -1783,7 +1819,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // still streaming; only real faults surface as .failure.
             if !Self.isBenignRace(detail) { onEvent?(id, .failure(turnFailure(detail))) }
             flushSpeech()
-        case .warning:
+        case .warning, .rejected:
             break // logged in the session-level switch above
         case .closed:
             onEvent?(id, .failure("The voice session closed."))

@@ -71,6 +71,20 @@ final class VoiceActivityGateTests: XCTestCase {
         run.events.filter { $0 == .turnStarted || $0 == .turnEnded }
     }
 
+    /// Speech that never pauses ends its turn at maxTurn and, still going,
+    /// opens the next one: every buffer goes up exactly once.
+    func testContinuousSpeechIsCutIntoTurnsOfAtMostMaxTurn() async throws {
+        var tuning = VoiceActivityGate.Tuning()
+        tuning.maxTurn = 1.0
+        let result = try await run("SSSSSSSSSSSS", tuning: tuning)
+        XCTAssertEqual(Array(result.endedAfter.prefix(2)), [5, 10], "1.0 s caps a turn at four chunks after its first")
+        XCTAssertEqual(Array(turns(result).prefix(4)), [.turnStarted, .turnEnded, .turnStarted, .turnEnded])
+        for index in 0..<12 {
+            XCTAssertEqual(result.sentPerBuffer[index], 1, "buffer \(index) is uploaded exactly once")
+        }
+        XCTAssertEqual(VoiceActivityGate.Tuning().maxTurn, 30)
+    }
+
     func testTheTurnEndsAfterEndOfTurnOfQuiet() async throws {
         let result = try await run("........SSSS......")
         XCTAssertEqual(turns(result), [.turnStarted, .turnEnded])
