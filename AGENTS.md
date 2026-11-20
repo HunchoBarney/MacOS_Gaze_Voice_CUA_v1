@@ -11,6 +11,8 @@ for what is settled, and [RELEASE.md](RELEASE.md) before shipping a build.
 - `make test` — `swift test --parallel`, then the tracker typecheck and
   Vitest. This is what CI runs.
 - `swift test --filter <Suite>` — a focused Swift check.
+- `scripts/lane-test.sh [command]` — run `make test`, or any command, in the
+  crew's shared warm build checkout. See [TESTING.md](TESTING.md).
 - `make release` — one signed build from source: `build/Jarvis.app`, a
   zip and its SHA-256. It is the default goal.
 - `make install` — release, then copy to `~/jarvis-local/Jarvis.app`
