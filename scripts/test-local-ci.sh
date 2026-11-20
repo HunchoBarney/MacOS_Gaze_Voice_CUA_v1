@@ -77,8 +77,10 @@ if [ $lane_exit -ne 0 ]; then echo "lane: gave up after 1 s; holder: pid 1"; exi
 cat "$dir/passing.log"
 EOF
     chmod +x "$dir/gh-$1" "$dir/lane-$1"
-    LOCAL_CI_HOME=$home GH=$dir/gh-$1 LOCAL_CI_LANE=$dir/lane-$1 LOCAL_CI_LANE_TIMEOUT=1 \
-        "$here/local-ci.sh" "$sha" >/dev/null 2>&1
+    for mode in "$sha" poll; do
+        LOCAL_CI_HOME=$home GH=$dir/gh-$1 LOCAL_CI_LANE=$dir/lane-$1 LOCAL_CI_LANE_TIMEOUT=1 \
+            "$here/local-ci.sh" "$mode" >/dev/null 2>&1
+    done
     echo "$home"
 }
 
@@ -103,8 +105,9 @@ fi
 
 home=$(ci_run no-lane 0)
 rm -f "$dir/lane-no-lane"
-LOCAL_CI_HOME=$home GH=$dir/gh-no-lane LOCAL_CI_LANE=$dir/lane-no-lane \
-    "$here/local-ci.sh" "$(git -C "$dir/origin-no-lane" rev-parse HEAD)" >/dev/null 2>&1
+for mode in "$(git -C "$dir/origin-no-lane" rev-parse HEAD)" poll; do
+    LOCAL_CI_HOME=$home GH=$dir/gh-no-lane LOCAL_CI_LANE=$dir/lane-no-lane "$here/local-ci.sh" "$mode" >/dev/null 2>&1
+done
 check "$home" gh.log "state=error -f context=local-ci -f description=no build lane at"
 if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a missing lane must not post failure"; failures=$((failures + 1))
@@ -171,5 +174,62 @@ printf '%s\n' \
 pick_is fresh "main"
 echo mmmm >"$dir/poll-fresh/done"
 pick_is fresh "pr#2"
+
+# A head queued by hand records its request and a pending status and returns
+# at once; poll then tests it in first-seen order. A head that already has a
+# result queues from the time of the request. This fake gh keeps every posted
+# status, newest last, so poll sees what the request and each run posted.
+cat >"$dir/gh-req" <<'EOF'
+#!/bin/bash
+h=$REQ_HOME; a="$*"
+case "$a" in
+    "pr list"*) cat "$h/heads" ;;
+    *"-X POST"*) s=${a#*statuses/}; s=${s%% *}; st=${a#*state=}; echo "$s ${st%% *}" >>"$h/posted" ;;
+    *"/statuses --jq"*) s=${a#*commits/}; s=${s%%/*}
+        st=$(grep "^$s " "$h/posted" 2>/dev/null | tail -1 | cut -d" " -f2)
+        [ -n "$st" ] && echo "$st $(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
+    *"--jq .sha"*) s=${a#*commits/}; [ "${s%% *}" = main ] || echo "${s%% *}" ;;
+esac
+exit 0
+EOF
+chmod +x "$dir/gh-req"
+
+req() { REQ_HOME=$dir/req-$1 LOCAL_CI_HOME=$dir/req-$1 GH=$dir/gh-req "$here/local-ci.sh" "$2" </dev/null 2>/dev/null; }
+req_pick_is() {
+    local got
+    got=$(REQ_HOME=$dir/req-$1 LOCAL_CI_HOME=$dir/req-$1 GH=$dir/gh-req poll_pick)
+    if [ "$got" = "$2" ]; then
+        echo "ok   req-$1 picks $2"
+    else
+        echo "FAIL req-$1: expected $2, got '$got'"; failures=$((failures + 1))
+    fi
+}
+req_check() {
+    if eval "$2"; then echo "ok   req-$1"; else echo "FAIL req-$1"; failures=$((failures + 1)); fi
+}
+
+mkdir -p "$dir/req-new/seen" && git init -q "$dir/req-new/checkout"
+echo "2026-11-20T05:00:00Z aaaa pr#1" >"$dir/req-new/heads"
+echo 2000 >"$dir/req-new/seen/aaaa"
+echo 1000 >"$dir/req-new/seen/rrrr"
+start=$(date +%s)
+out=$(req new rrrr)
+req_check "new: returns at once without taking the lock (got: $out)" \
+    '[ $(($(date +%s) - start)) -le 5 ] && [ ! -d "$dir/req-new/lock" ] && grep -q "queued rrrr" <<<"$out"'
+req_check "new: records the request and posts pending" \
+    '[ -s "$dir/req-new/requested/rrrr" ] && grep -qx "rrrr pending" "$dir/req-new/posted"'
+req_pick_is new requested
+req_check "new: poll clears the request it tests" '[ ! -e "$dir/req-new/requested/rrrr" ]'
+req_pick_is new "pr#1"
+
+mkdir -p "$dir/req-rerun/seen" && git init -q "$dir/req-rerun/checkout"
+echo "2026-11-20T05:00:00Z bbbb pr#2" >"$dir/req-rerun/heads"
+echo 2000 >"$dir/req-rerun/seen/bbbb"
+echo 500 >"$dir/req-rerun/seen/aaaa"
+echo "aaaa success" >"$dir/req-rerun/posted"
+req rerun aaaa >/dev/null
+req_check "rerun: a tested head queues from the request" '[ "$(cat "$dir/req-rerun/seen/aaaa")" -ge "$start" ]'
+req_pick_is rerun "pr#2"
+req_pick_is rerun requested
 
 exit $((failures > 0))
