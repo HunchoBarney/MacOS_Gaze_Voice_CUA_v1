@@ -99,7 +99,7 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(),
                             environment: [:])
         return VoiceTaskCoordinator(
-            config: config, jevAPIKey: { "" },
+            config: config, jevRoute: { nil },
             gazeService: GazeService(
                 stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: TargetOverlay())
@@ -273,7 +273,7 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
         XCTAssertTrue(production.hasForegroundAppLauncher)
         let config = Config(defaults: UserDefaults(suiteName: "native-select-\(UUID())")!,
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
-        let controlled = VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        let controlled = VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: TargetOverlay(), commandDriver: { _, _ in .object([:]) })
         XCTAssertFalse(controlled.hasForegroundAppLauncher)
@@ -284,7 +284,7 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
         var nativeCalls = 0, backgroundCalls = 0, raises = 0
-        let c = VoiceTaskCoordinator(config: config, jevAPIKey: { "" },
+        let c = VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
             overlay: TargetOverlay(), resolver: AppResolver(listApps: {
                 [.init(name: "AuditFixture", bundle: "fixture.audit")]
