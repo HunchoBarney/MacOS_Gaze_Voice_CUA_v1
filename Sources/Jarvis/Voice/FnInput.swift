@@ -1,11 +1,12 @@
 import AppKit
 import Carbon
+import Synchronization
 
 /// Event decisions are independent of the global tap so release/cancellation races are testable.
-struct FnInputState {
+struct FnInputState: Sendable {
     enum Kind { case flagsChanged, keyDown, keyUp }
     enum Action { case none, begin, finish, cancel, cancelCapture }
-    struct Result {
+    struct Result: Sendable {
         var action: Action = .none
         var consume = false
         /// Fn+Ctrl chord: on `.begin` the hold is dictation; on `.none` a live
@@ -101,6 +102,101 @@ struct FnInputState {
     }
 }
 
+/// The tap's half of the monitor: it owns the state machine and runs on the
+/// tap's own thread, so a stalled main thread never delays a keystroke.
+/// Only Fn presses and Escape read main-actor gates, and those wait at most
+/// `gateWait` for them before using the last published values.
+final class FnTapCore: @unchecked Sendable {
+    struct Gates: Sendable { var canBegin = false, active = false }
+    struct Decision: Sendable {
+        var interrupted = false
+        var fnKey = false
+        var fnFlag = false
+        var heldWithPhysicalFn = false
+        var result = FnInputState.Result()
+        var beginHandlingMs: Double = 0
+    }
+
+    static let gateWait: DispatchTimeInterval = .milliseconds(100)
+    let state: Mutex<FnInputState>
+    let gates = Mutex(Gates())
+    let tap = Mutex<CFMachPort?>(nil)
+    let runLoop = Mutex<CFRunLoop?>(nil)
+    nonisolated(unsafe) weak var monitor: FnInputMonitor?
+
+    init(state: FnInputState) { self.state = Mutex(state) }
+
+    func onTap(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+        let decision = decide(type, event) { needsGates in
+            guard needsGates else { return gates.withLock { $0 } }
+            let refreshed = DispatchSemaphore(value: 0)
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.monitor?.publishGates() }
+                refreshed.signal()
+            }
+            _ = refreshed.wait(timeout: .now() + Self.gateWait)
+            return gates.withLock { $0 }
+        }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.monitor?.apply(decision) }
+        }
+        return decision.result.consume ? nil : Unmanaged.passUnretained(event)
+    }
+
+    func decide(_ type: CGEventType, _ event: CGEvent, gates: (Bool) -> Gates) -> Decision {
+        let handlingStarted = ProcessInfo.processInfo.systemUptime
+        var decision = Decision()
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            tap.withLock { if let tap = $0 { CGEvent.tapEnable(tap: tap, enable: true) } }
+            decision.interrupted = true
+            return decision
+        }
+        let kind: FnInputState.Kind
+        switch type {
+        case .flagsChanged: kind = .flagsChanged
+        case .keyDown: kind = .keyDown
+        case .keyUp: kind = .keyUp
+        default: return decision
+        }
+        let key = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+        decision.fnKey = kind == .flagsChanged && key == 63
+        decision.fnFlag = event.flags.contains(.maskSecondaryFn)
+        let current = gates((decision.fnKey && decision.fnFlag) || (kind == .keyDown && key == 53))
+        let other: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        let nonControl: CGEventFlags = [.maskCommand, .maskAlternate, .maskShift]
+        let pressed: Set<UInt16>? = decision.fnKey ? Self.pressedNonModifierKeys() : nil
+        let (result, held) = state.withLock { state in
+            // Reconcile after missed events/tap interruptions, including keys held before launch.
+            if let pressed { state.reconcilePressedKeys(pressed) }
+            let result = state.handle(kind, key: key, fn: decision.fnFlag,
+                                      otherModifiers: !event.flags.intersection(other).isEmpty,
+                                      dictationChord: event.flags.contains(.maskControl)
+                                          && event.flags.intersection(nonControl).isEmpty,
+                                      now: handlingStarted,
+                                      canBegin: current.canBegin, active: current.active)
+            return (result, state.held)
+        }
+        if decision.fnKey { decision.heldWithPhysicalFn = held && Self.physicalFnDown }
+        decision.result = result
+        if result.action == .begin {
+            decision.beginHandlingMs = (ProcessInfo.processInfo.systemUptime - handlingStarted) * 1000
+        }
+        return decision
+    }
+
+    static var physicalFnDown: Bool {
+        CGEventSource.keyState(.hidSystemState, key: 63)
+            || CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
+    }
+
+    private static func pressedNonModifierKeys() -> Set<UInt16> {
+        let modifiers: Set<UInt16> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+        return Set((UInt16(0)...127).filter {
+            !modifiers.contains($0) && CGEventSource.keyState(.hidSystemState, key: $0)
+        })
+    }
+}
+
 @MainActor
 final class FnInputMonitor: ObservableObject {
     @Published private(set) var ready = false
@@ -118,15 +214,14 @@ final class FnInputMonitor: ObservableObject {
     /// Latch seam — fires on a tap-short release before `.finish` arrives.
     var onLatch: () -> Void = {}
     var dictationChordEnabled: Bool {
-        get { state.dictationEnabled }
-        set { state.dictationEnabled = newValue }
+        get { core.state.withLock { $0.dictationEnabled } }
+        set { core.state.withLock { $0.dictationEnabled = newValue } }
     }
     var latchMode: Bool {
-        get { state.latchMode }
-        set { state.latchMode = newValue }
+        get { core.state.withLock { $0.latchMode } }
+        set { core.state.withLock { $0.latchMode = newValue } }
     }
-    private var state: FnInputState
-    private var tap: CFMachPort?
+    private let core: FnTapCore
     private var source: CFRunLoopSource?
     private var healthTimer: Timer?
     private var observedPhysicalHold = false
@@ -134,7 +229,8 @@ final class FnInputMonitor: ObservableObject {
     private(set) var beginHandlingMs: Double = 0
 
     init(state: FnInputState = FnInputState()) {
-        self.state = state
+        core = FnTapCore(state: state)
+        core.monitor = self
     }
 
     func start() {
@@ -158,71 +254,81 @@ final class FnInputMonitor: ObservableObject {
             message = "Accessibility access needed for Fn"
             return
         }
-        if let tap, CGEvent.tapIsEnabled(tap: tap) {
+        if let tap = core.tap.withLock({ $0 }), CGEvent.tapIsEnabled(tap: tap) {
             ready = !IsSecureEventInputEnabled()
             message = ready ? "Hold Fn to speak, release to finish" : "Fn is unavailable while secure keyboard input is active"
+            publishGates()
             return
         }
         teardown()
         let mask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
-        tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-                               eventsOfInterest: CGEventMask(mask), callback: { _, type, event, context in
+        let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                                    eventsOfInterest: CGEventMask(mask), callback: { _, type, event, context in
             guard let context else { return Unmanaged.passUnretained(event) }
-            return MainActor.assumeIsolated {
-                Unmanaged<FnInputMonitor>.fromOpaque(context).takeUnretainedValue().handle(type, event)
-            }
-        }, userInfo: Unmanaged.passUnretained(self).toOpaque())
+            return Unmanaged<FnTapCore>.fromOpaque(context).takeUnretainedValue().onTap(type, event)
+        }, userInfo: Unmanaged.passUnretained(core).toOpaque())
         guard let tap, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             teardown()
             message = "Could not register Fn. Check Accessibility and relaunch."
             return
         }
+        core.tap.withLock { $0 = tap }
         self.source = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        runOnOwnThread(source)
         CGEvent.tapEnable(tap: tap, enable: true)
         ready = CGEvent.tapIsEnabled(tap: tap) && !IsSecureEventInputEnabled()
         message = ready ? "Hold Fn to speak, release to finish" : "Fn is temporarily unavailable"
+        publishGates()
     }
 
+    /// Services the tap on a dedicated thread's run loop, attached before
+    /// this returns.
+    private func runOnOwnThread(_ source: CFRunLoopSource) {
+        let attached = DispatchSemaphore(value: 0)
+        let thread = Thread { [core] in
+            core.runLoop.withLock { $0 = CFRunLoopGetCurrent() }
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            attached.signal()
+            CFRunLoopRun()
+        }
+        thread.name = "com.karanvirkang.jarvis.fn-tap"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        attached.wait()
+    }
+
+    /// Main-actor entry for a delivered event: decides with the live gates and
+    /// applies the outcome immediately. The tap thread uses `FnTapCore.onTap`.
     func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
-        let handlingStarted = ProcessInfo.processInfo.systemUptime
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        let live = currentGates()
+        let decision = core.decide(type, event) { _ in live }
+        apply(decision)
+        return decision.result.consume ? nil : Unmanaged.passUnretained(event)
+    }
+
+    func publishGates() {
+        let live = currentGates()
+        core.gates.withLock { $0 = live }
+    }
+
+    private func currentGates() -> FnTapCore.Gates {
+        FnTapCore.Gates(canBegin: ready && canBegin(), active: operationActive())
+    }
+
+    func apply(_ decision: FnTapCore.Decision) {
+        if decision.interrupted {
             interrupt("Keyboard monitoring was interrupted. Hold Fn again to retry.")
-            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            return Unmanaged.passUnretained(event)
+            return
         }
-        let kind: FnInputState.Kind
-        switch type {
-        case .flagsChanged: kind = .flagsChanged
-        case .keyDown: kind = .keyDown
-        case .keyUp: kind = .keyUp
-        default: return Unmanaged.passUnretained(event)
-        }
-        if kind == .flagsChanged, event.getIntegerValueField(.keyboardEventKeycode) == 63 {
+        if decision.fnKey {
             releaseCandidate = nil
-            reportPhysicalFn(event.flags.contains(.maskSecondaryFn))
-            // Reconcile after missed events/tap interruptions, including keys held before launch.
-            let modifiers: Set<UInt16> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
-            state.reconcilePressedKeys(Set((UInt16(0)...127).filter {
-                !modifiers.contains($0) && CGEventSource.keyState(.hidSystemState, key: $0)
-            }))
+            reportPhysicalFn(decision.fnFlag)
+            observedPhysicalHold = decision.heldWithPhysicalFn
         }
-        let other: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
-        let nonControl: CGEventFlags = [.maskCommand, .maskAlternate, .maskShift]
-        let result = state.handle(kind, key: UInt16(event.getIntegerValueField(.keyboardEventKeycode)),
-                                  fn: event.flags.contains(.maskSecondaryFn),
-                                  otherModifiers: !event.flags.intersection(other).isEmpty,
-                                  dictationChord: event.flags.contains(.maskControl)
-                                      && event.flags.intersection(nonControl).isEmpty,
-                                  now: handlingStarted,
-                                  canBegin: ready && canBegin(), active: operationActive())
-        if kind == .flagsChanged, event.getIntegerValueField(.keyboardEventKeycode) == 63 {
-            observedPhysicalHold = state.held && physicalFnDown
-        }
-        if result.action == .begin { beginHandlingMs = (ProcessInfo.processInfo.systemUptime - handlingStarted) * 1000 }
-        dispatch(result)
-        return result.consume ? nil : Unmanaged.passUnretained(event)
+        if decision.result.action == .begin { beginHandlingMs = decision.beginHandlingMs }
+        dispatch(decision.result)
+        publishGates()
     }
 
     /// Feature seams fire before the base action so their handlers are
@@ -243,21 +349,23 @@ final class FnInputMonitor: ObservableObject {
             interrupt("Secure keyboard input interrupted recording.")
             ready = false
             message = "Fn is unavailable while secure keyboard input is active"
+            publishGates()
             return
         }
         guard AXIsProcessTrusted() else { refresh(); return }
-        guard let tap, CGEvent.tapIsEnabled(tap: tap) else {
+        guard let tap = core.tap.withLock({ $0 }), CGEvent.tapIsEnabled(tap: tap) else {
             interrupt("Keyboard monitoring was interrupted. Hold Fn again to retry.")
             refresh()
             return
         }
         guard ready else { refresh(); return }
-        reconcilePhysicalFn(isDown: physicalFnDown, now: ProcessInfo.processInfo.systemUptime)
+        publishGates()
+        reconcilePhysicalFn(isDown: FnTapCore.physicalFnDown, now: ProcessInfo.processInfo.systemUptime)
     }
 
     func reconcilePhysicalFn(isDown: Bool, now: TimeInterval) {
         if isDown { reportPhysicalFn(true) }
-        guard state.held else {
+        guard core.state.withLock({ $0.held }) else {
             if !isDown, reportedPhysicalFn == true, releaseCandidate == nil {
                 releaseCandidate = now
                 return
@@ -276,8 +384,10 @@ final class FnInputMonitor: ObservableObject {
         guard let firstUp = releaseCandidate else { releaseCandidate = now; return }
         releaseCandidate = nil
         observedPhysicalHold = false
-        let result = state.handle(.flagsChanged, key: 63, fn: false, now: firstUp,
-                                  canBegin: false, active: operationActive())
+        let active = operationActive()
+        let result = core.state.withLock {
+            $0.handle(.flagsChanged, key: 63, fn: false, now: firstUp, canBegin: false, active: active)
+        }
         reportPhysicalFn(false)
         if result.action == .finish { onReleaseRecovery(firstUp, now, result.latch) }
         dispatch(result)
@@ -289,25 +399,29 @@ final class FnInputMonitor: ObservableObject {
         onPhysicalFnChanged(down)
     }
 
-    private var physicalFnDown: Bool {
-        CGEventSource.keyState(.hidSystemState, key: 63)
-            || CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
-    }
-
     private func interrupt(_ reason: String) {
         releaseCandidate = nil
         observedPhysicalHold = false
         // A latched capture depends on the tap as much as a held one does.
-        let captureHeld = state.held || state.latched
-        state.interrupt()
+        let captureHeld = core.state.withLock { state in
+            defer { state.interrupt() }
+            return state.held || state.latched
+        }
         // Only capture depends on keyboard health. App execution may itself enter secure input.
         if captureHeld { onInterruption(reason) }
     }
 
     private func teardown() {
         ready = false
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
-        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
-        tap = nil; source = nil
+        core.gates.withLock { $0 = FnTapCore.Gates() }
+        if let tap = core.tap.withLock({ tap in defer { tap = nil }; return tap }) {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let runLoop = core.runLoop.withLock({ loop in defer { loop = nil }; return loop }) {
+            if let source { CFRunLoopRemoveSource(runLoop, source, .commonModes) }
+            CFRunLoopStop(runLoop)
+        }
+        source = nil
     }
 }
