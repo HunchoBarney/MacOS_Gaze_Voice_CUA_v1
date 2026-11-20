@@ -19,10 +19,12 @@ import JarvisCore
 ///
 /// Every committed buffer counts as a turn. Spend comes from each event's
 /// reported `usage` and is appended to a ledger outside the repository;
-/// the run stops before a turn that could cross either cap. The API key is
-/// read in-process from the Keychain with user interaction disabled, so a
-/// permission prompt fails the run instead of appearing; it is never
-/// printed or written.
+/// the run stops before a turn that could cross either cap. The API key
+/// comes from OPENAI_API_KEY, set at launch from the Keychain
+/// (\`security find-generic-password -s com.chriswozniczek.jevvoice -a openAIAPIKey -w\`);
+/// without it the key is read in-process from the Keychain with user
+/// interaction disabled, so a permission prompt fails the run instead of
+/// appearing. It is never printed or written.
 ///
 /// Off unless JARVIS_LIVE_REALTIME_BENCH=1.
 @MainActor
@@ -126,7 +128,8 @@ final class RealtimeTurnBenchTests: XCTestCase {
         let out = URL(fileURLWithPath: try XCTUnwrap(env["JARVIS_BENCH_OUT"]))
         let store = KeychainAPIKeyStore(service: env["JARVIS_BENCH_KEY_SERVICE"] ?? "com.karanvirkang.jarvis",
                                         account: "openAIAPIKey", allowUserInteraction: false)
-        let key = try XCTUnwrap(try store.read(), "no stored OpenAI key")
+        let key = try XCTUnwrap(env["OPENAI_API_KEY"].flatMap { $0.isEmpty ? nil : $0 } ?? (try store.read()),
+                                "no OpenAI key in OPENAI_API_KEY or the Keychain")
         var ledger = Ledger(ledgerURL)
 
         let wireBox = LockedBox<RecordingWire?>(nil)

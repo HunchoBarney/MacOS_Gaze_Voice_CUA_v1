@@ -20,7 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from klm import baselines  # noqa: E402
 
 FLOWS = ["open_app", "click_named", "show_names", "lost_window", "switch_desktop"]
-CITED_TRANSCRIPT_MS = [440.0] * 9 + [1600.0]
+CITED_TRANSCRIPT_MS = [440.0] * 4 + [1600.0]
 
 
 def pct(values, p):

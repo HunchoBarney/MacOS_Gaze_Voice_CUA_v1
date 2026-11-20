@@ -38,12 +38,13 @@ final class FlowBenchTests: XCTestCase {
         Flow(name: "open_app", phrase: "open Calculator", actions: ["launch_app"]),
         Flow(name: "click_named", phrase: "click Reply", actions: ["click", "press", "perform_action"]),
         Flow(name: "show_names", phrase: "show names", actions: nil),
-        Flow(name: "lost_window", phrase: "where is Safari", actions: ["unminimize_window", "bring_to_front", "set_window_frame", "launch_app", "click", "hotkey"]),
+        Flow(name: "lost_window", phrase: "where is Safari", actions: ["activate_app"]),
         Flow(name: "switch_desktop", phrase: "next desktop", actions: ["hotkey", "press_key"]),
     ]
 
-    /// Fixture desk: Mail frontmost with a toolbar, Safari minimized,
-    /// Calculator installed but not running.
+    /// Fixture desk: Mail frontmost with a toolbar, Safari's window on
+    /// another desktop until Safari is activated, Calculator installed but
+    /// not running until it is launched.
     final class Desk: @unchecked Sendable {
         private let lock = NSLock()
         private var profile: [String: Double]
@@ -51,6 +52,8 @@ final class FlowBenchTests: XCTestCase {
         private(set) var actionAt: Double?
         private(set) var actionTool: String?
         private(set) var calls: [(tool: String, at: Double)] = []
+        private var calculatorRunning = false
+        private var safariShown = false
         let verbose: Bool
 
         init(profile: [String: Double], verbose: Bool) {
@@ -62,19 +65,32 @@ final class FlowBenchTests: XCTestCase {
             lock.lock(); defer { lock.unlock() }
             self.actions = actions
             actionAt = nil; actionTool = nil; calls = []
+            calculatorRunning = false; safariShown = false
+        }
+
+        private func record(_ tool: String) -> Double {
+            let now = ProcessInfo.processInfo.systemUptime
+            lock.lock(); defer { lock.unlock() }
+            calls.append((tool, now))
+            if actionAt == nil, actions?.contains(tool) == true { actionAt = now; actionTool = tool }
+            if tool == "launch_app" { calculatorRunning = true }
+            return profile[tool] ?? 0
+        }
+
+        /// The coordinator's app activation: macOS follows an activated
+        /// app to its desktop, so Safari's window comes on screen.
+        func activate(_ pid: Int) {
+            _ = record("activate_app")
+            lock.lock(); defer { lock.unlock() }
+            if pid == Self.safariPID { safariShown = true }
         }
 
         func call(_ tool: String, _ args: [String: JSONValue]) async throws -> JSONValue {
-            let now = ProcessInfo.processInfo.systemUptime
-            let delay: Double = {
-                lock.lock(); defer { lock.unlock() }
-                calls.append((tool, now))
-                if actionAt == nil, actions?.contains(tool) == true { actionAt = now; actionTool = tool }
-                return profile[tool] ?? 0
-            }()
+            let delay = record(tool)
             if verbose { print("bench desk \(tool) \(args.keys.sorted())") }
             if delay > 0 { try await Task.sleep(for: .milliseconds(delay)) }
-            return Self.respond(tool)
+            lock.lock(); defer { lock.unlock() }
+            return Self.respond(tool, calculatorRunning: calculatorRunning, safariShown: safariShown)
         }
 
         static let mailPID = 424_201, safariPID = 424_202, calculatorPID = 424_203
@@ -94,18 +110,20 @@ final class FlowBenchTests: XCTestCase {
                      "frame": .object(["x": .number(x), "y": .number(70), "w": .number(56), "h": .number(28)])])
         }
 
-        static func respond(_ tool: String) -> JSONValue {
+        static func respond(_ tool: String, calculatorRunning: Bool, safariShown: Bool) -> JSONValue {
             switch tool {
             case "list_apps":
                 return .object(["apps": .array([
                     .object(["name": .string("Mail"), "bundle_id": .string("com.apple.mail"), "pid": .number(Double(mailPID)), "active": .bool(true)]),
                     .object(["name": .string("Safari"), "bundle_id": .string("com.apple.Safari"), "pid": .number(Double(safariPID))]),
-                ])])
+                ] + (calculatorRunning ? [
+                    .object(["name": .string("Calculator"), "bundle_id": .string("com.apple.calculator"), "pid": .number(Double(calculatorPID))]),
+                ] : []))])
             case "list_windows":
                 return .object(["windows": .array([
                     window(11, mailPID, "Mail", "Inbox", onScreen: true, z: 1),
-                    window(12, safariPID, "Safari", "Apple", onScreen: false, z: 2),
-                ])])
+                    window(12, safariPID, "Safari", "Apple", onScreen: safariShown, z: safariShown ? 3 : 2),
+                ] + (calculatorRunning ? [window(13, calculatorPID, "Calculator", "Calculator", onScreen: true, z: 4)] : []))])
             case "get_window_state":
                 return .object(["pid": .number(Double(mailPID)), "window_id": .number(11),
                                 "window_title": .string("Inbox"), "snapshot_id": .string("bench-snapshot"),
@@ -231,12 +249,15 @@ final class FlowBenchTests: XCTestCase {
                 _ = try await desk.call("launch_app", [:])
                 return Desk.calculatorPID
             },
-            desktopSpaces: Spaces().system)
+            desktopSpaces: Spaces().system,
+            activateApp: { desk.activate($0) })
         let lane = RealtimeVoiceLane(apiKey: { "" }, client: RealtimeVoiceClient(wireFactory: { _ in
             preconditionFailure("the flow bench never opens a Realtime connection")
         }))
         let controller = VoiceController(config: config, speech: lane, authorize: { true },
-                                         frontmost: { "Mail" }, cuaRuntime: coordinator)
+                                         frontmost: { "Mail" },
+                                         focusedWindow: { (Desk.mailPID, "com.apple.mail", 11) },
+                                         cuaRuntime: coordinator)
         return World(controller: controller, coordinator: coordinator, overlay: overlay)
     }
 

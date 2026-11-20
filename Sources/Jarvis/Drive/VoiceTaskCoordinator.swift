@@ -176,6 +176,7 @@ final class VoiceTaskCoordinator {
     private let commandDriver: DriveLoop.Call?
     private let foregroundAppLauncher: ((String) async throws -> Int)?
     private let desktopSpaces: DesktopSpaceSwitch.System
+    private let activateApp: (Int) -> Void
     var hasForegroundAppLauncher: Bool { foregroundAppLauncher != nil }
     private var connection: CuaConnection?
     private var connectTask: Task<CuaConnection, Error>?
@@ -297,9 +298,11 @@ final class VoiceTaskCoordinator {
          gazeService: GazeService? = nil, overlay: TargetOverlay? = nil,
          resolver: AppResolver? = nil, commandDriver: DriveLoop.Call? = nil,
          foregroundAppLauncher: ((String) async throws -> Int)? = nil,
-         desktopSpaces: DesktopSpaceSwitch.System = .live) {
+         desktopSpaces: DesktopSpaceSwitch.System = .live,
+         activateApp: @escaping (Int) -> Void = DriveLoop.activateRunningApp) {
         self.config = config
         self.desktopSpaces = desktopSpaces
+        self.activateApp = activateApp
         self.jevAPIKey = jevAPIKey
         self.resolver = resolver ?? AppResolver()
         self.commandDriver = commandDriver
@@ -1495,6 +1498,7 @@ final class VoiceTaskCoordinator {
             nativeTextEvent: { [weak self] receipt in
                 await self?.recordNativeTextInsertion(receipt, turn: traceTurn, work: traceWork)
             },
+            activateApp: activateApp,
             foregroundAppLauncher: foregroundAppLauncher,
             gaze: { [weak self] in
                 // A live hold already owns the ~20Hz stream — reading it
