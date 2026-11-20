@@ -51,7 +51,7 @@ struct VoiceSemanticRouter: Sendable {
     typealias Infer = @Sendable (JSONValue, [String: Question]) async throws -> SystemOneResponse
     let infer: Infer
 
-    static func live(apiKey: String, transport: Infer? = nil) -> Self {
+    static func live(apiKey: String, transport: Infer? = nil, session: URLSession = .shared) -> Self {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return Self { _, _ in throw Failure.unavailable }
         }
@@ -66,7 +66,7 @@ struct VoiceSemanticRouter: Sendable {
                 return try await transport(state, questions)
             }
         }
-        let client = JevClient(apiKey: apiKey)
+        let client = JevClient(apiKey: apiKey, model: JevChooser.model, session: session)
         return Self { state, questions in
             Self.stageTimings?.record("reserve_ms", milliseconds: 0)
             let started = ProcessInfo.processInfo.systemUptime
