@@ -19,32 +19,24 @@ final class DriverDaemonHostTests: XCTestCase {
         XCTAssertEqual(env["CUA_DRIVER_RS_TELEMETRY_ENABLED"], "0")
     }
 
-    func testProxyProcessUsesSafeChildEnvironmentWithoutLaunching() {
-        let executable = URL(fileURLWithPath: "/bin/true")
-        let proxy = CuaConnection.makeProxyProcess(
-            executable: executable,
-            socket: "/tmp/jev-test-never-opened.sock",
-            hostEnvironment: [
-                "HOME": "/tmp/jev-test-home",
-                "AWS_SECRET_ACCESS_KEY": "synthetic-secret",
-                "CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS": "1",
-                "DO_NOT_TRACK": "0",
-                "CUA_TELEMETRY": "1",
-            ]
-        )
-        XCTAssertFalse(proxy.isRunning)
-        XCTAssertEqual(proxy.executableURL, executable)
-        XCTAssertEqual(proxy.arguments, [
-            "mcp", "--embedded", "--socket", "/tmp/jev-test-never-opened.sock",
-            "--host-bundle-id", CuaDependency.hostBundleID,
+    func testDaemonAdmitsOnlyItsHostAndOpensEnvelopeStreams() {
+        let env = EmbeddedDaemon.daemonEnvironment(host: [
+            "HOME": "/tmp/jev-test-home",
+            "AWS_SECRET_ACCESS_KEY": "synthetic-secret",
+            "CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS": "1",
         ])
-        let env = proxy.environment ?? [:]
+        XCTAssertEqual(env["CUA_DRIVER_EMBEDDED"], "1")
+        XCTAssertEqual(env["CUA_DRIVER_MCP_ENVELOPES"], "1")
         XCTAssertEqual(env["HOME"], "/tmp/jev-test-home")
-        XCTAssertEqual(env["DO_NOT_TRACK"], "1")
-        XCTAssertEqual(env["CUA_TELEMETRY"], "0")
-        XCTAssertEqual(env["CUA_DRIVER_RS_TELEMETRY_ENABLED"], "0")
         XCTAssertNil(env["AWS_SECRET_ACCESS_KEY"])
         XCTAssertNil(env["CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS"])
+        XCTAssertEqual(EmbeddedDaemon.daemonArguments(socket: "/tmp/jev-test-never-opened.sock"), [
+            "serve", "--embedded", "--host-connections-only", "--parent-liveness-stdio",
+            "--no-permissions-gate", "--socket", "/tmp/jev-test-never-opened.sock",
+            "--host-bundle-id", CuaDependency.hostBundleID,
+            "--permission-mode", "standard",
+            "--grant", "existing-profile",
+        ])
     }
 
     // MARK: - Window-change tail knobs

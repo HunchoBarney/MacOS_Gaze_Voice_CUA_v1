@@ -129,13 +129,15 @@ actor CuaDispatchPacing {
     }
 }
 
-/// One persistent MCP stdio transport — a `cua-driver mcp --embedded` proxy
-/// bound to the shared daemon socket vended by CuaDaemonHost. Sessions and
-/// driver grants are keyed per (session, transport, resource), so a caller
-/// owns one connection for its session's lifetime. Never reconnects or
-/// retries a mutation; a dead transport is replaced wholesale by the caller.
+/// One persistent host connection: a direct stream on the shared daemon
+/// socket vended by CuaDaemonHost, upgraded to MCP with the daemon's
+/// `mcp_envelope_stream` request. The daemon runs with
+/// `--host-connections-only`, so only this process — its parent — is
+/// admitted; no proxy child sits in between. Sessions and driver grants
+/// are keyed per (session, transport, resource), so a caller owns one
+/// connection for its session's lifetime. Never reconnects or retries a
+/// mutation; a dead transport is replaced wholesale by the caller.
 actor CuaConnection {
-    private let executable: URL
     private let onToolCall: (@Sendable (String, Int?) -> Void)?
     /// Fired once per refusal storm: a read-only call that burns its whole
     /// retry budget on `tool_invocation_failed` means the daemon itself is
@@ -145,7 +147,7 @@ actor CuaConnection {
     /// the shared daemon out of this connection's failure handling.
     /// `nonisolated let` — immutable since init; tests read it directly.
     nonisolated let onSickDaemon: (@Sendable (String) -> Void)?
-    private var process: Process?
+    private var socketFD: Int32?
     private var input: FileHandle?
     private var output: FileHandle?
     private var reader: Task<Void, Never>?
@@ -157,16 +159,15 @@ actor CuaConnection {
     private var initialized = false
     private(set) var dispatchPacing = CuaDispatchPacing()
     private var sessionEpochs = CuaSessionEpochs()
-    /// The daemon socket this proxy is bound to — the sick-daemon token.
+    /// The daemon socket this connection is bound to — the sick-daemon token.
     private(set) var boundSocket: String?
     /// A wedged daemon can hold the socket open and never answer — two
     /// consecutive timeouts mark the transport dead rather than letting
     /// every later call burn a full timeout forever.
     private var consecutiveTimeouts = 0
     private(set) var serverVersion: String?
-    /// A connection that completed `initialize` and whose proxy process is
-    /// still alive.
-    var connected: Bool { initialized && process?.isRunning == true }
+    /// A connection that completed `initialize` and whose stream is still open.
+    var connected: Bool { initialized && socketFD != nil }
 
     /// The shared host's token-scoped re-mint — the sick-daemon hook's
     /// intended consumer. Token-scoped, so a stale fault aimed at a
@@ -177,14 +178,12 @@ actor CuaConnection {
         Task { await CuaDaemonHost.shared.invalidate(matching: socket) }
     }
 
-    init(executable: URL = CuaDependency.executable,
-         onToolCall: (@Sendable (String, Int?) -> Void)? = nil,
+    init(onToolCall: (@Sendable (String, Int?) -> Void)? = nil,
          onSickDaemon: (@Sendable (String) -> Void)? = CuaConnection.defaultSickDaemonHook) {
-        // A write to a just-dead proxy raises SIGPIPE, whose default
+        // A write to a just-closed stream raises SIGPIPE, whose default
         // disposition kills the process — ignore it once so EPIPE surfaces
         // as a thrown error instead of an app crash.
         signal(SIGPIPE, SIG_IGN)
-        self.executable = executable
         self.onToolCall = onToolCall
         self.onSickDaemon = onSickDaemon
     }
@@ -192,65 +191,95 @@ actor CuaConnection {
     deinit {
         reader?.cancel()
         try? input?.close()
-        if process?.isRunning == true { process?.terminate() }
+        if let socketFD { Darwin.shutdown(socketFD, SHUT_RDWR) }
     }
 
-    /// Spawns `mcp --embedded --socket <socket>` and runs the MCP handshake.
-    /// The proxy is the same pinned binary as the daemon — verified here even
-    /// though the daemon was verified by the host. One-shot: a connected or
-    /// dead connection is never restarted in place; make a new one.
+    /// Opens the stream and runs the MCP handshake. One-shot: a connected
+    /// or dead connection is never restarted in place; make a new one.
     func connect(socket: String) async throws {
-        guard process == nil, !initialized else {
+        guard socketFD == nil, !initialized else {
             throw DriverConnectionError.remote("Cua connection already started.")
         }
-        let expected = executable == CuaDependency.bundledExecutable
-            ? (CuaDependency.bundledSHA256 ?? CuaDependency.executableSHA256)
-            : CuaDependency.executableSHA256
-        try CuaDependency.verify(executable, expectedSHA256: expected)
         boundSocket = socket
         do {
-            try await startProxy(socket: socket)
+            try await openStream(socket: socket)
         } catch {
             boundSocket = nil
             throw error
         }
     }
 
-    static func makeProxyProcess(
-        executable: URL, socket: String, hostEnvironment: [String: String]
-    ) -> Process {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = ["mcp", "--embedded", "--socket", socket,
-                             "--host-bundle-id", CuaDependency.hostBundleID]
-        process.environment = EmbeddedDaemon.daemonEnvironment(host: hostEnvironment)
-        return process
+    /// The daemon's stream upgrade: this one line, one acknowledgement
+    /// line back, then plain MCP JSON-RPC lines on the same socket.
+    static let envelopeStreamRequest = Data(#"{"method":"mcp_envelope_stream"}"#.utf8) + [10]
+
+    static func acceptsEnvelopeAcknowledgement(_ line: Data) -> Bool {
+        guard let ack = try? JSONDecoder().decode(JSONValue.self, from: line) else { return false }
+        return ack["ok"]?.bool == true && ack["result"]?["mcp_envelope_stream"]?.integer == 1
     }
 
-    private func startProxy(socket: String) async throws {
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw DriverConnectionError.unavailable }
-        let process = Self.makeProxyProcess(
-            executable: executable, socket: socket,
-            hostEnvironment: ProcessInfo.processInfo.environment
-        )
-        let stdin = Pipe(), stdout = Pipe()
+    /// Connects to the daemon socket and runs the envelope upgrade with a
+    /// bounded blocking read. A daemon that refuses this peer closes the
+    /// connection unread, which surfaces here as `closed`.
+    static func openEnvelopeStream(socket path: String, timeout: Int = 4) throws -> Int32 {
+        var address = sockaddr_un()
+        let pathBytes = Array(path.utf8)
+        guard pathBytes.count < MemoryLayout.size(ofValue: address.sun_path) else {
+            throw DriverConnectionError.unavailable
+        }
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: pathBytes) }
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw DriverConnectionError.unavailable }
+        var opened = false
+        defer { if !opened { Darwin.close(fd) } }
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        let status = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard status == 0 else { throw DriverConnectionError.unavailable }
+        var limit = timeval(tv_sec: timeout, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
+        let written = envelopeStreamRequest.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+        guard written == envelopeStreamRequest.count else { throw DriverConnectionError.closed }
+        var line = Data()
+        var byte: UInt8 = 0
+        while true {
+            guard Darwin.read(fd, &byte, 1) == 1 else { throw DriverConnectionError.closed }
+            if byte == 10 { break }
+            line.append(byte)
+            guard line.count <= 16_384 else { throw DriverConnectionError.malformed }
+        }
+        guard acceptsEnvelopeAcknowledgement(line) else {
+            throw DriverConnectionError.refused("The Cua daemon did not open an MCP stream.")
+        }
+        var unlimited = timeval()
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &unlimited, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &unlimited, socklen_t(MemoryLayout<timeval>.size))
+        opened = true
+        return fd
+    }
+
+    private func openStream(socket: String) async throws {
+        let fd = try await Task.detached { try Self.openEnvelopeStream(socket: socket) }.value
+        let writeFD = dup(fd)
+        guard writeFD >= 0 else {
+            Darwin.close(fd)
+            throw DriverConnectionError.unavailable
+        }
         let token = UUID()
         generation = token
         dispatchPacing = CuaDispatchPacing()
         frames = MCPFrames()
         consecutiveTimeouts = 0
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        // Driver logs may contain observed content. Do not persist them as product history.
-        process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { [weak self] _ in
-            Task { await self?.connectionEnded(token) }
-        }
-        try process.run()
-        self.process = process
-        input = stdin.fileHandleForWriting
-        output = stdout.fileHandleForReading
-        let handle = stdout.fileHandleForReading
+        socketFD = fd
+        input = FileHandle(fileDescriptor: writeFD, closeOnDealloc: true)
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        output = handle
         reader = Task.detached { [weak self] in
             while !Task.isCancelled {
                 let bytes = handle.availableData
@@ -427,14 +456,14 @@ actor CuaConnection {
                     // A READ that exhausted its retries on daemon refusals is
                     // a sick-daemon storm — four consecutive
                     // tool_invocation_failed answers, not a slow transport:
-                    // a fresh proxy on the same daemon would refuse
+                    // a fresh connection to the same daemon would refuse
                     // identically. Kill this transport and tell the host to
-                    // recycle the daemon generation this proxy was bound to.
+                    // recycle the daemon generation this connection was bound to.
                     // A single refusal on a mutation is a real tool error,
-                    // never a storm. Only refusals count: a wedged proxy or
+                    // never a storm. Only refusals count: a wedged stream or
                     // slow daemon exhausts on .timedOut/.closed — noteTimeout
                     // already tore this transport down, and recycling the
-                    // shared daemon for that would kill healthy proxies.
+                    // shared daemon for that would kill healthy connections.
                     if Self.isReadOnly(name, arguments: arguments),
                        case .toolRefused(_, let code, _) = error,
                        code == "tool_invocation_failed", let socket = boundSocket {
@@ -544,7 +573,7 @@ actor CuaConnection {
 
     private func request(_ method: String, params: JSONValue, timeout: TimeInterval = 30) async throws -> JSONValue {
         try Task.checkCancellation()
-        guard process?.isRunning == true else { throw DriverConnectionError.closed }
+        guard socketFD != nil else { throw DriverConnectionError.closed }
         nextID += 1
         let id = nextID
         return try await withTaskCancellationHandler {
@@ -633,7 +662,7 @@ actor CuaConnection {
 
     private func cancel(_ id: Int, error: Error) {
         guard pending[id] != nil else { return }
-        // The stdio proxy drops notifications — this documents intent only;
+        // The daemon drops this notification — this documents intent only;
         // the daemon still runs the dispatched action to completion.
         Task { [weak self] in
             try? await self?.write(.object(["jsonrpc": .string("2.0"), "method": .string("notifications/cancelled"),
@@ -661,7 +690,7 @@ actor CuaConnection {
         for id in Array(pending.keys) { complete(id, result: .failure(error)) }
         reader?.cancel(); reader = nil
         // Close behind the write tail: closing a FileHandle mid-write can
-        // raise an ObjC exception, and the child exit below fails any
+        // raise an ObjC exception, and the shutdown below fails any
         // blocked write so the deferred close always runs.
         if let input {
             let prior = writeTail
@@ -669,11 +698,10 @@ actor CuaConnection {
             self.input = nil
             writeTail = nil
         }
-        if process?.isRunning == true { process?.terminate() }
-        process?.terminationHandler = nil
-        process = nil
         // Closing a FileHandle while another thread reads it can raise an ObjC exception.
-        // Child exit closes the write side, unblocking the reader which owns its handle.
+        // Shutdown ends both directions, unblocking the reader, which owns its handle.
+        if let socketFD { Darwin.shutdown(socketFD, SHUT_RDWR) }
+        socketFD = nil
         output = nil
         boundSocket = nil
     }

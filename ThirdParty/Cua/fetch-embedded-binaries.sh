@@ -33,25 +33,43 @@ fetch() { # url dest
   curl -fL --retry 3 --retry-delay 2 -o "$2" "$1"
 }
 
-# --- cua-driver: the manifest-pinned release build, embedded so TCC grants
-# attribute to Jarvis instead of the standalone CuaDriver app. The
-# installed app copy satisfies the pin offline; otherwise fetch the release
-# tarball and extract the signed app-bundle binary (the bare top-level
-# tarball member is a different build and does NOT match the pin).
+# --- cua-driver: upstream source at the pinned commit plus our reviewed
+# patch (host-connections-only.patch), built here and pinned by the
+# artefact's own SHA-256. The build is reproducible: a locked dependency
+# graph, the toolchain upstream pins in rust-toolchain.toml, a fixed git
+# revision, every machine-specific path remapped, and one fixed build
+# directory: Cargo hashes the absolute path of the path dependencies under
+# libs/cua/crates into their crate metadata, so a build anywhere else gets a
+# different binary. A cached build that
+# matches the pin is reused. Needs rustup (it installs the pinned
+# toolchain on first use) and network for the clone and crates.
 DRIVER_SHA="$(field cua-driver sha256)"
 DRIVER_OUT="$DEST/cua-driver"
 if ! { [ -f "$DRIVER_OUT" ] && [ "$(sha256 "$DRIVER_OUT")" = "$DRIVER_SHA" ]; }; then
-  INSTALLED="$(field cua-driver installed)"
-  if [ -n "$INSTALLED" ] && [ -f "$INSTALLED" ] && [ "$(sha256 "$INSTALLED")" = "$DRIVER_SHA" ]; then
-    cp "$INSTALLED" "$DRIVER_OUT"
-  else
-    TARBALL="$CACHE/$(basename "$(field cua-driver url)")"
-    fetch "$(field cua-driver url)" "$TARBALL"
-    verify "$TARBALL" "$(field cua-driver tarball_sha256)" "cua-driver tarball"
-    DRIVER_EXTRACT="$(mktemp -d "$CACHE/cua-driver.XXXXXX")"
-    tar -xzf "$TARBALL" -C "$DRIVER_EXTRACT" "$(field cua-driver member)"
-    cp "$DRIVER_EXTRACT/$(field cua-driver member)" "$DRIVER_OUT"
+  COMMIT="$(field cua-driver commit)"
+  PATCH="$ROOT/$(field cua-driver patch)"
+  verify "$PATCH" "$(field cua-driver patch_sha256)" "cua-driver patch"
+  SRC="/private/tmp/jarvis-cua-driver-$COMMIT"
+  if [ ! -d "$SRC/.git" ]; then
+    rm -rf "$SRC"
+    git clone --quiet --filter=blob:none --no-checkout --depth 1 \
+      --branch "$(field cua-driver tag)" "$(field cua-driver repository)" "$SRC"
+    git -C "$SRC" sparse-checkout set --no-cone /libs/cua-driver/rust/ \
+      /libs/cua/Cargo.toml /libs/cua/crates/cua-agent-setup/ /libs/cua/crates/cua-home/ /libs/cua/crates/cua-telemetry/ \
+      /libs/cua/skills/ /libs/images/sandbox-images.json /libs/cua/crates/cua-teleport/src/ux/targets.json
   fi
+  [ "$(git -C "$SRC" rev-parse HEAD)" = "$COMMIT" ] || {
+    echo "cua-driver $(field cua-driver tag) is not the pinned commit $COMMIT. Refusing to build it." >&2
+    exit 1
+  }
+  git -C "$SRC" checkout --quiet --force HEAD
+  git -C "$SRC" apply "$PATCH"
+  RUST="$SRC/libs/cua-driver/rust"
+  TARGET="$SRC-target"
+  ( cd "$RUST" && CARGO_TARGET_DIR="$TARGET" CUA_DRIVER_GIT_SHA="$COMMIT" \
+      RUSTFLAGS="--remap-path-prefix=$SRC=/cua --remap-path-prefix=$TARGET=/target --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$HOME/.rustup=/rustup" \
+      cargo build --release --locked -p cua-driver )
+  cp "$TARGET/release/cua-driver" "$DRIVER_OUT"
 fi
 verify "$DRIVER_OUT" "$DRIVER_SHA" "cua-driver"
 chmod +x "$DRIVER_OUT"

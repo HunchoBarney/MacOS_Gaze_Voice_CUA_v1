@@ -15,6 +15,9 @@ const upstream = createServer((request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/realtime/client_secrets") {
       response.end(JSON.stringify({ value: "ek_smoke", expires_at: 1_900_000_000 }));
+    } else if (request.url === "/v1/live/sessions") {
+      response.statusCode = 201;
+      response.end(JSON.stringify({ session: { id: "live_smoke" }, transport: { type: "webrtc", sdp: "v=0 answer" } }));
     } else if (request.url === "/v1/responses") {
       response.end(JSON.stringify({ output: [], usage: { input_tokens: 10, output_tokens: 10 } }));
     } else {
@@ -88,6 +91,9 @@ try {
   assert.equal((await request("/v1/realtime/client_secret", { token })).status, 200);
   assert.equal((await request("/v1/realtime/client_secret", { token })).json.error.code, "rate_limited");
 
+  const live = await request("/v1/live/sessions", { token, body: { sdp: "v=0 offer" } });
+  assert.deepEqual(live, { status: 201, json: { session: { id: "live_smoke" }, transport: { type: "webrtc", sdp: "v=0 answer" } } });
+
   assert.equal((await request("/v1/responses", { token, body: { model: "gpt-6.1-terra", input: [] } })).status, 200);
   assert.equal((await request("/v1/jev", { token, body: { model: "jev-1.14.0", state: {}, questions: {} } })).status, 200);
   assert.equal((await request("/v1/jev", { token: "jv1_" + "A".repeat(43), body: {} })).status, 401);
@@ -102,10 +108,11 @@ try {
   assert.equal((await request("/v1/installs")).json.error.code, "paused");
 
   assert.deepEqual(seen.map((call) => call.url), [
-    "/v1/realtime/client_secrets", "/v1/realtime/client_secrets", "/v1/responses", "/v1/systemone",
+    "/v1/realtime/client_secrets", "/v1/realtime/client_secrets", "/v1/live/sessions", "/v1/responses", "/v1/systemone",
   ]);
   assert.equal(seen[0].authorization, "Bearer sk-smoke-fixture");
-  assert.equal(seen[3].authorization, "Bearer ts-smoke-fixture");
+  assert.equal(seen[2].authorization, "Bearer sk-smoke-fixture");
+  assert.equal(seen[4].authorization, "Bearer ts-smoke-fixture");
   console.log("smoke passed: wrangler dev, Durable Object ledger, fake upstream, fails closed without secrets");
 } finally {
   for (const server of servers) {
