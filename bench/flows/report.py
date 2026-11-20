@@ -21,6 +21,7 @@ from klm import baselines  # noqa: E402
 
 FLOWS = ["open_app", "click_named", "show_names", "lost_window", "switch_desktop"]
 CITED_TRANSCRIPT_MS = [440.0] * 4 + [1600.0]
+WPM = 150
 
 
 def pct(values, p):
@@ -81,6 +82,26 @@ def main(argv):
             print(f"| {flow} | {klm[flow]['adult_s']:.2f} | {klm[flow]['older_s']:.2f} | "
                   f"{fmt(pct(zero, .5))} / {fmt(pct(zero, .9))} | {fmt(pct(modeled, .5))} / {fmt(pct(modeled, .9))} | "
                   f"{fmt(pct(total, .5))} / {fmt(pct(total, .9))} | {', '.join(typical) or 'none'} |")
+        print()
+    speech = [r for r in rows if r.get("kind") == "speech"]
+    replies = [r for r in rows if r.get("kind") == "reply"]
+    if speech or replies:
+        print(f"## Spoken replies (words at {WPM} wpm)\n")
+        print("| Label | Flow or reply | Spoken words p50 | Spoken s p50 | First spoken p50 | What is said |")
+        print("|---|---|---|---|---|---|")
+        for label in dict.fromkeys(r["label"] for r in speech + replies):
+            for flow in FLOWS:
+                runs = [r for r in speech if r["label"] == label and r["flow"] == flow]
+                if not runs:
+                    continue
+                first = [r["first_spoken_ms"] for r in runs if "first_spoken_ms" in r]
+                said = max((" / ".join(r["spoken_lines"]) for r in runs), key=[" / ".join(r["spoken_lines"]) for r in runs].count)
+                print(f"| {label} | {flow} | {pct([r['spoken_words'] for r in runs], .5)} | "
+                      f"{pct([r['spoken_s'] for r in runs], .5):.2f} | {fmt(pct(first, .5))} s | {said or '(silent)'} |")
+            for r in replies:
+                if r["label"] == label:
+                    print(f"| {label} | {r['reply']} | {r['spoken_words']} | {r['spoken_s']:.2f} | – | "
+                          f"{' / '.join(r['spoken_lines']) or '(silent)'} |")
         print()
     hands = [r for r in realtime if r.get("mode") == "handsfree"]
     if hands:

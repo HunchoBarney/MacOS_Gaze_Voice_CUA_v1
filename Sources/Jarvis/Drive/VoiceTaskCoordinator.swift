@@ -1573,10 +1573,11 @@ final class VoiceTaskCoordinator {
         if keepScrolling, result.status == .done, result.dispatchedEffect, work.verifiedScroll != nil { return }
         let (outcome, say) = Self.describe(result, request: work.request)
         feed.add(.outcome, say)
+        let spoken = Self.spokenOutcome(outcome, say: say)
         taskEventSink(work.captureID,
                       VoiceToolResult(kind: VoiceToolResult.Kind.taskOutcome, status: VoiceToolResult.Status.ok,
-                                      say: VoiceToolResult.spoken(say, words: 30)).encoded(),
-                      true)
+                                      say: spoken ?? say).encoded(),
+                      spoken != nil)
         finish(work, outcome, say: say)
     }
 
@@ -1787,6 +1788,17 @@ final class VoiceTaskCoordinator {
         return !result.dispatchedEffect
     }
 
+    static let doneLine = "Done."
+
+    /// What a settled task says out loud: nothing for a clean success,
+    /// which the Glass chime and the press glow already mark, and the
+    /// headline of its line otherwise. A caveat or failure must still make
+    /// sense heard alone. nil = silent.
+    static func spokenOutcome(_ outcome: Work.Outcome, say: String) -> String? {
+        if case .done = outcome, say == doneLine { return nil }
+        return OutcomeWording.headline(say)
+    }
+
     /// DriveResult → (outcome, spoken line). `.done` is only reached with
     /// a confirmed effect behind it — the loop enforces that invariant.
     /// When the settle's own outcome line (the history tail the executor
@@ -1804,7 +1816,7 @@ final class VoiceTaskCoordinator {
                    tail.localizedCaseInsensitiveContains($0) }) {
                 return (.done, tail)
             }
-            return (.done, "Done.")
+            return (.done, Self.doneLine)
         case .alreadySatisfied:
             return (.alreadyDone, "That's already done.")
         case .blocked(let why), .blockedByConsent(let why):
@@ -2814,7 +2826,8 @@ final class VoiceTaskCoordinator {
             "that", "these", "those", "there", "here", "if", "but", "not", "no",
             "yes", "to", "for", "in", "on", "at", "of", "as", "by", "or", "and",
             "so", "do", "does", "did", "have", "has", "had", "shall", "should",
-            "may", "might", "must", "some", "any", "all"]
+            "may", "might", "must", "some", "any", "all",
+            "next", "previous", "last", "first", "new"]
         guard !nonActions.contains(w) else { return nil }
         let doubles: Set<String> = ["run", "stop", "quit", "set", "cut", "hit",
             "put", "shut", "sit", "win", "plan", "drag", "drop", "grab", "tap",
