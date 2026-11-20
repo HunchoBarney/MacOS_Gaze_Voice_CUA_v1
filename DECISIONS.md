@@ -2,6 +2,15 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Local CI queues in the build lane
+
+- Local CI no longer skips a tick when the lane is busy. Each head's
+  \`make test\` takes a high-priority ticket in \`~/.capy/work/lane/lane.sh\`
+  and runs in local CI's own checkout (\`LANE_NO_MIRROR=1\`), so it goes
+  ahead of focused jobs without preempting the one running. One local-ci job
+  still runs at a time. A lane that never frees up posts \`error\`, which
+  local CI retries an hour later, not \`failure\`.
+
 ## 2026-11-20 — Standby opens a session on the wake word
 
 - Standby keeps the voice lane's microphone open, as Hold fn already does,
