@@ -7,8 +7,8 @@
 #   JARVIS_E2E_APP      the signed Jarvis.app to test (default ~/jarvis-local/Jarvis.app)
 #   JARVIS_E2E_AUDIO    speakers (default) plays the lines aloud into the built-in
 #                       microphone; blackhole routes them through BlackHole 2ch
-#   JARVIS_E2E_ONLY     run one flow: first-run, show-names-click, screen-question
-#                       or wake-word
+#   JARVIS_E2E_ONLY     run one flow: first-run, show-names-click, screen-question,
+#                       wake-word or stop-scroll
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 bundle=com.karanvirkang.jarvis
@@ -26,8 +26,8 @@ die() { echo "e2e: $*" >&2; exit 2; }
     || die "$app is not $bundle"
 codesign --verify --strict "$app" || die "$app fails codesign --verify"
 case "$only" in
-"" | first-run | show-names-click | screen-question | wake-word) ;;
-*) die "JARVIS_E2E_ONLY is first-run, show-names-click, screen-question or wake-word" ;;
+"" | first-run | show-names-click | screen-question | wake-word | stop-scroll) ;;
+*) die "JARVIS_E2E_ONLY is first-run, show-names-click, screen-question, wake-word or stop-scroll" ;;
 esac
 case "$audio" in
 speakers)
@@ -133,5 +133,5 @@ flow() { # flow <target> <name>...
     node_modules/.bin/e2e run --target "$target" "${files[@]}" || failed=1
 }
 flow first-run first-run
-flow jarvis show-names-click screen-question wake-word
+flow jarvis show-names-click screen-question wake-word stop-scroll
 exit "$failed"
