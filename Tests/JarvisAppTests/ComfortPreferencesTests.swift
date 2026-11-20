@@ -267,7 +267,7 @@ final class ComfortPreferencesTests: XCTestCase {
         defer { client.teardown() }
         let failures = LockedBox(0)
         client.onEvent = { events in
-            for case .failure(_) = events { failures.set(failures.value + 1) }
+            for case .failure in events { failures.set(failures.value + 1) }
         }
         try await client.connect(apiKey: "fixture-not-a-real-key")
         await wire.setRejectStyle(true, code: "session_update_rejected")
@@ -293,7 +293,8 @@ final class ComfortPreferencesTests: XCTestCase {
                                          "response": .object(["id": .string("resp-1"), "status": .string("completed")])]
         try await wire.inject(done)
         await waitFor { await wire.updates().count == 3 }
-        let retry = try XCTUnwrap(await wire.updates().last)
+        let afterRetry = await wire.updates()
+        let retry = try XCTUnwrap(afterRetry.last)
         XCTAssertEqual(retry["session"]?["audio"]?["output"]?["speed"], .number(0.85))
         XCTAssertEqual(retry["session"]?["instructions"]?.string, RealtimeVoiceClient.instructions(for: .shorter))
 
