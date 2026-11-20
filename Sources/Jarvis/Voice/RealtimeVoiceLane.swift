@@ -1530,6 +1530,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             Task { @MainActor in
                 guard let self, self.enabled, self.preparationID == token else { return }
                 if await self.rebuildConversationInput(token: token) { return }
+                guard self.enabled, self.preparationID == token else { return }
                 let reason = "Microphone configuration changed. Preparing a fresh input is required."
                 if let active = self.active { self.onEvent?(active.id, .failure(reason)) }
                 await self.suspend()
