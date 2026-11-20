@@ -20,6 +20,7 @@
 #   JARVIS_LANE_TIMEOUT   seconds to wait for the lane (default 3600)
 #   JARVIS_LANE_HOME      lane checkout and lock (default ~/.capy/work/build-lane)
 #   LANE_STATE            queue directory (default ~/.capy/work/lane/queue)
+#   LANE_KILL_GRACE       seconds between TERM and KILL once this script is gone (default 10)
 set -uo pipefail
 
 # Bash reads a script as it runs, so a waiting job runs from a private copy
@@ -186,8 +187,24 @@ fi
 set -m
 "$@" &
 CHILD=$!
+# A guardian in its own group outlives a SIGKILL to this script: once this
+# pid is gone it sends the job TERM, then KILL after LANE_KILL_GRACE seconds.
+bash -c '
+    while kill -0 -- "-$2" 2>/dev/null; do
+        if ! kill -0 "$1" 2>/dev/null; then
+            kill -TERM -- "-$2" 2>/dev/null
+            i=0
+            while kill -0 -- "-$2" 2>/dev/null && [ "$i" -lt $(($3 * 10)) ]; do sleep 0.1; i=$((i + 1)); done
+            kill -KILL -- "-$2" 2>/dev/null
+            exit 0
+        fi
+        sleep 0.5
+    done' lane-guard "$$" "$CHILD" "${LANE_KILL_GRACE:-10}" </dev/null >/dev/null 2>&1 &
+GUARD=$!
+disown "$GUARD"
 set +m
 wait "$CHILD"
 code=$?
 CHILD=
+kill -KILL -- "-$GUARD" 2>/dev/null
 exit "$code"

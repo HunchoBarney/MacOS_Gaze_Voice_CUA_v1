@@ -113,5 +113,24 @@ JARVIS_LANE_TIMEOUT=5 "$L" bash -c 'job U 0.1' >/dev/null
 check "reused pid's ticket and lock reclaimed within 2 s" 'grep -q "end U" "$LOG" && [ $(( $(date +%s) - start )) -le 2 ]'
 kill $OTHER
 
+# 12. SIGKILL to lane.sh still stops a job that ignores TERM
+LANE_KILL_GRACE=1 "$L" bash -c 'trap "" TERM; sleep 41; : m41' >/dev/null & K=$!; sleep 1
+check "guardian runs beside the job" 'pgrep -f "lane-guard $K " >/dev/null'
+kill -9 $K; wait $K 2>/dev/null; sleep 3
+check "job group gone after SIGKILL to lane.sh" '! pgrep -f "m41" >/dev/null && ! pgrep -fx "sleep 41" >/dev/null'
+check "guardian gone after SIGKILL to lane.sh" '! pgrep -f "lane-guard $K " >/dev/null'
+
+# 13. TERM to lane.sh escalates to KILL for a job that traps TERM
+LANE_KILL_GRACE=2 "$L" bash -c 'trap : TERM; while :; do sleep 0.2; done; : m43' >/dev/null & K=$!; sleep 1
+kill -TERM $K; wait $K 2>/dev/null; sleep 1
+check "job that traps TERM survives the grace" 'pgrep -f "m43" >/dev/null'
+sleep 4
+check "job that traps TERM killed after the grace" '! pgrep -f "m43" >/dev/null'
+pkill -9 -f "m41|m43"
+
+# 14. A normal exit leaves no guardian behind
+"$L" bash -c 'sleep 0.5' >/dev/null & N=$!; wait $N; sleep 0.3
+check "no guardian after a normal exit" '! pgrep -f "lane-guard $N " >/dev/null'
+
 rm -rf "$T"
 exit $fail
