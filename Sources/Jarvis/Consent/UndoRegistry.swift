@@ -164,15 +164,11 @@ enum UndoRegistry {
     }
 
     /// Mail's Undo Send delay in seconds (Mail ▸ Settings ▸ Composing),
-    /// stored as `UndoSendDelayTime`. Mail ships with 10 s, so a readable
-    /// Mail domain without the key is 10. An unreadable or empty domain is
-    /// unknown, and a send then asks.
+    /// read from `UndoSendDelayTime`. The key name comes from Mail's
+    /// binary and isn't documented, so only a value Mail actually wrote
+    /// counts: a missing or unreadable key is unknown, and a send asks.
     static func mailUndoSendDelay() -> TimeInterval? {
-        let domain = mail as CFString
-        guard let keys = CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String],
-              !keys.isEmpty else { return nil }
-        guard let value = CFPreferencesCopyAppValue("UndoSendDelayTime" as CFString, domain) else { return 10 }
-        return (value as? NSNumber)?.doubleValue
+        (CFPreferencesCopyAppValue("UndoSendDelayTime" as CFString, mail as CFString) as? NSNumber)?.doubleValue
     }
 }
 

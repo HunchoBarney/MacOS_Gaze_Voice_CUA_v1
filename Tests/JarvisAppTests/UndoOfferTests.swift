@@ -97,6 +97,55 @@ final class UndoOfferTests: XCTestCase {
         }
     }
 
+    /// Software Update and the Apple menu's confirm dialogs: nothing takes
+    /// a restart back, so these always ask and never get an undo route.
+    func testRestartsAlwaysAskAndAreNeverUndoable() {
+        for label in ["Update Now", "Upgrade Now", "Restart Now", "Install and Restart", "Restart", "Shut Down"] {
+            XCTAssertEqual(Consequence.classify(label), .restart, label)
+            XCTAssertEqual(CuaPolicy.decide(tool: "click", args: [:], elementText: label, standingGrant: true),
+                           .askFirst(.restart), "\(label) asks even under the standing grant")
+            for bundle in ["com.apple.finder", "com.apple.mail", "com.apple.Notes", "com.apple.systempreferences"] {
+                XCTAssertNil(route(label, in: bundle), "\(label) in \(bundle)")
+            }
+            for passed in [UndoRegistry.Route(kind: .putBack, deadline: nil), UndoRegistry.Route(kind: .unsend, deadline: 7)] {
+                XCTAssertEqual(CuaPolicy.decide(tool: "click", args: [:], elementText: label, standingGrant: true,
+                                                undo: passed), .askFirst(.restart), label)
+            }
+        }
+        XCTAssertEqual(Consequence.classify("Log Out"), .account, "Log Out still asks, as an account change")
+        XCTAssertFalse(Consequence.covers(goal: "just do it", control: "Update Now"))
+        XCTAssertFalse(Consequence.covers(goal: "restart Safari", control: "Restart"),
+                       "a restart button needs its exact name after a press verb")
+        XCTAssertTrue(Consequence.covers(goal: "click Restart", control: "Restart"))
+        XCTAssertTrue(Consequence.restart.question(target: "Update Now").contains("restarts or shuts down"))
+    }
+
+    func testRestartAsksInTheLoop() async throws {
+        let script = Script([copyItem, trashItem])
+        let loop = await makeLoop(script, offers: UndoOffers(), bundle: "com.apple.systempreferences")
+        await loop.bindSpokenGoal("update my Mac, just do it")
+        var confirmed = false
+        _ = try await loop.dispatch("click", target, elementText: "Update Now", denied: [], confirmed: &confirmed)
+        XCTAssertEqual(script.asks.value, 1)
+    }
+
+    /// Mail's Format button is formatting, not a deletion (JARA-36).
+    func testFormatIsNotADelete() {
+        XCTAssertNil(Consequence.classify("Format"))
+        XCTAssertNotNil(CuaPolicy.neverReason(text: "Format Disk"), "formatting a disk stays on the never list")
+    }
+
+    /// A "show me how" goal asks to be taught: when Jarvis does a step after
+    /// all, a consequential press asks first (JARA-36, #559).
+    func testAShowMeHowGoalCoversNoPress() {
+        for goal in ["show me how to send Linda a photo", "how do I send Linda a photo",
+                     "walk me through sending Linda a photo", "teach me to delete that email"] {
+            XCTAssertFalse(Consequence.covers(goal: goal, control: "Send"), goal)
+            XCTAssertFalse(Consequence.covers(goal: goal, control: "Delete"), goal)
+        }
+        XCTAssertTrue(Consequence.covers(goal: "send Linda a photo", control: "Send"))
+    }
+
     func testNeverListAndPasswordsStayRefused() {
         let trash = UndoRegistry.Route(kind: .putBack, deadline: nil)
         for label in ["Empty Trash", "Delete Permanently", "Download AnyDesk", "Buy Gift Card"] {

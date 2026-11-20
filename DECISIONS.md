@@ -15,9 +15,19 @@ Settled choices, newest first. Change one only with a new entry here.
   dependency). An offer stands only when the press changed that item, and
   a spoken "undo" invokes that exact item in that app, and refuses if the
   app shows anything else since.
-- Mail's delay is `UndoSendDelayTime` in the `com.apple.mail` domain. A
-  readable domain without the key is Mail's default 10 s; an unreadable
-  one, or Undo Send off, keeps the question.
+- Mail's delay is read from `UndoSendDelayTime` in the `com.apple.mail`
+  domain, a name taken from Mail's binary. It fails closed: a send asks
+  unless Mail has written that key with at least 7 s (4 s of offer after
+  3 s to say it). Mail's shipped default, with no key written, still asks.
+- Update Now, Upgrade Now, Restart Now, Install and Restart, Restart and
+  Shut Down are a `.restart` consequence. Nothing takes a restart back,
+  so Jarvis always asks when it chose the press, and the person's words
+  cover it only as "click Restart". "Format" is no longer a delete phrase
+  (Format Disk stays on the never list), and a "show me how" or "how do I"
+  goal covers no press.
+- Known limit: Mail's undo item reads only "Undo Delete". If the person
+  deletes another message inside the window, a spoken "undo" reverses
+  their newer delete; Accessibility can't tell the two apart.
 - Still asking: Pay, Call, Allow and other permission prompts, account
   changes, unnamed presses, permanent or wholesale deletes, sends outside
   Mail, and any press with nobody to hear the offer. The never list and the
