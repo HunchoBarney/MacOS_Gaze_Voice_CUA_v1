@@ -89,20 +89,22 @@ final class HostedCredentials: @unchecked Sendable {
 
     /// A fresh Realtime client secret. A token the service no longer knows
     /// (its ledger was reset) is dropped and this Mac registers again once;
-    /// a revoked one stays revoked.
+    /// a revoked one stays revoked. Only the token that failed is dropped,
+    /// so a concurrent caller's fresh registration survives.
     func realtimeCredential() async throws -> RealtimeCredential {
+        let token = try await installToken()
         do {
-            return try await mintRealtimeSecret()
+            return try await mintRealtimeSecret(token: token)
         } catch let failure as Failure where failure.code == "unknown_install" {
-            try? tokenStore.delete()
-            return try await mintRealtimeSecret()
+            if storedToken == token { try? tokenStore.delete() }
+            return try await mintRealtimeSecret(token: try await installToken())
         }
     }
 
-    private func mintRealtimeSecret() async throws -> RealtimeCredential {
+    private func mintRealtimeSecret(token: String) async throws -> RealtimeCredential {
         var request = URLRequest(url: baseURL.appending(path: "v1/realtime/client_secret"), timeoutInterval: 10)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(try await installToken())", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let reply = try await send(request)
         guard let value = reply["value"]?.string, !value.isEmpty,
               let model = reply["model"]?.string, !model.isEmpty else { throw Failure.malformed }

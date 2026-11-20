@@ -136,6 +136,22 @@ final class HostedCredentialsTests: XCTestCase {
         XCTAssertEqual(paths, ["/base/v1/realtime/client_secret", "/base/v1/installs", "/base/v1/realtime/client_secret"])
     }
 
+    func testAStaleFailureKeepsAFresherRegistration() async throws {
+        let service = FakeService(), tokens = TokenBox("jv1_forgotten")
+        await service.setRealtimeReplies([
+            (401, #"{"error":{"code":"unknown_install","message":"This install isn't registered."}}"#),
+            (401, #"{"error":{"code":"unknown_install","message":"This install isn't registered."}}"#),
+        ])
+        let credentials = hosted(service, tokens: tokens)
+        async let first = credentials.realtimeCredential()
+        async let second = credentials.realtimeCredential()
+        let keys = try await [first, second].map(\.key)
+        XCTAssertEqual(keys, ["ek_fixture", "ek_fixture"])
+        XCTAssertEqual(try tokens.read(), "jv1_token1")
+        let registrations = await service.seen.filter { $0.path == "/base/v1/installs" }.count
+        XCTAssertEqual(registrations, 1, "the second failure must not drop the first one's new token")
+    }
+
     func testARevokedInstallStaysRevokedAndSaysWhy() async throws {
         let service = FakeService(), tokens = TokenBox("jv1_revoked")
         await service.setRealtimeReplies([(403, #"{"error":{"code":"revoked","message":"This Mac's access to Jarvis's service was turned off."}}"#)])
