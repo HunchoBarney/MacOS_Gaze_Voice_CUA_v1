@@ -347,6 +347,20 @@ final class ProactiveEngineTests: XCTestCase {
         XCTAssertTrue(seed.contains("who's in it?"))
     }
 
+    func testTheReplyWindowStaysOpenWhileTheAlertIsStillBeingSpoken() {
+        let first = alert(.meetingNow, "A"), second = alert(.reminder, "B")
+        engine.submit([first, second])
+        situation.jarvisSpeaking = true
+        advance(7)
+        engine.tick()
+        advance(7)
+        engine.tick()
+        situation.jarvisSpeaking = false
+        advance(7)
+        engine.tick()
+        XCTAssertEqual(engine.handleReply("yes"), .accepted([first, second]))
+    }
+
     func testALateReplyIsIgnored() {
         engine.submit([alert(.meetingNow)])
         advance(8)

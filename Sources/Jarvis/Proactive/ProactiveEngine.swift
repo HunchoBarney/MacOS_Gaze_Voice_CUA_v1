@@ -11,7 +11,7 @@ final class ProactiveEngine: ObservableObject {
     /// Alerts spoken within this long of the last spoken alert wait and go
     /// out together when it ends.
     static let bundleWindow: TimeInterval = 120
-    /// How long Jarvis takes an answer after speaking.
+    /// How long Jarvis takes an answer after it finishes speaking.
     static let replyWindow: TimeInterval = 8
     static let digestLimit = 50
 
@@ -73,10 +73,17 @@ final class ProactiveEngine: ObservableObject {
     }
 
     /// Called on a timer: retries held alerts, sends a bundle whose window
-    /// has ended, and closes an unanswered reply window.
+    /// has ended, keeps the reply window open while the alert is still
+    /// being spoken, and closes it once unanswered.
     func tick() {
         let now = clock()
-        if let awaiting, now >= awaiting.until { self.awaiting = nil }
+        if let awaiting {
+            if context().jarvisSpeaking {
+                self.awaiting?.until = max(awaiting.until, now.addingTimeInterval(Self.replyWindow))
+            } else if now >= awaiting.until {
+                self.awaiting = nil
+            }
+        }
         let retry = held
         held = []
         route(retry, now: now)
