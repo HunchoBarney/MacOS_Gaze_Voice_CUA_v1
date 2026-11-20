@@ -28,6 +28,19 @@ enum ListeningMode: String, CaseIterable, Sendable {
         case .pushToTalk: return "Hold the fn key while you speak, then let go."
         }
     }
+
+    /// What leaves the Mac in this mode, and where it goes. Audio goes to
+    /// OpenAI to hear the words; the words go to TypeSafe to understand them.
+    var disclosure: String {
+        switch self {
+        case .conversation:
+            return "When you speak, your voice goes to OpenAI and your words go to TypeSafe, so Jarvis can understand you. Silence and room noise stay on your Mac."
+        case .standby:
+            return "Nothing leaves your Mac until you say its name. Then your voice goes to OpenAI and your words go to TypeSafe, so Jarvis can understand you."
+        case .pushToTalk:
+            return "While you hold fn, everything Jarvis hears goes to OpenAI and your words go to TypeSafe, so it can understand you. Nothing is sent once you let go."
+        }
+    }
 }
 
 /// A local wake-word engine. None ships yet: the engine arrives as its own

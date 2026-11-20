@@ -44,6 +44,36 @@ final class UXOnboardingTests: XCTestCase {
         XCTAssertEqual(m.position?.number, 2)
     }
 
+    /// The choice is saved only on reaching the try-it step, after the
+    /// microphone step has explained it — Hands-free mustn't open the mic
+    /// from step 1.
+    func testListeningChoiceIsSavedAfterTheMicrophoneStep() {
+        let m = model(choosing: true)
+        var saved: [ListeningMode] = []
+        m.saveListeningMode = { saved.append($0) }
+        XCTAssertEqual(m.listeningMode, .pushToTalk)
+        m.listeningMode = .conversation
+        m.allow()
+        XCTAssertEqual(m.step, .microphone)
+        XCTAssertEqual(saved, [])
+        m.advance()
+        XCTAssertEqual(saved, [])
+        m.advance()
+        XCTAssertEqual(m.step, .tryIt)
+        XCTAssertEqual(saved, [.conversation])
+    }
+
+    /// The disclosure names both services and is true for each mode.
+    func testDisclosureFollowsTheChoice() {
+        for mode in ListeningMode.allCases {
+            XCTAssertTrue(mode.disclosure.contains("OpenAI"), "\(mode)")
+            XCTAssertTrue(mode.disclosure.contains("TypeSafe"), "\(mode)")
+        }
+        XCTAssertTrue(ListeningMode.pushToTalk.disclosure.contains("everything Jarvis hears"))
+        XCTAssertFalse(ListeningMode.pushToTalk.disclosure.contains("room noise"))
+        XCTAssertTrue(ListeningMode.conversation.disclosure.contains("room noise stay on your Mac"))
+    }
+
     /// Once the wake word ships, it is offered first and preselected.
     func testWakeWordBecomesTheRecommendedChoice() {
         let m = model(engine: true, choosing: true)

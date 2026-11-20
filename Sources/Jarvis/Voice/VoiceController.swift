@@ -911,6 +911,13 @@ final class VoiceController: ObservableObject {
               !held, !physicalFnDown, !isMicrophoneTest,
               handsFreeTask == nil, let lane = speech as? RealtimeVoiceLane,
               lane.conversation.id == nil else { return }
+        // Without its key Jarvis can't hear anything: say so on the card,
+        // where Open Settings is, before opening the microphone for nothing.
+        guard !config.openAIAPIKey.isEmpty || config.hostedCredentialsConfigured else {
+            handsFreeState = .unavailable(OutcomeWording.missingVoiceKey)
+            status = .error(OutcomeWording.missingVoiceKey)
+            return
+        }
         let request = UUID()
         handsFreeRequest = request
         handsFreeTask = Task { [weak self, weak lane] in
