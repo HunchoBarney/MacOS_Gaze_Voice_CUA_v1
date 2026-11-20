@@ -57,6 +57,14 @@ final class CommandPhrasingTests: XCTestCase {
                        "type Hello, World")
     }
 
+    func testHitAndPushNeedOneWordOrANamedControl() {
+        for phrase in ["push the changes", "push my commits to GitHub", "hit the road"] {
+            XCTAssertNil(CommandGrammar.canonical(phrase, isApp: { _ in false }), phrase)
+        }
+        XCTAssertEqual(CommandGrammar.canonical("push Save", isApp: { _ in false }), "click save")
+        XCTAssertEqual(CommandGrammar.canonical("hit the Save button", isApp: { _ in false }), "click save button")
+    }
+
     /// Runs one set, prints its pass rate by family, returns the failures.
     private func measure(_ set: String) throws -> [String] {
         let rows = try rows(set)

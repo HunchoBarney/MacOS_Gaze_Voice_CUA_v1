@@ -116,7 +116,9 @@ enum CommandGrammar {
 
     /// "hit Save", "press the button labeled Send", "select the OK button":
     /// a click on a named control. "Click", "press" and "tap" already parse
-    /// with a plain name, so only the label frames rewrite them. "Select",
+    /// with a plain name, so only the label frames rewrite them. "Hit" and
+    /// "push" take one bare word or a named control, so "push the changes"
+    /// and "push my commits to GitHub" stay requests for Jev. "Select",
     /// "choose" and "pick" need the control's role said out loud, so
     /// "select all" keeps its own meaning.
     private static func click(_ w: [String]) -> String? {
@@ -135,7 +137,9 @@ enum CommandGrammar {
            controlRoles.contains(role) {
             name = Array(rest.dropLast())
         }
-        if name == nil, ["hit", "push"].contains(verb) { name = rest }
+        if name == nil, ["hit", "push"].contains(verb), w.count == 2 || rest.last.map(controlRoles.contains) == true {
+            name = rest
+        }
         guard let name, !name.isEmpty else { return nil }
         let command = "click " + name.joined(separator: " ")
         guard case .clickNamed? = FastAction.parse(command)?.action.body else { return nil }
