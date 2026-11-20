@@ -2112,13 +2112,13 @@ extension DriveLoop {
                                    history: inout [String]) async throws -> DriveResult {
         let process = pid_t(pid)
         let displays = Self.displayFrames().map(\.frame)
-        func isFullScreen() async throws -> Bool {
+        func isFullScreen() async throws -> Bool? {
             if let attribute = windowAttributes.fullScreen(process, windowID) { return attribute }
             guard let row = try await windowRow(pid: pid, windowID: windowID, session: session),
-                  let frame = Self.rowFrame(row) else { return false }
+                  let frame = Self.rowFrame(row) else { return nil }
             return LostWindow.isDisplaySized(frame, on: displays)
         }
-        guard try await isFullScreen() else {
+        guard try await isFullScreen() == true else {
             return done("\(name) isn't full screen right now.", task, history,
                         pid: pid, windowID: windowID, bundleID: bundle)
         }
@@ -2144,19 +2144,19 @@ extension DriveLoop {
             }),
         ]
         for rung in rungs {
-            if try await !isFullScreen() { break }
+            if try await isFullScreen() != true { break }
             guard try await rung.attempt() else {
                 history.append("Exit full screen: \(rung.label) unavailable.")
                 continue
             }
-            if (try await pollDriver({ try await isFullScreen() }, until: { !$0 })) == false {
+            if (try await pollDriver({ try await isFullScreen() }, until: { $0 == false })) == .some(false) {
                 history.append("Exit full screen: \(rung.label) worked.")
                 return done("\(name) is a normal window again.", task, history,
                             pid: pid, windowID: windowID, bundleID: bundle, effect: true)
             }
             history.append("Exit full screen: \(rung.label) didn't take.")
         }
-        if try await !isFullScreen() {
+        if try await isFullScreen() == false {
             return done("\(name) is a normal window again.", task, history,
                         pid: pid, windowID: windowID, bundleID: bundle, effect: true)
         }

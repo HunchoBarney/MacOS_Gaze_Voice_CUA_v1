@@ -526,6 +526,17 @@ final class ExitFullScreenTests: XCTestCase {
         XCTAssertFalse(result.dispatchedEffect)
     }
 
+    /// A window that drops out of the list can't prove it left full screen,
+    /// and the toggling rungs must not fire blind.
+    func testUnreadableWindowAfterARungIsNotCalledFixed() async {
+        let desk = desk(fullScreen: nil)
+        desk.pressFullScreen = { desk, _ in desk.windows.removeAll(); return true }
+        let result = await run(desk)
+        guard case .blocked = result.status else { return XCTFail("expected blocked, got \(result.status)") }
+        XCTAssertEqual(desk.steps, ["AXFullScreen", "button fullscreen"])
+        XCTAssertFalse(result.dispatchedEffect)
+    }
+
     func testNormalWindowIsLeftAlone() async {
         let desk = desk(fullScreen: false)
         let result = await run(desk)
