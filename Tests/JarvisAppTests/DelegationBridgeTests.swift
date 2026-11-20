@@ -102,6 +102,22 @@ final class DelegationBridgeTests: XCTestCase {
                        .committed(spine.requests[0].id))
     }
 
+    func testWordsThatArriveAfterTheDelegationStillRun() async throws {
+        let gate = AsyncStream<Void>.makeStream()
+        bridge = DelegationBridge(live: session, spine: spine,
+                                  timing: .init(settleMs: 300, maxWait: .milliseconds(300), lagWait: .seconds(2)),
+                                  sleep: { duration in
+                                      if duration == .seconds(2) { for await _ in gate.stream { return } }
+                                  }, uptime: { 100 })
+        try await replay([started(), delegation("del_1", at: 1000)].joined(separator: "\n"))
+        XCTAssertTrue(spine.requests.isEmpty, "the transcript hasn't reached the delegation yet")
+        try await replay(said("open Calculator", 200, 900))
+        XCTAssertTrue(spine.requests.isEmpty, "still inside the lag wait")
+        gate.continuation.finish()
+        await drain()
+        XCTAssertEqual(spine.requests.map(\.text), ["open Calculator"])
+    }
+
     func testDuplicateDelegationProducesOneAction() async throws {
         try await replay([started(), said("open Calculator", 200, 900),
                           delegation("del_1", at: 1000), delegation("del_2", at: 1100),

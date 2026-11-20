@@ -51,6 +51,9 @@ final class DelegationBridge {
         var settleMs = 300
         /// The longest wait before the request goes ahead anyway.
         var maxWait: Duration = .milliseconds(300)
+        /// The extra wait when no new words have arrived yet, so a
+        /// transcript that lags the delegation isn't lost.
+        var lagWait: Duration = .seconds(2)
     }
 
     private let live: LiveSessionSending
@@ -114,8 +117,7 @@ final class DelegationBridge {
                 stopWaiting(through: delta.endMs)
                 return
             }
-            let heard = input.map(\.endMs).max() ?? 0
-            for entry in waiting where heard >= entry.offsetMs + timing.settleMs { settle(entry.key) }
+            for entry in waiting where heardMs >= entry.offsetMs + timing.settleMs { settle(entry.key) }
         case .outputTranscript:
             break
         case .delegation(let delegation):
@@ -144,7 +146,18 @@ final class DelegationBridge {
     /// before it reaches the spine. Work already handed over keeps going
     /// and reports honestly.
     func bargeIn() {
-        stopWaiting(through: input.map(\.endMs).max() ?? 0)
+        stopWaiting(through: heardMs)
+    }
+
+    /// Session ms up to which the input transcript has arrived.
+    private var heardMs: Int { input.map(\.endMs).max() ?? 0 }
+
+    /// Whether any words past the last request have arrived yet.
+    private func hasNewWords(in session: String) -> Bool {
+        let start = ledger.consumed(session: session)
+        return preface != nil || input.contains {
+            $0.startMs >= start && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty
+        }
     }
 
     /// The coordinator's `taskEventSink`: a question or the outcome of
@@ -163,12 +176,13 @@ final class DelegationBridge {
         guard ledger.admit(key) else { return }
         for earlier in waiting { settle(earlier.key) }
         waiting.append((key, delegation.offsetMs, speakerVerified))
-        if (input.map(\.endMs).max() ?? 0) >= delegation.offsetMs + timing.settleMs {
+        if heardMs >= delegation.offsetMs + timing.settleMs {
             settle(key)
             return
         }
-        Task { [weak self, sleep, maxWait = timing.maxWait] in
+        Task { [weak self, sleep, maxWait = timing.maxWait, lagWait = timing.lagWait] in
             await sleep(maxWait)
+            if let self, !self.hasNewWords(in: key.liveSessionID) { await sleep(lagWait) }
             self?.settle(key)
         }
     }
