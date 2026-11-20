@@ -137,6 +137,9 @@ final class LiveSession: LiveSessionSending {
             let command = ["type": "session.close", "event_id": "jarvis_close_" + UUID().uuidString]
             do { try transport.send(JSONSerialization.data(withJSONObject: command)) } catch {
                 Self.log.notice("live_close_send_failed \(error.localizedDescription, privacy: .public)")
+                let ending = LiveSessionEnding(reason: .closeRequested, usage: nil)
+                end(ending)
+                return ending
             }
             phase = .closing
             let deadline = Task { [weak self] in

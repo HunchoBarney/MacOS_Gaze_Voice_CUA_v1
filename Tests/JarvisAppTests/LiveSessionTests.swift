@@ -11,11 +11,13 @@ final class LiveSessionTests: XCTestCase {
         private(set) var answers: [String] = []
         private(set) var sent: [[String: Any]] = []
         private(set) var closes = 0
+        var failSends = false
 
         init() { (incoming, continuation) = AsyncStream.makeStream() }
         func offer() async throws -> String { "offer-sdp" }
         func accept(answer: String) async throws { answers.append(answer) }
         func send(_ message: Data) throws {
+            if failSends { throw URLError(.networkConnectionLost) }
             sent.append(try XCTUnwrap(JSONSerialization.jsonObject(with: message) as? [String: Any]))
         }
         func close() { closes += 1; continuation.finish() }
@@ -136,6 +138,18 @@ final class LiveSessionTests: XCTestCase {
         let ending = await live.close(timeout: .milliseconds(50))
         XCTAssertEqual(ending, LiveSessionEnding(reason: .closeRequested, usage: nil))
         XCTAssertFalse(ending.confirmed)
+        XCTAssertEqual(transport.closes, 1)
+    }
+
+    func testCloseEndsAtOnceWhenSessionCloseCannotBeSent() async throws {
+        let (live, transport, _) = session()
+        transport.deliver(started)
+        try await live.start()
+        transport.failSends = true
+        let began = ContinuousClock.now
+        let ending = await live.close(timeout: .seconds(5))
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(1), "no point waiting for a close that was never sent")
+        XCTAssertEqual(ending, LiveSessionEnding(reason: .closeRequested, usage: nil))
         XCTAssertEqual(transport.closes, 1)
     }
 
