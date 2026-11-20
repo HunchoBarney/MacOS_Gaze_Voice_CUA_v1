@@ -1,11 +1,16 @@
 import AppKit
 
-// The flows' own target window: three buttons and a code word, nothing
-// personal. Each press appends the button's title to the file named by the
-// first argument, so a test checks a click by reading that file. With --list
-// it shows a long list of numbered rows instead and appends the list's scroll
-// offset to that file each time it moves, so a test checks scrolling the same
-// way.
+// The flows' own target windows, with nothing personal in them. Each one
+// appends what happens to it to the file named by the first argument, so a
+// test checks an effect by reading that file, not by asking Jarvis.
+//
+//   (default)  three buttons and a code word; a press appends the button's title
+//   --list     a long list of numbered rows; a scroll appends the offset
+//   --field    one empty text field; an edit appends "value <text>"
+//   --message  a received message, selected, a Reply field and a Send button;
+//              an edit of Reply appends "value <text>", a press of Send "Send"
+//
+// In "value" lines a newline is written as a backslash and an n.
 
 final class Rows: NSView {
     static let height: CGFloat = 28
@@ -26,19 +31,52 @@ final class Rows: NSView {
     }
 }
 
+/// The received message: static text the person has selected, so Jarvis's
+/// "this" is its text and it is not a field to type into.
+final class Message: NSView {
+    static let text = "Hi, can we move tomorrow's 3 pm call to Thursday at 10? Thanks, Dana"
+
+    override var acceptsFirstResponder: Bool { true }
+    override var isFlipped: Bool { true }
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
+    override func accessibilityValue() -> Any? { Self.text }
+    override func accessibilitySelectedText() -> String? { Self.text }
+    override func accessibilitySelectedTextRange() -> NSRange { NSRange(location: 0, length: (Self.text as NSString).length) }
+    override func isAccessibilityFocused() -> Bool { window?.firstResponder === self }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.selectedTextBackgroundColor.setFill()
+        bounds.fill()
+        (Self.text as NSString).draw(in: bounds.insetBy(dx: 8, dy: 6),
+                                     withAttributes: [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: NSColor.labelColor])
+    }
+}
+
+enum Mode {
+    case board, list, field, message
+}
+
 final class Board: NSObject, NSApplicationDelegate {
     private let output: URL
-    private let list: Bool
+    private let mode: Mode
     private var window: NSWindow?
+    private var editable: NSTextField?
+    private var recorded = ""
 
-    init(output: URL, list: Bool) {
+    init(output: URL, mode: Mode) {
         self.output = output
-        self.list = list
+        self.mode = mode
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FileManager.default.createFile(atPath: output.path, contents: Data())
-        if list { return showList() }
+        switch mode {
+        case .list: return showList()
+        case .field: return showField()
+        case .message: return showMessage()
+        case .board: break
+        }
         let code = NSTextField(labelWithString: "The code word is PELICAN.")
         code.font = .systemFont(ofSize: 18)
         let buttons = ["Apple", "Banana", "Cherry"].map { NSButton(title: $0, target: self, action: #selector(press(_:))) }
@@ -77,6 +115,59 @@ final class Board: NSObject, NSApplicationDelegate {
         NSApp.activate()
     }
 
+    private func show(_ title: String, _ content: NSView, size: NSSize) {
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = title
+        window.isReleasedWhenClosed = false
+        window.contentView = content
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        self.window = window
+        NSApp.activate()
+    }
+
+    private func textField(placeholder: String) -> NSTextField {
+        let field = NSTextField(string: "")
+        field.placeholderString = placeholder
+        field.font = .systemFont(ofSize: 15)
+        field.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        editable = field
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.recordValue() }
+        return field
+    }
+
+    private func recordValue() {
+        guard let value = editable?.stringValue, value != recorded else { return }
+        recorded = value
+        append("value " + value.replacingOccurrences(of: "\n", with: "\\n"))
+    }
+
+    private func stack(_ views: [NSView]) -> NSStackView {
+        let stack = NSStackView(views: views)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 16
+        stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
+        return stack
+    }
+
+    private func showField() {
+        let field = textField(placeholder: "Type here")
+        show("Jarvis E2E Field", stack([NSTextField(labelWithString: "Notes"), field]), size: NSSize(width: 520, height: 140))
+        window?.makeFirstResponder(field)
+    }
+
+    private func showMessage() {
+        let message = Message()
+        message.translatesAutoresizingMaskIntoConstraints = false
+        message.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        message.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        let reply = textField(placeholder: "Reply")
+        let send = NSButton(title: "Send", target: self, action: #selector(press(_:)))
+        show("Jarvis E2E Message", stack([NSTextField(labelWithString: "From Dana"), message, reply, send]), size: NSSize(width: 520, height: 260))
+        window?.makeFirstResponder(message)
+    }
+
     @objc private func press(_ sender: NSButton) {
         append(sender.title)
     }
@@ -97,11 +188,13 @@ final class Board: NSObject, NSApplicationDelegate {
 }
 
 guard let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) else {
-    FileHandle.standardError.write(Data("usage: Board <record file> [--list]\n".utf8))
+    FileHandle.standardError.write(Data("usage: Board <record file> [--list | --field | --message]\n".utf8))
     exit(64)
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
-let board = Board(output: URL(fileURLWithPath: path), list: CommandLine.arguments.contains("--list"))
+let flags = Set(CommandLine.arguments.dropFirst())
+let mode: Mode = flags.contains("--list") ? .list : flags.contains("--field") ? .field : flags.contains("--message") ? .message : .board
+let board = Board(output: URL(fileURLWithPath: path), mode: mode)
 app.delegate = board
 app.run()
