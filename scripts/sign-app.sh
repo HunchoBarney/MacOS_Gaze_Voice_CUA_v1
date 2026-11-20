@@ -8,6 +8,11 @@ set -euo pipefail
 
 APP="$1"
 IDENTITY_NAME="Jarvis Local Dev"
+# The identity's name before the product rename. A Mac that already has it
+# keeps signing with it: a new certificate changes the designated
+# requirement, and macOS would drop every TCC grant just as it does for
+# an ad-hoc signature.
+LEGACY_IDENTITY_NAME="Jev Voice Local Dev"
 
 xattr -dr com.apple.FinderInfo "$APP" 2>/dev/null || true
 xattr -cr "$APP" 2>/dev/null || true
@@ -18,8 +23,14 @@ xattr -cr "$APP" 2>/dev/null || true
 # We never fall back to `-`: the fix for a missing identity is minting it
 # once, not silently signing into a TCC-reset trap.
 find_identity() {
-    security find-identity -v -p codesigning \
-        | sed -n "s/.*\"\($IDENTITY_NAME\)\"/\1/p" | head -1
+    local identities name
+    identities=$(security find-identity -v -p codesigning)
+    for name in "$IDENTITY_NAME" "$LEGACY_IDENTITY_NAME"; do
+        if grep -qF "\"$name\"" <<<"$identities"; then
+            echo "$name"
+            return
+        fi
+    done
 }
 
 # Mint the identity once: an openssl-generated self-signed cert carrying
