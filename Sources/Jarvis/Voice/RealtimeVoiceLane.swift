@@ -21,6 +21,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private lazy var eventRelay: (UUID, SpeechEvent) -> Void = { [weak self] id, event in
         guard let self else { return }
         self.presentationHandler?(id, event)
+        switch event {
+        case .assistantDelta, .assistant, .toolSay, .turnEnded, .failure: self.quietFiller(turn: id)
+        default: break
+        }
         if self.remoteReplyTurn == id {
             switch event {
             case .turnEnded: self.finishRemoteReply()
@@ -299,7 +303,19 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// instead of talking over the user's hold.
     private let outputGate = Atomic<Bool>(true)
 
-    private let apiKey: () -> String
+    /// A turn that waits on the model for its answer says one short filler
+    /// when nothing has been spoken this long after the hand-off: silence
+    /// reads as failure, and a fast answer needs no preamble.
+    static let fillerDelay: Duration = .milliseconds(1200)
+    static let fillerLine = "Looking…"
+    /// Voices the filler through the controller's fixed-line guards.
+    var onFiller: ((UUID, String) -> Void)?
+    /// Waits out `fillerDelay`. Internal for tests — a scripted clock.
+    var fillerClock: @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+    private var filler: (turn: UUID, task: Task<Void, Never>)?
+    private var fillerSpokenTurn: UUID?
+
+    private let credential: () async throws -> RealtimeCredential?
     private let client: RealtimeVoiceClient
     private let player = RealtimePlayer()
     private let input = MicrophoneInput()
@@ -311,6 +327,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var duplexRequested = false
     private var desiredInputMode: RealtimeVoiceClient.InputMode = .conversation
     private var conversationFeed: ConvertedAudioFeed?
+    /// The last 20 s of hands-free speech sent to Realtime, for L7's
+    /// on-device second transcription of "type this …".
+    let recentSpeech = RecentSpeechAudio()
     private var conversationStartID = UUID()
     private var conversationMeter: Timer?
     private var conversationSender: Task<Void, Never>?
@@ -325,7 +344,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
     private var remoteInputs: [String: RemoteInput] = [:]
     private var remoteInputOrder: [String] = []
-    private var remoteSpeakingItem: String?
+    private var localSpeakingKey: String?
+    private var awaitingCommit: [String] = []
+    /// How long a turn waits for its commit and then its transcript.
+    /// Internal for tests.
+    var commitConfirmationTimeout: Duration = .seconds(8)
     private var remoteInputDrain: Task<Void, Never>?
     private var remoteReplyTurn: UUID?
     private var remoteReplyContinuation: CheckedContinuation<Void, Error>?
@@ -529,9 +552,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
-    init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
+    /// `credential` is asked once per new socket: a developer's own key,
+    /// or a fresh client secret from Jarvis's service.
+    init(credential: @escaping () async throws -> RealtimeCredential?, client: RealtimeVoiceClient? = nil,
          admissionOwner: LocalSpeechSession? = nil) {
-        self.apiKey = apiKey
+        self.credential = credential
         self.duplexRequested = true
         self.admissionOwner = admissionOwner
         self.client = client ?? RealtimeVoiceClient()
@@ -564,6 +589,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 self.prepareNext()
             }
         }
+    }
+
+    /// Straight to OpenAI with this key; an empty one reports the missing key.
+    convenience init(apiKey: @escaping () -> String, client: RealtimeVoiceClient? = nil,
+                     admissionOwner: LocalSpeechSession? = nil) {
+        self.init(credential: { RealtimeCredential(key: apiKey(), model: nil) },
+                  client: client, admissionOwner: admissionOwner)
     }
 
     static func requestAuthorization() async -> Bool {
@@ -607,6 +639,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private func handleWire(_ envelope: RealtimeVoiceClient.WireEnvelope) {
         guard envelope.connectionID == client.connectionID else { return }
+        for case .rejected(let eventID) in envelope.events { rejectedCommit(eventID) }
         if handleRemoteInput(envelope) { return }
         if envelope.kind == "session.updated" {
             responseAuthority.connect(envelope.connectionID)
@@ -667,6 +700,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                       responseAuthority.matches(connection: envelope.connectionID, responseID: response),
                       responseAuthority.purpose == .outcomeOnly || speaksDuringReasoning,
                       outputGate.load(ordering: .acquiring) else { continue }
+                quietFiller()
                 player.enqueue(data, itemID: item)
             case .assistantDelta, .assistantDone, .outputAudioDone:
                 guard let response = envelope.responseID,
@@ -741,6 +775,29 @@ final class RealtimeVoiceLane: SpeechCapturing {
         guard turnID == admission.turn.id, client.connectionID == connection, !Task.isCancelled else { throw CancellationError() }
         awaitingTurnEnd = true
         requestResponseWhenFree()
+        armFiller(turn: admission.turn.id)
+    }
+
+    /// Starts the filler clock for a turn that waits on the model's answer
+    /// (`speaksDuringReasoning`); direct commands already speak an ack.
+    /// Fires at most once, and only while the turn is still silent.
+    private func armFiller(turn id: UUID) {
+        filler?.task.cancel(); filler = nil
+        guard speaksDuringReasoning, fillerSpokenTurn != id else { return }
+        let clock = fillerClock
+        filler = (id, Task { [weak self] in
+            await clock(Self.fillerDelay)
+            guard !Task.isCancelled, let self, self.filler?.turn == id, self.turnID == id,
+                  self.audioRepliesEnabled, !self.holding else { return }
+            self.filler = nil; self.fillerSpokenTurn = id
+            self.onFiller?(id, Self.fillerLine)
+        })
+    }
+
+    /// Anything spoken or played, or the turn ending, retires the filler.
+    private func quietFiller(turn id: UUID? = nil) {
+        guard let pending = filler, id == nil || pending.turn == id else { return }
+        pending.task.cancel(); filler = nil
     }
 
     private func dispatchToolV1(callID: String, name: String, arguments: String,
@@ -859,8 +916,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
             replayOutcomes()
             return
         }
-        let key = apiKey().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
+        let credential = try await credential()
+        // Minting a client secret goes to the network; a caller that
+        // connected meanwhile owns the socket now.
+        if client.isReady, !responseAuthority.requiresReconnect,
+           client.connectedAt.map({ Date().timeIntervalSince($0) <= 50 * 60 }) == true {
+            return try await ensureConnected(inputMode: inputMode)
+        }
+        guard let credential,
+              case let key = credential.key.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
             throw VoiceError(OutcomeWording.missingVoiceKey)
         }
         client.teardown()
@@ -868,7 +932,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
         // A rebuilt session resets the call_id namespace — the dedupe set's
         // lifetime ends with the socket it belonged to.
         handledCalls = []
-        try await client.connect(apiKey: key, inputMode: inputMode ?? .conversation)
+        try await client.connect(apiKey: key, model: credential.model ?? RealtimeVoiceClient.defaultModel,
+                                 inputMode: inputMode ?? .conversation)
         seenInputItems = []
         responseAuthority.connect(client.connectionID)
         replayOutcomes()
@@ -904,36 +969,21 @@ final class RealtimeVoiceLane: SpeechCapturing {
         let now = ProcessInfo.processInfo.systemUptime
         for event in envelope.events {
             switch event {
-            case .speechStarted:
-                guard seenInputItems.insert(item).inserted else { continue }
-                do {
-                    guard remoteInputs.count < 32 else { throw VoiceError("Voice input could not keep up. Resume listening.") }
-                    holding = true
-                    remoteSpeakingItem = item
-                    let capture = try conversation.beginExternal(
-                        input: .init(connectionID: envelope.connectionID, itemID: item), at: now)
-                    remoteInputs[item] = .init(capture: capture)
-                    remoteInputOrder.append(item)
-                } catch {
-                    stopConversation(state: .unavailable(error.localizedDescription))
-                }
-            case .speechStopped:
-                if let gate = conversationGate { Task { await gate.speechServiceHeardStop() } }
-                if remoteSpeakingItem == item {
-                    remoteSpeakingItem = nil; holding = false
-                    if remoteInputs[item] == nil { flushSpeech() }
-                }
             case .inputCommitted:
-                guard var record = remoteInputs[item], !record.committed else { continue }
+                guard seenInputItems.insert(item).inserted, !awaitingCommit.isEmpty else { continue }
+                let key = awaitingCommit.removeFirst()
+                guard let local = remoteInputs.removeValue(forKey: key),
+                      let slot = remoteInputOrder.firstIndex(of: key) else { continue }
+                local.deadline?.cancel()
+                remoteInputOrder[slot] = item
+                var record = RemoteInput(capture: local.capture.bound(to: item))
+                remoteInputs[item] = record
                 guard conversation.commitExternal(record.capture, at: now) else {
                     expireRemoteInput(item)
                     continue
                 }
                 record.committed = true
-                record.deadline = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(8)) } catch { return }
-                    self?.expireRemoteInput(item)
-                }
+                record.deadline = expiry(item)
                 remoteInputs[item] = record
                 drainRemoteInputs()
             case .transcriptDone(let text, _, let finalItem):
@@ -953,6 +1003,62 @@ final class RealtimeVoiceLane: SpeechCapturing {
         return true
     }
 
+    /// Hands-free speech began on the Mac: the turn's capture starts now and
+    /// is bound to the server's input item when the commit is confirmed.
+    /// Internal for tests — scripted turns drive it without a microphone.
+    func localTurnStarted(connection: UUID) {
+        guard conversation.id != nil, localSpeakingKey == nil else { return }
+        do {
+            guard remoteInputs.count < 32 else { throw VoiceError("Voice input could not keep up. Resume listening.") }
+            let key = "local-" + UUID().uuidString
+            let capture = try conversation.beginExternal(
+                input: .init(connectionID: connection, itemID: ""), at: ProcessInfo.processInfo.systemUptime)
+            holding = true
+            localSpeakingKey = key
+            remoteInputs[key] = .init(capture: capture)
+            remoteInputOrder.append(key)
+        } catch {
+            stopConversation(state: .unavailable(error.localizedDescription))
+        }
+    }
+
+    /// The Mac heard the end of the turn: commit what was uploaded. Commits
+    /// confirm in order, so each `committed` binds the oldest waiting turn.
+    /// Internal for tests.
+    func localTurnEnded(connection: UUID) async throws {
+        guard let key = localSpeakingKey else { return }
+        localSpeakingKey = nil; holding = false
+        guard var record = remoteInputs[key] else { flushSpeech(); return }
+        record.deadline = expiry(key)
+        remoteInputs[key] = record
+        guard client.connectionID == connection else { throw VoiceError("The realtime connection changed mid-turn.") }
+        awaitingCommit.append(key)
+        do {
+            try await client.commitAudio(eventID: key)
+        } catch {
+            awaitingCommit.removeAll { $0 == key }
+            throw error
+        }
+    }
+
+    /// The server refused a turn's commit, so no confirmation will come for
+    /// it: its slot leaves the queue and the turn is dropped.
+    private func rejectedCommit(_ eventID: String) {
+        guard let slot = awaitingCommit.firstIndex(of: eventID) else { return }
+        awaitingCommit.remove(at: slot)
+        expireRemoteInput(eventID)
+    }
+
+    private func expiry(_ key: String) -> Task<Void, Never> {
+        Task { [weak self] in
+            do { try await Task.sleep(for: self?.commitConfirmationTimeout ?? .seconds(8)) } catch { return }
+            self?.expireRemoteInput(key)
+        }
+    }
+
+    /// A turn that expires before its commit is confirmed keeps its slot in
+    /// `awaitingCommit`: confirmations arrive in commit order, so the late
+    /// one consumes that slot and is dropped instead of binding the next turn.
     private func expireRemoteInput(_ item: String) {
         if let record = remoteInputs.removeValue(forKey: item) {
             record.deadline?.cancel()
@@ -1258,6 +1364,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 self.onReadiness?(.ready(hardware.name))
                 return hardware.name
             } catch {
+                Self.log.error("prepare stage=microphone_input failed error=\(error.localizedDescription, privacy: .public)")
                 if self.preparationID == token {
                     self.hardware = nil
                     await self.input.stop()
@@ -1324,8 +1431,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
                         guard let samples = buffer.int16ChannelData?[0] else {
                             throw VoiceError("The microphone audio format changed.")
                         }
-                        for pcm in try await speechGate.admit(Data(bytes: samples, count: Int(buffer.frameLength) * 2)) {
-                            try await self.client.sendAudio(pcm, connection: connection)
+                        for event in try await speechGate.admit(Data(bytes: samples, count: Int(buffer.frameLength) * 2)) {
+                            guard self.conversation.id == session else { return }
+                            switch event {
+                            case .turnStarted: self.localTurnStarted(connection: connection)
+                            case .audio(let pcm):
+                                self.recentSpeech.append(pcm)
+                                try await self.client.sendAudio(pcm, connection: connection)
+                            case .turnEnded: try await self.localTurnEnded(connection: connection)
+                            }
                         }
                     }
                 } catch {
@@ -1366,10 +1480,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     func stopConversation(state: ConversationListeningState = .paused) {
         conversationStartID = UUID()
+        recentSpeech.clear()
         closeConversationFeed()
         remoteInputDrain?.cancel(); remoteInputDrain = nil
         for record in remoteInputs.values { record.deadline?.cancel() }
-        remoteInputs = [:]; remoteInputOrder = []; remoteSpeakingItem = nil
+        remoteInputs = [:]; remoteInputOrder = []; localSpeakingKey = nil; awaitingCommit = []
         finishRemoteReply(error: CancellationError())
         conversation.stop()
         if case .unavailable = state {
@@ -1397,7 +1512,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             conversationGate = nil
             Task {
                 let usage = await gate.usage
-                Self.log.notice("voice gate heard_s=\(usage.heard, format: .fixed(precision: 1)) speech_s=\(usage.sentSpeech, format: .fixed(precision: 1)) silence_s=\(usage.sentSilence, format: .fixed(precision: 1))")
+                Self.log.notice("voice gate heard_s=\(usage.heard, format: .fixed(precision: 1)) speech_s=\(usage.sentSpeech, format: .fixed(precision: 1))")
             }
         }
         guard let feed = conversationFeed else { return }
@@ -1406,6 +1521,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     func interruptConversationPlayback() {
+        quietFiller()
         let interrupted = player.interrupt(untilResponseDone: responseInFlight)
         let cancel = responseInFlight
         let response = responseAuthority.interruptConversation()
@@ -1710,7 +1826,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             // still streaming; only real faults surface as .failure.
             if !Self.isBenignRace(detail) { onEvent?(id, .failure(turnFailure(detail))) }
             flushSpeech()
-        case .warning:
+        case .warning, .rejected:
             break // logged in the session-level switch above
         case .closed:
             onEvent?(id, .failure("The voice session closed."))
@@ -1759,8 +1875,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
-    /// A question about the screen speaks while it reasons ("Let me look"),
-    /// like a plain question; every other turn speaks only its outcome.
+    /// A question about the screen may speak while it reasons (a clarifying
+    /// question with no tool call), like a plain question; every other turn
+    /// speaks only its outcome.
     private var speaksDuringReasoning: Bool {
         ["question", "screen_question"].contains(speechSession.gate.admission?.intent ?? "")
     }
@@ -1838,6 +1955,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     func speakFeedback(_ text: String) {
+        quietFiller()
         guard audioRepliesEnabled, !text.isEmpty,
               let data = try? JSONEncoder().encode(JSONValue.object([
                 "kind": .string("voice_feedback"), "say": .string(text)])) else { return }
@@ -2163,6 +2281,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     }
 
     func cancel() {
+        quietFiller()
         discardScreenItems(); toolRelayOwed = false
         failManualFinal(CancellationError())
         cancelSemanticInterpretation(); semanticTask = nil; semanticTurn = nil

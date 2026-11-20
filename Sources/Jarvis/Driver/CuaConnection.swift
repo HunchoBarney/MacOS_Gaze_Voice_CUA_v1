@@ -1,13 +1,6 @@
 import Foundation
 import JarvisCore
 
-struct CuaResultOrigin: Sendable, Equatable {
-    let session: String?
-    let daemonSocket: String
-    var transport: UUID? = nil
-    var sessionEpoch: UUID? = nil
-}
-
 struct CuaSessionEpochs {
     private var epochs: [String: UUID] = [:]
 
@@ -22,16 +15,10 @@ struct CuaSessionEpochs {
     }
 }
 
-typealias CuaScopedCall = @Sendable (
-    String, [String: JSONValue], CuaResultOrigin?
-) async throws -> CuaToolResult
-
 /// Preserve the full tool payload: captures can carry images alongside typed metadata.
 struct CuaToolResult: Sendable {
     let structured: JSONValue
     let content: [JSONValue]
-    var origin: CuaResultOrigin? = nil
-    var capturedElementTools: Set<String> = []
 }
 
 /// A dispatched effect may exist even when Driver reports an error. Keep its
@@ -502,61 +489,6 @@ actor CuaConnection {
         return try await callResultOnce("set_agent_cursor_motion", arguments: arguments, timeout: timeout).structured
     }
 
-    func callScoped(_ name: String, arguments: [String: JSONValue],
-                    origin: CuaResultOrigin?, timeout: TimeInterval = 30) async throws -> CuaToolResult {
-        try validateScope(name, arguments: arguments, origin: origin)
-        let definitions = JSONValue.object(["tools": .array(try await tools(timeout: min(timeout, 8)))])
-        guard Self.supportsCapturedInputs(definitions) else {
-            throw DriverConnectionError.refused("The driver does not support capture-bound clicks, typing, keys and scrolling.")
-        }
-        let nativeCaptureTools = Self.capturedElementTools(definitions)
-        try validateScope(name, arguments: arguments, origin: origin)
-        if arguments["capture_id"] != nil, arguments["element_token"] != nil,
-           !nativeCaptureTools.contains(name) {
-            throw DriverConnectionError.refused("The driver does not support capture-bound native elements for this tool.")
-        }
-        var result = try await callResult(name, arguments: arguments, timeout: timeout)
-        result.capturedElementTools = nativeCaptureTools
-        return result
-    }
-
-    private func validateScope(_ name: String, arguments: [String: JSONValue],
-                               origin: CuaResultOrigin?) throws {
-        if let origin {
-            guard initialized, let socket = boundSocket,
-                  origin == CuaResultOrigin(session: arguments["session"]?.string,
-                    daemonSocket: socket, transport: generation,
-                    sessionEpoch: sessionEpochs.current(arguments["session"]?.string)) else {
-                throw DriverConnectionError.refused("The capture's transport scope is no longer current.")
-            }
-        } else if !Self.isReadOnly(name, arguments: arguments) {
-            throw DriverConnectionError.refused("A capture-bound input requires its original transport scope.")
-        }
-    }
-
-    static func supportsCapturedInputs(_ definitions: JSONValue) -> Bool {
-        let tools = definitions["tools"]?.array ?? []
-        return ["click", "type_text", "press_key", "scroll"].allSatisfy { name in
-            tools.contains {
-                $0["name"]?.string == name
-                    && $0["inputSchema"]?["properties"]?["capture_id"]?.object != nil
-            }
-        }
-    }
-
-    static func capturedElementTools(_ definitions: JSONValue) -> Set<String> {
-        Set((definitions["tools"]?.array ?? []).compactMap { definition in
-            guard let name = definition["name"]?.string,
-                  ["click", "type_text", "press_key", "scroll"].contains(name),
-                  let schema = definition["inputSchema"],
-                  schema["x-cua-capture-bound-element"] == .bool(true),
-                  schema["properties"]?["capture_id"]?["type"] == .string("string"),
-                  schema["properties"]?["element_token"]?["type"] == .string("string")
-            else { return nil }
-            return name
-        })
-    }
-
     /// Two consecutive timeouts is a dead transport, not a slow one — tear it
     /// down so callers get `.closed` and replace it wholesale.
     private func noteTimeout() {
@@ -567,10 +499,8 @@ actor CuaConnection {
     }
 
     private func callResultOnce(_ name: String, arguments: [String: JSONValue], timeout: TimeInterval) async throws -> CuaToolResult {
-        guard let socket = boundSocket else { throw DriverConnectionError.closed }
-        let origin = CuaResultOrigin(session: arguments["session"]?.string,
-            daemonSocket: socket, transport: generation,
-            sessionEpoch: sessionEpochs.willCall(name, session: arguments["session"]?.string))
+        guard boundSocket != nil else { throw DriverConnectionError.closed }
+        _ = sessionEpochs.willCall(name, session: arguments["session"]?.string)
         let value = try await request("tools/call", params: .object([
             "name": .string(name), "arguments": .object(arguments)
         ]), timeout: timeout)
@@ -603,7 +533,7 @@ actor CuaConnection {
         // brace-scans) every snapshot's tree_markdown for nothing.
         let merged = Self.isReadOnly(name, arguments: arguments)
             ? body : Self.mergeWindowChanges(body, content: content)
-        return CuaToolResult(structured: merged, content: content, origin: origin)
+        return CuaToolResult(structured: merged, content: content)
     }
 
     /// The driver's WindowChangeDetector appends `changes.new_windows` /

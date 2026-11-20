@@ -357,6 +357,14 @@ final class TargetOverlay {
         haloRect = nil
     }
 
+    /// A guide step's words beside its glow. It answers to the same
+    /// Reduce Motion as the glow and goes when everything is dismissed.
+    lazy var guideCallout: GuideCalloutPanel = {
+        let callout = GuideCalloutPanel()
+        callout.reduceMotion = { [weak self] in self?.reduceMotion() ?? true }
+        return callout
+    }()
+
     // MARK: Press glow
 
     static let pressGlowSeconds: Double = 1.2
@@ -556,6 +564,7 @@ final class TargetOverlay {
         clearChips()
         retireRing()
         hideHalo()
+        guideCallout.hide()
         cheatPanel?.orderOut(nil)
         cheatPanel = nil
     }
@@ -882,6 +891,13 @@ final class TargetOverlay {
             cheatPanel = nil
             return
         }
+        showSheet(lines: lines)
+    }
+
+    /// The same panel, replacing what it shows instead of toggling: L7's
+    /// "Type this?" and reply drafts.
+    func showSheet(lines: [String]) {
+        hideSheet()
         let hosting = NSHostingView(rootView: CheatSheet(lines: lines))
         let panel = Self.makePanel()
         panel.contentView = hosting
@@ -894,5 +910,10 @@ final class TargetOverlay {
                               width: size.width, height: size.height), display: true)
         panel.orderFrontRegardless()
         cheatPanel = panel
+    }
+
+    func hideSheet() {
+        cheatPanel?.orderOut(nil)
+        cheatPanel = nil
     }
 }

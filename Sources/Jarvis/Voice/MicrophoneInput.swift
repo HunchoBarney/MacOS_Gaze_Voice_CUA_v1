@@ -254,6 +254,9 @@ final class MicrophoneInput: @unchecked Sendable {
     func prepare(device: MicrophoneDevice, voiceProcessing: Bool = false,
                  interrupted: @escaping @Sendable () -> Void) async throws -> Ready {
         try Task.checkCancellation()
+        guard !MicrophoneTestGuard.blocksRealMicrophone else {
+            throw VoiceError("Unit tests don't open the microphone. Set JARVIS_LIVE_MIC=1 for a live test.")
+        }
         let generation = UUID()
         let cancelled = OSAllocatedUnfairLock(initialState: false)
         let result: Ready = try await withTaskCancellationHandler {
@@ -285,7 +288,6 @@ final class MicrophoneInput: @unchecked Sendable {
                     let state = PreparationState(generation: generation)
                     self.pending = Preparation(state: state, name: device.name,
                         continuation: continuation, timeout: timeout, cancelled: cancelled)
-                    self.queue.asyncAfter(deadline: .now() + 5, execute: timeout)
                     do {
                         let engine = AVAudioEngine()
                         let input = engine.inputNode
@@ -351,7 +353,7 @@ final class MicrophoneInput: @unchecked Sendable {
                         self.installTap(on: input, format: format, generation: generation,
                                         tap: state.tapID)
                         engine.prepare()
-                        try engine.start()
+                        try Self.start(engine.start, thenArm: timeout, after: 5, on: self.queue)
                         self.hardwareFormat = input.outputFormat(forBus: 0)
                     } catch {
                         self.failPreparation(error)
@@ -366,6 +368,11 @@ final class MicrophoneInput: @unchecked Sendable {
         }
         try Task.checkCancellation()
         return result
+    }
+    static func start(_ start: () throws -> Void, thenArm deadline: DispatchWorkItem,
+                      after seconds: TimeInterval, on queue: DispatchQueue) rethrows {
+        try start()
+        queue.asyncAfter(deadline: .now() + seconds, execute: deadline)
     }
     private func configurationChanged(generation: UUID) {
         guard engineID == generation, let engine, let preparedFormat else { return }
