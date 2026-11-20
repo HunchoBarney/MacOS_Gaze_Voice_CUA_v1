@@ -48,6 +48,7 @@ private actor ComfortWire: RealtimeVoiceWire {
     }
 
     func setRejectStyle(_ value: Bool, code: String = "invalid_value") { rejectStyle = value; rejectionCode = code }
+    func inject(_ object: [String: JSONValue]) throws { try push(object) }
     func updates() -> [JSONValue] { written.filter { $0["type"]?.string == "session.update" } }
 }
 
@@ -275,6 +276,33 @@ final class ComfortPreferencesTests: XCTestCase {
         await wire.setRejectStyle(false)
         try await client.configureInput(.manual)
         XCTAssertEqual(failures.value, 0, "a refused style change is the client's own business")
+        XCTAssertEqual(client.inputMode, .manual)
+        XCTAssertTrue(client.isReady)
+    }
+
+    func testRefusedStyleChangeIsSentOnceMoreAfterTheReplyEnds() async throws {
+        let wire = ComfortWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        defer { client.teardown() }
+        try await client.connect(apiKey: "fixture-not-a-real-key")
+        await wire.setRejectStyle(true)
+        try await client.setReplyStyle(.init(speed: 0.85, length: .shorter))
+        await waitFor { await wire.updates().count == 2 }
+
+        let done: [String: JSONValue] = ["type": .string("response.done"),
+                                         "response": .object(["id": .string("resp-1"), "status": .string("completed")])]
+        try await wire.inject(done)
+        await waitFor { await wire.updates().count == 3 }
+        let retry = try XCTUnwrap(await wire.updates().last)
+        XCTAssertEqual(retry["session"]?["audio"]?["output"]?["speed"], .number(0.85))
+        XCTAssertEqual(retry["session"]?["instructions"]?.string, RealtimeVoiceClient.instructions(for: .shorter))
+
+        try await wire.inject(done)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let count = await wire.updates().count
+        XCTAssertEqual(count, 3, "a refused retry is not retried again")
+        await wire.setRejectStyle(false)
+        try await client.configureInput(.manual)
         XCTAssertEqual(client.inputMode, .manual)
         XCTAssertTrue(client.isReady)
     }

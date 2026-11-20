@@ -274,6 +274,11 @@ final class RealtimeVoiceClient {
     /// The style changed while an input change awaited confirmation; it is
     /// sent once that confirmation lands.
     private var replyStylePending = false
+    /// OpenAI refuses a speed change while a reply is in progress, which is
+    /// when "talk slower" usually lands. A refused update is sent once more
+    /// after the next `response.done`; this is the retry's event id.
+    private var replyStyleRetryOwed = false
+    private var replyStyleRetryID: String?
     private(set) var inputMode: InputMode?
     private var requestedInputMode: InputMode?
     private var configurationID = UUID()
@@ -418,9 +423,11 @@ final class RealtimeVoiceClient {
         try await sendReplyStyle()
     }
 
-    private func sendReplyStyle() async throws {
+    private func sendReplyStyle(retry: Bool = false) async throws {
         let id = Self.contextItemID(prefix: "sty-")
         replyStyleUpdates.append(id)
+        replyStyleRetryOwed = false
+        replyStyleRetryID = retry ? id : nil
         try await send(["type": "session.update", "event_id": id, "session": Self.replyStyleSession(replyStyle)])
     }
 
@@ -432,11 +439,18 @@ final class RealtimeVoiceClient {
             guard let index = replyStyleUpdates.firstIndex(of: eventID) else { return false }
             replyStyleUpdates.remove(at: index)
             Self.log.notice("reply_style_rejected")
+            if eventID != replyStyleRetryID, index == replyStyleUpdates.endIndex { replyStyleRetryOwed = true }
             return true
         }
         guard !replyStyleUpdates.isEmpty else { return false }
         replyStyleUpdates.removeFirst()
         return true
+    }
+
+    private func retryRefusedReplyStyle(connection identity: UUID) {
+        guard identity == connectionID, replyStyleRetryOwed, isReady, sessionReady == nil else { return }
+        replyStyleRetryOwed = false
+        Task { [weak self] in try? await self?.sendReplyStyle(retry: true) }
     }
 
     /// Connect and configure. Resolves once the server confirms the session
@@ -761,6 +775,9 @@ final class RealtimeVoiceClient {
                 let frame = try? JSONDecoder().decode(JSONValue.self, from: Data(payload.utf8))
                 guard await confirmSessionReady(connection: identity, session: frame?["session"]) else { return }
             }
+            if case .responseDone = event {
+                await retryRefusedReplyStyle(connection: identity)
+            }
             if case .closed = event {
                 await failSessionReady(VoiceError("The realtime session closed."), connection: identity)
             }
@@ -901,6 +918,8 @@ final class RealtimeVoiceClient {
         requestedInputMode = nil
         replyStyleUpdates = []
         replyStylePending = false
+        replyStyleRetryOwed = false
+        replyStyleRetryID = nil
         configurationTimeout?.cancel(); configurationTimeout = nil
         // A connect() suspended on session confirmation would otherwise wait
         // out its 10s timeout — teardown is the definitive answer it needs.
