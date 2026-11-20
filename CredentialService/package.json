@@ -4,8 +4,8 @@
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "dev": "pnpm dlx wrangler@4.165.0 dev",
-    "deploy": "pnpm dlx wrangler@4.165.0 deploy",
+    "dev": "corepack pnpm dlx wrangler@4.165.0 dev",
+    "deploy": "corepack pnpm dlx wrangler@4.165.0 deploy",
     "smoke": "node test/smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
