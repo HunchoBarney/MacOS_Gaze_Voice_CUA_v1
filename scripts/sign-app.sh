@@ -95,6 +95,38 @@ fi
 SIGN="$IDENTITY"
 echo "sign-app: signing with '$SIGN'"
 
+# Every executable gets the hardened runtime, so dyld ignores DYLD_*
+# variables and unsigned libraries; Jarvis passes its environment to the
+# tracker and agents, and they run with its TCC grants. Entitlements are
+# the minimum each one needs: the app records audio and asks for the
+# camera; Electron and node JIT-compile JavaScript and load native
+# modules; Codex's JavaScript host and voice host do the same.
+ENTITLEMENTS="$(cd "$(dirname "$0")" && pwd)/entitlements"
+entitlements_for() {
+    case "$1" in
+        "$APP") echo "$ENTITLEMENTS/jarvis.entitlements" ;;
+        "$APP/Contents/Resources/EyeTracker/"*) echo "$ENTITLEMENTS/tracker.entitlements" ;;
+        */codex-code-mode-host|*/codex-voice-host) echo "$ENTITLEMENTS/codex-runtime.entitlements" ;;
+    esac
+}
+
+# A secure timestamp needs Apple's timestamp service; offline or ad-hoc
+# builds sign without one rather than fail.
+sign() {
+    local args=(--force --sign "$SIGN")
+    if [ "$1" = executable ]; then
+        args+=(--options runtime)
+        local entitlements
+        entitlements=$(entitlements_for "$2")
+        [ -n "$entitlements" ] && args+=(--entitlements "$entitlements")
+    fi
+    shift
+    if [ "$SIGN" != "-" ] && codesign "${args[@]}" --timestamp "$@" 2>/dev/null; then
+        return
+    fi
+    codesign "${args[@]}" --timestamp=none "$@"
+}
+
 # Embedded runtimes carry foreign signatures (cua-driver's is bound to the
 # CuaDriver.app Info.plist, which kills it on exec), and `codesign --deep`
 # does not reach loose binaries under Resources — sign each nested Mach-O
@@ -104,11 +136,12 @@ echo "sign-app: signing with '$SIGN'"
 prev_inode=""
 prev_file=""
 find "$APP/Contents/Resources" -type f -exec stat -f '%i %N' {} + | sort -n | while read -r inode file; do
-    case "$(file -b "$file")" in Mach-O*) ;; *) continue ;; esac
+    kind=$(file -b "$file")
+    case "$kind" in Mach-O*) ;; *) continue ;; esac
     if [ "$inode" = "$prev_inode" ]; then
         ln -f "$prev_file" "$file"
     else
-        codesign --force --sign "$SIGN" "$file"
+        case "$kind" in *executable*) sign executable "$file" ;; *) sign library "$file" ;; esac
         prev_inode="$inode"
         prev_file="$file"
     fi
@@ -116,7 +149,7 @@ done
 
 /usr/libexec/PlistBuddy -c "Delete :JevCuaDriverSHA256" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :JevCuaDriverSHA256 string $(shasum -a 256 "$APP/Contents/Resources/cua-driver" | cut -d' ' -f1)" "$APP/Contents/Info.plist"
-codesign --force --deep --sign "$SIGN" "$APP"
+sign executable "$APP"
 
 # Verify what we produced. `codesign --verify --deep --strict` can fail
 # spuriously inside a synced Documents checkout on com.apple.provenance
