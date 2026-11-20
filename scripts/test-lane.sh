@@ -94,5 +94,13 @@ printf 'echo broken; if true; then\n' >"$T/lane-copy.sh"
 wait
 check "waiting job survives an in-place edit (got $(grep start "$LOG" | awk '{print $2}' | tr -d '\n'))" '[ "$(grep start "$LOG" | awk "{print \$2}" | tr -d "\n")" = RS ] && ! grep -q "syntax error" "$T/err9"'
 
+# 10. Starting a job leaves a live job's private copy alone
+mkdir -p "$T/tmp"
+TMPDIR=$T/tmp "$L" bash -c 'sleep 1.5' >/dev/null & V=$!; sleep 0.5
+TMPDIR=$T/tmp "$L" true >/dev/null & sleep 0.5
+check "live job's private copy kept" 'ls "$T/tmp"/lane.$V.* >/dev/null 2>&1'
+wait
+check "private copies removed afterwards" '[ -z "$(ls "$T/tmp")" ]'
+
 rm -rf "$T"
 exit $fail
