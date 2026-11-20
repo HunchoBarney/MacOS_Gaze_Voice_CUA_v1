@@ -214,7 +214,6 @@ struct AXElement: Sendable {
     var nativeValue: NativeFieldProvenance? = nil
     var nativeIdentity: NativeFieldIdentity? = nil
     var nativeAncestorRoles: [String]? = nil
-    var nativeReadOnlyValue: NativeReadOnlyValue? = nil
 }
 
 /// DOM-first browser control's snapshot shape — CONTRACTS §5.
