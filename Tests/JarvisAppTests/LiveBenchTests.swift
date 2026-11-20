@@ -96,7 +96,8 @@ final class LiveBenchTests: XCTestCase {
             guard spent + 0.05 < budget else { break }
             var config = LiveSessionConfig(instructions: Self.instructions)
             config.idleTimeoutS = idleTimeouts[index % idleTimeouts.count]
-            let live = LiveSession(transport: WebRTCLiveTransport(), broker: LiveConnectTests.DirectLiveSessions(key: key),
+            let transport = WebRTCLiveTransport()
+            let live = LiveSession(transport: transport, broker: LiveConnectTests.DirectLiveSessions(key: key),
                                    config: config)
             var events: [(LiveSessionEvent, ContinuousClock.Instant)] = []
             var latestUsage: LiveUsage?
@@ -117,7 +118,8 @@ final class LiveBenchTests: XCTestCase {
                 spent += Self.cost(nil)
                 continue
             }
-            var row: [String: Any] = ["kind": "session", "session": index, "cold": index == 0,
+            transport.remoteAudio?.add(rig)
+            var row: [String: Any] = ["kind": "session", "remote_audio": transport.remoteAudio != nil, "session": index, "cold": index == 0,
                                       "idle_timeout_s": config.idleTimeoutS, "start_ms": ms(.now - began) ?? -1]
             for step in live.startSteps { row["step_\(step.step)_ms"] = Int(step.seconds * 1000) }
 
@@ -182,6 +184,15 @@ final class LiveBenchTests: XCTestCase {
                     if case .outputTranscript(let delta) = item.0 { return total + delta.text.count }
                     return total
                 }
+                let inputs = events.compactMap { item -> LiveTranscriptDelta? in
+                    if case .inputTranscript(let delta) = item.0 { return delta }
+                    return nil
+                }
+                let firstOutput = events.lazy.compactMap { item -> LiveTranscriptDelta? in
+                    if case .outputTranscript(let delta) = item.0 { return delta }
+                    return nil
+                }.first
+                let heardEnd = firstOutput.flatMap { output in inputs.filter { $0.endMs <= output.startMs }.map(\.endMs).max() }
                 let errors = events.compactMap { item -> String? in
                     if case .error(let error) = item.0 { return error.code ?? error.type }
                     return nil
@@ -191,6 +202,7 @@ final class LiveBenchTests: XCTestCase {
                     "speech_ms": ms(speechEnd - speechStart) ?? 0, "delegated": delegated != nil,
                     "output_chars": outputChars, "errors": errors, "paused": pausedAt != nil,
                 ]
+                turnRow["server_output_after_input_ms"] = zip2(heardEnd, firstOutput).map { $1.startMs - $0 }
                 turnRow["resume_after_speech_start_ms"] = ms(resumed.map { $0 - speechStart })
                 turnRow["input_transcript_after_speech_end_ms"] = ms(heard.map { $0 - speechEnd })
                 turnRow["output_text_after_speech_end_ms"] = ms(spoke.map { $0 - speechEnd })
@@ -219,7 +231,8 @@ final class LiveBenchTests: XCTestCase {
         }
         let stats = rig.inputStats
         write(["kind": "summary", "turns": completedTurns, "spent": spent, "budget": budget,
-               "engine_starts": stats.starts, "all_offline": stats.allManual])
+               "engine_starts": stats.starts, "all_offline": stats.allManual,
+               "remote_buffers": stats.remoteBuffers, "playout_buffers": stats.playoutBuffers])
         XCTAssertTrue(stats.allManual, "the bench must never open an audio device")
         XCTAssertGreaterThan(completedTurns, 0)
         #else

@@ -23,6 +23,7 @@ final class WebRTCLiveTransport: NSObject, LiveTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var peer: LKRTCPeerConnection?
     private var channel: LKRTCDataChannel?
+    private var remote: LKRTCAudioTrack?
     private var gathered: CheckedContinuation<Void, Never>?
     private var gatheringComplete = false
     private var finished = false
@@ -67,6 +68,10 @@ final class WebRTCLiveTransport: NSObject, LiveTransport, @unchecked Sendable {
         guard let sdp = peer.localDescription?.sdp else { throw VoiceError("The voice connection has no offer.") }
         return sdp
     }
+
+    /// Live's voice as it arrives, before playout: for level meters and the
+    /// paid tests' first-audio timing.
+    var remoteAudio: LKRTCAudioTrack? { lock.withLock { remote } }
 
     func accept(answer: String) async throws {
         guard let peer = lock.withLock({ self.peer }) else { throw VoiceError("The voice connection closed.") }
@@ -133,6 +138,11 @@ extension WebRTCLiveTransport: LKRTCPeerConnectionDelegate, LKRTCDataChannelDele
 
     func dataChannelDidChangeState(_ channel: LKRTCDataChannel) {
         if channel.readyState == .closed { finish("event channel closed") }
+    }
+
+    func peerConnection(_ peer: LKRTCPeerConnection, didAdd receiver: LKRTCRtpReceiver, streams: [LKRTCMediaStream]) {
+        guard let track = receiver.track as? LKRTCAudioTrack else { return }
+        lock.withLock { remote = track }
     }
 
     func peerConnection(_ peer: LKRTCPeerConnection, didChange state: LKRTCSignalingState) {}

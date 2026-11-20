@@ -8,7 +8,7 @@ import LiveKitWebRTC
 /// mode: no audio device opens, nothing is heard, and \`play\` feeds speech in.
 /// With \`.microphone\` the engine keeps the real mic, and every input buffer
 /// also reaches \`onInput\`, as the wake word would share it.
-final class LiveAudioRig: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked Sendable {
+final class LiveAudioRig: NSObject, LKRTCAudioDeviceModuleDelegate, LKRTCAudioRenderer, @unchecked Sendable {
     enum Input { case microphone, rendered }
 
     struct InputStats: Sendable {
@@ -20,6 +20,8 @@ final class LiveAudioRig: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked S
         /// Whether every engine started was offline, with no audio device.
         var allManual = true
         var starts = 0
+        var playoutBuffers = 0
+        var remoteBuffers = 0
     }
 
     let input: Input
@@ -129,19 +131,26 @@ final class LiveAudioRig: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked S
         if let destination { engine.connect(source, to: destination, format: format) }
         source.removeTap(onBus: 0)
         source.installTap(onBus: 0, bufferSize: 480, format: nil) { [weak self] buffer, _ in
-            guard let self, buffer.frameLength > 0 else { return }
-            let count = Int(buffer.frameLength)
-            var sum: Float = 0
-            if let samples = buffer.floatChannelData?[0] {
-                for index in 0..<count { sum += samples[index] * samples[index] }
-            } else if let samples = buffer.int16ChannelData?[0] {
-                for index in 0..<count { let value = Float(samples[index]) / 32768; sum += value * value }
-            } else { return }
-            guard (sum / Float(count)).squareRoot() > 0.01 else { return }
-            let now = ContinuousClock.now
-            self.lock.withLock { self.loud.append(now) }
+            self?.lock.withLock { self?.stats.playoutBuffers += 1 }
         }
         return 0
+    }
+
+    /// Live's decoded voice, from `WebRTCLiveTransport.remoteAudio`.
+    func render(pcmBuffer buffer: AVAudioPCMBuffer) {
+        guard buffer.frameLength > 0 else { return }
+        let count = Int(buffer.frameLength)
+        var sum: Float = 0
+        if let samples = buffer.floatChannelData?[0] {
+            for index in 0..<count { sum += samples[index] * samples[index] }
+        } else if let samples = buffer.int16ChannelData?[0] {
+            for index in 0..<count { let value = Float(samples[index]) / 32768; sum += value * value }
+        } else { return }
+        let now = ContinuousClock.now
+        lock.withLock {
+            stats.remoteBuffers += 1
+            if (sum / Float(count)).squareRoot() > 0.01 { loud.append(now) }
+        }
     }
 
     func audioDeviceModuleDidUpdateDevices(_ module: LKRTCAudioDeviceModule) {}
