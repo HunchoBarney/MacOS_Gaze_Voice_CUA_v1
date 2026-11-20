@@ -173,6 +173,8 @@ final class LiveSession: LiveSessionSending {
             if phase == .standby { phase = .active }
         case .paused:
             if phase == .active { phase = .standby }
+        case .inputTranscript, .outputTranscript:
+            if phase == .standby { phase = .active }
         case .usage(let usage):
             lastUsage = usage
         case .closed(let reason, let usage):

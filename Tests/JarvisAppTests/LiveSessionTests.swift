@@ -81,6 +81,18 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(events.all, [.started(sessionID: "live_123"), .resumed, .usage(reported), .paused])
     }
 
+    func testTheFirstWakeHasNoResumedEventSoSpeechMarksItActive() async throws {
+        let (live, transport, _) = session()
+        transport.deliver(started)
+        try await live.start()
+        transport.deliver(#"{"type":"session.input_transcript.delta","event_id":"e2","delta":"hi","start_ms":100,"end_ms":300}"#)
+        try await waitUntil { live.phase == .active }
+        XCTAssertEqual(live.phase, .active, "the bench saw speech wake a new session without session.resumed")
+        transport.deliver(#"{"type":"session.paused","event_id":"e3"}"#)
+        try await waitUntil { live.phase == .standby }
+        XCTAssertEqual(live.phase, .standby)
+    }
+
     func testCloseSendsSessionCloseAndConfirmsTheReasonAndFinalUsage() async throws {
         let (live, transport, events) = session()
         transport.deliver(started)
