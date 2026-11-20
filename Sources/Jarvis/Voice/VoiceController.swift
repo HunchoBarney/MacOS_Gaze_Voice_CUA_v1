@@ -684,6 +684,11 @@ final class VoiceController: ObservableObject {
                 self?.commandTrace.record(stage, turn: turn)
             }
             lane.audioRepliesEnabled = config.ttsEnabled
+            let speech = lane.recentSpeech
+            speech.isRecording = config.voiceLive
+            cua.writingByInstruction.localTranscript = {
+                await LocalSpanTranscriber().transcribe(speech.snapshot())
+            }
             lane.commandHandler = { [weak self, weak lane] instruction, app, literalText, transcript, steps, captureID in
                 guard let self else { return #"{"status":"refused","say":"Jev is not available right now."}"# }
                 let capturedWindow = lane?.capturedLocalWindowID(for: captureID)
