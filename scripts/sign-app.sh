@@ -99,13 +99,17 @@ echo "sign-app: signing with '$SIGN'"
 # variables and unsigned libraries; Jarvis passes its environment to the
 # tracker and agents, and they run with its TCC grants. Entitlements are
 # the minimum each one needs: the app records audio and asks for the
-# camera; Electron and node JIT-compile JavaScript and load native
-# modules; Codex's JavaScript host and voice host do the same.
+# camera; cua-driver scripts browsers through osascript, and those Apple
+# Events are checked against the app as the responsible process too
+# (upstream CuaDriver.app ships the same apple-events entitlement);
+# Electron and node JIT-compile JavaScript and load native modules;
+# Codex's JavaScript host and voice host do the same.
 ENTITLEMENTS="$(cd "$(dirname "$0")" && pwd)/entitlements"
 entitlements_for() {
     case "$1" in
         "$APP") echo "$ENTITLEMENTS/jarvis.entitlements" ;;
         "$APP/Contents/Resources/EyeTracker/"*) echo "$ENTITLEMENTS/tracker.entitlements" ;;
+        "$APP/Contents/Resources/cua-driver") echo "$ENTITLEMENTS/cua-driver.entitlements" ;;
         */codex-code-mode-host|*/codex-voice-host) echo "$ENTITLEMENTS/codex-runtime.entitlements" ;;
     esac
 }
