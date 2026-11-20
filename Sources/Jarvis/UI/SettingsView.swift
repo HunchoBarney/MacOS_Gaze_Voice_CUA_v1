@@ -128,7 +128,7 @@ struct SettingsView: View {
             Picker("How Jarvis listens", selection: $config.listeningMode) {
                 ForEach(ListeningPolicy.current.offeredModes, id: \.self) { mode in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(mode.title).font(.system(size: 14))
+                        Text(mode.title(name: config.assistantName)).font(.system(size: 14))
                         Text(mode.detail).font(.system(size: 13)).foregroundStyle(.secondary)
                     }
                     .tag(mode)
@@ -138,12 +138,15 @@ struct SettingsView: View {
             .pickerStyle(.radioGroup)
             .labelsHidden()
             .accessibilityLabel("How Jarvis listens")
-            if config.handsFreeEnabled {
+            if ListeningPolicy.current.wakeWordAvailable {
+                AssistantNameField(config: config, controller: controller)
+            }
+            if controller.listensWithoutFn {
                 HStack {
                     Text(controller.handsFreeLabel).font(.system(size: 14))
                     Spacer()
-                    Button(controller.handsFreeListening ? "Pause listening" : "Start listening") {
-                        if controller.handsFreeListening { controller.pauseHandsFree() }
+                    Button(controller.listeningWithoutFn ? "Pause listening" : "Start listening") {
+                        if controller.listeningWithoutFn { controller.pauseHandsFree() }
                         else { controller.resumeHandsFree() }
                     }
                 }

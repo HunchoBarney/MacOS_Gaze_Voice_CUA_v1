@@ -137,7 +137,7 @@ struct FirstRunView: View {
     private var title: String {
         switch model.step {
         case .listening: return "How should Jarvis listen?"
-        case .standbyIntro: return "Jarvis listens for “Hey Jarvis”"
+        case .standbyIntro: return "Jarvis listens for “Hey \(config.assistantName)”"
         case .microphone: return "Let Jarvis hear you"
         case .accessibility: return "Let Jarvis use your Mac"
         case .tryIt: return model.triedIt ? "That worked" : "Try it"
@@ -150,11 +150,14 @@ struct FirstRunView: View {
         case .listening:
             VStack(spacing: 10) {
                 ForEach(model.policy.offeredModes, id: \.self) { mode in
-                    ListeningChoice(mode: mode, recommended: mode == model.policy.defaultMode,
+                    ListeningChoice(mode: mode, name: config.assistantName, recommended: mode == model.policy.defaultMode,
                                     selected: model.listeningMode == mode) { model.listeningMode = mode }
                 }
             }
-            Text(model.listeningMode.disclosure)
+            if model.listeningMode == .standby {
+                AssistantNameField(config: config).padding(.top, 12)
+            }
+            Text(model.listeningMode.disclosure(name: config.assistantName))
                 .font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 14)
@@ -165,7 +168,7 @@ struct FirstRunView: View {
                     .font(.system(size: 15))
             }
             .padding(.bottom, 8)
-            paragraph("Jarvis listens on your Mac for its name. Nothing leaves your Mac until you say it.")
+            paragraph("Jarvis listens on your Mac for “Hey \(config.assistantName)”. Nothing leaves your Mac until you say it.")
         case .microphone:
             switch model.microphone {
             case .refused:
@@ -254,6 +257,7 @@ struct FirstRunView: View {
 /// than a radio button and its label.
 private struct ListeningChoice: View {
     let mode: ListeningMode
+    let name: String
     let recommended: Bool
     let selected: Bool
     let choose: () -> Void
@@ -266,7 +270,7 @@ private struct ListeningChoice: View {
                     .foregroundStyle(selected ? Color.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
-                        Text(mode.title).font(.system(size: 16, weight: .semibold))
+                        Text(mode.title(name: name)).font(.system(size: 16, weight: .semibold))
                         if recommended {
                             Text("Recommended")
                                 .font(.system(size: 12, weight: .medium))

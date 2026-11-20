@@ -123,7 +123,7 @@ final class VoiceController: ObservableObject {
         case .listening:
             if handsFreeSpeaking { return "Talking, still listening" }
             return continuousScrolling ? "Scrolling, still listening" : "Listening"
-        case .standby: return "Waiting for “Hey Jarvis”"
+        case .standby: return "Waiting for “Hey \(config.assistantName)”"
         case .paused: return "Paused"
         case .unavailable: return "Can't listen right now"
         }
@@ -447,6 +447,7 @@ final class VoiceController: ObservableObject {
     /// Standby: the wake word hears the prepared microphone's tap, and a
     /// wake opens a hands-free session that closes once it goes quiet.
     private var standbyArmed = false
+    private var armedName = ""
     private var wakeSession: Task<Void, Never>?
     private var otherMicrophoneWatch: Task<Void, Never>?
     private var otherAppListening = false
@@ -809,6 +810,13 @@ final class VoiceController: ObservableObject {
         config.$listeningMode.dropFirst().removeDuplicates().sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.listeningModeChanged() }
         }.store(in: &subscriptions)
+        config.$assistantName.dropFirst().removeDuplicates().sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.standbyArmed, self.armedName != self.config.assistantName else { return }
+                self.disarmStandby()
+                self.armStandby()
+            }
+        }.store(in: &subscriptions)
     }
 
     private func bindPlayback() {
@@ -975,14 +983,53 @@ final class VoiceController: ObservableObject {
             return
         }
         do {
-            try detector.start { [weak self] moment in self?.wakeHeard(at: moment) }
+            try detector.start(name: config.assistantName) { [weak self] moment in self?.wakeHeard(at: moment) }
         } catch {
             handsFreeState = .unavailable(error.localizedDescription)
             return
         }
         lane.wakeListener = detector
+        armedName = config.assistantName
         standbyArmed = true
         handsFreeState = .standby
+    }
+
+    /// Settings' Test button: Jarvis says the phrase, then listens 5 s for
+    /// the person to say it. A wake heard during the test opens nothing.
+    enum WakeTest: Equatable { case speaking, listening, heard, missed, failed(String) }
+    @Published private(set) var wakeTest: WakeTest?
+    private var wakeTestTask: Task<Void, Never>?
+
+    func testWakeWord(say: @escaping @MainActor (String) async -> Void) {
+        guard wakeTest != .speaking, wakeTest != .listening, let detector = ListeningPolicy.wakeWord,
+              let lane = speech as? RealtimeVoiceLane else { return }
+        let name = config.assistantName
+        wakeTestTask = Task { [weak self] in
+            guard let self else { return }
+            self.wakeTest = .speaking
+            self.prepareMicrophone()
+            await say("Hey \(name)")
+            guard !Task.isCancelled else { return }
+            self.stopHandsFree(state: .off)
+            var heard = false
+            do {
+                try detector.start(name: name) { _ in heard = true }
+            } catch {
+                self.wakeTest = .failed(error.localizedDescription)
+                self.armStandby()
+                return
+            }
+            lane.wakeListener = detector
+            self.wakeTest = .listening
+            let deadline = ProcessInfo.processInfo.systemUptime + 5
+            while !heard, !Task.isCancelled, ProcessInfo.processInfo.systemUptime < deadline {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            lane.wakeListener = nil
+            detector.stop()
+            self.wakeTest = heard ? .heard : .missed
+            if self.config.handsFreeEnabled { self.startHandsFree() } else { self.armStandby() }
+        }
     }
 
     private func disarmStandby() {

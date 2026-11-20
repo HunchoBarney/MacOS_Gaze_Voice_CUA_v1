@@ -28,6 +28,11 @@ final class Config: ObservableObject {
     @Published var microphoneUID: String {
         didSet { defaults.set(microphoneUID, forKey: "microphoneUID") }
     }
+    /// The name in the wake phrase, "Hey <name>". Settings stores only a
+    /// name the wake-word engine can hear.
+    @Published var assistantName: String {
+        didSet { defaults.set(assistantName, forKey: "assistantName") }
+    }
 
     @Published var autoExecute: Bool {
         didSet { defaults.set(autoExecute, forKey: "autoExecute") }
@@ -164,6 +169,7 @@ final class Config: ObservableObject {
         self.apiKey = environment["TYPESAFE_API_KEY"] ?? ""
         self.openAIAPIKey = environment["OPENAI_API_KEY"] ?? ""
         self.microphoneUID = defaults.string(forKey: "microphoneUID") ?? ""
+        self.assistantName = defaults.string(forKey: "assistantName") ?? AssistantName.standard
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.alwaysAllowComputerUse = defaults.object(forKey: "cuaStandingGrant.computerUseInput") as? Bool ?? false
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? true
