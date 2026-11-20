@@ -153,6 +153,7 @@ final class VoiceController: ObservableObject {
     func stopAll() { cancel(); cua.stopAll() }
     func selectTask(_ id: UUID) { cua.select(id: id) }
     func cancelTask(_ id: UUID) { cua.cancel(id) }
+    func guideControl(_ control: GuideControl, task id: UUID) { Task { await cua.guideControl(control, workID: id) } }
     func approveTask(_ id: UUID, approved: Bool) { cua.resolveApproval(id: id, approved: approved) }
     /// All parked confirm asks, oldest task first — every row's Run button
     /// is id-scoped (approveTask → resolveApproval), so it resolves its own.
