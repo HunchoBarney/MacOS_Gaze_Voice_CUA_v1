@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import OSLog
+import Synchronization
 
 /// Owns the eye-tracker child process — the tracker is a required component
 /// (gaze-referent verbs depend on it), so the app spawns it on launch,
@@ -23,9 +24,14 @@ actor TrackerHost {
     /// Tests turn spawning off so the respawn and stale-generation paths
     /// run without forking a real tracker.
     private let spawnEnabled: Bool
+    /// Where a tracker writes its API token; nil when no bundled tracker
+    /// exists to say where.
+    private let tokenFile: @Sendable () -> URL?
 
-    init(spawnEnabled: Bool = true) {
+    init(spawnEnabled: Bool = true,
+         tokenFile: @escaping @Sendable () -> URL? = { TrackerHost.trackerDirectory().map(TrackerHost.tokenFile(trackerDir:)) }) {
         self.spawnEnabled = spawnEnabled
+        self.tokenFile = tokenFile
     }
     /// The tracker's read-only API port (`--external-api-port` default).
     static let port = 47892
@@ -40,17 +46,29 @@ actor TrackerHost {
             .joined()
     }()
 
-    /// The running tracker's token: the owner-only file it writes beside
-    /// its calibration (an adopted tracker has its own), else this
-    /// launch's token.
+    /// An adopted tracker's own token, read once from its file and
+    /// verified at adoption. nil whenever the tracker is one this launch
+    /// spawned, which always takes `launchToken`.
+    private nonisolated static let adoptedToken = Mutex<String?>(nil)
+
+    /// The running tracker's token. A spawned tracker never reads the
+    /// file: if the tracker failed to write it, the file would still hold
+    /// an earlier launch's token and every call would get 401.
     nonisolated static func apiToken() -> String {
-        if let dir = trackerDirectory(),
-           let text = try? String(contentsOf: calibrationDirectory(trackerDir: dir)
-                .appendingPathComponent(".tracker_api_token"), encoding: .utf8) {
-            let token = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !token.isEmpty { return token }
-        }
-        return launchToken
+        adoptedToken.withLock { $0 } ?? launchToken
+    }
+
+    /// The owner-only file a tracker writes its token to, beside its
+    /// calibration.
+    nonisolated static func tokenFile(trackerDir: URL) -> URL {
+        calibrationDirectory(trackerDir: trackerDir).appendingPathComponent(".tracker_api_token")
+    }
+
+    /// The token in `file`, or nil when it is missing, unreadable or empty.
+    nonisolated static func storedToken(at file: URL?) -> String? {
+        guard let file, let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        let token = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
     }
 
     /// A request to the tracker API, carrying the bearer token.
@@ -86,7 +104,9 @@ actor TrackerHost {
     /// `armAdoptionWatch` stands in for the termination-handler exit
     /// watch and the stop chain's SIGTERM step is a skip (the /control
     /// quit and scoped sweep still apply to adoptees).
-    private var adopted = false
+    private var adopted = false {
+        didSet { if !adopted { Self.adoptedToken.withLock { $0 = nil } } }
+    }
     /// Spawn attempts since the app started — bounded so a tracker that
     /// crashes immediately doesn't restart-loop forever. A boot that
     /// stays healthy ~60s earns the budget back (`armAttemptReset`) —
@@ -341,6 +361,25 @@ actor TrackerHost {
                 state = .failed("The eye tracker wedged and would not stop — restart it by hand.")
                 return
             }
+            // Fail closed: without the tracker's own token every call
+            // would get 401, and nothing a respawn does can fix that.
+            guard let token = Self.storedToken(at: tokenFile()) else {
+                Self.log.error("tracker already serving on port \(Self.port) but its API token is unreadable — not adopting")
+                state = .failed(Self.foreignTrackerMessage)
+                return
+            }
+            Self.adoptedToken.withLock { $0 = token }
+            guard await authorizationAccepted() else {
+                Self.adoptedToken.withLock { $0 = nil }
+                guard generation == startGeneration, state == .starting else { return }
+                Self.log.error("tracker on port \(Self.port) refused its stored API token — not adopting")
+                state = .failed(Self.foreignTrackerMessage)
+                return
+            }
+            guard generation == startGeneration, state == .starting else {
+                Self.adoptedToken.withLock { $0 = nil }
+                return
+            }
             Self.log.notice("tracker already serving on port \(Self.port) — adopted")
             adopted = true
             state = .running
@@ -383,6 +422,9 @@ actor TrackerHost {
         env.removeValue(forKey: "ELECTRON_RUN_AS_NODE")
         env.removeValue(forKey: "ELECTRON_NO_ATTACH_CONSOLE")
         env["JARVIS_TRACKER_TOKEN"] = Self.launchToken
+        // The file is the adoption channel only; a leftover from an earlier
+        // launch must never outlive the tracker that wrote it.
+        try? FileManager.default.removeItem(at: Self.tokenFile(trackerDir: dir))
         // node on a GUI app's PATH is bare — resolve it explicitly rather
         // than trusting /usr/bin/env to find it.
         guard let node = Self.nodeBinary(environment: env, trackerDir: dir) else {
@@ -544,6 +586,8 @@ actor TrackerHost {
     private enum SnapshotProbe {
         /// The API itself didn't answer — a health miss, not a verdict.
         case unreachable
+        /// The API answered 401: the token is wrong, and no respawn fixes that.
+        case unauthorized
         /// `wedgeSignal`'s verdict plus the served status error message,
         /// if any — logged once so non-wedge errors don't spam.
         case verdict(WedgeSignal, error: String?)
@@ -559,8 +603,10 @@ actor TrackerHost {
         }
         var request = Self.authorized(url)
         request.timeoutInterval = 3
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else { return .unreachable }
+        let status = (response as? HTTPURLResponse)?.statusCode
+        if status == 401 { return .unauthorized }
+        guard status == 200,
               let snapshot = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return .unreachable }
         return .verdict(
@@ -595,6 +641,11 @@ actor TrackerHost {
                 let (running, forced, isAdopted) = await (self.state, self.forceWasm, self.adopted)
                 guard running == .running, !forced else { return }
                 switch await self.probeSnapshot(runningSince: runningSince) {
+                case .unauthorized:
+                    // Unstructured, so the stop's kill-chain waits don't
+                    // inherit this watch's cancellation.
+                    Task { await self.lostAccess() }
+                    return
                 case .unreachable:
                     healthMisses += 1
                     // An adoptee's dead API is the adoption poll's job —
@@ -1091,6 +1142,31 @@ actor TrackerHost {
 
     private func healthy() async -> Bool {
         await healthPayload() != nil
+    }
+
+    static let foreignTrackerMessage =
+        "Another eye tracker is already running and I can't use it. Quit it, then turn eye tracking on again."
+    static let lostAccessMessage =
+        "I lost access to the eye tracker. Turn eye tracking off and on again."
+
+    /// Whether the tracker accepts the current token. Only a 401 says no;
+    /// a dropped request is the health checks' business.
+    private func authorizationAccepted() async -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:\(Self.port)/snapshot/status") else { return true }
+        var request = Self.authorized(url)
+        request.timeoutInterval = 2
+        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return true }
+        return (response as? HTTPURLResponse)?.statusCode != 401
+    }
+
+    /// The tracker refused this launch's token mid-run. A respawn or a
+    /// wasm escalation would meet the same refusal, so stop for good and
+    /// say so once.
+    private func lostAccess() async {
+        guard state == .running else { return }
+        Self.log.error("tracker API refused the token — stopping instead of respawning")
+        await stop()
+        state = .failed(Self.lostAccessMessage)
     }
 
     /// Who answered /health — `.stamped` carries the responder's
