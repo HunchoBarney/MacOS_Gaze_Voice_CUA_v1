@@ -38,6 +38,13 @@ Local CI runs it again at every PR head and on main, and posts the
    what differs from the last head the lane built.
 3. It runs your command there and releases the lock.
 
+When the crew's shared queue `~/.capy/work/lane/lane.sh` is installed,
+`lane-test.sh` hands over to it. It works the same way, but waiters run in
+the order they arrived instead of whichever polls first, and
+`LANE_PRIORITY=high` (local CI, main-blocking jobs) goes to the front.
+`~/.capy/work/lane/lane.sh --status` shows the running job, how long it has
+run, and the queue in order.
+
 Don't build in your own worktree as well: that adds a second cold `.build`
 (400 MB–1.4 GB) and holds the lane for minutes. Local CI keeps its own
 checkout under `~/.capy/work/local-ci`. Never point either at the owner's
