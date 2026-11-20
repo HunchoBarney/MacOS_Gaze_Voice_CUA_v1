@@ -5,7 +5,7 @@ import JarvisCore
 /// Exact upstream integration tested for this migration. Stock auto-updates
 /// must not silently replace the verified build.
 enum CuaDependency {
-    static let sourceRevision = "85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19" // cua-driver-rs-v0.38.0
+    static let sourceRevision = "09dd7017fca72678fd707490f8d2913a55d97e72" // cua-driver-rs-v0.54.0 + host-connections-only.patch
     static let hostBundleID = "com.karanvirkang.jarvis"
     static let installedExecutable = URL(fileURLWithPath: "/Applications/CuaDriver.app/Contents/MacOS/cua-driver")
     /// `make app` embeds the pinned build at Contents/Resources/cua-driver so
@@ -23,7 +23,7 @@ enum CuaDependency {
     }
 
     /// A passing full hash is remembered per path for the process lifetime —
-    /// every connect() and pool proxy verifies, so the stat shortcut skips
+    /// every daemon spawn verifies, so the stat shortcut skips
     /// repeat ~72MB reads. Nothing persists: a UserDefaults record is
     /// forgeable by any same-UID process that can stat() the file, so each
     /// cold start pays one honest hash. The record is bound to the pin, so

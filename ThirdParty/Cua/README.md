@@ -1,37 +1,49 @@
 # Cua integration provenance and recovery
 
-The app verifies `/Applications/CuaDriver.app/Contents/MacOS/cua-driver`
-against SHA-256 `b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8`
-(the official upstream `cua-driver-rs` **v0.38.0** release build, tag
-`cua-driver-rs-v0.38.0` at commit `85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19`;
-archive digest verified against GitHub's published asset digest on 2026-10-25). The authoritative
-runtime constants are in
-[`CuaDependency.swift`](../../Sources/Jarvis/ComputerControl/CuaDependency.swift).
-Do not update the pin just to accept a different build.
+The embedded driver is **cua-driver-rs v0.54.0 plus one reviewed patch**,
+built from source and pinned by the artefact's SHA-256:
 
-Historical note — v0.32.0 (a prior pin; the current pin is v0.38.0, above)
-superseded the local fork we previously ran: upstream landed the
-foreground-chord modifier fix (0.30.4), launch-before-snapshot wait (0.31.0),
-element-token snapshot-store resolution (0.31.0), cursor reveal for
-keyboard-first actions (0.31.0), and the post-navigation page-title refresh
-(0.30.2). Its `type_text` runs the AX→CGEvent ladder internally, so the
-fork's `type_chars_only` arg was removed from our calls. Browser `target_id`/
-`tab_id` are re-minted per `get_browser_state` read — callers must use ids
-from the same snapshot, immediately.
+- Source: `https://github.com/trycua/cua.git`, tag `cua-driver-rs-v0.54.0`,
+  commit `09dd7017fca72678fd707490f8d2913a55d97e72`.
+- Patch: [`host-connections-only.patch`](host-connections-only.patch). It adds
+  `cua-driver serve --host-connections-only` (env
+  `CUA_DRIVER_HOST_CONNECTIONS_ONLY=1`). With it, the daemon closes every
+  socket peer that is not its embedded host before reading a request. The
+  host is the process whose PID is the daemon's parent PID, checked with
+  upstream's existing `authenticate_embedded_host_connection`. The existing
+  same-UID check still runs first. Outside embedded mode, no peer counts as
+  the host, so every connection is refused (fail closed).
+- Build: `cargo build --release --locked -p cua-driver` with the toolchain
+  in upstream's `rust-toolchain.toml` (1.97.1), `CUA_DRIVER_GIT_SHA` set to
+  the commit, and every machine path remapped. See
+  [`fetch-embedded-binaries.sh`](fetch-embedded-binaries.sh).
+- Pins: `vendored_binaries.cua-driver` in
+  [`source-manifest.json`](source-manifest.json) records the commit, the
+  patch hash and the artefact hash. A mismatch on any of them fails the build.
+  The runtime constants are in
+  [`CuaDependency.swift`](../../Sources/Jarvis/ComputerControl/CuaDependency.swift).
 
-The current canonical installer bakes 0.37.0. This is an intentional exact
-0.38.0 component-release selection, not a claim that the default installer
-currently selects it. The release explains that GitHub's prerelease label
-protects the monorepo-wide Latest pointer; plain component SemVer is stable.
-Archive SHA-256:
-`5f71191c082ca07c9dfc13b7c9a6eec60a82818c245a93534cc0eb7911471d72`.
-Use the app-bundle member, not the separate bare executable.
-The existing embedding/liveness/standard-permission flags and backward
-tool schemas pass isolated preflight; signed Jev runtime acceptance is
-recorded under `.agent/results/P3/closeout02/cua-upgrade/` in the
-`harness-archive-2026-11-19` tag.
+This replaces "official tarball" with "official source + reviewed patch,
+hash-pinned". Do not update a pin just to accept a different build. To move
+to a new upstream version, rebase the patch, rebuild, check the new hash on
+a second clean build, and get a live retest.
+
+Jarvis talks to the daemon only from its own process. `CuaDaemonHost` spawns
+`serve --embedded --host-connections-only …` with
+`CUA_DRIVER_MCP_ENVELOPES=1`. `CuaConnection` connects to the socket
+directly, sends `{"method":"mcp_envelope_stream"}`, expects
+`{"ok":true,"result":{"mcp_envelope_stream":1}}`, and then speaks MCP
+JSON-RPC lines on the same stream. No `cua-driver mcp` proxy child is spawned.
+Agent MCP children (`Jarvis --mcp-stdio`) are other processes, so the
+daemon refuses them. They reach the desktop through the host app.
 
 Prior pins (recovery only):
+- `b4d974a9c1c92a700cd7be7ede987aea4a1e6835e37039ce3d628b71bd5f0ca8`: upstream
+  v0.38.0 release build (tag `cua-driver-rs-v0.38.0`, commit
+  `85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19`), the app-bundle member of
+  `cua-driver-rs-0.38.0-darwin-arm64.tar.gz` (archive SHA-256
+  `5f71191c082ca07c9dfc13b7c9a6eec60a82818c245a93534cc0eb7911471d72`).
+  Its daemon admits any same-user peer.
 - `54e5d48128fb62323366c49b6be480ccef83cdee23bd7fc1f19431347a5df86b` — upstream
   v0.34.0, prior pin; preserve the old application and embedded vendor bytes
   before replacement. Never silently fall back to it under the new pin.
@@ -53,22 +65,18 @@ vendored Codex runtime at `Contents/Resources/CodexRuntime/` (entrypoint
 `CodexRuntime/codex`, the npm `@openai/codex` darwin-arm64 `vendor/` tree
 preserved so `codex-path`/`codex-resources` resolve).
 
-At runtime `CuaDependency` resolves the bundled driver first and falls back
-to the installed app for unpackaged runs. `CuaConnection` spawns the bundled
-binary as `serve --embedded` (env `CUA_DRIVER_EMBEDDED=1`,
+At runtime `CuaDependency` resolves the bundled driver first. Unpackaged runs
+fall back to `/Applications/CuaDriver.app`, which only passes the pin if a
+build of this exact artefact is installed there. `CuaDaemonHost` spawns
+the bundled binary as `serve --embedded --host-connections-only` (env
+`CUA_DRIVER_EMBEDDED=1`, `CUA_DRIVER_MCP_ENVELOPES=1`,
 `CUA_DRIVER_HOST_BUNDLE_ID`, `CUA_DRIVER_EMBEDDED_HOST_PID`; args
 `--parent-liveness-stdio --no-permissions-gate --socket <private>
 --host-bundle-id com.karanvirkang.jarvis --permission-mode standard
---grant existing-profile`) on a private socket, then speaks MCP through
-`mcp --embedded --socket <private>` on stdio — the driver's documented
-host contract (`Skills/cua-driver/EMBEDDING.md`), so Accessibility and
-Screen Recording attribute to `com.karanvirkang.jarvis`. The daemon's
-stdin is a liveness pipe: host exit closes it and the daemon exits.
-
-The pinned binary is the signed app-bundle member
-(`.../CuaDriver.app/Contents/MacOS/cua-driver`) of the release tarball; the
-bare top-level `cua-driver` member is a different build and does not match
-the pin.
+--grant existing-profile`). It's the driver's documented embedding contract
+(`Skills/cua-driver/EMBEDDING.md`), so Accessibility and Screen Recording
+attribute to `com.karanvirkang.jarvis`. The daemon's stdin is a liveness
+pipe: when the host exits, the pipe closes and the daemon exits.
 
 ## Preserved source
 

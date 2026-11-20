@@ -1,0 +1,121 @@
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs
+index c067545..8bfff83 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs
+@@ -40,6 +40,20 @@ pub const HOST_BUNDLE_ID_ENV: &str = "CUA_DRIVER_HOST_BUNDLE_ID";
+ /// continue to use stdin for JSON-RPC and never set it.
+ pub const PARENT_LIVENESS_STDIN_ENV: &str = "CUA_DRIVER_PARENT_LIVENESS_STDIN";
+ 
++/// Embedded-host lockdown: when set to the exact value `1`, the service
++/// socket admits only the embedded host itself (the peer whose PID is the
++/// daemon's parent). Every other local peer is dropped before its first
++/// request is read, so another process of the same user cannot reach the
++/// tools by finding the socket.
++pub const HOST_CONNECTIONS_ONLY_ENV: &str = "CUA_DRIVER_HOST_CONNECTIONS_ONLY";
++
++/// Only the exact value `1` enables it; anything else leaves the socket as
++/// before. Enforcement fails closed: outside embedded mode no peer
++/// authenticates as the host, so every connection is refused.
++pub fn host_connections_only() -> bool {
++    std::env::var_os(HOST_CONNECTIONS_ONLY_ENV).is_some_and(|value| value == "1")
++}
++
+ /// Only the exact value `1` counts — fail-safe for anything else.
+ pub fn embedded_mode() -> bool {
+     is_embedded_sentinel(std::env::var_os(EMBEDDED_ENV).as_deref())
+diff --git a/libs/cua-driver/rust/crates/cua-driver/src/cli.rs b/libs/cua-driver/rust/crates/cua-driver/src/cli.rs
+index 817cb92..b0cd41f 100644
+--- a/libs/cua-driver/rust/crates/cua-driver/src/cli.rs
++++ b/libs/cua-driver/rust/crates/cua-driver/src/cli.rs
+@@ -798,6 +798,10 @@ pub fn parse_command() -> Command {
+     if args.iter().any(|a| a == "--parent-liveness-stdio") {
+         std::env::set_var(cua_driver_core::PARENT_LIVENESS_STDIN_ENV, "1");
+     }
++    // Embedded-host lockdown: only the spawning host may connect.
++    if args.iter().any(|a| a == "--host-connections-only") {
++        std::env::set_var(cua_driver_core::HOST_CONNECTIONS_ONLY_ENV, "1");
++    }
+ 
+     // Strip cursor-overlay flags (and their values) to expose the subcommand.
+     let mut positionals: Vec<&str> = Vec::new();
+@@ -1292,6 +1296,8 @@ const SELF_PARSING_COMMANDS: &[&str] = &["extension", "perception", "cursor-them
+ const UNLISTED_OPTIONS: &[(&str, &str, bool)] = &[
+     // Internal embedded-host lifetime contract (`EmbeddedCuaDriverHost`).
+     ("serve", "--parent-liveness-stdio", false),
++    // Embedded-host lockdown (`HOST_CONNECTIONS_ONLY_ENV`).
++    ("serve", "--host-connections-only", false),
+     // Removed picture-in-picture preview, still accepted and ignored.
+     ("serve", "--experimental-pip", false),
+     ("serve", "--experimental-pip-geometry", true),
+diff --git a/libs/cua-driver/rust/crates/cua-driver/src/serve.rs b/libs/cua-driver/rust/crates/cua-driver/src/serve.rs
+index 63822ce..765dad2 100644
+--- a/libs/cua-driver/rust/crates/cua-driver/src/serve.rs
++++ b/libs/cua-driver/rust/crates/cua-driver/src/serve.rs
+@@ -907,6 +907,13 @@ async fn authenticate_history_cli_request(
+     .unwrap_or(false)
+ }
+ 
++/// Under `--host-connections-only` a connection is served only when it is the
++/// authenticated embedded host's own; otherwise every authenticated local
++/// peer is served as before.
++fn admits_connection(host_connections_only: bool, trusted_host_connection: bool) -> bool {
++    !host_connections_only || trusted_host_connection
++}
++
+ fn service_authorization_status(trusted_host_connection: bool) -> serde_json::Value {
+     let mut status = cua_driver_core::authorization::status_json_with_provider(None);
+     if trusted_host_connection {
+@@ -936,7 +943,8 @@ fn service_authorization_status(trusted_host_connection: bool) -> serde_json::Va
+ #[cfg(all(test, unix))]
+ mod peer_authentication_tests {
+     use super::{
+-        authenticate_unix_peer, authenticate_unix_uid, history_cli_authentication_path,
++        admits_connection, authenticate_embedded_host_connection, authenticate_unix_peer,
++        authenticate_unix_uid, history_cli_authentication_path,
+         history_relaunch_state_response, shutdown_response, DaemonRequest, ToolObservationOrigin,
+     };
+ 
+@@ -947,6 +955,20 @@ mod peer_authentication_tests {
+         authenticate_unix_peer(&right).expect("right peer must be current user");
+     }
+ 
++    #[test]
++    fn host_connections_only_admits_only_the_embedded_host() {
++        assert!(admits_connection(false, false));
++        assert!(admits_connection(false, true));
++        assert!(admits_connection(true, true));
++        assert!(!admits_connection(true, false));
++    }
++
++    #[tokio::test]
++    async fn a_peer_that_is_not_the_parent_is_not_the_embedded_host() {
++        let (left, _right) = tokio::net::UnixStream::pair().expect("Unix stream pair");
++        assert!(authenticate_embedded_host_connection(&left).is_err());
++    }
++
+     #[test]
+     fn foreign_unix_uid_is_rejected_before_request_parsing() {
+         let error = authenticate_unix_uid(501, 502).unwrap_err();
+@@ -1120,6 +1142,10 @@ pub async fn run_serve(
+                 }
+                 let trusted_host_connection =
+                     authenticate_embedded_host_connection(&stream).is_ok();
++                if !admits_connection(cua_driver_core::host_connections_only(), trusted_host_connection) {
++                    tracing::warn!("service connection rejected: only the embedded host may connect");
++                    continue;
++                }
+                 let history_cli_executable_path = history_cli_executable_path(&stream).ok();
+                 let reg = sdk.clone();
+                 let shutdown_tx2 = shutdown_tx.clone();
+@@ -1949,6 +1975,11 @@ pub async fn run_serve(
+                         expected_host_process_id,
+                         client_process_id,
+                     );
++                if !admits_connection(cua_driver_core::host_connections_only(), trusted_host_connection) {
++                    tracing::warn!("service named-pipe connection rejected: only the embedded host may connect");
++                    let _ = server.disconnect();
++                    continue;
++                }
+                 let history_cli_executable_path =
+                     client_process_id.and_then(platform_windows::history::process_executable_path);
+ 

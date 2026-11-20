@@ -4,13 +4,13 @@ import JarvisCore
 /// Where the daemon's sockets live: one directory per app run, made by
 /// mkdtemp (mode 0700, random name) in the per-user temp folder. Nothing
 /// publishes its path in a well-known file; the app hands it to its own
-/// agent MCP children as `--cua-dir`. This is obscurity, not access
-/// control: any same-user process can still find the socket (lsof, a proxy's
-/// argv, a directory scan) and the daemon checks only the peer's uid.
+/// agent MCP children as `--cua-dir`. The private directory is not the
+/// access control: the daemon runs with `--host-connections-only` and closes
+/// every peer that is not this app process, its parent.
 enum CuaSocketDirectory {
     static let current: String? = create(in: NSTemporaryDirectory())
 
-    /// Unix socket paths are limited to ~104 bytes, so a long temp folder
+    /// Unix socket paths are limited to `104 bytes, so a long temp folder
     /// falls back to /tmp.
     static func create(in base: String) -> String? {
         let parent = base.utf8.count < 60 ? base : "/tmp"
@@ -67,9 +67,9 @@ final class EmbeddedDaemon {
     /// The daemon's post-mutation observation window — how long its
     /// WindowChangeDetector waits for a window change after each
     /// bound-window mutation. Driver default is 1000ms (the dominant
-    /// per-dispatch tax, ~1.4s clicks); the driver clamps the knob to
+    /// per-dispatch tax, `1.4s clicks); the driver clamps the knob to
     /// 0–10000ms. 100ms keeps the window-diff coverage launch/menu opens
-    /// need while shrinking the tail ~10x per dispatch.
+    /// need while shrinking the tail `10x per dispatch.
     ///
     /// SAFETY: a shorter tail means the detector can report "no change"
     /// for UI still settling past 100ms — the drive loop's next observe
@@ -97,6 +97,7 @@ final class EmbeddedDaemon {
             if let value = host[key] { environment[key] = value }
         }
         environment["CUA_DRIVER_EMBEDDED"] = "1"
+        environment["CUA_DRIVER_MCP_ENVELOPES"] = "1"
         environment["DO_NOT_TRACK"] = "1"
         environment["CUA_TELEMETRY"] = "0"
         environment["CUA_DRIVER_RS_TELEMETRY_ENABLED"] = "0"
@@ -109,6 +110,17 @@ final class EmbeddedDaemon {
         return environment
     }
 
+    /// `--host-connections-only` (our vendored patch on 0.54.0) admits only
+    /// this process, the daemon's parent: every other local peer is closed
+    /// before its first request. CuaConnection speaks to it directly.
+    static func daemonArguments(socket: String) -> [String] {
+        ["serve", "--embedded", "--host-connections-only", "--parent-liveness-stdio",
+         "--no-permissions-gate", "--socket", socket,
+         "--host-bundle-id", CuaDependency.hostBundleID,
+         "--permission-mode", "standard",
+         "--grant", "existing-profile"]
+    }
+
     func start() async throws {
         let socket = Self.socketPath(in: directory)
         try? FileManager.default.removeItem(atPath: socket)
@@ -116,11 +128,7 @@ final class EmbeddedDaemon {
         let liveness = Pipe()
         let daemon = Process()
         daemon.executableURL = executable
-        daemon.arguments = ["serve", "--embedded", "--parent-liveness-stdio",
-                            "--no-permissions-gate", "--socket", socket,
-                            "--host-bundle-id", CuaDependency.hostBundleID,
-                            "--permission-mode", "standard",
-                            "--grant", "existing-profile"]
+        daemon.arguments = Self.daemonArguments(socket: socket)
         daemon.environment = environment
         // Daemon logs may contain observed content; do not persist them.
         daemon.standardOutput = FileHandle.nullDevice
@@ -166,9 +174,10 @@ final class EmbeddedDaemon {
     }
 }
 
-/// One daemon for the whole app. Every consumer (voice session, agent MCP
-/// children, setup probes) spawns its own `mcp --embedded` proxy onto this
-/// socket — the daemon serves N connections concurrently by design.
+/// One daemon for the whole app. Every consumer in this process (voice
+/// session, read-only sibling, setup probes) opens its own CuaConnection
+/// stream on this socket — the daemon serves N connections concurrently by
+/// design. Other processes, agent MCP children included, are refused.
 ///
 /// Health model: `socket()` re-mints a dead daemon lazily (child exited or
 /// socket file gone). A daemon that's alive but refusing every tool is sick,
@@ -193,7 +202,7 @@ actor CuaDaemonHost {
     }
 
     /// The shared daemon's socket — mints on first use, re-mints on death.
-    /// A re-mint invalidates every proxy bound to the old socket; callers
+    /// A re-mint invalidates every connection bound to the old socket; callers
     /// drop their dead transports and reconnect (sessions re-mint caller-side).
     func socket() async throws -> String {
         if let minting { return try await minting.value }
