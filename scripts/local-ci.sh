@@ -106,9 +106,10 @@ stop_group() {
     kill -KILL -- "-$1" 2>/dev/null
 }
 
-test_pid=""
+test_pid="" watchdog=""
 on_signal() {
     [ -n "$test_pid" ] && stop_group "$test_pid" 10
+    [ -n "$watchdog" ] && { pkill -P "$watchdog" sleep; kill "$watchdog"; } 2>/dev/null
     [ -n "${sha:-}" ] && post "$sha" error "cancelled on the Mac"
     exit 130
 }
@@ -171,7 +172,7 @@ run_sha() {
     set +m
     rm -f "$CI_HOME/timed-out"
     (sleep $((LANE_TIMEOUT + TEST_TIMEOUT)) && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
-    local watchdog=$!
+    watchdog=$!
     wait "$test_pid"; rc=$?
     test_pid=""
     if [ -e "$CI_HOME/timed-out" ]; then
@@ -179,6 +180,7 @@ run_sha() {
     else
         pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
     fi
+    watchdog=""
     local minutes=$(((SECONDS - start + 59) / 60)) counts
     if grep -aq '^lane: gave up after' "$log"; then
         say "the build lane did not free up in $LANE_TIMEOUT s" | tee -a "$log"

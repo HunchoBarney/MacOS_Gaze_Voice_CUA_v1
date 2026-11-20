@@ -185,6 +185,29 @@ if [ -e "$home/lane.log" ]; then
     echo "FAIL a head that conflicts with main must never reach the lane"; failures=$((failures + 1))
 fi
 
+# A run cancelled on the Mac stops its watchdog too, so no orphaned timer
+# later signals a process group whose id has been reused.
+merge_origin cancel "pr change" b.txt
+cat >"$dir/lane-cancel" <<'EOF'
+#!/bin/bash
+exec sleep 30
+EOF
+chmod +x "$dir/lane-cancel"
+home=$dir/ci-cancel; mkdir -p "$home"; git clone -q "$dir/origin-cancel" "$home/checkout"
+printf '#!/bin/bash\nexit 0\n' >"$dir/gh-cancel" && chmod +x "$dir/gh-cancel"
+mkdir -p "$home/requested" && date -u +%Y-%m-%dT%H:%M:%SZ >"$home/requested/$(cat "$dir/origin-cancel.head")"
+LOCAL_CI_HOME=$home GH=$dir/gh-cancel LOCAL_CI_LANE=$dir/lane-cancel LOCAL_CI_LANE_TIMEOUT=1 LOCAL_CI_TEST_TIMEOUT=7776 \
+    "$here/local-ci.sh" poll >/dev/null 2>&1 &
+ci=$!
+for _ in $(seq 50); do pgrep -f "sleep 7777" >/dev/null && break; sleep 0.2; done
+kill -TERM "$ci"; wait "$ci"
+sleep 1
+if pgrep -f "sleep 7777" >/dev/null; then
+    echo "FAIL a cancelled run left its watchdog running"; failures=$((failures + 1)); pkill -f "sleep 7777"
+else
+    echo "ok   ci-cancel stops its watchdog"
+fi
+
 # poll tests the head it first listed longest ago, not the most recently
 # updated one, and skips heads that already have a status. gh is a fake that
 # lists the heads below; the checkout has no remote, so the chosen head fails
