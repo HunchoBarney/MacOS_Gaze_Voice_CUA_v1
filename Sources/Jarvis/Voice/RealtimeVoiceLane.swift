@@ -1863,6 +1863,24 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
+    /// The screen answer's response was refused (the session is gone or
+    /// reconnecting): say so in fixed words and end the turn, rather than
+    /// holding it open until the person's next turn.
+    private func abandonScreenAnswer() {
+        toolRelayOwed = false
+        discardScreenItems()
+        guard let id = turnID, awaitingTurnEnd else { return }
+        awaitingTurnEnd = false
+        onEvent?(id, .toolSay(ScreenQuestion.failure))
+        if player.playbackIdle {
+            onEvent?(id, .turnEnded)
+            turnID = nil
+            prepareNext()
+        } else {
+            deferTurnEndOnDrain(turn: id)
+        }
+    }
+
     /// A question about the screen may speak while it reasons (a clarifying
     /// question with no tool call), like a plain question; every other turn
     /// speaks only its outcome.
@@ -2091,7 +2109,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
         } else {
             guard pendingOutcomeReady || toolRelayOwed else { return }
             purpose = .outcomeOnly
-            guard responseAuthority.request(admission: nil, purpose: purpose, inputItemID: nil) else { return }
+            guard responseAuthority.request(admission: nil, purpose: purpose, inputItemID: nil) else {
+                if toolRelayOwed { abandonScreenAnswer() }
+                return
+            }
             turnResponseOutstanding = toolRelayOwed
             pendingOutcomeReady = false; toolRelayOwed = false
         }
