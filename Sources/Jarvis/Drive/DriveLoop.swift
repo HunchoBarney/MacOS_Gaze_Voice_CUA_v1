@@ -1251,7 +1251,7 @@ actor DriveLoop {
         if let parsed = FastAction.parse(goal) {
             switch parsed.action.body {
             case .gaze, .tracker, .mediaKey, .systemHotkey, .overlay,
-                 .repeatLast, .locate, .dictation, .webSearch, .navigateURL, .desktop:
+                 .repeatLast, .locate, .locatePointer, .dictation, .webSearch, .navigateURL, .desktop:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,
                  .menu, .windowFrame, .clickNamed, .showNamed, .exitFullScreen:

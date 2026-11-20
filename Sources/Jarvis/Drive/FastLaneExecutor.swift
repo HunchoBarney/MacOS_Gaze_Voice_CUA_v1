@@ -167,7 +167,7 @@ extension DriveLoop {
         // dictation verbs steer the capture lane. Peeled qualifiers are
         // emphasis, the same as the gaze referents above.
         switch parsed.action.body {
-        case .systemHotkey, .overlay, .repeatLast, .locate, .dictation, .desktop:
+        case .systemHotkey, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
             guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
             else { return .vetoed }
             return .resolved(FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: ""))
@@ -396,6 +396,9 @@ extension DriveLoop {
                 // still lands here has nothing behind it to repeat.
                 return settle(.blocked("Nothing to repeat."), task, history,
                               blockedReason: "no action to replay")
+            case .locatePointer:
+                feed(action.description)
+                return await runLocatePointer(task: task, history: history)
             case .locate(let query):
                 feed(action.description)
                 try await gateExplicit("locate window", corpus: "\(action.description) \(query)",
@@ -694,7 +697,7 @@ extension DriveLoop {
                                                task: task, session: session, history: &history,
                                                confirmed: &confirmed)
         case .mediaKey, .systemHotkey, .navigateURL, .webSearch, .appControl,
-             .gaze, .tracker, .overlay, .repeatLast, .locate, .dictation, .desktop:
+             .gaze, .tracker, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
             return nil // handled above
         }
     }
@@ -1897,19 +1900,25 @@ extension DriveLoop {
                 let app = row["app_name"]?.string ?? ""
                 if !app.isEmpty, !names.contains(app) { names.append(app) }
             }
-            if matches.isEmpty {
-                // No window answers to the name: the app is running with its
-                // windows closed, or it quit. Only an app we can identify
-                // gets either answer.
-                let resolved = await resolver.resolveDetailed(query)
+            // No window answers to the name: the app is running with its
+            // windows closed, or it quit. Only an app we can identify gets
+            // either answer.
+            let resolved = matches.isEmpty ? await resolver.resolveDetailed(query) : nil
+            if let resolved {
                 names = resolved.matches.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+            }
+            guard names.count <= 1 else {
+                return settle(.blocked("“\(query)” could be a few things — \(names.joined(separator: ", ")). Which one?"),
+                              task, history, blockedReason: "locate ambiguous")
+            }
+            if let resolved {
                 guard let app = resolved.app, app.bundle != nil || (app.pid ?? 0) > 0 else {
                     return settle(.blocked("I can't find anything called \(query) — say 'what can I say' to see what I understand."),
                                   task, history, blockedReason: "locate found nothing")
                 }
-                // Reopening or launching needs the app's exact name: "where
-                // is the cursor" must not open Cursor.app on a near match.
-                guard Self.namesApp(query, app.name) else {
+                // Reopening or launching needs one of the app's own names: a
+                // near match never opens anything.
+                guard Self.names(of: app).contains(where: { Self.namesApp(query, $0) }) else {
                     return settle(.blocked("I can't find a window called \u{201C}\(query)\u{201D}. The closest app I know is \(app.name). Say \u{201C}open \(app.name)\u{201D} if that's the one."),
                                   task, history, blockedReason: "locate near match")
                 }
@@ -1926,10 +1935,6 @@ extension DriveLoop {
                 bundle = try await bundleID(forPID: found, session: session)
                 name = names.first ?? query
                 appRows = matches.filter { $0["pid"]?.integer == found }
-            }
-            guard names.count <= 1 else {
-                return settle(.blocked("“\(query)” could be a few things — \(names.joined(separator: ", ")). Which one?"),
-                              task, history, blockedReason: "locate ambiguous")
             }
         }
         let displays = Self.displayFrames().map(\.frame)
@@ -2109,14 +2114,55 @@ extension DriveLoop {
     /// accents, a leading "the" and a trailing "app".
     static func namesApp(_ spoken: String, _ app: String) -> Bool {
         func bare(_ text: String) -> String {
-            var words = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
-                .replacingOccurrences(of: ".app", with: "")
-                .split(whereSeparator: \.isWhitespace).map(String.init)
+            var folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            if folded.hasSuffix(".app") { folded.removeLast(4) }
+            var words = folded.split(whereSeparator: \.isWhitespace).map(String.init)
             if words.first == "the" { words.removeFirst() }
             if words.last == "app" { words.removeLast() }
             return words.joined(separator: " ")
         }
         return !bare(spoken).isEmpty && bare(spoken) == bare(app)
+    }
+
+    /// The bundle's own CFBundleDisplayName and CFBundleName, localized
+    /// first. Tests swap in fixed names.
+    nonisolated(unsafe) static var bundleNames: (String) -> [String] = { bundleID in
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+              let bundle = Bundle(url: url) else { return [] }
+        let keys = ["CFBundleDisplayName", "CFBundleName"]
+        return keys.compactMap { bundle.localizedInfoDictionary?[$0] as? String }
+            + keys.compactMap { bundle.infoDictionary?[$0] as? String }
+    }
+
+    private static let vendorPrefixes: Set<String> = ["google", "microsoft", "adobe"]
+
+    /// Every name a person might call an app by: its name, its bundle's
+    /// names, and each without a vendor ("Google Chrome" → "Chrome",
+    /// "Microsoft Word" → "Word").
+    static func names(of app: AppResolver.App) -> [String] {
+        let own = [app.name] + (app.bundle.map(bundleNames) ?? [])
+        return own + own.compactMap { name in
+            let words = name.split(whereSeparator: \.isWhitespace)
+            guard words.count > 1, vendorPrefixes.contains(words[0].lowercased()) else { return nil }
+            return words.dropFirst().joined(separator: " ")
+        }
+    }
+
+    /// "Where's my mouse?": a ring around the pointer where it is. Never an
+    /// app hunt, though "cursor" is also Cursor.app's exact name.
+    nonisolated(unsafe) static var pointerLocation: () -> CGPoint = {
+        ScreenGeometry.appKitToTopLeft(NSEvent.mouseLocation)
+    }
+
+    private func runLocatePointer(task: DriveTask, history: [String]) async -> DriveResult {
+        let point = Self.pointerLocation()
+        let ring = CGRect(x: point.x - 40, y: point.y - 40, width: 80, height: 80)
+        guard let overlayDispatch, let shown = await overlayDispatch(.highlight, [(ring, "Your pointer")], nil),
+              case .done = shown.status else {
+            return done("I can't circle it right now. Move the mouse quickly back and forth, and the pointer grows bigger for a moment so you can spot it.",
+                        task, history)
+        }
+        return done("There's your pointer. I've circled it.", task, history)
     }
 
     /// A row's `bounds` as a rect, or nil when any edge is missing.
@@ -3465,6 +3511,7 @@ extension DriveLoop {
         case .repeatLast: return "repeat last action"
         case .locate: return "list_windows"
         case .desktop: return "desktop switch"
+        case .locatePointer: return "highlight pointer"
         case .dictation: return "dictation"
         }
     }
