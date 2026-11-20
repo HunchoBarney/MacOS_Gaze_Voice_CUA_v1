@@ -23,6 +23,7 @@ struct FnInputState: Sendable {
     private(set) var held = false
     private(set) var latched = false
     private(set) var armed = false
+    private(set) var interruptions = 0
     private var dictating = false
     private var escapeConsumed = false
     private var pressedKeys: Set<UInt16> = []
@@ -33,7 +34,7 @@ struct FnInputState: Sendable {
     /// `held` deliberately survives: an interruption while the key is still
     /// down must not let the same physical hold re-arm a capture. The health
     /// check synthesizes the release when the tap misses it.
-    mutating func interrupt() { armed = false; dictating = false; latched = false }
+    mutating func interrupt() { armed = false; dictating = false; latched = false; interruptions += 1 }
 
     mutating func handle(_ kind: Kind, key: UInt16, fn: Bool, otherModifiers: Bool = false,
                          dictationChord: Bool = false, now: TimeInterval? = nil,
@@ -115,6 +116,7 @@ final class FnTapCore: @unchecked Sendable {
         var heldWithPhysicalFn = false
         var result = FnInputState.Result()
         var beginHandlingMs: Double = 0
+        var interruptions = 0
     }
 
     static let gateWait: DispatchTimeInterval = .milliseconds(100)
@@ -174,6 +176,7 @@ final class FnTapCore: @unchecked Sendable {
                                           && event.flags.intersection(nonControl).isEmpty,
                                       now: handlingStarted,
                                       canBegin: current.canBegin, active: current.active)
+            decision.interruptions = state.interruptions
             return (result, state.held)
         }
         if decision.fnKey { decision.heldWithPhysicalFn = held && Self.physicalFnDown }
@@ -327,7 +330,8 @@ final class FnInputMonitor: ObservableObject {
             observedPhysicalHold = decision.heldWithPhysicalFn
         }
         if decision.result.action == .begin {
-            guard core.state.withLock({ $0.armed }), canBegin() else {
+            guard core.state.withLock({ $0.interruptions }) == decision.interruptions else { return }
+            guard canBegin() else {
                 core.state.withLock { $0.interrupt() }
                 publishGates()
                 return

@@ -85,4 +85,24 @@ final class FnTapCoreTests: XCTestCase {
         _ = monitor.handle(.flagsChanged, try event(63, type: .flagsChanged))
         XCTAssertEqual(actions, [.begin, .finish])
     }
+
+    @MainActor
+    func testQuickTapDecidedAheadOfMainStillBeginsAndLatches() throws {
+        var state = FnInputState()
+        state.latchMode = true
+        let monitor = FnInputMonitor(state: state)
+        var actions: [FnInputState.Action] = []
+        var latches = 0
+        monitor.onAction = { actions.append($0) }
+        monitor.onLatch = { latches += 1 }
+        monitor.canBegin = { true }
+        let gates: (Bool) -> FnTapCore.Gates = { _ in FnTapCore.Gates(canBegin: true, active: false) }
+        let press = monitor.core.decide(.flagsChanged, try event(63, type: .flagsChanged, flags: .maskSecondaryFn), gates: gates)
+        let release = monitor.core.decide(.flagsChanged, try event(63, type: .flagsChanged), gates: gates)
+        monitor.apply(press)
+        monitor.apply(release)
+        XCTAssertEqual(actions, [.begin, .finish])
+        XCTAssertEqual(latches, 1)
+        XCTAssertTrue(monitor.core.state.withLock { $0.latched })
+    }
 }
