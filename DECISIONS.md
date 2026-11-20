@@ -2,6 +2,27 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Writing by instruction checks words on device (L7)
+
+- "Type this …" takes the exact span after the lead-in ("type this",
+  "write this down", "type the following", or a bare "type"/"write" before
+  a quote) up to a closing quote, a spoken "end quote" or the end of speech.
+  Before typing, Apple's on-device `SpeechAnalyzer` (Speech framework,
+  macOS 26, no download or network) transcribes the last 20 s of the
+  hands-free speech the lane sent. Same words, ignoring case and
+  punctuation, types at once with the conversation transcript's formatting.
+  Different words, or no on-device transcript, shows the text and waits for
+  "type it". Every insert is read back through Accessibility.
+- Speech Recognition permission is requested at the first "type this"
+  (`NSSpeechRecognitionUsageDescription`); until it is granted, every
+  literal is shown before typing. L5 onboarding should cover the prompt.
+- "Come up with a reply for this" drafts with `TerraClient` (Responses API,
+  `store: false`), puts the draft in the focused field unsent and reads its
+  first line. Only "send it", with the draft still in the field of the same
+  app, sends, through the spine's own "click Send".
+- No library needed: span extraction is about 150 lines over string
+  matching, and the transcriber is Apple's.
+
 ## 2026-11-20 — Equivalent phrasings through a small command grammar
 
 - "get Safari open", "hop over to desktop 2", "label everything", "I can't

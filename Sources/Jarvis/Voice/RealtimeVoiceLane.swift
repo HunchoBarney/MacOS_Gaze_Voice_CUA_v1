@@ -311,6 +311,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var duplexRequested = false
     private var desiredInputMode: RealtimeVoiceClient.InputMode = .conversation
     private var conversationFeed: ConvertedAudioFeed?
+    /// The last 20 s of hands-free speech sent to Realtime, for L7's
+    /// on-device second transcription of "type this …".
+    let recentSpeech = RecentSpeechAudio()
     private var conversationStartID = UUID()
     private var conversationMeter: Timer?
     private var conversationSender: Task<Void, Never>?
@@ -1325,6 +1328,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                             throw VoiceError("The microphone audio format changed.")
                         }
                         for pcm in try await speechGate.admit(Data(bytes: samples, count: Int(buffer.frameLength) * 2)) {
+                            self.recentSpeech.append(pcm)
                             try await self.client.sendAudio(pcm, connection: connection)
                         }
                     }
@@ -1366,6 +1370,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     func stopConversation(state: ConversationListeningState = .paused) {
         conversationStartID = UUID()
+        recentSpeech.clear()
         closeConversationFeed()
         remoteInputDrain?.cancel(); remoteInputDrain = nil
         for record in remoteInputs.values { record.deadline?.cancel() }
