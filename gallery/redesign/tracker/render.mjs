@@ -405,7 +405,7 @@ async function main() {
   const failures = [];
   const cleanup = async () => {
     try { await chrome.send("Browser.close"); } catch {}
-    await Promise.race([chrome.exited, sleep(3000).then(() => chrome.child.kill("SIGKILL"))]);
+    await Promise.race([chrome.exited, sleep(10000).then(() => chrome.child.kill("SIGTERM"))]);
     server.close();
     rmSync(profileDir, { recursive: true, force: true });
   };
