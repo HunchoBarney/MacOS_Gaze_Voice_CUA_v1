@@ -31,6 +31,8 @@ struct VoiceAdmissionContext: Sendable {
     var currentAsks: [Ask] = []
     var hasExplicitGrantScope = false
     var agents: [String: String] = [:]
+    /// Jarvis just pressed something without asking and offered "undo".
+    var undoOffered = false
 }
 
 /// Final-only deterministic admission. Unknown values never become phonetic substitutions.
@@ -43,6 +45,8 @@ enum VoiceAdmissionPolicy {
         if eligibleAsks(context).contains(where: { ask in
             ask.kind == .choice && ask.options.contains { normalized($0) == raw }
         }) { return original }
+        if context.undoOffered, context.capturedAsks.isEmpty, context.currentAsks.isEmpty,
+           DriveLoop.repairsOffer(original) { return "undo" }
         var command = original.trimmingCharacters(in: .whitespacesAndNewlines)
         let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",:"))
         let courtesies = ["would you mind", "could you", "would you", "can you", "will you",

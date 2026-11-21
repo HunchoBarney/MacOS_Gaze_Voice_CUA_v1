@@ -106,6 +106,10 @@ public struct DriveTask: Sendable {
     /// where anyone in the room could have spoken: the words then name no
     /// consequential press, so send, delete, buy or post asks first (D3).
     public var speakerVerified = true
+    /// A consent or choice question was waiting for an answer when these
+    /// words arrived, so a bare "no" answers it and never takes back a
+    /// press Jarvis offered to undo.
+    public var questionPending = false
     public init(goal: String, application: String? = nil, pid: Int? = nil,
                 windowID: Int? = nil, windowName: String? = nil,
                 previousContext: String? = nil,

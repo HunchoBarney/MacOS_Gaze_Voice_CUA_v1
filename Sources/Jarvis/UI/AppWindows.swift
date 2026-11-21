@@ -104,6 +104,8 @@ final class AppWindows: NSObject, NSWindowDelegate {
                 ?? controller.pendingQuestions.last?.prompt ?? "Jarvis has a question"
         case .problem:
             if case .error(let message) = controller.status { text = message } else { text = "Something went wrong" }
+        case .notice:
+            text = controller.liveNotice ?? ""
         }
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
                              userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])

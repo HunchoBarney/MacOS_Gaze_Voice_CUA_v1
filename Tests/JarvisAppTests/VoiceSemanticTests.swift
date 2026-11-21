@@ -749,6 +749,24 @@ final class VoiceSemanticTests: XCTestCase {
         speech.cancel()
     }
 
+    func testALocalRepairWordReachesTheDriveLoopAsSpokenNotAsUndo() async throws {
+        var c = context()
+        c.windowID = 7
+        c.undoOffered = true
+        for phrase in ["no", "not that", "wrong one", "that's wrong"] {
+            let speech = lane(c)
+            speech.semanticEnabled = { false }
+            var commands: [String] = []
+            speech.commandHandler = { command, _, _, _, _, _ in
+                commands.append(command)
+                return #"{"status":"done","say":"Put it back."}"#
+            }
+            try await speech.submitTyped(phrase, sessionID: UUID())
+            XCTAssertEqual(commands, [phrase], "a bare \"undo\" would press ⌘Z once the offer has gone")
+            speech.cancel()
+        }
+    }
+
     private func tracedComposition(failing: Bool = false, capturedWindow: Int? = nil)
         -> (VoiceController, VoiceTaskCoordinator) {
         let config = Config(defaults: UserDefaults(suiteName: "composition-\(UUID())")!,

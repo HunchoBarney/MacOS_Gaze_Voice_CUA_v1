@@ -185,6 +185,14 @@ final class MemoryCommandsTests: MemoryTestCase {
         }
     }
 
+    @MainActor func testStripsTheWakePhraseHoweverTheTranscriptPunctuatesIt() {
+        for heard in ["Hey Jarvis, who's Dana?", "Hey, Jarvis, who's Dana?", "Hey Jarvis. Who's Dana?",
+                      "hey jarvis who's Dana", "Jarvis, please, who's Dana?"] {
+            XCTAssertEqual(MemoryIntent.parse(heard), .recall("Dana", explicit: false), heard)
+        }
+        XCTAssertNil(MemoryIntent.parse("Jarvisville, who's Dana?"))
+    }
+
     @MainActor func testReadsMemoriesBackInSecondPerson() {
         XCTAssertEqual(MemoryCommands.spoken("Dana is my manager"), "Dana is your manager.")
         XCTAssertEqual(MemoryCommands.spoken("I am allergic to peanuts"), "You are allergic to peanuts.")
@@ -367,6 +375,66 @@ final class MemoryCommandsTests: MemoryTestCase {
         XCTAssertNil(work.agentAskID)
         XCTAssertTrue(work.isAgentAsk)
         XCTAssertEqual(s.sessionContext(for: "deploy the staging build"), .empty)
+    }
+
+    @MainActor func testBareWhoRecallsOnlyRememberedFactsNeverPastRequests() throws {
+        let s = store()
+        try s.recordRequest("Email Dana the quarterly report — Sent.")
+        let commands = MemoryCommands(store: { s })
+        XCTAssertFalse(commands.answers("Who's Dana?"))
+        XCTAssertNil(commands.handle("Who's Dana?"))
+        _ = commands.handle("Remember Dana is my manager")
+        XCTAssertTrue(commands.answers("Who's Dana?"))
+        XCTAssertEqual(commands.handle("Who's Dana?"), "Dana is your manager.")
+    }
+
+    @MainActor func testHandsFreeMemoryCheckIgnoresTheWakePhrase() async throws {
+        let s = store()
+        let commands = MemoryCommands(store: { s })
+        _ = commands.handle("Remember Dana is my manager")
+        let said = try await handsFreeFeedback("Hey Jarvis, who's Dana?", commands: commands)
+        XCTAssertEqual(said, ["Dana is your manager."])
+    }
+
+    @MainActor private func handsFreeFeedback(_ text: String, commands: MemoryCommands) async throws -> [String] {
+        let conversation = ConversationSession()
+        conversation.makeSpeechSession = { captured in
+            let owner = LocalSpeechSession { _ in XCTFail("queue owns execution") }
+            owner.context = captured
+            return owner
+        }
+        conversation.readContext = { VoiceAdmissionContext() }
+        conversation.interpret = { _, _, _ in
+            XCTFail("a memory intent must not call a model")
+            return .init(kind: .clarify)
+        }
+        conversation.remote = { _, _, _ in XCTFail("a memory intent must not reach the Live model") }
+        conversation.execute = { _ in
+            XCTFail("a memory intent is not a task")
+            return .init(verified: false, waitingForAnswer: false, message: "")
+        }
+        conversation.onControl = { _ in }
+        conversation.memoryCommands = { commands }
+        var said: [String] = []
+        conversation.onEvent = { if case .feedback(_, let message) = $0 { said.append(message) } }
+        try conversation.startExternal(session: UUID())
+        defer { conversation.stop() }
+        let turn = try conversation.beginExternal(input: .init(connectionID: UUID(), itemID: "turn"), at: 1)
+        XCTAssertTrue(conversation.commitExternal(turn, at: 2))
+        await conversation.finishExternal(turn, text: text, at: 2.1)
+        return said
+    }
+
+    @MainActor func testCurlyApostrophesFromTheTranscriberStillMatchTheIntents() throws {
+        XCTAssertEqual(MemoryIntent.parse("who’s Dana?"), .recall("Dana", explicit: false))
+        XCTAssertEqual(MemoryIntent.parse("Don’t remember that."), .forgetLast)
+        XCTAssertEqual(MemoryIntent.parse("Remember Dana’s birthday is “May 4”"),
+                       .remember("Dana's birthday is \"May 4\""))
+        let s = store()
+        let commands = MemoryCommands(store: { s })
+        _ = commands.handle("Remember Dana is my manager")
+        XCTAssertTrue(commands.answers("Who’s Dana?"))
+        XCTAssertEqual(commands.handle("Who’s Dana?"), "Dana is your manager.")
     }
 
     private struct NoKeys: APIKeyStore {

@@ -52,6 +52,9 @@ struct VoiceTimings {
     /// Past this a wake session closes at the first quiet time, not the
     /// follow-up window; then the wake word is needed again.
     var wakeSessionCap: TimeInterval = 30 * 60
+    /// How often Standby looks for another app on the microphone. Nil
+    /// leaves the looking to `checkOtherMicrophoneUse()` callers.
+    var otherMicrophoneInterval: TimeInterval? = 2
 }
 
 /// When a wake-word session closes. Until Jarvis has answered, it closes
@@ -486,6 +489,10 @@ final class VoiceController: ObservableObject {
     /// KAR-75 L3: under `voice.live`, LiveKit's engine owns the microphone
     /// and the wake word opens a GPT-Live session instead of this lane.
     @Published private(set) var liveGlow: LiveVoice.Glow = .hidden
+    /// KAR-75 L10: one quiet line on the glow, such as the Live voice
+    /// warning or a basic-voice reply that isn't spoken. It clears itself.
+    @Published private(set) var liveNotice: String?
+    private var liveNoticeClear: Task<Void, Never>?
     lazy var liveVoice: LiveVoice? = makeLiveVoice()
     /// Releases this lane's microphone, then arms Live: one owner at a time.
     private var liveArming: Task<Void, Never>?
@@ -493,6 +500,8 @@ final class VoiceController: ObservableObject {
     /// The open session's transport, to mute or unmute Live's voice.
     private weak var liveTransport: WebRTCLiveTransport?
     #endif
+    /// KAR-75 L2: Live's delegations into the coordinator, once each.
+    private(set) var liveDelegations: DelegationBridge?
 
     private func makeLiveVoice() -> LiveVoice? {
         #if canImport(LiveKitWebRTC)
@@ -509,21 +518,60 @@ final class VoiceController: ObservableObject {
                                config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
         }
         live.onGlow = { [weak self] glow in self?.liveGlow = glow }
+        live.allowance = .shared
+        live.onNotice = { [weak self] line in self?.showLiveNotice(line) }
+        live.speaksWarnings = { [weak self] in self?.config.ttsEnabled ?? false }
+        live.onBasicRequest = { [weak self] samples, until in
+            let speech = BasicVoiceTurn.speech(samples, sampleRate: LiveMicrophone.format.sampleRate)
+            let text = await LocalSpanTranscriber().transcribe(speech)
+            guard let self else { return }
+            guard let text else { return self.showLiveNotice("I didn't catch that.") }
+            await self.basicVoiceTurn.handle(text, until: until)
+        }
         live.onReply = { [weak self] text in
             guard let self, !self.config.ttsEnabled else { return }
             self.detail = text
         }
         config.$ttsEnabled.dropFirst().sink { [weak self] speaks in self?.liveTransport?.playsAudio = speaks }
             .store(in: &subscriptions)
+        liveDelegations = DelegationBridge.connect(live, to: cua)
         return live
         #else
         return nil
         #endif
     }
+
+    /// Basic voice's way into the spine and back out: the reply is spoken
+    /// on the Mac's own voice when "Say replies out loud" is on, otherwise
+    /// it shows on the glow.
+    var basicVoiceTurn: BasicVoiceTurn {
+        BasicVoiceTurn(run: { [weak self] text in
+            guard let self else { return "" }
+            return await self.cua.beginVoiceTask(text, frontmostHint: self.frontmost() ?? self.lastExternalApp,
+                                                 transcriptHint: text)
+        }, speak: { [weak self] line in
+            self?.onSpokenLine?(line)
+            self?.speaker?.speak(line)
+        }, show: { [weak self] lines in
+            self?.showLiveNotice(lines.joined(separator: " "))
+        }, speaksReplies: { [weak self] in self?.config.ttsEnabled ?? false })
+    }
+
+    func showLiveNotice(_ line: String, for seconds: Double = 8) {
+        liveNotice = line
+        liveNoticeClear?.cancel()
+        liveNoticeClear = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.liveNotice = nil
+        }
+    }
     private var armedName = ""
     private var wakeSession: Task<Void, Never>?
     private var otherMicrophoneWatch: Task<Void, Never>?
     private var otherAppListening = false
+    private var otherMicrophoneChecks = 0
+    private var otherMicrophoneApplied = 0
     /// Whether another app is capturing audio: Core Audio in the app, a
     /// fake in tests.
     private let otherAppUsesMicrophone: @Sendable () -> Bool
@@ -619,6 +667,7 @@ final class VoiceController: ObservableObject {
             }
         }
         context.currentAsks = context.capturedAsks
+        context.undoOffered = UndoOffers.shared.standing()
         return context
     }
     var isListening: Bool { status == .listening }
@@ -1230,25 +1279,34 @@ final class VoiceController: ObservableObject {
     /// A call or another recording app owns the microphone: Standby waits
     /// until it's done.
     private func watchOtherMicrophoneUse() {
-        guard otherMicrophoneWatch == nil else { return }
+        guard otherMicrophoneWatch == nil, let interval = timings.otherMicrophoneInterval else { return }
         otherMicrophoneWatch = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.standbyChosen else {
                     self?.otherMicrophoneWatch = nil
                     return
                 }
-                let probe = self.otherAppUsesMicrophone
-                let busy = await Task.detached { probe() }.value
-                if busy != self.otherAppListening {
-                    self.otherAppListening = busy
-                    if busy, self.standbyArmed || self.wakeSession != nil {
-                        self.stopHandsFree(state: .unavailable("Paused while another app is using the microphone."))
-                    } else if !busy {
-                        self.armStandby()
-                    }
-                }
-                try? await Task.sleep(for: .seconds(2))
+                await self.checkOtherMicrophoneUse()
+                try? await Task.sleep(for: .seconds(interval))
             }
+        }
+    }
+
+    /// One look at who owns the microphone. A look that started before
+    /// the one last applied is stale and changes nothing.
+    func checkOtherMicrophoneUse() async {
+        otherMicrophoneChecks &+= 1
+        let check = otherMicrophoneChecks
+        let probe = otherAppUsesMicrophone
+        let busy = await Task.detached { probe() }.value
+        guard check > otherMicrophoneApplied else { return }
+        otherMicrophoneApplied = check
+        guard busy != otherAppListening else { return }
+        otherAppListening = busy
+        if busy, standbyArmed || wakeSession != nil {
+            stopHandsFree(state: .unavailable("Paused while another app is using the microphone."))
+        } else if !busy {
+            armStandby()
         }
     }
 
@@ -1390,7 +1448,9 @@ final class VoiceController: ObservableObject {
             let added = cua.tasks.filter { !prior.contains($0.id) && $0.captureID == capture }
             guard added.count == 1, let created = added.first else {
                 return .init(verified: false, waitingForAnswer: false,
-                             message: RealtimeVoiceLane.deterministicSay(result) ?? "No action was started.")
+                             message: RealtimeVoiceLane.deterministicSay(result)
+                                 ?? (VoiceToolResult(jsonString: result)?.status == VoiceToolResult.Status.ok
+                                     ? "" : "No action was started."))
             }
             work = created
         }

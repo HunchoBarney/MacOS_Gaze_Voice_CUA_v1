@@ -577,6 +577,17 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
         XCTAssertEqual(bridge.interruptAllCalls, 1)
     }
 
+    func testARepairWordOutsideAnOfferStaysSilentAndStartsNothing() async {
+        XCTAssertFalse(UndoOffers.shared.standing())
+        let c = coordinator()
+        for phrase in ["no", "not that", "wrong one", "that's wrong"] {
+            let reply = await c.beginVoiceTask(phrase, captureID: UUID())
+            XCTAssertEqual(VoiceToolResult(jsonString: reply)?.status, VoiceToolResult.Status.ok, phrase)
+            XCTAssertNil(RealtimeVoiceLane.deterministicSay(reply), "\(phrase) gets no spoken line")
+        }
+        XCTAssertTrue(c.tasks.isEmpty, "no Work row for a repair word with nothing to take back")
+    }
+
     /// A ".cancel" verdict inside beginVoiceTask stops everything instead
     /// of spawning work — the router's classify is authoritative.
     func testSpokenCancelVerdictStopsWork() async {

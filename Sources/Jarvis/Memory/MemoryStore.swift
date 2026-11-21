@@ -143,7 +143,9 @@ final class MemoryStore: Sendable {
     // MARK: - Reading
 
     /// Memories that mention every word of `subject`, best match first.
-    func recall(_ subject: String, limit: Int = 3) throws -> [Memory] {
+    /// `includeRequests: false` keeps to what the person asked Jarvis to
+    /// remember, leaving out summaries of past requests.
+    func recall(_ subject: String, limit: Int = 3, includeRequests: Bool = true) throws -> [Memory] {
         let words = Self.meaningfulWords(subject)
         guard let pattern = FTS5Pattern(matchingAllTokensIn: words.isEmpty ? subject : words.joined(separator: " "))
         else { return [] }
@@ -153,10 +155,10 @@ final class MemoryStore: Sendable {
             return try Memory.fetchAll(db, sql: """
                 SELECT memory.* FROM memory
                 JOIN memory_ft ON memory_ft.rowid = memory.id
-                WHERE memory_ft MATCH ?
+                WHERE memory_ft MATCH ? AND (? OR memory.kind != 'request')
                 ORDER BY bm25(memory_ft, 4.0, 1.0), memory.createdAt DESC
                 LIMIT ?
-                """, arguments: [pattern, limit])
+                """, arguments: [pattern, includeRequests, limit])
         }
     }
 

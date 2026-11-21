@@ -660,8 +660,11 @@ actor DriveLoop {
         var confirmedTask = false
         bindSpokenGoal(explicitConsent ? task.goal : nil, speakerVerified: task.speakerVerified)
         func step(_ s: String) { feed(s); history.append(s) }
-        if let pending = claimOffer(for: task.goal) {
+        if let pending = claimOffer(for: task.goal, questionPending: task.questionPending) {
             return await runOfferedUndo(pending, task: task, session: directSession ?? session)
+        }
+        if !task.questionPending, Self.repairsOffer(task.goal) {
+            return settle(.blocked(""), task, history, blockedReason: Self.noLiveOfferReason)
         }
 
         do {

@@ -275,6 +275,17 @@ final class DelegationBridgeTests: XCTestCase {
         XCTAssertEqual(Set(spoken.map(\.delegationID)), ["del_1"])
     }
 
+    func testEveryGuideStepReachesLive() async throws {
+        try await replay([started(), said("how do I move this window to Desktop 2", 200, 900), delegation("del_1", at: 1000)]
+            .joined(separator: "\n"))
+        let id = try XCTUnwrap(spine.requests.first?.id)
+        bridge.taskEvent(captureID: id, payload: #"{"kind":"guide_step","status":"ok","say":"Open Mission Control."}"#)
+        bridge.taskEvent(captureID: id, payload: #"{"kind":"guide_step","status":"ok","say":"Drag the window onto Desktop 2."}"#)
+        XCTAssertTrue(bridge.follows(id), "a walkthrough is still the bridge's until its outcome")
+        let spoken = session.appends.filter { $0.kind == .commentary }
+        XCTAssertEqual(spoken.map(\.content), ["Open Mission Control.", "Drag the window onto Desktop 2."])
+    }
+
     func testAnImmediateAnswerIsSpoken() async throws {
         spine.reply = .answered("I haven't done anything yet.")
         try await replay([started(), said("what did you just do", 200, 900), delegation("del_1", at: 1000)]
