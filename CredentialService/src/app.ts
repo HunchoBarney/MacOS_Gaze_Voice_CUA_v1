@@ -8,6 +8,8 @@ export interface Deps {
   ledger: LedgerClient;
   upstream: (url: string, init: RequestInit) => Promise<Response>;
   clientIP: (c: Context) => string | undefined;
+  /** Starts metering a created Live session, without delaying the reply. */
+  startMeter: (session: { sessionID: string; installID: string }) => void;
   now?: () => number;
 }
 
@@ -42,6 +44,16 @@ const UNKNOWN_INSTALL: Denial = { status: 401, code: "unknown_install", message:
 function fail(c: Context, denial: Denial): Response {
   if (denial.retryAfter !== undefined) c.header("Retry-After", String(denial.retryAfter));
   return c.json({ error: { code: denial.code, message: denial.message } }, denial.status as 400);
+}
+
+function liveLimit(periodEnds: string, now: number): Denial {
+  const until = new Date(periodEnds).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+  return {
+    status: 429,
+    code: "live_limit",
+    message: `This month's Live voice is used up. Jarvis keeps working in basic voice until ${until}.`,
+    retryAfter: Math.ceil((Date.parse(periodEnds) - now) / 1000),
+  };
 }
 
 function upstreamFailure(status: number): Denial {
@@ -137,6 +149,17 @@ export function createApp(deps: Deps) {
         : fail(c, { status: 404, code: "not_found", message: "No such install." });
     });
   }
+  app.post("/admin/installs/:id/tier", async (c) => {
+    const parsed = await readJSON(c, 1024);
+    if ("denial" in parsed) return fail(c, parsed.denial);
+    const { tier } = parsed.value;
+    if (typeof tier !== "string" || !Object.hasOwn(config.metering.tiers, tier)) {
+      return fail(c, { status: 400, code: "unknown_tier", message: "No such tier." });
+    }
+    const found = await ledger.setTier({ installID: c.req.param("id"), tier });
+    return found ? c.json({ installID: c.req.param("id"), tier })
+      : fail(c, { status: 404, code: "not_found", message: "No such install." });
+  });
   app.get("/admin/usage", async (c) => c.json(await ledger.usage(now())));
 
   app.use("/v1/*", async (c, next) => {
@@ -156,6 +179,31 @@ export function createApp(deps: Deps) {
     });
     if (denial) return fail(c, denial);
     return c.json({ installID, token }, 201);
+  });
+
+  /**
+   * The install's tier and this month's Live usage, in weighted seconds (a
+   * Standby second counts STANDBY_WEIGHT). Not charged or rate-limited.
+   * With metering off, usage reads as zero and uncapped.
+   */
+  app.get("/v1/usage", async (c) => {
+    const token = bearer(c);
+    if (!TOKEN.test(token)) return fail(c, UNKNOWN_INSTALL);
+    const found = await ledger.lookup({ tokenHash: await sha256Hex(token) });
+    if ("status" in found) return fail(c, found);
+    const status = await ledger.liveStatus(found.installID, now());
+    const metering = config.metering.enabled;
+    return c.json({
+      metering,
+      tier: status.tier,
+      period: status.period,
+      periodEnds: status.periodEnds,
+      liveSeconds: metering ? status.liveSeconds : 0,
+      liveSecondsLimit: metering ? status.liveSecondsLimit : null,
+      warnAt: config.metering.warnFraction,
+      capped: metering && status.capped,
+      tasksLimit: status.tasksLimit,
+    });
   });
 
   /**
@@ -204,9 +252,15 @@ export function createApp(deps: Deps) {
    * delegation with no tools (the app does every action), no stored session,
    * the speech wake policy, a hashed safety identifier and the client events
    * the data channel accepts; the app chooses only the conversation fields
-   * in LIVE_FIELDS_ALLOWED.
+   * in LIVE_FIELDS_ALLOWED. With LIVE_METERING on, a capped install is
+   * refused before any upstream call, and a created session is metered
+   * from its sideband instead of charged a flat price.
    */
   app.post("/v1/live/sessions", admitted("live", config.prices.liveSessionCents), async (c) => {
+    if (config.metering.enabled) {
+      const status = await ledger.liveStatus(c.get("installID"), now());
+      if (status.capped) return fail(c, liveLimit(status.periodEnds, now()));
+    }
     const parsed = await readJSON(c, config.maxLiveBytes);
     if ("denial" in parsed) return fail(c, parsed.denial);
     const request = parsed.value;
@@ -253,10 +307,12 @@ export function createApp(deps: Deps) {
     if (!reply.ok) return fail(c, upstreamFailure(reply.status));
     let created: { session?: { id?: unknown }; transport?: { sdp?: unknown } } | undefined;
     try { created = JSON.parse(text); } catch {}
-    if (typeof created?.session?.id !== "string" || typeof created.transport?.sdp !== "string") {
+    const sessionID = created?.session?.id;
+    if (typeof sessionID !== "string" || typeof created?.transport?.sdp !== "string") {
       return fail(c, { status: 502, code: "upstream_error", message: "The model provider returned no SDP answer." });
     }
-    c.set("spentCents", config.prices.liveSessionCents);
+    if (config.metering.enabled) deps.startMeter({ sessionID, installID: c.get("installID") });
+    else c.set("spentCents", config.prices.liveSessionCents);
     return c.body(text, 201, { "content-type": "application/json" });
   });
 

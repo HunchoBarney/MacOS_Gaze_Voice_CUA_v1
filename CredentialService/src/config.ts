@@ -1,4 +1,4 @@
-import type { Limits } from "./ledger.ts";
+import type { Limits, Plans, Tier } from "./ledger.ts";
 
 export interface Config {
   openAIKey: string;
@@ -25,6 +25,42 @@ export interface Config {
     responsesOutputCentsPerMTok: number;
     jevCallCents: number;
   };
+  metering: Plans & {
+    enabled: boolean;
+    standbyWeight: number;
+    warnFraction: number;
+    activeCentsPerMinute: number;
+    pausedCentsPerMinute: number;
+    graceSeconds: number;
+  };
+}
+
+export const DEFAULT_TIERS: Record<string, Tier> = {
+  jarvis: { liveMinutes: 300, tasks: 100, priceUSD: 30 },
+  pro: { liveMinutes: 1000, tasks: 400, priceUSD: 100 },
+};
+
+/** Reads TIERS and DEFAULT_TIER. Throws when either is malformed. */
+export function loadPlans(env: Record<string, unknown>): Plans {
+  const raw = typeof env.TIERS === "string" ? env.TIERS.trim() : env.TIERS;
+  const bad = new Error(
+    "TIERS must be a JSON object of tiers, each { liveMinutes: number or null, tasks: number or null, priceUSD: number }.");
+  let tiers: unknown = DEFAULT_TIERS;
+  if (typeof raw === "string" && raw) {
+    try { tiers = JSON.parse(raw); } catch { throw bad; }
+  } else if (raw && typeof raw === "object") {
+    tiers = raw;
+  }
+  const amount = (value: unknown, nullable: boolean) =>
+    (nullable && value === null) || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+  if (!tiers || typeof tiers !== "object" || Array.isArray(tiers) || Object.keys(tiers).length === 0) throw bad;
+  for (const tier of Object.values(tiers)) {
+    const { liveMinutes, tasks, priceUSD } = (tier ?? {}) as Record<string, unknown>;
+    if (!amount(liveMinutes, true) || !amount(tasks, true) || !amount(priceUSD, false)) throw bad;
+  }
+  const defaultTier = typeof env.DEFAULT_TIER === "string" && env.DEFAULT_TIER.trim() ? env.DEFAULT_TIER.trim() : "jarvis";
+  if (!Object.hasOwn(tiers, defaultTier)) throw new Error(`DEFAULT_TIER names no tier in TIERS: ${defaultTier}.`);
+  return { tiers: tiers as Record<string, Tier>, defaultTier };
 }
 
 /** Reads the Worker's secrets and vars. Throws when a required secret is missing. */
@@ -40,6 +76,11 @@ export function loadConfig(env: Record<string, unknown>): Config {
     if (!raw) return fallback;
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number.`);
+    return value;
+  };
+  const fraction = (name: string, fallback: number) => {
+    const value = number(name, fallback);
+    if (value > 1) throw new Error(`${name} must be a number from 0 to 1.`);
     return value;
   };
   const list = (name: string, fallback: string[]) => {
@@ -81,6 +122,15 @@ export function loadConfig(env: Record<string, unknown>): Config {
       responsesInputCentsPerMTok: number("RESPONSES_INPUT_CENTS_PER_MTOK", 200),
       responsesOutputCentsPerMTok: number("RESPONSES_OUTPUT_CENTS_PER_MTOK", 800),
       jevCallCents: number("JEV_CALL_CENTS", 0.5),
+    },
+    metering: {
+      enabled: text("LIVE_METERING") === "1",
+      ...loadPlans(env),
+      standbyWeight: fraction("STANDBY_WEIGHT", 0.4),
+      warnFraction: fraction("LIVE_WARN_FRACTION", 0.8),
+      activeCentsPerMinute: number("LIVE_ACTIVE_CENTS_PER_MINUTE", 5),
+      pausedCentsPerMinute: number("LIVE_PAUSED_CENTS_PER_MINUTE", 2),
+      graceSeconds: number("CAP_GRACE_SECONDS", 60),
     },
   };
 }

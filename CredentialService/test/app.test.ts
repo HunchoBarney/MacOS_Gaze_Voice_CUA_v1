@@ -13,13 +13,18 @@ const body = (response: Response): Promise<any> => response.json();
 interface Call { url: string; headers: Record<string, string>; body: any }
 
 function harness(vars: Record<string, string> = {}) {
+  const config = loadConfig({
+    OPENAI_API_KEY: OPENAI_KEY, TYPESAFE_API_KEY: TYPESAFE_KEY, ADMIN_TOKEN: ADMIN, ...vars,
+  });
   const db = new DatabaseSync(":memory:");
   const sql: Sql = { all: (query, ...params) => db.prepare(query).all(...params) as any };
-  const local = new Ledger(sql);
+  const local = new Ledger(sql, config.metering);
   const ledger = Object.fromEntries(
-    (["register", "admit", "charge", "setPaused", "setRevoked", "usage"] as const)
-      .map((name) => [name, async (...args: any[]) => (local[name] as any)(...args)]),
+    ([
+      "register", "admit", "charge", "setPaused", "setRevoked", "usage", "lookup", "setTier", "addLiveUsage", "liveStatus",
+    ] as const).map((name) => [name, async (...args: any[]) => (local[name] as any)(...args)]),
   ) as LedgerClient;
+  const meters: { sessionID: string; installID: string }[] = [];
   const calls: Call[] = [];
   let reply: (call: Call) => Response | Promise<Response> = (call) => {
     if (call.url.endsWith("/v1/realtime/client_secrets")) {
@@ -35,14 +40,12 @@ function harness(vars: Record<string, string> = {}) {
   };
   let clock = Date.UTC(2026, 10, 20, 12, 0, 0);
   let ip = "203.0.113.7";
-  const config = loadConfig({
-    OPENAI_API_KEY: OPENAI_KEY, TYPESAFE_API_KEY: TYPESAFE_KEY, ADMIN_TOKEN: ADMIN, ...vars,
-  });
   const app = createApp({
     config,
     ledger,
     now: () => clock,
     clientIP: () => ip,
+    startMeter: (session) => { meters.push(session); },
     upstream: async (url, init) => {
       const call = { url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) };
       calls.push(call);
@@ -65,9 +68,11 @@ function harness(vars: Record<string, string> = {}) {
     return (await body(response)) as { installID: string; token: string };
   };
   return {
-    db, calls, request, register, config,
+    db, calls, request, register, config, local, meters,
+    now: () => clock,
     setReply: (next: typeof reply) => { reply = next; },
     advance: (ms: number) => { clock += ms; },
+    setClock: (ms: number) => { clock = ms; },
     setIP: (next: string) => { ip = next; },
     admin: (path: string, method = "POST") => request(path, { method, token: ADMIN }),
   };
@@ -566,3 +571,132 @@ describe("reservations", () => {
   });
 });
 
+describe("Live metering and tiers", () => {
+  const TIERS = JSON.stringify({
+    tiny: { liveMinutes: 1, tasks: 5, priceUSD: 0 }, open: { liveMinutes: null, tasks: null, priceUSD: 100 },
+  });
+  const usage = async (h: ReturnType<typeof harness>, token: string) => {
+    const response = await h.request("/v1/usage", { method: "GET", token });
+    expect(response.status).toBe(200);
+    return body(response);
+  };
+  const spent = async (h: ReturnType<typeof harness>) => (await body(await h.admin("/admin/usage", "GET"))).globalCents;
+
+  it("reads Live usage as zero and uncapped with metering off, and keeps the flat Live charge", async () => {
+    const h = harness();
+    const { installID, token } = await h.register();
+    await h.local.addLiveUsage({ installID, weightedSeconds: 99_999, cents: 0, now: h.now() });
+    expect(await usage(h, token)).toEqual({
+      metering: false, tier: "jarvis", period: "2026-11", periodEnds: "2026-12-01T00:00:00.000Z",
+      liveSeconds: 0, liveSecondsLimit: null, warnAt: 0.8, capped: false, tasksLimit: 100,
+    });
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+    expect(h.meters).toEqual([]);
+    expect(await spent(h)).toBe(8);
+  });
+
+  it("reports this month's weighted Live usage against the tier, without charging", async () => {
+    const h = harness({ LIVE_METERING: "1" });
+    const { installID, token } = await h.register();
+    expect(await h.local.addLiveUsage({ installID, weightedSeconds: 600, cents: 50, now: h.now() }))
+      .toEqual({ used: 600, limit: 18_000, capped: false });
+    expect(await usage(h, token)).toEqual({
+      metering: true, tier: "jarvis", period: "2026-11", periodEnds: "2026-12-01T00:00:00.000Z",
+      liveSeconds: 600, liveSecondsLimit: 18_000, warnAt: 0.8, capped: false, tasksLimit: 100,
+    });
+    expect(await spent(h)).toBe(50);
+    expect(h.calls).toHaveLength(0);
+    for (const token of [undefined, "jv1_" + "A".repeat(43)]) {
+      expect((await body(await h.request("/v1/usage", { method: "GET", token }))).error.code).toBe("unknown_install");
+    }
+    await h.admin(`/admin/installs/${installID}/revoke`);
+    expect((await h.request("/v1/usage", { method: "GET", token })).status).toBe(403);
+  });
+
+  it("meters a created session instead of charging its flat price", async () => {
+    const h = harness({ LIVE_METERING: "1", LIVE_SESSION_CENTS: "8" });
+    const { installID, token } = await h.register();
+    const response = await h.request("/v1/live/sessions", { token, body: live });
+    expect(response.status).toBe(201);
+    expect(await body(response)).toEqual({ session: { id: "live_fixture" }, transport: { type: "webrtc", sdp: "v=0 answer" } });
+    expect(h.meters).toEqual([{ sessionID: "live_fixture", installID }]);
+    expect(await spent(h)).toBe(0);
+    h.setReply(() => new Response("down", { status: 500 }));
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(502);
+    expect(h.meters).toHaveLength(1);
+  });
+
+  it("refuses a new Live session once the month is used up, without calling upstream or charging", async () => {
+    const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
+    const { installID, token } = await h.register();
+    expect(await h.local.addLiveUsage({ installID, weightedSeconds: 60, cents: 0, now: h.now() }))
+      .toEqual({ used: 60, limit: 60, capped: true });
+    const refused = await h.request("/v1/live/sessions", { token, body: live });
+    expect(refused.status).toBe(429);
+    expect(await body(refused)).toEqual({ error: {
+      code: "live_limit",
+      message: "This month's Live voice is used up. Jarvis keeps working in basic voice until December 1.",
+    } });
+    expect(h.calls).toHaveLength(0);
+    expect(h.meters).toHaveLength(0);
+    expect(await spent(h)).toBe(0);
+    expect(await usage(h, token)).toMatchObject({ capped: true, liveSeconds: 60, liveSecondsLimit: 60, tasksLimit: 5 });
+    expect((await h.request("/v1/jev", { token, body: jev })).status).toBe(200);
+  });
+
+  it("starts a new period at the start of the UTC month", async () => {
+    const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
+    const { installID, token } = await h.register();
+    h.setClock(Date.UTC(2026, 10, 30, 23, 59, 59));
+    await h.local.addLiveUsage({ installID, weightedSeconds: 60, cents: 0, now: h.now() });
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(429);
+    h.advance(1_000);
+    expect(await usage(h, token)).toEqual({
+      metering: true, tier: "tiny", period: "2026-12", periodEnds: "2027-01-01T00:00:00.000Z",
+      liveSeconds: 0, liveSecondsLimit: 60, warnAt: 0.8, capped: false, tasksLimit: 5,
+    });
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+  });
+
+  it("puts an install on a tier from the admin endpoint", async () => {
+    const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
+    const { installID, token } = await h.register();
+    const set = (id: string, tier: unknown, auth = ADMIN) =>
+      h.request(`/admin/installs/${id}/tier`, { token: auth, body: { tier } });
+    const response = await set(installID, "open");
+    expect(response.status).toBe(200);
+    expect(await body(response)).toEqual({ installID, tier: "open" });
+    expect(await usage(h, token)).toMatchObject({ tier: "open", liveSecondsLimit: null, tasksLimit: null, capped: false });
+    for (const tier of ["platinum", 7, undefined]) {
+      const bad = await set(installID, tier);
+      expect(bad.status).toBe(400);
+      expect((await body(bad)).error.code).toBe("unknown_tier");
+    }
+    expect((await set("nobody", "tiny")).status).toBe(404);
+    expect((await set(installID, "tiny", token)).status).toBe(401);
+    expect(await usage(h, token)).toMatchObject({ tier: "open" });
+  });
+
+  it("validates the metering variables", () => {
+    const secrets = { OPENAI_API_KEY: "a", TYPESAFE_API_KEY: "b", ADMIN_TOKEN: "c" };
+    expect(loadConfig(secrets).metering).toEqual({
+      enabled: false,
+      tiers: {
+        jarvis: { liveMinutes: 300, tasks: 100, priceUSD: 30 },
+        pro: { liveMinutes: 1000, tasks: 400, priceUSD: 100 },
+      },
+      defaultTier: "jarvis",
+      standbyWeight: 0.4,
+      warnFraction: 0.8,
+      activeCentsPerMinute: 5,
+      pausedCentsPerMinute: 2,
+      graceSeconds: 60,
+    });
+    for (const tiers of ["not json", "[]", "{}", '{"a":{"liveMinutes":-1,"tasks":1,"priceUSD":1}}', '{"a":{"tasks":1,"priceUSD":1}}']) {
+      expect(() => loadConfig({ ...secrets, TIERS: tiers })).toThrow(/TIERS/);
+    }
+    expect(() => loadConfig({ ...secrets, DEFAULT_TIER: "gold" })).toThrow(/DEFAULT_TIER/);
+    expect(() => loadConfig({ ...secrets, STANDBY_WEIGHT: "1.5" })).toThrow(/STANDBY_WEIGHT/);
+    expect(loadConfig({ ...secrets, LIVE_METERING: "1" }).metering.enabled).toBe(true);
+  });
+});
