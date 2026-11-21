@@ -49,7 +49,8 @@ struct VoiceTimings {
     var wakeSessionQuiet: TimeInterval = 8
     /// After each reply the session stays open this long for a follow-up.
     var wakeFollowUp: TimeInterval = 90
-    /// No wake session outlives this; then the wake word is needed again.
+    /// Past this a wake session closes at the first quiet time, not the
+    /// follow-up window; then the wake word is needed again.
     var wakeSessionCap: TimeInterval = 30 * 60
 }
 
@@ -57,7 +58,8 @@ struct VoiceTimings {
 /// after `wakeSessionQuiet` with nothing happening, so a false wake costs
 /// seconds. Each finished reply opens a `wakeFollowUp` window, and only a
 /// reply refreshes it: speech that gets no answer doesn't. Past
-/// `wakeSessionCap` from the wake it closes the moment nothing is happening.
+/// `wakeSessionCap` from the wake it closes after `wakeSessionQuiet` with
+/// nothing happening, so a turn still being transcribed can finish.
 /// `lastReply` is when the latest reply finished, recorded as it happens
 /// rather than sampled, so a reply shorter than one check still counts.
 struct WakeSessionClock {
@@ -78,9 +80,8 @@ struct WakeSessionClock {
             lastActive = now
             return false
         }
-        if now - opened >= timings.wakeSessionCap { return true }
         if now - lastActive < timings.wakeSessionQuiet { return false }
-        guard let reply else { return true }
+        guard let reply, now - opened < timings.wakeSessionCap else { return true }
         return now >= reply + timings.wakeFollowUp
     }
 }

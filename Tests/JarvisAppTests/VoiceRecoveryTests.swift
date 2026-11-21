@@ -104,8 +104,10 @@ final class VoiceRecoveryTests: XCTestCase {
             now += 60
         }
         XCTAssertFalse(clock.shouldClose(busy: true, lastReply: now - 58, now: 30 * 60 + 1), "a turn in progress finishes")
-        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: now - 58, now: 30 * 60 + 2),
-                      "past the cap the next idle moment closes it, however recent the last reply")
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: now - 58, now: 30 * 60 + 8.9),
+                       "a sealed turn still being transcribed gets the quiet time to be answered")
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: now - 58, now: 30 * 60 + 9),
+                      "past the cap the quiet time closes it, however recent the last reply")
     }
 
     // MARK: RealtimePlayer
