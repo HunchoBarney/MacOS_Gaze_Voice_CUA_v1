@@ -387,6 +387,26 @@ final class TargetOverlayTests: XCTestCase {
         overlay.hideAll()
     }
 
+    /// The service replays its last sample while it is fresh; a replay
+    /// isn't new gaze, so the orb goes one freshness window after the
+    /// last real sample, not one window after the last replay.
+    func testAReplayedGazePointDoesNotKeepTheOrbAlive() {
+        let overlay = TargetOverlay()
+        var t: TimeInterval = 100
+        overlay.now = { t }
+        let p = CGPoint(x: 200, y: 200)
+        overlay.ingestGaze(p)
+        t += 1.0
+        overlay.ingestGaze(p)
+        XCTAssertTrue(overlay.orbShown)
+        t += 0.6
+        overlay.ingestGaze(p)
+        XCTAssertFalse(overlay.orbShown)
+        overlay.ingestGaze(CGPoint(x: 201, y: 200))
+        XCTAssertTrue(overlay.orbShown, "a new sample brings it back")
+        overlay.hideAll()
+    }
+
     /// A hold carrying a moved frame keeps the same glow and moves it; a
     /// different control is a new glow, grown out of the orb.
     func testSameControlGlidesAndANewControlIsANewGlow() {

@@ -248,6 +248,7 @@ final class TargetOverlay {
     /// release or panel retire can never undo a newer lock.
     private var magnetGeneration = 0
     private var lastGazeAt: TimeInterval = -.greatestFiniteMagnitude
+    private var lastGazePoint: CGPoint?
     private var orbWatchdog: Task<Void, Never>?
     /// The rect the glow claims — the element frame plus outset, never
     /// the gaze point. nil while only the orb shows: a glow shrinking
@@ -611,10 +612,18 @@ final class TargetOverlay {
     }
 
     /// The orb follows every fresh gaze point and fades once samples stop
-    /// for the freshness window, so it never sits on a dead feed.
+    /// for the freshness window, so it never sits on a dead feed. The
+    /// service replays its last sample until that sample is stale, and a
+    /// replay doesn't count as a new sample.
     private func moveOrb(to point: CGPoint) {
         guard point.x.isFinite, point.y.isFinite else { return }
-        lastGazeAt = now()
+        if point != lastGazePoint {
+            lastGazePoint = point
+            lastGazeAt = now()
+        } else if now() - lastGazeAt > GazeSample.freshnessWindow {
+            hideOrb()
+            return
+        }
         updateMagnet(reduceMotion() ? nil : Self.orbFollow) { $0.orb = point }
         guard orbWatchdog == nil else { return }
         orbWatchdog = Task { [weak self] in
