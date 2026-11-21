@@ -172,6 +172,9 @@ actor DriveLoop {
     /// Control phrases the words already pressed once this task: "click
     /// Send" covers one Send, and a second one asks.
     private var spentCoverage: Set<String> = []
+    /// The task's words may not be the person's (`DriveTask.speakerVerified`
+    /// off): even a press they name asks first.
+    private var speakerUnverified = false
     var consentAppBundleID: String?
     let ask: AskFn?
     let granted: () -> Bool
@@ -645,7 +648,7 @@ actor DriveLoop {
         /// A per-task approval granted this run — one `ask` covers every
         /// later consent prompt, including the bind-phase launch gate.
         var confirmedTask = false
-        bindSpokenGoal(explicitConsent ? task.goal : nil)
+        bindSpokenGoal(explicitConsent ? task.goal : nil, speakerVerified: task.speakerVerified)
         func step(_ s: String) { feed(s); history.append(s) }
 
         do {
@@ -1362,8 +1365,9 @@ actor DriveLoop {
 
     /// Binds the person's words for a new task. Internal so tests can
     /// stand in for `run`.
-    func bindSpokenGoal(_ goal: String?) {
-        spokenGoal = goal
+    func bindSpokenGoal(_ goal: String?, speakerVerified: Bool = true) {
+        spokenGoal = speakerVerified ? goal : nil
+        speakerUnverified = !speakerVerified
         spentCoverage = []
     }
 
@@ -1414,9 +1418,11 @@ actor DriveLoop {
     /// `explicitConsent` off — an agent's `drive_until`, where the goal
     /// is model-authored — the identical dispatch is an autonomous
     /// mutation and rides the standing grant / per-task confirm like
-    /// every other effect.
+    /// every other effect. `press` is the label of the control a click
+    /// lands on: when the words may not be the person's (D3), a
+    /// consequential one asks first.
     func gateExplicit(_ tool: String, corpus: String, denied: [String],
-                      confirmed: inout Bool) async throws {
+                      confirmed: inout Bool, press: String? = nil) async throws {
         if explicitConsent {
             if let hit = denied.first(where: {
                 corpus.lowercased().contains($0.lowercased())
@@ -1427,6 +1433,9 @@ actor DriveLoop {
             if let why = CuaPolicy.neverReason(text: corpus) {
                 feed("denied: \(why)")
                 throw Abort.denied(why)
+            }
+            if speakerUnverified, let press, let consequence = Consequence.of(control: press) {
+                try await confirmConsequence(consequence, label: press)
             }
             return
         }
