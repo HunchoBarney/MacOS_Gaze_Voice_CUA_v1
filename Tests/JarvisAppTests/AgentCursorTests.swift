@@ -12,6 +12,21 @@ final class AgentCursorTests: XCTestCase {
         return .object(["structuredContent": .object(inner)])
     }
 
+    @MainActor
+    func testCursorLabelPanelStaysOutOfCapturesAndNeverTakesTheMouse() {
+        let panel = AgentCursorLabels.makePanel()
+        XCTAssertEqual(panel.sharingType, .none)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        XCTAssertFalse(panel.canBecomeKey)
+    }
+
+    @MainActor
+    func testListeningIndicatorPanelStaysOutOfCaptures() {
+        let panel = IndicatorPanel()
+        XCTAssertEqual(panel.sharingType, .none)
+        XCTAssertFalse(panel.canBecomeKey)
+    }
+
     func testPositionedCursorYieldsFlippedPoint() {
         let payload = state(enabled: true, position: ["x": .number(400), "y": .number(300)])
         let point = VoiceTaskCoordinator.agentCursorPoint(from: payload, primaryHeight: 1000)

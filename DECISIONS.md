@@ -35,6 +35,19 @@ Settled choices, newest first. Change one only with a new entry here.
 - Not physically verified yet: the AX titles each app shows, and invoking
   Undo by menu path in a background app.
 
+## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
+
+- The owner: "the chimes and noises it makes are super annoying and not
+  good experience". Jarvis is always listening, so it plays no non-speech
+  sound by default. The glow, the indicator and the task row carry
+  success, failure, stalls and questions; speech is heard only where words
+  are needed, and spoken answers and the "Looking…" filler are unchanged.
+- One setting, Settings → Replies → Sounds (`soundsEnabled`), off by
+  default, brings back the Glass and Basso earcons. Installs that had it on
+  are moved to off once (`soundsQuietByDefault`); a later choice sticks.
+- New feedback, Live (L3+) included, follows the same rule: visual first,
+  speech only for words, never a new chime.
+
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
 - "Type this …" takes the exact span after the lead-in ("type this",
@@ -274,7 +287,8 @@ Settled choices, newest first. Change one only with a new entry here.
 - Limits live in one SQLite-backed Durable Object, so checks and charges are
   strongly consistent; KV is eventually consistent and can't hold a limit.
   Per install: requests per minute per route and estimated spend per UTC
-  day ($1 default). Global: $20 a day, new installs per network and per day,
+  day ($1 default). Global: $5 a day (lowered from $20 when the repository
+  went public), new installs per network and per day,
   a `PAUSED` variable and an admin pause, and per-install revoke.
 - Open source: Hono 4.13.19 (MIT) for routing, Wrangler 4.165.0 (MIT or
   Apache-2.0) to run and deploy. Our code is the ledger and the proxy rules.
@@ -332,6 +346,11 @@ Settled choices, newest first. Change one only with a new entry here.
   PRs and main every 5 minutes, one job at a time, at low priority, and only
   while no other `swift-build`/`swift-test`/`swift-frontend`/`xcodebuild`
   runs. Dependabot PRs run only with the `local-ci` label; fork PRs never run.
+- Local CI tests a PR head merged into current main (`git merge-tree`, never
+  committed) and names that main in the status, so a green PR doesn't need
+  main merged in just to refresh CI. A result stays valid while main's later
+  commits touch none of the PR's non-Markdown files; a conflict posts
+  `error` without a run.
 - nektos/act (MIT) was considered to run `ci.yml` itself. In host mode it
   copies the local directory instead of checking out the head, and
   `setup-node` downloads its own Node, while the job's only real step is

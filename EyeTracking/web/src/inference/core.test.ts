@@ -731,6 +731,109 @@ describe("Calibration", () => {
     expect(calibration.lastVerdict).toBeNull();
   });
 
+  describe("a failed pursuit run keeps the previous calibration's pools", () => {
+    type Pools = { samples: unknown[]; implicitSamples: unknown[]; rejectedBiasEvidence: unknown[]; sameSpotRun: number };
+
+    function pools(calibration: Calibration): Pools {
+      const internals = calibration as unknown as Pools;
+      return {
+        samples: calibration.samples.slice(),
+        implicitSamples: calibration.implicitSamples.slice(),
+        rejectedBiasEvidence: internals.rejectedBiasEvidence.slice(),
+        sameSpotRun: internals.sameSpotRun
+      };
+    }
+
+    async function calibrated() {
+      const made = makeCalibration();
+      await pursuitAndVerify(made.calibration);
+      for (const target of GRID.slice(1, 9)) {
+        made.calibration.addImplicitSample(makeFeature(target), target);
+      }
+      made.calibration.addImplicitSample(makeFeature(GRID[8]), GRID[8]);
+      made.calibration.addResidualBiasEvidence(makeFeature([0.4, 0.4]), [0.5, 0.5]);
+      made.emit.mockClear();
+      made.write.mockClear();
+      const before = pools(made.calibration);
+      expect(before.samples).toHaveLength(26);
+      expect(before.implicitSamples).toHaveLength(9);
+      expect(before.rejectedBiasEvidence).toHaveLength(1);
+      expect(before.sameSpotRun).toBe(1);
+      return { ...made, before };
+    }
+
+    it("restores the pools when the pursuit ends short of 24 samples", async () => {
+      const { calibration, emit, write, before } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID.slice(0, 11)) {
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.finishPursuit();
+      expect(emit).toHaveBeenCalledWith(expect.objectContaining({ status: "rejected_fit" }));
+      expect(write).not.toHaveBeenCalled();
+      expect(pools(calibration)).toEqual(before);
+    });
+
+    it("restores the pools when the verify sweep rejects the new fit", async () => {
+      const { calibration, emit, write, before } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID) {
+        calibration.capturePursuit(makeFeature(target), target);
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.finishPursuit();
+      calibration.beginVerify();
+      for (let i = 0; i < 36; i += 1) {
+        calibration.captureVerifyError(makeFeature([0.5, 0.5]), [0.1, 0.1]);
+      }
+      await calibration.finishVerify();
+      expect(emit).toHaveBeenCalledWith(expect.objectContaining({ status: "rejected_fit" }));
+      expect(write).not.toHaveBeenCalled();
+      expect(pools(calibration)).toEqual(before);
+    });
+
+    it("takes no background labels while a fit awaits its verify sweep", async () => {
+      const { calibration } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID) {
+        calibration.capturePursuit(makeFeature(target), target);
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.finishPursuit();
+      expect(calibration.pendingMatrix).not.toBeNull();
+      calibration.addImplicitSample(makeFeature([0.3, 0.6]), [0.3, 0.6]);
+      calibration.addResidualBiasEvidence(makeFeature([0.4, 0.4]), [0.5, 0.5]);
+      expect(calibration.implicitSamples).toHaveLength(0);
+      expect((calibration as unknown as { rejectedBiasEvidence: unknown[] }).rejectedBiasEvidence).toHaveLength(0);
+      expect(await calibration.refitWithImplicit(Number.MAX_SAFE_INTEGER)).toBe(false);
+    });
+
+    it("restores the pools when the run is aborted", async () => {
+      const { calibration, emit, before } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID) {
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.abortPursuit();
+      expect(emit).not.toHaveBeenCalled();
+      expect(pools(calibration)).toEqual(before);
+    });
+
+    it("replaces the pools with the new run once it is saved", async () => {
+      const { calibration, emit, before } = await calibrated();
+      await pursuitAndVerify(calibration, warpedFeatureAt);
+      expect(emit).toHaveBeenCalledWith(expect.objectContaining({ status: "saved" }));
+      const after = pools(calibration);
+      expect(after.samples).toHaveLength(26);
+      expect(after.samples).not.toEqual(before.samples);
+      expect(after.implicitSamples).toHaveLength(0);
+      expect(after.rejectedBiasEvidence).toHaveLength(0);
+      calibration.beginPursuit();
+      calibration.finishPursuit();
+      expect(pools(calibration)).toEqual(after);
+    });
+  });
+
   it("selects the feature map when the projected cone is nonlinearly distorted", async () => {
     const { calibration, write } = makeCalibration();
     await pursuitAndVerify(calibration, warpedFeatureAt);
@@ -1909,7 +2012,14 @@ describe("daily-use robustness", () => {
   });
 });
 
-describe("inference worker", () => {
+// The worker tests drive real frames through the inference pipeline, so
+// under a loaded Mac each frame can take far longer than vi.waitFor's 1 s
+// default and the whole test longer than vitest's 5 s (#571: set_paused took
+// 5.1 s). Generous waits keep them event-driven rather than clock-bound.
+const WORKER_WAIT = { timeout: 10_000, interval: 5 };
+const WORKER_TEST_TIMEOUT_MS = 30_000;
+
+describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
   function workerConfig(accelerator: "auto" | "webgpu" | "wasm" = "wasm"): WebInferenceConfig {
     return {
       runtime: "onnxweb",
@@ -2017,10 +2127,10 @@ describe("inference worker", () => {
     // init now parks on it (model build overlaps camera acquisition), so
     // the harness must deliver it or init never reaches calibration_read.
     send({ type: "camera_geometry", width: 640, height: 480, resolutionName: "640x480" });
-    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "calibration_read")).toBe(true));
+    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "calibration_read")).toBe(true), WORKER_WAIT);
     const readRequest = workerMessages.find((m) => m.type === "calibration_read") as { id: number };
     send({ type: "calibration_read_result", id: readRequest.id, response: { ok: true, text: null } });
-    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "backend")).toBe(true));
+    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "backend")).toBe(true), WORKER_WAIT);
     workerMessages.length = 0;
     return send;
   }
@@ -2037,7 +2147,7 @@ describe("inference worker", () => {
       droppedFrames: 0,
       mainThreadLongTasks: 0
     });
-    await vi.waitFor(() => expect(workerMessages.filter((m) => m.type === "frame_done").length).toBeGreaterThan(done));
+    await vi.waitFor(() => expect(workerMessages.filter((m) => m.type === "frame_done").length).toBeGreaterThan(done), WORKER_WAIT);
   }
 
   function gazePayloads(): Array<Record<string, unknown>> {

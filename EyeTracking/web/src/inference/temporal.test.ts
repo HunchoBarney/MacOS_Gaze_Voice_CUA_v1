@@ -191,6 +191,12 @@ function runSuite(glitchLenMax: number): Record<"old" | "new", Metrics> {
   return { old: pack(agg.old), new: pack(agg.new) };
 }
 
+// 16 seeds × 2 glitch lengths of pure CPU replay, no timers to fake.
+// Unloaded it takes 0.9 s; under a loaded local-ci run (#569) it took 9.3 s
+// and tripped vitest's 5 s default. 30 s keeps ~3x headroom over that worst
+// case without shrinking the corpus the comparison is measured on.
+const SUITE_TIMEOUT_MS = 30_000;
+
 describe("temporal estimate smoother — measured", () => {
   it("median-window + coherent snap beats the legacy EMA on dwell error without added lag", () => {
     for (const lenMax of [1, 2]) {
@@ -210,7 +216,7 @@ describe("temporal estimate smoother — measured", () => {
       // Slow-pursuit tracking must not degrade either.
       expect(n.rampMed).toBeLessThanOrEqual(o.rampMed * 1.15);
     }
-  });
+  }, SUITE_TIMEOUT_MS);
 
   it("single-frame per-eye collapse never reaches the output; coherent saccade snaps in one frame", () => {
     const s = new GazeAngleSmoother();
