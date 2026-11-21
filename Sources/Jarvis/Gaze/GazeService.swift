@@ -88,6 +88,9 @@ final class GazeService {
     private var interactionLabels: InteractionLabels?
     /// Last σ re-read — the learning report changes as the map learns.
     private var sigmaReadAt: TimeInterval = -.greatestFiniteMagnitude
+    /// The σ last handed to the highlight — dwell fires only on a target
+    /// the highlight could lock onto, so it never clicks unannounced.
+    private var sigmaPt = GazeErrorBand.minimumSigmaPt
     static let sigmaRefreshInterval: TimeInterval = 5
 
     private var pump: Task<Void, Never>?
@@ -237,7 +240,8 @@ final class GazeService {
         let t = now()
         if t - sigmaReadAt >= Self.sigmaRefreshInterval {
             sigmaReadAt = t
-            sigmaSink(await scorer.refreshMeasuredSigma())
+            sigmaPt = await scorer.refreshMeasuredSigma()
+            sigmaSink(sigmaPt)
         }
         // A dropped socket reconnects on a budgeted cadence — fast while
         // the tracker was recently alive, slow once it's clearly down.
@@ -366,6 +370,9 @@ final class GazeService {
         }
         switch dwell.advance(event, share: share, policy: dwellPolicy) {
         case .fire(let candidate):
+            // The glow refused this target, so the user never saw it
+            // or its countdown: a click there would come unannounced.
+            guard TargetOverlay.canLock(candidate, sigmaPt: sigmaPt) else { return }
             // A suppressed fire is an aborted intent — feed it into the
             // learned-multiplier accounting or suppression would silently
             // tighten nothing and widen nothing.
