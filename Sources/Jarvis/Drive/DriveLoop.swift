@@ -664,8 +664,7 @@ actor DriveLoop {
             return await runOfferedUndo(pending, task: task, session: directSession ?? session)
         }
         if !task.questionPending, Self.repairsOffer(task.goal) {
-            return settle(.blocked("There's nothing to take back now."), task, history,
-                          blockedReason: "no live undo offer")
+            return settle(.blocked(""), task, history, blockedReason: Self.noLiveOfferReason)
         }
 
         do {

@@ -268,6 +268,8 @@ extension DriveLoop {
     /// "no", "not that", "wrong one", "that's wrong": the whole utterance
     /// says the press was wrong. They name nothing to act on, so they take
     /// back only a live offer; outside one they start nothing new.
+    static let noLiveOfferReason = "no live undo offer"
+
     static func repairsOffer(_ goal: String) -> Bool {
         ["no", "not that", "wrong one", "that s wrong", "thats wrong"]
             .contains(VoiceAdmissionPolicy.normalized(goal))

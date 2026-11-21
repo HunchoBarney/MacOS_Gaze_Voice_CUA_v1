@@ -575,14 +575,14 @@ final class UndoOfferTests: XCTestCase {
         let loop = await makeLoop(script, offers: offers)
         let expired = await loop.run(DriveTask(goal: "no"), session: "s")
         XCTAssertTrue(script.calls.value.isEmpty, "an expired offer leaves \"no\" with nothing to do")
-        XCTAssertEqual(expired.blockedReason, "no live undo offer")
+        XCTAssertEqual(expired.blockedReason, DriveLoop.noLiveOfferReason)
 
         offered(offers, at: script.now.value)
         var unverified = DriveTask(goal: "not that")
         unverified.speakerVerified = false
         let refused = await loop.run(unverified, session: "s")
         XCTAssertTrue(script.calls.value.isEmpty, "an unverified repair word is not a new task either")
-        XCTAssertEqual(refused.blockedReason, "no live undo offer")
+        XCTAssertEqual(refused.blockedReason, DriveLoop.noLiveOfferReason)
     }
 
     func testUndoRefusesAfterThePersonTypedOrClicked() async {
