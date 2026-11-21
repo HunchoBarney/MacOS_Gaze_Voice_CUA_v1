@@ -52,6 +52,9 @@ struct VoiceTimings {
     /// Past this a wake session closes at the first quiet time, not the
     /// follow-up window; then the wake word is needed again.
     var wakeSessionCap: TimeInterval = 30 * 60
+    /// How often Standby looks for another app on the microphone. Nil
+    /// leaves the looking to `checkOtherMicrophoneUse()` callers.
+    var otherMicrophoneInterval: TimeInterval? = 2
 }
 
 /// When a wake-word session closes. Until Jarvis has answered, it closes
@@ -1272,7 +1275,7 @@ final class VoiceController: ObservableObject {
     /// A call or another recording app owns the microphone: Standby waits
     /// until it's done.
     private func watchOtherMicrophoneUse() {
-        guard otherMicrophoneWatch == nil else { return }
+        guard otherMicrophoneWatch == nil, let interval = timings.otherMicrophoneInterval else { return }
         otherMicrophoneWatch = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.standbyChosen else {
@@ -1280,7 +1283,7 @@ final class VoiceController: ObservableObject {
                     return
                 }
                 await self.checkOtherMicrophoneUse()
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .seconds(interval))
             }
         }
     }
