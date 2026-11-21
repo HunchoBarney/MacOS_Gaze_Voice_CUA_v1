@@ -69,7 +69,8 @@ export function coverVariant(component: Component, scheme: Scheme): Variant | un
 
 export function baseStateFor(component: Component, proposed: State): State | undefined {
   const current = component.states.filter((s) => (s.kind ?? "current") === "current");
-  return current.find((s) => s.id === proposed.id.replace(/-proposed$/, "")) ?? current[0];
+  const base = proposed.id.replace(/-proposed$/, "").replace(/^proposed-/, "");
+  return current.find((s) => s.id === base) ?? current.find((s) => s.id.endsWith("-" + base)) ?? current[0];
 }
 
 export function severityCounts(findings: Finding[]): Record<Severity, number> {
