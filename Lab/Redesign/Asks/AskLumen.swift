@@ -64,7 +64,8 @@ public enum AskLumen: Direction {
     static func ears(_ f: AskFixture, _ c: Ctx, _ m: MotionBank, w: CGFloat) -> some View {
         HStack(spacing: 0) {
             ZStack {
-                VoiceRing(.ring, state: f.phase == .question ? .listening : .speaking, source: .level({ m["level"] }), size: 24)
+                VoiceRing(.ring, state: f.phase == .question ? .listening : .speaking, source: .level({ m["level"] }),
+                          style: .ring(paused: c.reduceMotion), size: 24)
                     .frame(width: 24, height: 24)
                     .opacity(1 - m["warm"])
                 Circle().fill(Color(red: 1, green: 0.62, blue: 0.24)).frame(width: 9, height: 9)
