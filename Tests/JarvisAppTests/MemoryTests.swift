@@ -425,6 +425,18 @@ final class MemoryCommandsTests: MemoryTestCase {
         return said
     }
 
+    @MainActor func testCurlyApostrophesFromTheTranscriberStillMatchTheIntents() throws {
+        XCTAssertEqual(MemoryIntent.parse("who’s Dana?"), .recall("Dana", explicit: false))
+        XCTAssertEqual(MemoryIntent.parse("Don’t remember that."), .forgetLast)
+        XCTAssertEqual(MemoryIntent.parse("Remember Dana’s birthday is “May 4”"),
+                       .remember("Dana's birthday is \"May 4\""))
+        let s = store()
+        let commands = MemoryCommands(store: { s })
+        _ = commands.handle("Remember Dana is my manager")
+        XCTAssertTrue(commands.answers("Who’s Dana?"))
+        XCTAssertEqual(commands.handle("Who’s Dana?"), "Dana is your manager.")
+    }
+
     private struct NoKeys: APIKeyStore {
         func read() throws -> String? { nil }
         func save(_ apiKey: String) throws {}
