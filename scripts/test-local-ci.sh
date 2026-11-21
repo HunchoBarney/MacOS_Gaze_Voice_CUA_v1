@@ -108,6 +108,11 @@ check "$home" gh.log "state=error -f context=local-ci -f description=build lane 
 if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a lane that never freed up must not post failure"; failures=$((failures + 1))
 fi
+if [ -e "$home/requested/$(git -C "$dir/origin-lane-busy" rev-parse HEAD)" ]; then
+    echo "ok   ci-lane-busy queues the head again"
+else
+    echo "FAIL a lane that never freed up must queue the head again"; failures=$((failures + 1))
+fi
 
 home=$(ci_run no-guard 0 none)
 check "$home" gh.log "state=error -f context=local-ci -f description=the merge with main $(git -C "$dir/origin-no-guard" rev-parse --short=7 HEAD) lacks the #598 Keychain test guard"
@@ -123,6 +128,11 @@ done
 check "$home" gh.log "state=error -f context=local-ci -f description=no build lane at"
 if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a missing lane must not post failure"; failures=$((failures + 1))
+fi
+if [ -e "$home/requested/$(git -C "$dir/origin-no-lane" rev-parse HEAD)" ]; then
+    echo "ok   ci-no-lane queues the head again"
+else
+    echo "FAIL a missing lane must queue the head again"; failures=$((failures + 1))
 fi
 
 # A PR head is tested merged into current main: main moved on after the PR
@@ -207,6 +217,11 @@ if pgrep -f "sleep 7777" >/dev/null; then
 else
     echo "ok   ci-cancel stops its watchdog"
 fi
+if [ -e "$home/requested/$(cat "$dir/origin-cancel.head")" ]; then
+    echo "FAIL a cancelled run must not queue the head again"; failures=$((failures + 1))
+else
+    echo "ok   ci-cancel does not queue the head again"
+fi
 
 # poll tests the head it first listed longest ago, not the most recently
 # updated one, and skips heads that already have a status. gh is a fake that
@@ -262,6 +277,19 @@ else
     echo "FAIL poll-starve didn't record a new head"; failures=$((failures + 1))
 fi
 
+# A head whose status can't be read is skipped, not tested again.
+mkdir -p "$dir/poll-nostatus/seen" && git init -q "$dir/poll-nostatus/checkout"
+cat >"$dir/gh-poll-nostatus" <<'EOF'
+#!/bin/bash
+case "$*" in
+    "pr list"*) echo "2026-11-20T01:00:00Z tttt pr#20 false" ;;
+    *"/statuses --jq"*) exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "$dir/gh-poll-nostatus"
+pick_is nostatus ""
+
 poll_setup fresh
 printf '%s\n' \
     "2026-11-20T09:00:00Z dddd pr#3" \
@@ -272,9 +300,9 @@ echo mmmm >"$dir/poll-fresh/done"
 pick_is fresh "pr#2"
 
 # A head queued by hand records its request and a pending status and returns
-# at once; poll then tests it in first-seen order. A head that already has a
-# result queues from the time of the request. This fake gh keeps every posted
-# status, newest last, so poll sees what the request and each run posted.
+# at once; poll then tests it before any open head, even one that already has
+# a result. This fake gh keeps every posted status, newest last, so poll sees
+# what the request and each run posted.
 cat >"$dir/gh-req" <<'EOF'
 #!/bin/bash
 h=$REQ_HOME; a="$*"
@@ -324,9 +352,8 @@ echo 2000 >"$dir/req-rerun/seen/bbbb"
 echo 500 >"$dir/req-rerun/seen/aaaa"
 echo "aaaa success" >"$dir/req-rerun/posted"
 req rerun aaaa >/dev/null
-req_check "rerun: a tested head queues from the request" '[ "$(cat "$dir/req-rerun/seen/aaaa")" -ge "$start" ]'
-req_pick_is rerun "pr#2"
 req_pick_is rerun requested
+req_pick_is rerun "pr#2"
 
 mkdir -p "$dir/req-nopost/seen" && git init -q "$dir/req-nopost/checkout"
 : >"$dir/req-nopost/heads"
@@ -336,5 +363,55 @@ REQ_HOME=$dir/req-nopost LOCAL_CI_HOME=$dir/req-nopost GH=$dir/gh-nopost "$here/
 rc=$?
 req_check "nopost: a request whose status can't be posted fails and records nothing" \
     '[ $rc -eq 1 ] && [ ! -e "$dir/req-nopost/requested/cccc" ]'
+
+# Requests come first, oldest request first, ahead of open heads however long
+# ago poll saw them. A request whose PR has a newer head is dropped untested,
+# whether the request recorded its PR or not. Open heads run only once no
+# request is left, and never a draft, a held PR or a head with a status.
+cat >"$dir/gh-queue" <<'EOF'
+#!/bin/bash
+h=$REQ_HOME; a="$*"
+case "$a" in
+    "pr list"*) cat "$h/heads" ;;
+    "pr view 7 "*) echo nnnn ;;
+    *commits/oooo/pulls*) echo pppp ;;
+    *"-X POST"*) s=${a#*statuses/}; s=${s%% *}; st=${a#*state=}; echo "$s ${st%% *}" >>"$h/posted" ;;
+    *"/statuses --jq"*) s=${a#*commits/}; s=${s%%/*}
+        st=$(grep "^$s " "$h/posted" 2>/dev/null | tail -1 | cut -d" " -f2)
+        [ -n "$st" ] && echo "$st $(date -u +%Y-%m-%dT%H:%M:%SZ)" ;;
+esac
+exit 0
+EOF
+chmod +x "$dir/gh-queue"
+q=$dir/req-queue
+mkdir -p "$q/seen" "$q/requested" && git init -q "$q/checkout"
+printf '%s\n' \
+    "2026-11-20T01:00:00Z dddd pr#10 true" \
+    "2026-11-20T01:00:00Z hhhh pr#11 false" \
+    "2026-11-20T01:00:00Z ssss pr#12 false" \
+    "2026-11-20T01:00:00Z uuuu pr#13 false" >"$q/heads"
+for s in dddd hhhh ssss uuuu; do echo 1 >"$q/seen/$s"; done
+echo 11 >"$q/held"
+echo "ssss error" >"$q/posted"
+echo "2026-11-20T06:00:00Z" >"$q/requested/oooo"
+echo "2026-11-20T07:00:00Z 7" >"$q/requested/xxxx"
+echo "2026-11-20T08:00:00Z 8" >"$q/requested/rold"
+echo "2026-11-20T09:00:00Z" >"$q/requested/rnew"
+queue_pick_is() {
+    local got
+    got=$(REQ_HOME=$q LOCAL_CI_HOME=$q GH=$dir/gh-queue "$here/local-ci.sh" poll 2>/dev/null </dev/null \
+        | sed -n 's/.* testing \([^ ]* [^ ]*\)$/\1/p' | head -1)
+    if [ "$got" = "$1" ]; then
+        echo "ok   req-queue picks '$1'"
+    else
+        echo "FAIL req-queue: expected '$1', got '$got'"; failures=$((failures + 1))
+    fi
+}
+queue_pick_is "requested rold"
+req_check "queue: requests whose PR has a newer head are dropped untested" \
+    '[ ! -e "$q/requested/oooo" ] && [ ! -e "$q/requested/xxxx" ] && grep -qx "oooo error" "$q/posted" && grep -qx "xxxx error" "$q/posted" && ! grep -q "^xxxx pending" "$q/posted"'
+queue_pick_is "requested rnew"
+queue_pick_is "pr#13 uuuu"
+queue_pick_is ""
 
 exit $((failures > 0))
