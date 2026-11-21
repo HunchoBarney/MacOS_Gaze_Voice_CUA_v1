@@ -19,6 +19,9 @@ final class SpeechOutput: SpeechSynthesizing, VoicePlaybackRouting, @unchecked S
     private var consumer: Task<Void, Never>?
     var playbackChannel: VoicePlaybackChannel { .system }
     var playbackActive: Bool { !player.playbackIdle }
+    /// Whether anything is being spoken, routed or not. Read on the main
+    /// thread, where the synthesizer lives.
+    var speaking: Bool { playbackActive || (synthesizer?.isSpeaking ?? false) }
 
     init(rate: Float = AVSpeechUtteranceDefaultSpeechRate, enabled: Bool = true) {
         self.rate = rate

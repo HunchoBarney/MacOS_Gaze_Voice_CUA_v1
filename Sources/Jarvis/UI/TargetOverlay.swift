@@ -259,8 +259,9 @@ final class TargetOverlay {
     }
 
     /// The shared chrome — borderless, nonactivating, above everything
-    /// including full-screen windows, on every Space, blind to the mouse.
-    private static func makePanel() -> NSPanel {
+    /// including full-screen windows, on every Space, blind to the mouse,
+    /// and left out of screenshots, recordings and screen shares.
+    static func makePanel() -> NSPanel {
         let panel = OverlayPanel(contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -270,6 +271,7 @@ final class TargetOverlay {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
+        panel.sharingType = .none
         panel.appearance = NSAppearance(named: .darkAqua)
         return panel
     }
@@ -356,6 +358,14 @@ final class TargetOverlay {
         haloPanel?.orderOut(nil)
         haloRect = nil
     }
+
+    /// A guide step's words beside its glow. It answers to the same
+    /// Reduce Motion as the glow and goes when everything is dismissed.
+    lazy var guideCallout: GuideCalloutPanel = {
+        let callout = GuideCalloutPanel()
+        callout.reduceMotion = { [weak self] in self?.reduceMotion() ?? true }
+        return callout
+    }()
 
     // MARK: Press glow
 
@@ -556,6 +566,7 @@ final class TargetOverlay {
         clearChips()
         retireRing()
         hideHalo()
+        guideCallout.hide()
         cheatPanel?.orderOut(nil)
         cheatPanel = nil
     }

@@ -349,10 +349,12 @@ body,
   transition: transform 120ms linear;
 }
 
-/* Parked-protocol target (Tobii): soft luminous orb + ring. On arrival the
-   eye rests on the full-size target for ~350ms, then the ring contracts —
-   the shrink cue pulls foveation exactly onto the collection point. */
+/* Calibration target in the Magnet look: a hollow glow glides to each point
+   and contracts when it parks, pulling the eye onto its centre; the core
+   grows as that point's frames arrive. Only transform moves. */
 .pursuit-target {
+  --glow: 120 175 255;
+  --accent: 10 132 255;
   position: fixed;
   left: 0;
   top: 0;
@@ -362,67 +364,41 @@ body,
 
 .pursuit-ring {
   position: absolute;
-  left: -22px;
-  top: -22px;
-  width: 44px;
-  height: 44px;
+  left: -28px;
+  top: -28px;
+  width: 56px;
+  height: 56px;
   border-radius: 999px;
-  border: 2px solid rgba(160, 190, 255, 0.55);
-  box-shadow: 0 0 18px rgba(90, 130, 255, 0.18);
-  transition: transform 340ms cubic-bezier(0.25, 0.7, 0.3, 1), border-color 300ms ease;
+  background: radial-gradient(
+    circle,
+    rgb(var(--glow) / 0) 0 38%,
+    rgb(var(--glow) / 0.55) 52%,
+    rgb(var(--glow) / 0.18) 64%,
+    rgb(var(--glow) / 0) 72%
+  );
+  transition: transform 320ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-/* Rest first, then shrink: the delay lets the eye settle before the cue. */
 .pursuit-target.dwell .pursuit-ring {
-  transform: scale(0.36);
-  border-color: rgba(140, 230, 180, 0.9);
-  transition-delay: 340ms;
+  transform: scale(0.5);
 }
 
 .pursuit-dot {
   position: absolute;
-  left: -8px;
-  top: -8px;
-  width: 16px;
-  height: 16px;
+  left: -6px;
+  top: -6px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
-  background: radial-gradient(circle, #fdf6ec 0%, #dfe9ff 70%, #bcd0ff 100%);
+  background: #fff;
   box-shadow:
-    0 0 14px rgba(200, 220, 255, 0.85),
-    0 0 34px rgba(110, 150, 255, 0.4);
-  animation: pursuit-breathe 2400ms ease-in-out infinite;
+    0 0 0 2px rgb(var(--accent) / 0.55),
+    0 0 10px 2px rgb(var(--glow) / 0.85);
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.pursuit-target.dwell .pursuit-dot {
-  animation-play-state: paused;
-}
-
-@keyframes pursuit-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.14); }
-}
-
-/* Faint ghost at the next waypoint while the orb glides — the eye sees where
-   it's heading, so the arrival needs no saccadic search. */
-.pursuit-ghost {
-  position: fixed;
-  left: -5px;
-  top: -5px;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(170, 195, 255, 0.28);
-  box-shadow: 0 0 8px rgba(120, 155, 255, 0.2);
-}
-
-.pursuit-target.verify .pursuit-ring {
-  border-color: rgba(120, 220, 255, 0.6);
-}
-
-.pursuit-target.verify .pursuit-dot {
-  box-shadow:
-    0 0 14px rgba(180, 235, 255, 0.8),
-    0 0 34px rgba(90, 200, 255, 0.4);
+.pursuit-target.verify {
+  --glow: 110 215 255;
 }
 
 /* Countdown: a single thin numeral over the scrim — no boxed circle. Each
@@ -727,11 +703,8 @@ body,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pursuit-dot {
-    animation: none;
-  }
-
-  .pursuit-target.dwell .pursuit-ring {
+  .pursuit-dot,
+  .pursuit-ring {
     transition: none;
   }
 

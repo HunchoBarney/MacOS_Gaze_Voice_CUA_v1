@@ -18,7 +18,8 @@ new_sqlite_classes = ["LedgerObject"]
 [vars]
 PAUSED = "0"
 REALTIME_MODEL = "gpt-realtime-2.1"
+LIVE_MODEL = "gpt-live-1.1"
 RESPONSES_MODELS = "gpt-6.1-terra"
 JEV_MODELS = "jev-latest,jev-1.14.0"
 INSTALL_DAILY_CENTS = "100"
-GLOBAL_DAILY_CENTS = "2000"
+GLOBAL_DAILY_CENTS = "500"

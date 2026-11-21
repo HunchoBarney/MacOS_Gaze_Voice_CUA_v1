@@ -9,6 +9,8 @@ export interface Config {
   paused: boolean;
   realtimeModel: string;
   realtimeSecretSeconds: number;
+  liveModel: string;
+  maxLiveBytes: number;
   responsesModels: string[];
   jevModels: string[];
   maxOutputTokens: number;
@@ -17,6 +19,7 @@ export interface Config {
   limits: Limits;
   prices: {
     realtimeSessionCents: number;
+    liveSessionCents: number;
     responsesReserveCents: number;
     responsesInputCentsPerMTok: number;
     responsesOutputCentsPerMTok: number;
@@ -52,6 +55,8 @@ export function loadConfig(env: Record<string, unknown>): Config {
     paused: ["1", "true", "yes", "on"].includes(text("PAUSED").toLowerCase()),
     realtimeModel: text("REALTIME_MODEL") || "gpt-realtime-2.1",
     realtimeSecretSeconds: Math.min(Math.max(number("REALTIME_SECRET_SECONDS", 60), 10), 600),
+    liveModel: text("LIVE_MODEL") || "gpt-live-1.1",
+    maxLiveBytes: number("MAX_LIVE_BYTES", 256 * 1024),
     responsesModels: list("RESPONSES_MODELS", ["gpt-6.1-terra"]),
     jevModels: list("JEV_MODELS", ["jev-latest", "jev-1.14.0"]),
     maxOutputTokens: number("MAX_OUTPUT_TOKENS", 4_000),
@@ -60,16 +65,18 @@ export function loadConfig(env: Record<string, unknown>): Config {
     limits: {
       perMinute: {
         realtime: number("REALTIME_PER_MINUTE", 6),
+        live: number("LIVE_PER_MINUTE", 6),
         responses: number("RESPONSES_PER_MINUTE", 20),
         jev: number("JEV_PER_MINUTE", 120),
       },
       installDailyCents: number("INSTALL_DAILY_CENTS", 100),
-      globalDailyCents: number("GLOBAL_DAILY_CENTS", 2_000),
+      globalDailyCents: number("GLOBAL_DAILY_CENTS", 500),
       registrationsPerIPPerDay: number("REGISTRATIONS_PER_IP_PER_DAY", 5),
       registrationsPerDay: number("REGISTRATIONS_PER_DAY", 500),
     },
     prices: {
       realtimeSessionCents: number("REALTIME_SESSION_CENTS", 5),
+      liveSessionCents: number("LIVE_SESSION_CENTS", 8),
       responsesReserveCents: number("RESPONSES_RESERVE_CENTS", 5),
       responsesInputCentsPerMTok: number("RESPONSES_INPUT_CENTS_PER_MTOK", 200),
       responsesOutputCentsPerMTok: number("RESPONSES_OUTPUT_CENTS_PER_MTOK", 800),

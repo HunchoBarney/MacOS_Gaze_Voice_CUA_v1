@@ -121,6 +121,8 @@ final class VoiceTaskCoordinator {
     var selectedID: UUID? { didSet { onChange() } }
     var onChange: () -> Void = {}
     var audioFeedbackAllowed: () -> Bool = { true }
+    /// Plays a named system sound; a seam so tests hear nothing.
+    var playSound: (String) -> Void = { NSSound(named: $0)?.play() }
     enum ConversationBoundary: Sendable, Equatable {
         case question
         case finished(Work.Outcome)
@@ -180,6 +182,11 @@ final class VoiceTaskCoordinator {
     }
 
     private let config: Config
+    /// "Remember X", "who's X?" and "forget that", answered only while
+    /// `voice.live` is on (JARA-49 L8).
+    var memoryCommands = MemoryCommands()
+    /// Where finished requests are summarised while `voice.live` is on.
+    var memoryStore: () -> MemoryStore = { .shared }
     private let jevRoute: () async throws -> ServiceRoute?
     private let resolver: AppResolver
     private let commandDriver: DriveLoop.Call?
@@ -278,10 +285,15 @@ final class VoiceTaskCoordinator {
     /// task's previousContext and every delegation message. Production
     /// wires it to `gazeService.referentContext`; tests inject a line.
     var gazeContextProvider: () async -> String? = { nil }
+    /// Proactivity answers "what's up", "what did I miss", watch requests
+    /// and replies to a spoken alert before the utterance becomes a task.
+    /// It hears the person's own words when the turn has them: a "yes"
+    /// answers the alert, whatever the model made of it.
+    var proactiveIntercept: ((String) -> ProactiveIntercept?)?
     /// The candidate enumerator the service drives — built over `call`
     /// by `configureGazeService`; nil means the feed reports empty.
     private var gazeFeed: GazeCandidateFeed?
-    /// Fn-down pre-observe and its gaze pump — cancelled by
+    /// Speech-start pre-observe and its gaze pump — cancelled by
     /// `endListeningHint` or a watchdog so a non-computer utterance
     /// leaves nothing running.
     private var listenHintTask: Task<Void, Never>?
@@ -289,12 +301,12 @@ final class VoiceTaskCoordinator {
     /// Which gaze pump is live — a superseded pump's teardown must not
     /// stop the stream its replacement just opened.
     private var gazePumpGeneration = 0
-    /// Which Fn-down hint owns the gaze feed — a pending
+    /// Which speech-start hint owns the gaze feed — a pending
     /// `endListeningHint` teardown must not stop the stream a NEWER
     /// hold just opened.
     private var listenHintGeneration = 0
 
-    /// Live Fn/dictation capture probe — true while the user is mid-
+    /// Live capture probe — true while the user is mid-
     /// sentence, so a dwell fire can't double-actuate on "click this".
     /// `configureGazeService` points it at L5's `VoiceController.shared`;
     /// the default-off seam keeps tests (and a missing wire) from
@@ -722,7 +734,7 @@ final class VoiceTaskCoordinator {
     /// all instead of each call site re-checking the setting.
     private func cue(_ name: String) {
         guard config.sounds, audioFeedbackAllowed() else { return }
-        NSSound(named: name)?.play()
+        playSound(name)
     }
 
     /// Jev choice — one System One call, validated against the candidate
@@ -815,7 +827,8 @@ final class VoiceTaskCoordinator {
             let words = [transcriptHint, trimmed].compactMap { $0 }.first {
                 WritingInstruction.intent($0) != nil || WritingInstruction.confirmation($0) != nil
             } ?? trimmed
-            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput()) {
+            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput(),
+                                                               isCurrent: admissionIsCurrent) {
                 return written
             }
         }
@@ -843,6 +856,16 @@ final class VoiceTaskCoordinator {
             return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
         }
         let phrase = Self.normalizedPhrase(trimmed)
+        if windowScroll == nil, let intercept = proactiveIntercept?(transcriptHint ?? trimmed) {
+            switch intercept {
+            case .say:
+                return VoiceToolResult(status: VoiceToolResult.Status.ok,
+                                       say: "Jarvis already answered this aloud on the Mac. Say nothing more.").encoded()
+            case .request(let request):
+                return await beginVoiceTask(request, app: app, frontmostHint: frontmostHint, captureID: captureID,
+                                            admissionIsCurrent: admissionIsCurrent)
+            }
+        }
         // Utterances about existing work aren't tasks — each answers from
         // the task log (or shows the cheat sheet) and creates no Work row.
         if windowScroll == nil, Self.repeatPhrases.contains(phrase) {
@@ -877,6 +900,11 @@ final class VoiceTaskCoordinator {
             feed.add(.note, "showed the command cheat sheet")
             return VoiceToolResult(status: VoiceToolResult.Status.ok,
                                    say: Self.helpSummary(gaze: gaze)).encoded()
+        }
+        // Memory intents answer here, before the activity feed hears them,
+        // so a forgotten memory leaves no copy in the task log.
+        if config.voiceLive, let say = memoryCommands.handle(trimmed) {
+            return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
         }
         if tasks.contains(where: { $0.active && $0.request.lowercased() == normalized }) {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
@@ -1829,6 +1857,12 @@ final class VoiceTaskCoordinator {
         wakeConversationWaiters(work.id, .finished(outcome))
         work.message = say
         work.worker = nil
+        // A literal-text task can carry anything the user dictated, so
+        // only plain requests are kept as past requests.
+        if config.voiceLive, case .done = outcome, !work.isAgentAsk, work.spec.values.isEmpty {
+            let outcomeText = say.isEmpty ? "Done." : OutcomeWording.readable(say)
+            try? memoryStore().recordRequest("\(work.request) — \(outcomeText)")
+        }
         if selectedID == nil { selectedID = work.id }
         // Voice-turn tasks get their outcome spoken through the sink —
         // but a dead realtime socket makes that silence, so the earcon
@@ -1890,7 +1924,7 @@ final class VoiceTaskCoordinator {
     static let doneLine = "Done."
 
     /// What a settled task says out loud: nothing for a clean success,
-    /// which the Glass chime and the press glow already mark, and the
+    /// which the press glow and the task row already mark, and the
     /// headline of its line otherwise. A caveat or failure must still make
     /// sense heard alone. nil = silent.
     static func spokenOutcome(_ outcome: Work.Outcome, say: String) -> String? {
@@ -2171,7 +2205,7 @@ final class VoiceTaskCoordinator {
     /// Point the service's seams at this coordinator. The candidate feed
     /// enumerates through `call` (the resurrecting transport wrapper —
     /// a dead session label rotates, never fails the feed); every UI
-    /// seam lands on TargetOverlay through the same paths the Fn pump
+    /// seam lands on TargetOverlay through the same paths the pre-observe pump
     /// already used, so hold-time behavior is unchanged — the stream
     /// just outlives the hold now.
     func configureGazeService() {
@@ -2466,9 +2500,10 @@ final class VoiceTaskCoordinator {
         return await gazedChipSlug()
     }
 
-    // MARK: - Fn-down pre-observe
+    // MARK: - Speech-start pre-observe
 
-    /// Called on Fn-down: everything here is speculative and bounded —
+    /// Called when a hands-free turn starts: everything here is
+    /// speculative and bounded —
     /// warm the transport, the resolver's roster cache, and the gaze
     /// stream, then arm one best-effort halo where the user is already
     /// looking. Nothing may block capture, so every step is try?-quiet
@@ -2523,7 +2558,7 @@ final class VoiceTaskCoordinator {
         let generation = listenHintGeneration
         Task {
             await hint?.value
-            // A Fn-down that arrived during the drain owns the stream
+            // A turn that started during the drain owns the stream
             // now — leave its socket and pump alone.
             guard listenHintGeneration == generation else { return }
             gazePump?.cancel(); gazePump = nil
@@ -2587,7 +2622,7 @@ final class VoiceTaskCoordinator {
                 self?.retireStaleGazeHalo(stale: staleFor)
                 try? await Task.sleep(for: .milliseconds(66))
             }
-            // Whoever ends the pump — Fn-up, watchdog, cancel — the
+            // Whoever ends the pump — turn end, watchdog, cancel — the
             // dim must not outlive the feed that drove it, and the
             // stream must not outlive the pump: it has no other reader,
             // so a missed endListeningHint still bounds the socket.
@@ -2907,9 +2942,11 @@ final class VoiceTaskCoordinator {
                 guideGlowing = true
                 overlay.showHalo(frame: frame)
             }
+            overlay.guideCallout.show(step)
             onChange()
         case .pulse(let frame):
             overlay.glowPress(frame: frame)
+            overlay.guideCallout.pulse()
         case .say(let line):
             feed.add(.note, line)
             taskEventSink(work.captureID,
@@ -2919,8 +2956,24 @@ final class VoiceTaskCoordinator {
         case .clear:
             work.guideStep = nil
             if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+            overlay.guideCallout.hide()
             onChange()
         }
+    }
+
+    /// A guide button in the indicator: the same control the spoken words
+    /// take, its line spoken the way the walkthrough's own lines are.
+    /// Stop is the universal cancel, as the spoken "stop" is.
+    func guideControl(_ control: GuideControl, workID: UUID) async {
+        guard let work = tasks.first(where: { $0.id == workID }), work.active, let guide = work.guide else { return }
+        feed.add(.route, "button → guide \(control)")
+        guard control != .stop else {
+            cancel(workID)
+            return
+        }
+        let say = await guide.hear(control)
+        guard !say.isEmpty else { return }
+        presentGuide(.say(say), workID: workID)
     }
 
     private func endGuide(_ guide: GuideSession, on work: Work) {
@@ -2928,6 +2981,7 @@ final class VoiceTaskCoordinator {
         work.guideObserver = nil
         work.guideStep = nil
         if guideGlowing { guideGlowing = false; overlay.hideHalo() }
+        overlay.guideCallout.hide()
         Task { await guide.end() }
     }
 

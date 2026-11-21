@@ -4,13 +4,20 @@ import ServiceManagement
 @MainActor
 final class SettingsNavigation: ObservableObject {
     enum Section: String, CaseIterable, Identifiable {
-        case voice = "Settings", activity = "Activity"
+        case voice = "Settings", activity = "Activity", memory = "Memory"
         var id: String { rawValue }
-        var symbol: String { switch self { case .voice: return "gearshape"; case .activity: return "clock" } }
+        var symbol: String {
+            switch self {
+            case .voice: return "gearshape"
+            case .activity: return "clock"
+            case .memory: return "brain.head.profile"
+            }
+        }
         var subtitle: String {
             switch self {
             case .voice: return "How Jarvis listens, talks and helps."
             case .activity: return "What you asked and what Jarvis did."
+            case .memory: return "What Jarvis remembers about you. It stays on this Mac."
             }
         }
     }
@@ -25,7 +32,6 @@ struct SettingsView: View {
     @ObservedObject var controller: VoiceController
     @ObservedObject var config: Config
     @ObservedObject var microphones: MicrophoneCatalog
-    @ObservedObject var input: FnInputMonitor
     @ObservedObject var navigation: SettingsNavigation
     @StateObject private var accuracyCheck = AccuracyCheck()
     /// Eye-tracker settings — optimistic local copies, read back from the
@@ -53,7 +59,7 @@ struct SettingsView: View {
                     Text("Jarvis").font(.system(size: 17, weight: .semibold))
                 }.padding(.top, 18)
                 VStack(spacing: 5) {
-                    ForEach(SettingsNavigation.Section.allCases) { section in
+                    ForEach(SettingsNavigation.Section.allCases.filter { $0 != .memory || config.voiceLive }) { section in
                         Button {
                             if section != .voice { controller.stopMicrophoneTest() }
                             navigation.section = section
@@ -83,6 +89,7 @@ struct SettingsView: View {
                     switch navigation.section {
                     case .voice: settings
                     case .activity: ActivityView(controller: controller)
+                    case .memory: MemoryView(store: .shared)
                     }
                     Spacer(minLength: 8)
                 }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
@@ -111,6 +118,11 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             listening
             replies
+            if config.voiceLive {
+                SettingsSection(title: "Alerts", symbol: "bell") {
+                    ProactiveSettingsSection(settings: .shared)
+                }
+            }
             doingThings
             eyeTracking.id(SettingsNavigation.Anchor.eyeTracking.rawValue)
             permissions.id(SettingsNavigation.Anchor.permissions.rawValue)
@@ -141,25 +153,16 @@ struct SettingsView: View {
             if ListeningPolicy.current.wakeWordAvailable {
                 AssistantNameField(config: config, controller: controller)
             }
-            if controller.listensWithoutFn {
-                HStack {
-                    Text(controller.handsFreeLabel).font(.system(size: 14))
-                    Spacer()
-                    Button(controller.listeningWithoutFn ? "Pause listening" : "Start listening") {
-                        if controller.listeningWithoutFn { controller.pauseHandsFree() }
-                        else { controller.resumeHandsFree() }
-                    }
-                }
-                if case .unavailable(let reason) = controller.handsFreeState {
-                    Note(reason, tint: .orange)
+            HStack {
+                Text(controller.handsFreeLabel).font(.system(size: 14))
+                Spacer()
+                Button(controller.listeningHandsFree ? "Pause listening" : "Start listening") {
+                    if controller.listeningHandsFree { controller.pauseHandsFree() }
+                    else { controller.resumeHandsFree() }
                 }
             }
-            if !input.ready {
-                Note(input.message, tint: .orange)
-                HStack {
-                    Button("Open Keyboard Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!) }
-                    Button("Check again") { input.refresh(); controller.refreshPermissions() }
-                }
+            if case .unavailable(let reason) = controller.handsFreeState {
+                Note(reason, tint: .orange)
             }
             Divider()
             Picker("Microphone", selection: $config.microphoneUID) {
@@ -190,7 +193,8 @@ struct SettingsView: View {
     private var replies: some View {
         SettingsSection(title: "Replies", symbol: "speaker.wave.2") {
             Toggle("Say replies out loud", isOn: $config.ttsEnabled)
-            Toggle("Play sounds", isOn: $config.sounds)
+            Toggle("Sounds", isOn: $config.sounds)
+            Note("Chimes when a task finishes, fails or needs you. The glow and the indicator already show these, so they're off by default.")
         }
     }
 
@@ -269,7 +273,6 @@ struct SettingsView: View {
                     Text("Anything").tag(DwellPolicy.Mode.all.rawValue)
                 }.pickerStyle(.segmented)
                 Note("Keep your eyes on something for a moment and Jarvis clicks it.")
-                Toggle("Tap fn to click what I'm looking at", isOn: $config.tapToGazeClick)
                 HStack {
                     Button("Check eye-tracking accuracy") { accuracyCheck.start() }
                         .disabled(accuracyCheck.running)
@@ -310,7 +313,7 @@ struct SettingsView: View {
                     Spacer()
                     if missing {
                         Button(permission.canPrompt ? "Allow" : "Open System Settings") {
-                            Task { await permission.request(); controller.refreshPermissions(); input.refresh() }
+                            Task { await permission.request(); controller.refreshPermissions() }
                         }
                         .accessibilityLabel((permission.canPrompt ? "Allow " : "Open System Settings for ") + permission.rawValue)
                     }

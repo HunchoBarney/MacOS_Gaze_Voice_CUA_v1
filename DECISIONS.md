@@ -2,6 +2,39 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
+
+- The owner: "the chimes and noises it makes are super annoying and not
+  good experience". Jarvis is always listening, so it plays no non-speech
+  sound by default. The glow, the indicator and the task row carry
+  success, failure, stalls and questions; speech is heard only where words
+  are needed, and spoken answers and the "Looking…" filler are unchanged.
+- One setting, Settings → Replies → Sounds (`soundsEnabled`), off by
+  default, brings back the Glass and Basso earcons. Installs that had it on
+  are moved to off once (`soundsQuietByDefault`); a later choice sticks.
+- New feedback, Live (L3+) included, follows the same rule: visual first,
+  speech only for words, never a new chime.
+
+## 2026-11-20 — Memory stays on the Mac, in SQLite through GRDB
+
+- Behind `voice.live` (JARA-49 L8). Jarvis remembers people, preferences,
+  things you asked it to remember, and one-line summaries of finished
+  requests (kept 90 days) in one SQLite file,
+  `~/Library/Application Support/Jarvis/Memory/memory.sqlite`. It writes
+  nowhere else, opens the file only on first use, and never syncs it. Raw
+  audio and transcripts are never stored.
+- Open source: GRDB.swift 7.12.0 (MIT), pinned in `Package.swift` and
+  recorded in `ThirdParty/GRDB`, with SQLite's FTS5 for relevance. Our code
+  is the schema, the intents and the Settings screen.
+- Forgetting means gone: `secure_delete` and FTS5 `secure-delete` overwrite
+  deleted text, and Forget Everything rebuilds the index and vacuums the
+  file. Context for a Live session is read fresh on every call, so a deleted
+  memory never reaches a later session.
+- "Remember X", "who's X?" / "what do you remember about X" and "forget
+  that" are answered before a request becomes a task, so they never reach
+  the activity log. A bare "who's X?" with no memory goes on to the rest of
+  Jarvis.
+
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
 - "Type this …" takes the exact span after the lead-in ("type this",
@@ -174,6 +207,22 @@ Settled choices, newest first. Change one only with a new entry here.
   → 86/86; same-author held-out set 32/72 → 71/72; a blind set written by
   an agent that never saw the parser 51/72 → 66/72.
 
+## 2026-11-20 — The owner's physical checks run as e2e flows
+
+- The owner's checklist items for #548, #560 (25–29), #562 (24), #583 and L7
+  (#595) are flows in `e2e/`, so the owner grants permissions and the run
+  does the rest. They speak with `say`, act on fixture windows that record
+  what happens to them, and read other apps through Accessibility from the
+  native helper. They never ask for a permission: `run.sh` checks the
+  grants and stops with what to grant.
+- What stays with the owner: a keyboard Escape (#583 deliberately ignores a
+  posted one, and a flow checks that), putting the Mac to sleep, and spoken
+  checks only meaningful in his voice. Those run with `JARVIS_E2E_OWNER=1`.
+  The agent turn and the reply draft spend on paid calls beyond Realtime and
+  run with `JARVIS_E2E_PAID=1`.
+- A held Fn is posted at the HID event tap, which is where Jarvis read Fn
+  before #583, so a build that still listens for Fn fails the check.
+
 ## 2026-11-20 — A fifth end-to-end flow: "stop" mid-scroll
 
 - `stop-scroll` says "Hey Jarvis, scroll down", "keep scrolling", then "stop"
@@ -225,13 +274,16 @@ Settled choices, newest first. Change one only with a new entry here.
 - Limits live in one SQLite-backed Durable Object, so checks and charges are
   strongly consistent; KV is eventually consistent and can't hold a limit.
   Per install: requests per minute per route and estimated spend per UTC
-  day ($1 default). Global: $20 a day, new installs per network and per day,
+  day ($1 default). Global: $5 a day (lowered from $20 when the repository
+  went public), new installs per network and per day,
   a `PAUSED` variable and an admin pause, and per-install revoke.
 - Open source: Hono 4.13.19 (MIT) for routing, Wrangler 4.165.0 (MIT or
   Apache-2.0) to run and deploy. Our code is the ledger and the proxy rules.
 - Realtime spend is an estimate per minted secret, because the socket goes
   straight to OpenAI. A relay through the Worker would measure it exactly
   but adds a hop to every audio frame.
+- The Live broker sends `delegation: {type: "client"}` because the API
+  rejects the documented `null` (seen in a real connect test, 2026-11-20).
 
 ## 2026-11-20 — Standby opens a session on the wake word
 
@@ -273,6 +325,24 @@ Settled choices, newest first. Change one only with a new entry here.
   openWakeWord's pretrained models (CC BY-NC-SA); Picovoice (cost); and
   any hand-built detector.
 - The app grows by 80 MB (68 MB model, 12 MB library).
+
+## 2026-11-20 — GPT-Live runs over LiveKit's WebRTC build (L1, behind voice.live)
+
+- GPT-Live-1.1 sessions use WebRTC (`v1/live/sessions`), the transport
+  OpenAI recommends and the only one billed at the Standby rate. The Mac
+  never holds a key: it sends its SDP offer to the credential Worker's
+  `POST /v1/live/sessions` (#582), which fixes the model, client
+  delegation, no tools, `store: false` and the speech wake policy.
+- libwebrtc comes from LiveKit's build, livekit/webrtc-xcframework
+  150.7871.08 (BSD-3-Clause libwebrtc, Apache-2.0 packaging), pinned in
+  `ThirdParty/WebRTC`. Only its 29 MB macOS framework is fetched.
+- Why not stasel/WebRTC: its macOS build has no custom audio device, and
+  two captures of one microphone failed on the owner's Mac: without voice
+  processing our tap lost up to 3.35 s at a time, and with it WebRTC heard
+  near-silence. LiveKit's AVAudioEngine audio module owns the microphone
+  once, records without a call, and lets Jarvis tap the same engine, which
+  kept our tap continuous before, during and after a call
+  (`ThirdParty/WebRTC/README.md`).
 ## 2026-11-20 — CI runs on the owner's Mac
 
 - GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI
@@ -281,6 +351,11 @@ Settled choices, newest first. Change one only with a new entry here.
   PRs and main every 5 minutes, one job at a time, at low priority, and only
   while no other `swift-build`/`swift-test`/`swift-frontend`/`xcodebuild`
   runs. Dependabot PRs run only with the `local-ci` label; fork PRs never run.
+- Local CI tests a PR head merged into current main (`git merge-tree`, never
+  committed) and names that main in the status, so a green PR doesn't need
+  main merged in just to refresh CI. A result stays valid while main's later
+  commits touch none of the PR's non-Markdown files; a conflict posts
+  `error` without a run.
 - nektos/act (MIT) was considered to run `ci.yml` itself. In host mode it
   copies the local directory instead of checking out the head, and
   `setup-node` downloads its own Node, while the job's only real step is

@@ -156,7 +156,7 @@ struct ActivityView: View {
                     }
                     if controller.status == .done { Text(controller.resultMessage).foregroundStyle(.secondary) }
                     if controller.status == .idle && controller.transcript.isEmpty {
-                        Text("Speak, or hold Fn, to give your Mac a command. Your recent activity will appear here.")
+                        Text("Speak to give your Mac a command. Your recent activity will appear here.")
                             .foregroundStyle(.secondary)
                     }
                 }
