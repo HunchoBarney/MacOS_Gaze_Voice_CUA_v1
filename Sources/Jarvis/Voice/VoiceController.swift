@@ -58,12 +58,12 @@ struct VoiceTimings {
 /// seconds. Each finished reply opens a `wakeFollowUp` window, and only a
 /// reply refreshes it: speech that gets no answer doesn't. Past
 /// `wakeSessionCap` from the wake it closes the moment nothing is happening.
+/// `lastReply` is when the latest reply finished, recorded as it happens
+/// rather than sampled, so a reply shorter than one check still counts.
 struct WakeSessionClock {
     let opened: TimeInterval
     let timings: VoiceTimings
     private var lastActive: TimeInterval
-    private var lastReply: TimeInterval?
-    private var replying = false
 
     init(opened: TimeInterval, timings: VoiceTimings) {
         self.opened = opened
@@ -71,16 +71,17 @@ struct WakeSessionClock {
         lastActive = opened
     }
 
-    mutating func shouldClose(busy: Bool, replying speaking: Bool, now: TimeInterval) -> Bool {
-        if replying, !speaking { lastReply = now }
-        replying = speaking
-        if busy || speaking {
+    mutating func shouldClose(busy: Bool, lastReply: TimeInterval?, now: TimeInterval) -> Bool {
+        let reply = lastReply.flatMap { $0 >= opened ? $0 : nil }
+        if let reply { lastActive = max(lastActive, reply) }
+        if busy {
             lastActive = now
             return false
         }
         if now - opened >= timings.wakeSessionCap { return true }
-        guard let lastReply else { return now - lastActive >= timings.wakeSessionQuiet }
-        return now >= max(lastReply + timings.wakeFollowUp, lastActive + timings.wakeSessionQuiet)
+        if now - lastActive < timings.wakeSessionQuiet { return false }
+        guard let reply else { return true }
+        return now >= reply + timings.wakeFollowUp
     }
 }
 
@@ -138,7 +139,10 @@ final class VoiceController: ObservableObject {
     @Published private(set) var microphoneReadiness = "Preparing microphone…"
     @Published private(set) var handsFreeState: ConversationListeningState = .off
     @Published private(set) var continuousScrolling = false
-    @Published private(set) var handsFreeSpeaking = false
+    @Published private(set) var handsFreeSpeaking = false {
+        didSet { if oldValue, !handsFreeSpeaking { lastReplyFinished = ProcessInfo.processInfo.systemUptime } }
+    }
+    private var lastReplyFinished: TimeInterval?
     /// A hands-free turn is open: the user started speaking and the turn
     /// hasn't sealed. The on-screen indicator shows while this is true.
     @Published private(set) var conversationTurnOpen = false
@@ -1095,7 +1099,7 @@ final class VoiceController: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, !Task.isCancelled else { return }
                 let now = ProcessInfo.processInfo.systemUptime
-                if clock.shouldClose(busy: self.wakeSessionBusy, replying: self.handsFreeSpeaking, now: now) {
+                if clock.shouldClose(busy: self.wakeSessionBusy, lastReply: self.lastReplyFinished, now: now) {
                     Self.voiceLog.notice("wake_session closed open_s=\(now - clock.opened, format: .fixed(precision: 1))")
                     self.stopHandsFree(state: .off)
                     self.armStandby()

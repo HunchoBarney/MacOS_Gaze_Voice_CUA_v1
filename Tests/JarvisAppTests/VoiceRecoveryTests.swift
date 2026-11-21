@@ -47,50 +47,64 @@ final class VoiceRecoveryTests: XCTestCase {
 
     func testAFalseWakeClosesAfterTheQuietTime() {
         var clock = WakeSessionClock(opened: 0, timings: VoiceTimings())
-        XCTAssertFalse(clock.shouldClose(busy: false, replying: false, now: 7.9))
-        XCTAssertTrue(clock.shouldClose(busy: false, replying: false, now: 8))
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: nil, now: 7.9))
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: nil, now: 8))
     }
 
     func testEachReplyOpensANinetySecondFollowUpWindow() {
         var clock = WakeSessionClock(opened: 0, timings: VoiceTimings())
-        XCTAssertFalse(clock.shouldClose(busy: true, replying: false, now: 2))
-        XCTAssertFalse(clock.shouldClose(busy: true, replying: true, now: 5))
-        XCTAssertFalse(clock.shouldClose(busy: false, replying: false, now: 10))
-        XCTAssertFalse(clock.shouldClose(busy: false, replying: false, now: 60), "a reply keeps it open past the quiet time")
-        XCTAssertFalse(clock.shouldClose(busy: false, replying: false, now: 99.9))
-        XCTAssertTrue(clock.shouldClose(busy: false, replying: false, now: 100))
+        XCTAssertFalse(clock.shouldClose(busy: true, lastReply: nil, now: 2))
+        XCTAssertFalse(clock.shouldClose(busy: true, lastReply: nil, now: 5))
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: 10, now: 10))
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: 10, now: 60), "a reply keeps it open past the quiet time")
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: 10, now: 99.9))
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: 10, now: 100))
+    }
+
+    func testAReplyShorterThanOneCheckStillOpensTheWindow() {
+        var clock = WakeSessionClock(opened: 0, timings: VoiceTimings())
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: nil, now: 1))
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: 1.1, now: 9.2),
+                       "the reply began and ended between two checks and still counts")
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: 1.1, now: 91))
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: 1.1, now: 91.1))
+    }
+
+    func testAReplyFromBeforeTheWakeDoesNotOpenTheWindow() {
+        var clock = WakeSessionClock(opened: 100, timings: VoiceTimings())
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: 50, now: 108))
     }
 
     func testSpeechWithoutAReplyDoesNotRefreshTheWindow() {
         var clock = WakeSessionClock(opened: 0, timings: VoiceTimings())
-        _ = clock.shouldClose(busy: true, replying: true, now: 5)
-        _ = clock.shouldClose(busy: false, replying: false, now: 10)
-        XCTAssertFalse(clock.shouldClose(busy: true, replying: false, now: 95), "someone talks, Jarvis says nothing")
-        XCTAssertFalse(clock.shouldClose(busy: false, replying: false, now: 102.9))
-        XCTAssertTrue(clock.shouldClose(busy: false, replying: false, now: 103),
+        _ = clock.shouldClose(busy: true, lastReply: nil, now: 5)
+        _ = clock.shouldClose(busy: false, lastReply: 10, now: 10)
+        XCTAssertFalse(clock.shouldClose(busy: true, lastReply: 10, now: 95), "someone talks, Jarvis says nothing")
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: 10, now: 102.9))
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: 10, now: 103),
                       "the window still ends 90 s after the reply, plus the quiet time after the speech")
     }
 
     func testANewReplyRestartsTheWindow() {
         var clock = WakeSessionClock(opened: 0, timings: VoiceTimings())
-        _ = clock.shouldClose(busy: true, replying: true, now: 5)
-        _ = clock.shouldClose(busy: false, replying: false, now: 10)
-        _ = clock.shouldClose(busy: true, replying: true, now: 70)
-        _ = clock.shouldClose(busy: false, replying: false, now: 80)
-        XCTAssertFalse(clock.shouldClose(busy: false, replying: false, now: 169.9))
-        XCTAssertTrue(clock.shouldClose(busy: false, replying: false, now: 170))
+        _ = clock.shouldClose(busy: true, lastReply: nil, now: 5)
+        _ = clock.shouldClose(busy: false, lastReply: 10, now: 10)
+        _ = clock.shouldClose(busy: true, lastReply: 10, now: 70)
+        _ = clock.shouldClose(busy: false, lastReply: 80, now: 80)
+        XCTAssertFalse(clock.shouldClose(busy: false, lastReply: 80, now: 169.9))
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: 80, now: 170))
     }
 
     func testNoWakeSessionOutlivesThirtyMinutes() {
         var clock = WakeSessionClock(opened: 0, timings: VoiceTimings())
         var now: TimeInterval = 0
         while now < 30 * 60 {
-            XCTAssertFalse(clock.shouldClose(busy: true, replying: true, now: now + 1))
-            XCTAssertFalse(clock.shouldClose(busy: false, replying: false, now: now + 5))
+            XCTAssertFalse(clock.shouldClose(busy: true, lastReply: now - 58, now: now + 1))
+            XCTAssertFalse(clock.shouldClose(busy: false, lastReply: now + 2, now: now + 5))
             now += 60
         }
-        XCTAssertFalse(clock.shouldClose(busy: true, replying: false, now: 30 * 60 + 1), "a turn in progress finishes")
-        XCTAssertTrue(clock.shouldClose(busy: false, replying: false, now: 30 * 60 + 2),
+        XCTAssertFalse(clock.shouldClose(busy: true, lastReply: now - 58, now: 30 * 60 + 1), "a turn in progress finishes")
+        XCTAssertTrue(clock.shouldClose(busy: false, lastReply: now - 58, now: 30 * 60 + 2),
                       "past the cap the next idle moment closes it, however recent the last reply")
     }
 
