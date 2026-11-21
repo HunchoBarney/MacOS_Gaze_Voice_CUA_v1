@@ -100,6 +100,24 @@ final class GazeServiceTests: XCTestCase {
         XCTAssertEqual(hit?.0.id, "ax:42:7:axel_9")
     }
 
+    /// The scorer's σ reaches the highlight before the first event, so
+    /// the glow's lock gate never judges a control by a stale band.
+    func testSigmaReachesTheHighlightBeforeTheFirstEvent() async throws {
+        let service = GazeService(stream: stream(yielding: [gazeFrame(100, 100)]),
+                                  scorer: GazeIntentScorer(config: .init(sigmaPx: 384)))
+        var log: [String] = []
+        service.enumerate = { _ in .init(candidates: [self.saveButton], windowID: 7) }
+        service.windowIDUnder = { _ in 7 }
+        service.sigmaSink = { log.append("sigma \(Int($0))") }
+        service.eventSink = { _ in log.append("event") }
+        service.cursorPoint = { nil }
+        service.dwellPolicy = DwellPolicy(mode: .off, deniedApps: [], userMultiplier: 1)
+        service.start()
+        defer { service.stop() }
+        try await eventually { log.contains("event") }
+        XCTAssertEqual(log.first, "sigma 384")
+    }
+
     /// The gate: window change enumerates immediately; a parked gaze
     /// waits for the settle window; between signals nothing refetches.
     func testFeedGateCadence() {

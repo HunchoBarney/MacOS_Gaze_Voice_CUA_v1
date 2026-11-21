@@ -129,14 +129,31 @@ final class GazeCandidateFeedTests: XCTestCase {
     }
 
     /// Non-actionable elements never enter the feed — a label-less
-    /// AXImage can't be a referent worth a ring; a labelled group can.
+    /// AXImage can't be a referent worth a ring, and neither can a
+    /// group, labelled or not: it holds controls rather than being one.
     nonisolated func testNonActionableExcluded() {
         let out = GazeCandidateFeed.elementCandidates(Self.snap(elements: [
             Self.element(1, role: "AXImage", label: ""),
             Self.element(2, role: "AXButton", label: "Save"),
             Self.element(3, role: "AXGroup", label: "Panel"),
         ]), row: Self.row(7))
-        XCTAssertEqual(out.map(\.id), ["ax:42:7:_idx_2", "ax:42:7:_idx_3"])
+        XCTAssertEqual(out.map(\.id), ["ax:42:7:_idx_2"])
+    }
+
+    /// Tables, tab groups, scroll areas and other containers stay out even
+    /// with a label ("tab" inside "AXTable" used to let tables in), while
+    /// labelled leaves such as text and real tabs stay in.
+    nonisolated func testContainersNeverEnterTheFeed() {
+        let out = GazeCandidateFeed.elementCandidates(Self.snap(elements: [
+            Self.element(1, role: "AXTable", label: "Messages"),
+            Self.element(2, role: "AXTabGroup", label: "Tabs"),
+            Self.element(3, role: "AXScrollArea", label: "Content"),
+            Self.element(4, role: "AXSplitGroup", label: "Split"),
+            Self.element(5, role: "AXRadioButton", label: "General"),
+            Self.element(6, role: "AXStaticText", label: "Inbox"),
+            Self.element(7, role: "AXCell", label: ""),
+        ]), row: Self.row(7))
+        XCTAssertEqual(out.map(\.id), ["ax:42:7:_idx_5", "ax:42:7:_idx_6", "ax:42:7:_idx_7"])
     }
 
     // MARK: enumerate ladder

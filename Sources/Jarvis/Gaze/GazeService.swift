@@ -41,6 +41,9 @@ final class GazeService {
     var gazePointSink: (CGPoint) -> Void = { TargetOverlay.shared.ingestGaze($0) }
     /// Scorer transitions → the gaze highlight.
     var eventSink: (IntentEvent) -> Void = { TargetOverlay.shared.intentEvent($0) }
+    /// The σ the scorer uses, on every re-read — the highlight locks only
+    /// onto controls that error band can tell apart.
+    var sigmaSink: (Double) -> Void = { TargetOverlay.shared.gazeSigmaPt = $0 }
     /// Whether the highlight sweeps a dwell countdown — only when dwell
     /// can actually click; otherwise it's a plain look-highlight.
     var dwellProgressSink: (Bool) -> Void = { TargetOverlay.shared.showsDwellProgress = $0 }
@@ -222,7 +225,7 @@ final class GazeService {
         let t = now()
         if t - sigmaReadAt >= Self.sigmaRefreshInterval {
             sigmaReadAt = t
-            await scorer.refreshMeasuredSigma()
+            sigmaSink(await scorer.refreshMeasuredSigma())
         }
         // A dropped socket reconnects on a budgeted cadence — fast while
         // the tracker was recently alive, slow once it's clearly down.
@@ -320,8 +323,7 @@ final class GazeService {
         // synchronously — the scorer's own reset is async.
         switch event {
         case .acquire(let c), .hold(let c, _): liveCandidate = c
-        case .release, .none: liveCandidate = nil
-        case .ambiguous: break
+        case .release, .none, .ambiguous: liveCandidate = nil
         }
         var referent: GazeReferent?
         if case .hold = event { referent = await scorer.currentReferent }

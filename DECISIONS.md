@@ -2,6 +2,49 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-21 — The gaze highlight is one Magnet object (JARA-55)
+
+- The owner picked Magnet from three directions: while eye tracking runs, a
+  hollow glowing orb follows the gaze. When the scorer settles on a control
+  it stretches into a glow hugging that control's whole frame, and shrinks
+  back into the orb when the eyes leave, so nothing blinks on and off. This
+  supersedes "no permanently drawn gaze pointer" in the KAR-75 entry. The
+  orb's centre stays clear over text, and it fades 1.5 s after samples stop.
+- The glow locks only onto a control the error band can single out: σ at
+  most 1.5× the control's larger side, no bigger than 320×200 pt, never a
+  window or container (group, table, list, scroll area). Past that, only
+  the orb shows. A press glow (Jarvis pressing a named control) is not a
+  gaze guess and skips the gate.
+- A cursor parked on a control weighs ×2.5 up to σ 40 pt; above that its
+  log-bonus scales by (40/σ)², the rate gaze evidence itself thins out. A
+  tie that includes the highlighted control holds for the 0.2 s consensus
+  window and then releases it. The listening-start halo is gone, and the
+  gaze glow steps back into the orb whenever the answer or guide halo shows.
+- Libraries (library-first rule), each checked by reading its source:
+  - SwiftUI springs and transitions (Apple, macOS 26 SDK): the spring
+    engine and renderer. `spring(duration:bounce:)` retargets mid-flight
+    with its velocity, transitions animate the glow in and out using
+    position, scale and opacity only, and Reduce Motion becomes a
+    crossfade. No dependency.
+  - SwiftUI `AngularGradient` stroke (Apple): the edge light. libraries.dev
+    BorderBeamKit (MIT) needs its `.metal` shader compiled by Xcode, and
+    Jarvis builds with `swift build`. Its beam also animates without
+    end, which an always-on overlay can't afford.
+  - Rejected: libraries.dev ThinkingOrbsKit (MIT, commit 14ae9d2). It is a
+    dotted greyscale loading orb, filled, at fixed 20/64 pt, redrawn every
+    frame by `TimelineView(.animation)` and `Canvas`, and it can't
+    stretch onto a frame.
+  - Rejected: metasidd/Orb 0.2 (MIT, commit a48fc33). It is a filled
+    Siri-style orb whose rotating glows, blurs and particles animate
+    without end. It would cover the text being read and cost every frame.
+  - Not used: Wave 0.3.4 (MIT), which earns its place only when AppKit
+    drives CALayers, and Pow 0.3.1 (MIT), whose effects are for discrete
+    events. The stretch is a plain transition.
+- Render cost, as an offscreen estimate (`MagnetRenderBenchTests`, 30 s at
+  60 Hz on the owner's Mac, app-side rasterisation only): the old ring took
+  7.8% of one core with frames at 1.90 ms mean and 3.91 ms p95. The Magnet
+  took 1.7% of one core with frames at 0.38 ms mean and 1.92 ms p95. The
+  on-screen numbers come from the owner's physical check.
 ## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
 
 - The owner: "the chimes and noises it makes are super annoying and not
