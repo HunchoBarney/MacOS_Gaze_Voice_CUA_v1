@@ -471,6 +471,22 @@ final class WritingByInstructionTests: XCTestCase {
         XCTAssertTrue(coordinator.tasks.isEmpty)
     }
 
+    func testBeginVoiceTaskCarriesAnUnverifiedSpeakerToTheSend() async {
+        let config = Config(defaults: UserDefaults(suiteName: "writing-\(UUID().uuidString)")!,
+                            keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.handsFreeEnabled = false
+        config.voiceLive = true
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { nil },
+            gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })))
+        let desk = FakeDesk()
+        coordinator.writingByInstruction = writer(desk, local: nil, enabled: { config.voiceLive })
+
+        _ = await coordinator.beginVoiceTask("come up with a reply for this",
+                                             transcriptHint: "come up with a reply for this")
+        _ = await coordinator.beginVoiceTask("send it", speakerVerified: false)
+        XCTAssertEqual(desk.sentVerified, [false], "after Standby, the coordinator's send asks first (D3)")
+    }
+
     func testBeginVoiceTaskRechecksAdmissionBeforeTyping() async {
         let config = Config(defaults: UserDefaults(suiteName: "writing-\(UUID().uuidString)")!,
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
