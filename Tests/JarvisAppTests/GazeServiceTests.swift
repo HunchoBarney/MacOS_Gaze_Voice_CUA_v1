@@ -282,6 +282,45 @@ final class GazeServiceTests: XCTestCase {
         XCTAssertTrue(fired.isEmpty)
     }
 
+    /// The answer or guide halo stands the ring down, so dwell has no
+    /// countdown on screen while it shows and must not click.
+    func testDwellNeverFiresWhileTheHaloHoldsTheRingDown() async throws {
+        let suite = "GazeServiceTests.dwellHalo.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        DwellPolicy(mode: .safe, deniedApps: [], userMultiplier: 1).save(to: defaults)
+        let source = Source()
+        let frames = GazeStream(frames: { source.stream() })
+        let service = GazeService(stream: frames,
+                                  scorer: GazeIntentScorer(config: .init(sigmaPx: 40)),
+                                  defaults: defaults)
+        let clock = ManualClock()
+        clock.drive(service)
+        service.enumerate = { _ in
+            .init(candidates: [self.saveButton], windowID: 7)
+        }
+        service.windowIDUnder = { _ in 7 }
+        var furthestHold = 0.0
+        service.eventSink = {
+            if case .hold(_, let progress) = $0 { furthestHold = max(furthestHold, progress) }
+        }
+        service.sigmaSink = { _ in }
+        service.gazePointSink = { _ in }
+        service.cursorPoint = { nil }
+        service.haloShowing = { true }
+        var fired: [String] = []
+        service.actuate = { fired.append($0.id); return true }
+        service.dwellSuppressed = { false }
+        service.start()
+        defer { service.stop() }
+        for _ in 0..<45 {
+            await feed(source, frames, at: clock.wall)
+            await clock.tick(service)
+        }
+        XCTAssertGreaterThanOrEqual(furthestHold, 1, "The fixture must actually hold the target long enough")
+        XCTAssertTrue(fired.isEmpty)
+    }
+
     /// Suppressed dwell — a parked ask or armed overlay — never fires.
     func testDwellSuppressed() async throws {
         let source = Source()

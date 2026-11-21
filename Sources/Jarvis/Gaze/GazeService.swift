@@ -47,6 +47,9 @@ final class GazeService {
     /// Whether the highlight sweeps a dwell countdown — only when dwell
     /// can actually click; otherwise it's a plain look-highlight.
     var dwellProgressSink: (Bool) -> Void = { TargetOverlay.shared.showsDwellProgress = $0 }
+    /// Whether the answer or guide halo is up — the ring stands down
+    /// under it, so dwell has no countdown to show and must not fire.
+    var haloShowing: () -> Bool = { TargetOverlay.shared.haloArmed }
     /// Feed health → stale-dim; while the feed is stale it carries the
     /// live outage duration (seconds since the last fresh sample) on
     /// every tick, so duration-keyed thresholds actually fire; a 0
@@ -372,7 +375,7 @@ final class GazeService {
         case .fire(let candidate):
             // The ring refused this target, so the user never saw it
             // or its countdown: a click there would come unannounced.
-            guard TargetOverlay.canLock(candidate, sigmaPt: sigmaPt) else { return }
+            guard !haloShowing(), TargetOverlay.canLock(candidate, sigmaPt: sigmaPt) else { return }
             // A suppressed fire is an aborted intent — feed it into the
             // learned-multiplier accounting or suppression would silently
             // tighten nothing and widen nothing.

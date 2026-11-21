@@ -2219,6 +2219,7 @@ final class VoiceTaskCoordinator {
         }
         service.gazePointSink = { [weak self] point in self?.gazeIngest(point) }
         service.sigmaSink = { [weak self] sigma in self?.overlay.gazeSigmaPt = sigma }
+        service.haloShowing = { [weak self] in self?.overlay.haloArmed ?? true }
         service.eventSink = { [weak self] event in
             guard let self else { return }
             self.overlay.intentEvent(event)
