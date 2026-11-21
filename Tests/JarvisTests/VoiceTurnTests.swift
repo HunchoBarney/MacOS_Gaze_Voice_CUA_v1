@@ -285,16 +285,14 @@ final class VoiceTurnTests: XCTestCase {
         XCTAssertTrue(authority.request(admission: typed, purpose: .typed, inputItemID: "typed"))
     }
 
-    func testARealtimeTurnRequestsOnlyOnItsOwnConnectionAndItem() {
+    func testARealtimeTurnRequestsOnlyOnItsOwnConnectionAndItem() throws {
         let connection = UUID()
         let input = VoiceRealtimeInput(connectionID: connection, itemID: "input-1")
         var gate = VoiceTurnGate()
         let turn = gate.begin(mode: .command, ready: true, now: 0, realtimeConnection: connection)
-        _ = gate.acceptFrame(turn, sequence: 0)
-        _ = gate.release(turn, now: 1)
         XCTAssertTrue(gate.acknowledgeRealtimeCommit(turn, input: input, now: 1))
-        let admission = gate.finalize(turn, text: "what is this", proposal: .remote(), drainedFrames: 1,
-                                      now: 1.1, realtimeInput: input)!
+        let admission = try XCTUnwrap(gate.finalize(turn, text: "what is this", proposal: .remote(), drainedFrames: 0,
+                                                    now: 1.1, realtimeInput: input))
         var elsewhere = VoiceResponseAuthority()
         elsewhere.connect(UUID())
         XCTAssertFalse(elsewhere.request(admission: admission, purpose: .reasoning, inputItemID: "input-1"))

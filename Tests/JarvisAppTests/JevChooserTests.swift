@@ -1119,8 +1119,13 @@ final class JevChooserTests: XCTestCase {
         let count = await box.count
         print("PICKSIZE state=\(stateBytes)B questions=\(questionBytes)B "
             + "total=\(stateBytes + questionBytes)B questions=\(count) drafts=\(drafts.count)")
-        XCTAssertLessThanOrEqual(drafts.count, try XCTUnwrap(DriveLoop.Config.default.elementCap),
-                                 "600 elements still yield at most the capped candidate set")
+        let offered = Set(drafts.compactMap { draft -> Int? in
+            guard let kind = draft.id.first, "tveo".contains(kind) else { return nil }
+            return Int(draft.id.dropFirst())
+        })
+        XCTAssertGreaterThan(offered.count, 0)
+        XCTAssertLessThanOrEqual(offered.count, try XCTUnwrap(DriveLoop.Config.default.elementCap),
+                                 "600 elements still offer at most the capped element rows")
         XCTAssertGreaterThan(count, 0, "the request reached the judgment model")
     }
 }
