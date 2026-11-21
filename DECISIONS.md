@@ -2,6 +2,24 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-21 — Every visible surface lives in the UI gallery
+
+- The owner asked for one page that shows every visible component on its
+  own and together. `make gallery` renders each surface offscreen from
+  fixture state, in every state, light and dark, with Reduce Motion off and
+  on, plus combined desktop scenes. `make gallery-deploy` publishes the
+  site to Cloudflare Pages (project `jarvis-ui-gallery`). See
+  gallery/README.md.
+- A PR that adds or changes a visible component updates its gallery page
+  in the same PR, redeploys, and links before and after in its body.
+- The native harness hosts the real views through `@testable import`. It
+  copies product code only where the state is private (the menu-bar item
+  and menu), and those replicas cite their lines. No product code changes
+  to make the gallery work.
+- The site's libraries (Motion, cmdk, Lenis, NumberFlow and Sonner, all
+  MIT, plus Paper Shaders under Apache-2.0) are pinned in gallery/site
+  and listed with versions in gallery/site/REUSE.md.
+
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
 - "Type this …" takes the exact span after the lead-in ("type this",

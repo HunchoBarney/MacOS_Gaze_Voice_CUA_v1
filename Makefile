@@ -22,6 +22,7 @@ LOCAL_CI_JOB = gui/$(shell id -u)/$(LOCAL_CI_LABEL)
 .PHONY: setup build test tracker release install local run clean bench-flows
 .PHONY: local-ci-install local-ci-pause local-ci-resume local-ci-uninstall
 .PHONY: e2e e2e-install e2e-uninstall
+.PHONY: gallery gallery-site gallery-deploy
 
 setup:
 	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
@@ -167,3 +168,18 @@ e2e-install:
 
 e2e-uninstall:
 	e2e/scripts/uninstall.sh
+
+# The UI gallery (gallery/README.md): render every visible surface from
+# fixture state, build the site, publish it to Cloudflare Pages.
+GALLERY_RENDERS = build/gallery/renders
+
+gallery:
+	scripts/gallery.sh
+
+gallery-site:
+	cd gallery/site && corepack pnpm install --frozen-lockfile
+	cd gallery/site && node scripts/collect.mjs --renders ../../$(GALLERY_RENDERS) --findings ../audit/findings.json
+	cd gallery/site && corepack pnpm build
+
+gallery-deploy: gallery-site
+	cd gallery/site && corepack pnpm dlx wrangler@4.165.0 pages deploy dist --project-name jarvis-ui-gallery --branch main --commit-dirty=true
