@@ -458,6 +458,25 @@ final class WritingByInstructionTests: XCTestCase {
         XCTAssertTrue(coordinator.tasks.isEmpty)
     }
 
+    func testBeginVoiceTaskRechecksAdmissionBeforeTyping() async {
+        let config = Config(defaults: UserDefaults(suiteName: "writing-\(UUID().uuidString)")!,
+                            keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.handsFreeEnabled = false
+        config.voiceLive = true
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { nil },
+            gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })))
+        let desk = FakeDesk()
+        let writing = writer(desk, local: nil, enabled: { config.voiceLive })
+        writing.compose = { _ in desk.current = false; return "On my way." }
+        coordinator.writingByInstruction = writing
+
+        let payload = await coordinator.beginVoiceTask("come up with a reply for this",
+                                                       transcriptHint: "come up with a reply for this",
+                                                       admissionIsCurrent: { desk.current })
+        XCTAssertEqual(field(payload, "status"), VoiceToolResult.Status.refused)
+        XCTAssertTrue(desk.inserts.isEmpty)
+    }
+
     // MARK: - On-device transcription seams
 
     func testRecentSpeechKeepsOnlyTheLastTwentySeconds() {
