@@ -154,5 +154,8 @@ final class LiveInputRelayTests: XCTestCase {
         write(relay, [Float](repeating: 0.2, count: 600), endingAt: 1)
         XCTAssertTrue(relay.stats.overflowed)
         XCTAssertEqual(relay.stats.behind, 0)
+        relay.startSending()
+        write(relay, [Float](repeating: 0.3, count: 50), endingAt: 1.05)
+        XCTAssertEqual(read(relay, 50), [Float](repeating: 0.3, count: 50), "What the user says again still reaches the session")
     }
 }
