@@ -214,6 +214,35 @@ describe("invisible calibration", () => {
     expect(calibration.heldOutError(pool)).toBeGreaterThan(typicalMiss * 0.5);
   }, SIMULATION_TIMEOUT_MS);
 
+  it("keeps a fresh label's absorbed siblings out of the fit that scores it", () => {
+    // After an adopt, earlier labels at a target sit in the durable pool while
+    // a fresh label at the same target is scored. Folds keyed on the scored
+    // entries alone would leave those siblings in training, and the score
+    // would be in-sample again.
+    const { calibration } = makeCalibration();
+    const next = rng(11);
+    const pool: Array<[GazeFeature, [number, number]]> = [];
+    const fresh: Array<[GazeFeature, [number, number]]> = [];
+    const misses: number[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      for (let j = 0; j < 4; j += 1) {
+        const target: [number, number] = [0.1 + 0.8 * (i / 3), 0.1 + 0.8 * (j / 3)];
+        const miss: [number, number] = [(next() - 0.5) * 0.2, (next() - 0.5) * 0.2];
+        misses.push(Math.hypot(miss[0], miss[1]));
+        for (let frame = 0; frame < 6; frame += 1) {
+          const eyes: [number, number] = [target[0] + miss[0] + (next() - 0.5) * 0.004, target[1] + miss[1] + (next() - 0.5) * 0.004];
+          const entry: [GazeFeature, [number, number]] = [owner(eyes), [target[0], target[1]]];
+          pool.push(entry);
+          if (frame === 5) {
+            fresh.push(entry);
+          }
+        }
+      }
+    }
+    const typicalMiss = misses.sort((a, b) => a - b)[Math.floor(misses.length / 2)];
+    expect(calibration.heldOutError(pool, fresh)).toBeGreaterThan(typicalMiss * 0.5);
+  }, SIMULATION_TIMEOUT_MS);
+
   it("judges a refit against the live map, not the map it replaced", async () => {
     const { calibration } = makeCalibration();
     await calibration.load();
@@ -242,6 +271,29 @@ describe("invisible calibration", () => {
     info.mockRestore();
     expect(judged).toBeDefined();
     expect(JSON.parse(String(judged?.[1])).oldError).toBeLessThan(0.1);
+  }, SIMULATION_TIMEOUT_MS);
+
+  it("scores the live map and the refit on the same fresh labels", async () => {
+    const { calibration } = makeCalibration();
+    await calibration.load();
+    let now = await useFor(calibration, owner, BOOTSTRAP_MIN_LABELS + 30, 0, 7, 0);
+    // Older labels flattered the live map; the eyes have since moved 0.08 to
+    // the right of where it puts them, and only the fresh labels show it.
+    for (let i = 0; i < 40; i += 1) {
+      calibration.recordLabelError(0.005);
+    }
+    const next = rng(13);
+    for (let i = 0; i < 40; i += 1) {
+      const t: [number, number] = [0.1 + 0.7 * next(), 0.1 + 0.8 * next()];
+      calibration.addImplicitSample(owner([t[0] + 0.08, t[1]]), t);
+    }
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    now += 120_000;
+    await calibration.refitWithImplicit(now);
+    const judged = info.mock.calls.find(([message]) => typeof message === "string" && message.startsWith("Implicit refit"));
+    info.mockRestore();
+    expect(judged).toBeDefined();
+    expect(JSON.parse(String(judged?.[1])).oldError).toBeGreaterThan(0.05);
   }, SIMULATION_TIMEOUT_MS);
 
   it("keeps the live map when a refit would only memorise its pool", async () => {

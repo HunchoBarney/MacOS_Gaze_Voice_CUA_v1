@@ -3321,10 +3321,6 @@ export class Calibration {
   // Bundled starting samples (see seedPrior) — fit-pool filler only.
   readonly priorSamples: Array<[GazeFeature, [number, number]]> = [];
   private readonly learnedErrors: number[] = [];
-  // Labels scored against the map that is live now; adopt and commit reset
-  // it, so the refit judge never credits the live map with its predecessor's
-  // errors.
-  private errorsSinceMapChange = 0;
   private lastImplicitRefit = 0;
   // Consecutive implicit labels resting on (nearly) the same spot — a parked
   // cursor must not flood the pool or it starves spread (see refit gate).
@@ -3433,20 +3429,14 @@ export class Calibration {
       this.lastImplicitRefit = now;
       return false;
     }
-    // Both sides are judged on labels they were not fitted to. The residual
-    // RBF interpolates its own pool, so an in-sample comparison adopted
-    // memorising maps every time (logged 0.152 → 0.016 on a map whose
-    // held-out error was no better than guessing the screen centre). The live
-    // map's honest error is its out-of-sample error on labels since it went
-    // live, or its
-    // error on the fresh labels it hasn't absorbed yet; the candidate's is a
-    // k-fold refit of the same pool.
-    const fresh = Math.min(this.errorsSinceMapChange, this.learnedErrors.length);
-    const oldError =
-      (fresh >= LEARNED_ERROR_MIN_LABELS ? medianOf(this.learnedErrors.slice(-fresh)) : null) ??
-      medianOf(this.implicitSamples.map(([feature, target]) => pointError(this.applyFeature(feature), target))) ??
-      Infinity;
-    const newError = this.heldOutError(merged);
+    // Both sides are judged on the same labels, and neither was fitted to
+    // them: the fresh labels the live map hasn't absorbed. The residual RBF
+    // interpolates its own pool, so an in-sample comparison adopted memorising
+    // maps every time (logged 0.152 → 0.016 on a map whose held-out error was
+    // no better than guessing the screen centre). The candidate scores each
+    // fresh label from a refit that left that label's target out.
+    const oldError = medianOf(this.implicitSamples.map(([feature, target]) => pointError(this.applyFeature(feature), target))) ?? Infinity;
+    const newError = this.heldOutError(merged, this.implicitSamples);
     if (!(newError < oldError)) {
       console.info("Implicit refit kept old map", JSON.stringify({ oldError: Number(oldError.toFixed(4)), heldOutError: Number(newError.toFixed(4)) }));
       this.lastImplicitRefit = now;
@@ -3457,36 +3447,43 @@ export class Calibration {
     return true;
   }
 
-  // Median error of the refit procedure on labels each fold never saw. Four
-  // folds keep the cost to four fits per refit; a fold whose training share
-  // can't be fitted contributes nothing, and no scored label is Infinity.
-  // Folds split by target, not by index: a point run labels several frames
-  // at each target, and a sibling frame left in training teaches the fit
-  // that point's own miss, which made the score in-sample again.
-  heldOutError(pool: Array<[GazeFeature, [number, number]]>): number {
+  // Median error of the refit procedure on the scored labels (the whole
+  // pool by default), each predicted by a fit that never saw it. Four folds
+  // keep the cost to four fits per refit; a fold whose training share can't
+  // be fitted contributes nothing, and no scored label is Infinity. Folds
+  // split by target, not by index: a point run labels several frames at
+  // each target, and a sibling frame left in training teaches the fit that
+  // point's own miss, which made the score in-sample again. A pool entry
+  // leaves training whenever its target is scored in the fold, so labels
+  // already absorbed at a fresh label's target can't leak it either.
+  heldOutError(
+    pool: Array<[GazeFeature, [number, number]]>,
+    scored: Array<[GazeFeature, [number, number]]> = pool
+  ): number {
+    const keyOf = ([, target]: [GazeFeature, [number, number]]) => `${target[0]},${target[1]}`;
     const groups = new Map<string, number>();
-    const foldOf = pool.map(([, target]) => {
-      const key = `${target[0]},${target[1]}`;
+    for (const entry of scored) {
+      const key = keyOf(entry);
       if (!groups.has(key)) {
         groups.set(key, groups.size);
       }
-      return groups.get(key) as number;
-    });
+    }
     const folds = Math.min(4, groups.size);
     const errors: number[] = [];
     for (let fold = 0; fold < folds; fold += 1) {
+      const inFold = (entry: [GazeFeature, [number, number]]) => (groups.get(keyOf(entry)) ?? -1) % folds === fold;
       const fit = this.fitOnce(
-        pool.filter((_, i) => foldOf[i] % folds !== fold),
+        pool.filter((entry) => !inFold(entry)),
         IMPLICIT_FEATURE_MAP_MIN_SAMPLES
       );
       if (typeof fit === "string") {
         continue;
       }
-      pool.forEach(([feature, target], i) => {
-        if (foldOf[i] % folds === fold) {
-          errors.push(pointError(this.pendingEstimate(fit, feature), target));
+      for (const entry of scored) {
+        if (inFold(entry)) {
+          errors.push(pointError(this.pendingEstimate(fit, entry[0]), entry[1]));
         }
-      });
+      }
     }
     return medianOf(errors.filter(Number.isFinite)) ?? Infinity;
   }
@@ -3497,7 +3494,6 @@ export class Calibration {
   // the prior seed.
   private adopt(result: PendingFit, merged: Array<[GazeFeature, [number, number]]>, now: number, persist: boolean): void {
     const previousGeometry = this.geometry;
-    this.errorsSinceMapChange = 0;
     this.matrix = result.matrix;
     this.rbf = result.rbf;
     // When the refit prefers the affine chain the old feature map must go —
@@ -3596,7 +3592,6 @@ export class Calibration {
       return;
     }
     this.learnedErrors.push(error);
-    this.errorsSinceMapChange += 1;
     if (this.learnedErrors.length > LEARNED_ERROR_WINDOW) {
       this.learnedErrors.shift();
     }
@@ -3757,7 +3752,6 @@ export class Calibration {
     if (response.ok) {
       this.outputOffset = [0, 0];
       this.residualMap = residualMap;
-      this.errorsSinceMapChange = 0;
       this.matrix = pending.matrix;
       this.rbf = pending.rbf;
       this.featureMap = pending.useFeatureMap ? pending.featureMap : null;
