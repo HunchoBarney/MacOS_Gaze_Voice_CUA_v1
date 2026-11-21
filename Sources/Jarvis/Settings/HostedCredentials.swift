@@ -40,6 +40,7 @@ final class HostedCredentials: @unchecked Sendable {
     private let tokenStore: APIKeyStore
     private let transport: Transport
     private let registration = Registration()
+    private let tokenLock = NSLock()
 
     init(baseURL: URL, tokenStore: APIKeyStore,
          transport: @escaping Transport = { try await URLSession.shared.data(for: $0) }) {
@@ -82,7 +83,7 @@ final class HostedCredentials: @unchecked Sendable {
             guard let token = try await send(request)["token"]?.string, !token.isEmpty else {
                 throw Failure.malformed
             }
-            try tokenStore.save(token)
+            try tokenLock.withLock { try tokenStore.save(token) }
             return token
         }
     }
@@ -93,9 +94,12 @@ final class HostedCredentials: @unchecked Sendable {
     }
 
     /// Drops `token` when it is still the stored one, so the next call
-    /// registers again. A concurrent caller's fresher registration survives.
+    /// registers again. A concurrent caller's fresher registration survives,
+    /// even one saved between this read and the delete.
     func forget(_ token: String) {
-        if storedToken == token { try? tokenStore.delete() }
+        tokenLock.withLock {
+            if storedToken == token { try? tokenStore.delete() }
+        }
     }
 
     /// Whether `error` is this service saying it no longer knows the install

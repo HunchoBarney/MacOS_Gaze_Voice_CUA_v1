@@ -70,6 +70,29 @@ private final class TokenBox: APIKeyStore, @unchecked Sendable {
     func delete() throws { lock.withLock { value = nil } }
 }
 
+/// Its first read stalls after taking the value, until `release` or 500 ms,
+/// so another caller can act between a stale caller's read and its delete.
+private final class StallingTokenBox: APIKeyStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+    private var stalls = true
+    let reading = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+    init(_ value: String) { self.value = value }
+    func read() throws -> String? {
+        let (current, stall) = lock.withLock { () -> (String?, Bool) in
+            defer { stalls = false }
+            return (value, stalls)
+        }
+        if stall {
+            reading.signal()
+            _ = release.wait(timeout: .now() + .milliseconds(500))
+        }
+        return current
+    }
+    func save(_ apiKey: String) throws { lock.withLock { value = apiKey } }
+    func delete() throws { lock.withLock { value = nil } }
+}
+
 private struct NoKeys: APIKeyStore {
     func read() throws -> String? { nil }
     func save(_ apiKey: String) throws {}
@@ -222,6 +245,29 @@ final class HostedCredentialsTests: XCTestCase {
         XCTAssertEqual(try tokens.read(), "jv1_revoked")
         let seen = await service.seen.count
         XCTAssertEqual(seen, 0)
+    }
+
+    func testAStaleForgetKeepsARegistrationThatLandsWhileItReads() async throws {
+        let service = FakeService(), tokens = StallingTokenBox("jv1_forgotten")
+        let credentials = HostedCredentials(baseURL: base, tokenStore: tokens,
+                                            transport: { try await service.handle($0) })
+        let late = DispatchSemaphore(value: 0)
+        Thread { credentials.forget("jv1_forgotten"); late.signal() }.start()
+        await withCheckedContinuation { done in
+            DispatchQueue.global().async { tokens.reading.wait(); done.resume() }
+        }
+        let fresher = Task {
+            credentials.forget("jv1_forgotten")
+            return try await credentials.installToken()
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        tokens.release.signal()
+        await withCheckedContinuation { done in
+            DispatchQueue.global().async { late.wait(); done.resume() }
+        }
+        let token = try await fresher.value
+        XCTAssertEqual(token, "jv1_token1")
+        XCTAssertEqual(try tokens.read(), "jv1_token1", "a stale forget must not delete a registration made while it read")
     }
 
     func testAStaleFailureKeepsAFresherRegistration() async throws {
