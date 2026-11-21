@@ -46,18 +46,10 @@ public struct StageView: View {
     @ObservedObject var stage: Stage
     var crop: CGRect?
     var backdrop: Bool
-    /// The stage clock when this value was made. ImageRenderer re-renders a
-    /// reassigned content only when the view value differs, and a Stage is the
-    /// same reference every frame, so without this a frame where nothing else
-    /// changes the view's inputs (most often under Reduce Motion) repeats the
-    /// last image.
-    private let time: Double
-
     public init(stage: Stage, crop: CGRect? = nil, backdrop: Bool = true) {
         self.stage = stage
         self.crop = crop
         self.backdrop = backdrop
-        time = stage.time
     }
 
     public var body: some View {

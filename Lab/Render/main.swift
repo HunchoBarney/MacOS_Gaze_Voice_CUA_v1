@@ -14,8 +14,6 @@ func probe(_ out: String, component: String) throws {
     for d in entry.directions.indices {
         let stage = Stage(entry, direction: d)
         stage.playFlow()
-        let renderer = ImageRenderer(content: StageView(stage: stage))
-        renderer.scale = 2
         var t = 0.0
         var shot = 0
         let total = stage.flowDuration
@@ -24,7 +22,8 @@ func probe(_ out: String, component: String) throws {
             stage.advance(1.0 / 60)
             t += 1.0 / 60
             if t >= marks[shot] {
-                renderer.content = StageView(stage: stage)
+                let renderer = ImageRenderer(content: StageView(stage: stage))
+                renderer.scale = 2
                 if let image = renderer.cgImage {
                     try writePNG(image, to: URL(fileURLWithPath: out + "/\(component)-\(entry.directions[d].info.id)-\(shot)-\(stage.state.id).png"))
                 }
@@ -52,18 +51,20 @@ struct Options {
 }
 
 /// Renders `seconds` of the stage into one MP4 and its poster (the last frame).
+/// Every frame gets its own ImageRenderer: a reused renderer whose content is
+/// reassigned can return the previous image (seen under Reduce Motion, where
+/// the guide callout kept the last step's words).
 @MainActor
 func clip(_ stage: Stage, seconds: Double, options: Options, mp4: URL, poster: URL) throws {
-    let renderer = ImageRenderer(content: StageView(stage: stage))
-    renderer.scale = options.scale
     let size = stage.component.crop.size
     let writer = try ClipWriter(url: mp4, width: Int(size.width * options.scale), height: Int(size.height * options.scale), fps: options.fps)
     let count = Int((seconds * options.fps).rounded())
     var last: CGImage?
     for i in 0..<count {
         if i > 0 { stage.advance(1 / options.fps) }
-        renderer.content = StageView(stage: stage)
-        guard let image = renderer.cgImage else { throw RenderError("no frame \(i) for \(mp4.lastPathComponent)") }
+        let frame = ImageRenderer(content: StageView(stage: stage))
+        frame.scale = options.scale
+        guard let image = frame.cgImage else { throw RenderError("no frame \(i) for \(mp4.lastPathComponent)") }
         try writer.append(image)
         last = image
     }
@@ -98,8 +99,6 @@ func render(_ options: Options) throws {
                     let switchAt = lead
                     // Hold the previous state briefly, then change state live so the clip shows the transition.
                     var switched = false
-                    let renderer = ImageRenderer(content: StageView(stage: stage))
-                    renderer.scale = options.scale
                     let size = entry.crop.size
                     let writer = try ClipWriter(url: base.appendingPathExtension("mp4"), width: Int(size.width * options.scale),
                                                 height: Int(size.height * options.scale), fps: options.fps)
@@ -112,8 +111,9 @@ func render(_ options: Options) throws {
                             stageRef.advance(0)
                             switched = true
                         }
-                        renderer.content = StageView(stage: stageRef)
-                        guard let image = renderer.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
+                        let frame = ImageRenderer(content: StageView(stage: stageRef))
+                        frame.scale = options.scale
+                        guard let image = frame.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
                         try writer.append(image)
                         if i == Int(((lead + state.duration * 0.6) * options.fps).rounded()) { last = image }
                     }
@@ -142,16 +142,15 @@ func renderScenes(_ options: Options) throws {
         for variant in options.variants {
             let stage = SceneStage(scene, scheme: variant.scheme, reduceMotion: variant.reduceMotion)
             let base = options.out.appendingPathComponent("redesign/scenes/\(scene.id).\(variant.key)")
-            let renderer = ImageRenderer(content: stage.view())
-            renderer.scale = options.scale
             let writer = try ClipWriter(url: base.appendingPathExtension("mp4"), width: Int(Desk.size.width * options.scale),
                                         height: Int(Desk.size.height * options.scale), fps: options.fps)
             var poster: CGImage?
             let count = Int((scene.duration * options.fps).rounded())
             for i in 0..<count {
                 if i > 0 { stage.advance(1 / options.fps) }
-                renderer.content = stage.view()
-                guard let image = renderer.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
+                let frame = ImageRenderer(content: stage.view())
+                frame.scale = options.scale
+                guard let image = frame.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
                 try writer.append(image)
                 if abs(stage.time - 9.0) < 0.5 / options.fps { poster = image }
             }
