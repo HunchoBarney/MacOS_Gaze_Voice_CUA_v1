@@ -347,7 +347,7 @@ final class ConversationSession {
             onEvent?(.ignored(record.turn.id))
             return
         }
-        if let memory = memoryCommands?(), memory.answers(admission.text),
+        if admission.route == .remote, let memory = memoryCommands?(), memory.answers(admission.text),
            record.owner.consumeAdmission(record.turn) != nil {
             owners.removeValue(forKey: record.turn.id)
             if let say = memory.handle(admission.text) { onEvent?(.feedback(record.turn.id, say)) }

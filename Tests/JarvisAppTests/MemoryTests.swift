@@ -308,6 +308,37 @@ final class MemoryCommandsTests: MemoryTestCase {
         XCTAssertEqual(said, ["Dana is your manager."])
     }
 
+    @MainActor func testHandsFreeAnswerToAPendingQuestionIsNeverTakenAsAMemory() async throws {
+        let s = store()
+        let commands = MemoryCommands(store: { s })
+        let ask = VoiceAdmissionContext.Ask(taskID: UUID(), askID: UUID(), kind: .question)
+        var context = VoiceAdmissionContext()
+        context.capturedAsks = [ask]; context.currentAsks = [ask]
+        let conversation = ConversationSession()
+        conversation.makeSpeechSession = { captured in
+            let owner = LocalSpeechSession { _ in }
+            owner.context = captured
+            return owner
+        }
+        conversation.readContext = { context }
+        conversation.interpret = { _, _, _ in .init(kind: .clarify) }
+        conversation.remote = { _, _, _ in XCTFail("an answer to a pending question stays local") }
+        conversation.execute = { _ in .init(verified: false, waitingForAnswer: false, message: "") }
+        conversation.onControl = { _ in }
+        conversation.memoryCommands = { commands }
+        var said: [String] = []
+        conversation.onEvent = { if case .feedback(_, let message) = $0 { said.append(message) } }
+        let session = UUID(), connection = UUID()
+        try conversation.startExternal(session: session)
+        defer { conversation.stop() }
+
+        let turn = try conversation.beginExternal(input: .init(connectionID: connection, itemID: "answer"), at: 1)
+        XCTAssertTrue(conversation.commitExternal(turn, at: 2))
+        await conversation.finishExternal(turn, text: "Remember Dana is my manager", at: 2.1)
+        XCTAssertFalse(said.contains("Okay, I'll remember that."))
+        XCTAssertEqual(try s.recall("Dana"), [])
+    }
+
     @MainActor func testAnsweredAgentAskIsNeverKeptAsAPastRequest() async throws {
         let s = store()
         let config = Config(defaults: UserDefaults(suiteName: "memory-agent-\(UUID().uuidString)")!,
