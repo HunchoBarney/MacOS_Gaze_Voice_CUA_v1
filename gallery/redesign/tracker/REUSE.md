@@ -13,6 +13,7 @@ from each installed package's LICENSE or package.json.
 | React, React DOM | 19.2.7 | MIT | UI | all |
 | Vite, @vitejs/plugin-react | 8.0.16, 6.3.0 | MIT | Build | all |
 | TypeScript | 6.0.3 | Apache-2.0 | Typecheck | all |
+| [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) | 5.2.2 | MIT | Renderer only: muxes WebCodecs H.264 chunks into MP4 inside headless Chrome, so no frame sequence hits disk (deprecated upstream in favour of Mediabunny, which is MPL-2.0 and outside the permissive-only rule) | renderer |
 
 Checked and not used: voice-ring 0.2.0 (MIT) is a voice-reactive ring for
 speech UIs; nothing in calibration listens, so it would be decoration.

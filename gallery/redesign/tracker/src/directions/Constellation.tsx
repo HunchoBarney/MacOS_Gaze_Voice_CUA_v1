@@ -59,12 +59,9 @@ function Sky({ s, w, h, reduce }: { s: S; w: number; h: number; reduce: boolean 
     <svg className="con-svg" width={w} height={h} aria-hidden="true">
       <motion.g initial={false} animate={{ opacity: quiet ? 0.3 : 1 }} transition={{ duration: 0.35 }}>
         {lines.map((l, i) => (
-          <motion.line
+          <motion.path
             key={i}
-            x1={l.from[0]}
-            y1={l.from[1]}
-            x2={l.to[0]}
-            y2={l.to[1]}
+            d={arc(l.from, l.to, i % 2 ? 1 : -1)}
             className="con-line"
             data-weak={l.weak || undefined}
             initial={reduce ? { opacity: 0 } : { pathLength: 0 }}
@@ -106,6 +103,15 @@ function Sky({ s, w, h, reduce }: { s: S; w: number; h: number; reduce: boolean 
       })}
     </svg>
   );
+}
+
+// Lines bow gently, alternating sides, so the run reads as a drawn
+// constellation rather than a wireframe of the point grid.
+function arc(a: readonly [number, number], b: readonly [number, number], side: number) {
+  const [mx, my] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+  const bow = 0.09 * side;
+  return "M " + a[0] + " " + a[1] + " Q " + (mx - dy * bow) + " " + (my + dx * bow) + " " + b[0] + " " + b[1];
 }
 
 // The camera cue: sparks climb from the middle of the screen to the notch and
@@ -222,7 +228,7 @@ function Words({ s }: { s: S }) {
           {key === "intro" && (
             <>
               <h1>Connect the stars</h1>
-              <p>Look at each star until it lights up. Nine of them, about 15 seconds.</p>
+              <p>Look at each star until it lights up. About 15 seconds.</p>
               <div className="con-actions">
                 <button className="cal-btn con-quiet">Not now</button>
                 <button className="cal-btn con-primary" data-pressed={s.pressed === "start" || undefined}>Start</button>

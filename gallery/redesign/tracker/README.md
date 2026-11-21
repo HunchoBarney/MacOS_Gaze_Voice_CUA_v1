@@ -19,21 +19,23 @@ plus the failure path: plain words, Try again, and an 8 s auto-dismiss (ET-2).
     node gallery/redesign/tracker/render.mjs --out /absolute/OUT
 
 Writes `OUT/redesign/calibration/<A|B|C>/`: a still per state and variant
-(`<state>.<dark|light|dark-rm|light-rm>.png`, 3024x1964), a 60 fps frame
-folder per clip (`<state>.<variant>.frames/0000.png…` plus `clip.json`) and
-`flow.<variant>.frames` for the whole ~18 s flow, then
-`OUT/manifest.redesign.tracker.json`. The Swift gallery step encodes each frame
-folder to `<name>.mp4` and `<name>.poster.png`, which is what the manifest names.
+(`<state>.<dark|light|dark-rm|light-rm>.png`, 3024x1964), an MP4 and poster per
+state clip (`<state>.<variant>.mp4`, `.poster.png`, 60 fps, 1512x982) and
+`flow.<variant>.mp4` for the whole ~18 s flow, then
+`OUT/manifest.redesign.tracker.json`. Clips are encoded inside Chrome
+(WebCodecs H.264, which uses VideoToolbox on the Mac, muxed by mp4-muxer), so no
+PNG frame sequence is ever written: the Swift gallery step has nothing to encode
+for this producer.
 
 Options: `--only A,C`, `--states intro,look`, `--no-stills`, `--no-clips`,
 `--no-perf`, `--clip-variants dark,dark-rm` (default `dark,light,dark-rm`;
-light-rm is stills only), `--clip-scale 0.5` (clip frames at 1512x982, dpr 1),
+light-rm is stills only), `--clip-scale 0.5` (clips at 1512x982, dpr 1),
+`--bitrate 3000000`, `--budget-mb 150` (stops once the output folder passes it),
 `--work-dir`. A re-run with `--only` keeps the other directions' entries in the
 existing manifest.
 
-Disk: the flow is rendered once per variant and every happy-path state clip is
-cut from it by hard link, and identical consecutive frames are hard-linked too.
-Check `df -h /` before a full run; the frames are the bulk of the output.
+Disk: the flow is captured once per variant and every happy-path state clip is
+encoded from the same frames in that pass. Check `df -h /` before a full run.
 
 Live, with the picker (keys 1–3 or arrows switch, R replays):
 

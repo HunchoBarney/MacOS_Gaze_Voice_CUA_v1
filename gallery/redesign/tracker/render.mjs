@@ -9,8 +9,7 @@
 // gallery/tracker (render.mjs and fixture/bootstrap.js, read unmodified).
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, createWriteStream, statSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, createWriteStream, statSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -26,7 +25,7 @@ const log = (...parts) => console.log("[calibration]", ...parts);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function parseArgs(argv) {
-  const args = { only: null, states: null, clips: true, perf: true, stills: true, clipVariants: ["dark", "light", "dark-rm"], clipScale: 0.5, workDir: path.join(REPO, "build/gallery-redesign-tracker") };
+  const args = { only: null, states: null, clips: true, perf: true, stills: true, clipVariants: ["dark", "light", "dark-rm"], clipScale: 0.5, bitrate: 3_000_000, budgetMb: 150, workDir: path.join(REPO, "build/gallery-redesign-tracker") };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--out") args.out = argv[++i];
@@ -38,6 +37,8 @@ function parseArgs(argv) {
     else if (a === "--clip-variants") args.clipVariants = argv[++i].split(",");
     else if (a === "--clip-scale") args.clipScale = Number(argv[++i]);
     else if (a === "--work-dir") args.workDir = argv[++i];
+    else if (a === "--bitrate") args.bitrate = Number(argv[++i]);
+    else if (a === "--budget-mb") args.budgetMb = Number(argv[++i]);
     else if (a === "--help" || a === "-h") args.help = true;
     else throw new Error("Unknown argument: " + a);
   }
@@ -71,6 +72,10 @@ function serve(dir) {
   const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".wasm": "application/wasm", ".json": "application/json" };
   const server = http.createServer((req, res) => {
     const rel = decodeURIComponent(new URL(req.url, "http://x").pathname).replace(/^\/+/, "") || "index.html";
+    if (rel === "__encoder") {
+      res.writeHead(200, { "Content-Type": "text/html" }).end("<!doctype html><title>encoder</title>");
+      return;
+    }
     const file = path.resolve(root, rel);
     if ((file !== root && !file.startsWith(root + path.sep)) || !existsSync(file) || statSync(file).isDirectory()) {
       res.writeHead(404).end();
@@ -205,44 +210,89 @@ function write(file, buffer) {
   writeFileSync(file, buffer);
 }
 
-// A frame identical to the one before is hard-linked, not written again.
-function frameWriter(dir) {
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  let last = null;
-  let lastFile = null;
-  let count = 0;
+// ---- MP4 encoding in Chrome: WebCodecs H.264 into mp4-muxer (MIT) --------
+// Frames go from the capture straight into an encoder tab, so no PNG sequence
+// ever lands on disk. Only the MP4 and its poster (the clip's last frame) are
+// written.
+const ENCODER = `window.__enc = (() => {
+  const FPS = 60;
+  const clips = new Map();
+  let out = null;
   return {
-    add(buffer) {
-      const file = path.join(dir, String(count).padStart(4, "0") + ".png");
-      const hash = createHash("sha1").update(buffer).digest("hex");
-      if (hash === last) linkSync(lastFile, file);
-      else writeFileSync(file, buffer);
-      last = hash;
-      lastFile = file;
-      count += 1;
-      return file;
+    async supported(w, h, bitrate) {
+      const r = await VideoEncoder.isConfigSupported({ codec: "avc1.640033", width: w, height: h, bitrate, framerate: FPS });
+      return r.supported;
     },
-    finish() {
-      writeFileSync(path.join(dir, "clip.json"), JSON.stringify({ fps: 60 }) + "\n");
-      return count;
+    start(name, w, h, bitrate) {
+      const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: "avc", width: w, height: h, frameRate: FPS }, fastStart: "in-memory" });
+      const s = { muxer, n: 0, error: null };
+      s.encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => (s.error = String(e)) });
+      s.encoder.configure({ codec: "avc1.640033", width: w, height: h, bitrate, framerate: FPS, latencyMode: "quality", avc: { format: "avc" } });
+      clips.set(name, s);
+    },
+    async add(names, b64) {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      for (const name of names) {
+        const s = clips.get(name);
+        const frame = new VideoFrame(bitmap, { timestamp: Math.round((s.n * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
+        s.encoder.encode(frame, { keyFrame: s.n % 120 === 0 });
+        frame.close();
+        s.n += 1;
+        while (s.encoder.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 4));
+        if (s.error) throw new Error(s.error);
+      }
+      bitmap.close();
+    },
+    async finish(name) {
+      const s = clips.get(name);
+      await s.encoder.flush();
+      s.encoder.close();
+      s.muxer.finalize();
+      clips.delete(name);
+      if (s.error) throw new Error(s.error);
+      out = new Uint8Array(s.muxer.target.buffer);
+      return { bytes: out.length, frames: s.n };
+    },
+    chunk(at, size) {
+      const part = out.subarray(at, at + size);
+      let text = "";
+      for (let j = 0; j < part.length; j += 0x8000) text += String.fromCharCode.apply(null, part.subarray(j, j + 0x8000));
+      return btoa(text);
     }
+  };
+})();`;
+
+async function openEncoder(chrome, base, { width, height, bitrate }) {
+  const { targetId } = await chrome.send("Target.createTarget", { url: new URL("__encoder", base).href });
+  const { sessionId } = await chrome.send("Target.attachToTarget", { targetId, flatten: true });
+  const evaluate = async (expression) => {
+    const result = await chrome.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
+    if (result.exceptionDetails) throw new Error("encoder: " + (result.exceptionDetails.exception?.description || result.exceptionDetails.text));
+    return result.result.value;
+  };
+  for (let i = 0; i < 200 && (await evaluate("document.readyState").catch(() => "")) !== "complete"; i += 1) await sleep(25);
+  await evaluate(readFileSync(path.join(HERE, "node_modules/mp4-muxer/build/mp4-muxer.js"), "utf8"));
+  await evaluate(ENCODER);
+  if (!(await evaluate("window.__enc.supported(" + width + ", " + height + ", " + bitrate + ")"))) throw new Error("this Chrome can't encode H.264 at " + width + "x" + height);
+  return {
+    start: (name) => evaluate("window.__enc.start(" + JSON.stringify(name) + ", " + width + ", " + height + ", " + bitrate + ")"),
+    add: (names, png) => evaluate("window.__enc.add(" + JSON.stringify(names) + ", " + JSON.stringify(png.toString("base64")) + ")"),
+    async save(name, dirOut, relDir, poster) {
+      const { bytes, frames } = await evaluate("window.__enc.finish(" + JSON.stringify(name) + ")");
+      const parts = [];
+      for (let at = 0; at < bytes; at += 4 << 20) parts.push(Buffer.from(await evaluate("window.__enc.chunk(" + at + ", " + (4 << 20) + ")"), "base64"));
+      write(path.join(dirOut, name + ".mp4"), Buffer.concat(parts));
+      write(path.join(dirOut, name + ".poster.png"), poster);
+      const size = pngSize(poster);
+      return { kind: "clip", src: relDir + "/" + name + ".mp4", poster: relDir + "/" + name + ".poster.png", width: size.width, height: size.height, fps: 60, duration: Math.round((frames / 60) * 100) / 100 };
+    },
+    close: () => chrome.send("Target.closeTarget", { targetId }).catch(() => {})
   };
 }
 
-// A state clip cut from the flow: hard links into its own frame folder.
-function cutClip(flowDir, dir, from, to) {
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  let n = 0;
-  for (let i = from; i < to; i += 1) {
-    const source = path.join(flowDir, String(i).padStart(4, "0") + ".png");
-    if (!existsSync(source)) break;
-    linkSync(source, path.join(dir, String(n).padStart(4, "0") + ".png"));
-    n += 1;
-  }
-  writeFileSync(path.join(dir, "clip.json"), JSON.stringify({ fps: 60 }) + "\n");
-  return n;
+function duMb(dir) {
+  return Number(execFileSync("du", ["-sk", dir]).toString().split(/\s/)[0]) / 1024;
 }
 
 // ---- Performance: real time, no fixture clock ------------------------------
@@ -328,7 +378,7 @@ async function measure(chrome, base, dir) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help || !args.out) {
-    console.log("usage: node gallery/redesign/tracker/render.mjs --out <absolute OUT dir> [--only A,B] [--states intro,look] [--no-stills] [--no-clips] [--no-perf] [--clip-variants dark,light,dark-rm] [--clip-scale 0.5] [--work-dir dir]");
+    console.log("usage: node gallery/redesign/tracker/render.mjs --out <absolute OUT dir> [--only A,B] [--states intro,look] [--no-stills] [--no-clips] [--no-perf] [--clip-variants dark,light,dark-rm] [--clip-scale 0.5] [--bitrate 3000000] [--budget-mb 150] [--work-dir dir]");
     process.exit(args.help ? 0 : 2);
   }
   if (!path.isAbsolute(args.out)) throw new Error("--out must be an absolute path");
@@ -369,6 +419,7 @@ async function main() {
       const media = Object.fromEntries(dir.states.map((s) => [s.id, { ...(prevDir?.states?.find((p) => p.id === s.id)?.media || {}) }]));
       let flow = { ...(prevDir?.flow || {}) };
       const page = await openPage(chrome, { fixture: true });
+      const encoder = args.clips ? await openEncoder(chrome, base, { width: Math.round(VIEW.width * VIEW.scale * args.clipScale), height: Math.round(VIEW.height * VIEW.scale * args.clipScale), bitrate: args.bitrate }) : null;
       try {
         // Stills: every state, four variants, at deviceScaleFactor 2.
         if (args.stills) {
@@ -391,46 +442,52 @@ async function main() {
             log(dir.id + " stills " + variant);
           }
         }
-        // Clips: the flow once per variant, state clips cut from it by hard
-        // link, and the failure path from its own run.
+        // Clips: the flow once per variant, encoded straight to MP4 in Chrome
+        // (WebCodecs H.264 + mp4-muxer) with no frame folder on disk. Every
+        // happy-path state clip is encoded from the same frames in that pass,
+        // and the failure path from its own run.
         if (args.clips) {
           for (const variant of args.clipVariants) {
             await page.setMedia(variant);
             await page.load(base + "?dir=" + dir.id + "&scenario=happy&render=1");
-            const flowName = "flow." + variant;
-            const flowDir = path.join(dirOut, flowName + ".frames");
-            const writer = frameWriter(flowDir);
             const total = Math.round((dir.flowMs / 1000) * 60);
-            let size = null;
+            const happy = states.filter((s) => s.scenario === "happy").map((s) => ({ state: s, name: s.id + "." + variant, from: Math.round(s.clip[0] / FRAME_MS), to: Math.round(s.clip[1] / FRAME_MS) }));
+            const flowName = "flow." + variant;
+            await encoder.start(flowName);
+            const last = new Map();
             for (let i = 0; i < total; i += 1) {
               await page.advanceTo(i * FRAME_MS);
               const buffer = await page.shot(args.clipScale);
-              size = size || pngSize(buffer);
-              writer.add(buffer);
+              const targets = [flowName];
+              for (const c of happy) {
+                if (i === c.from) await encoder.start(c.name);
+                if (i >= c.from && i < c.to) {
+                  targets.push(c.name);
+                  last.set(c.name, buffer);
+                }
+              }
+              last.set(flowName, buffer);
+              await encoder.add(targets, buffer);
+              for (const c of happy) if (i === c.to - 1 || (i === total - 1 && i < c.to - 1 && i >= c.from)) media[c.state.id][variant] = await encoder.save(c.name, dirOut, REL + "/" + dir.id, last.get(c.name));
             }
-            writer.finish();
+            flow[variant] = await encoder.save(flowName, dirOut, REL + "/" + dir.id, last.get(flowName));
             if (page.errors.length) throw new Error(dir.id + " flow " + variant + ": " + page.errors.join(" | "));
-            const clipMedia = (name, frames) => ({ kind: "clip", src: REL + "/" + dir.id + "/" + name + ".mp4", poster: REL + "/" + dir.id + "/" + name + ".poster.png", width: size.width, height: size.height, fps: 60, duration: Math.round((frames / 60) * 100) / 100 });
-            flow[variant] = clipMedia(flowName, total);
-            for (const state of states.filter((s) => s.scenario === "happy")) {
-              const name = state.id + "." + variant;
-              const n = cutClip(flowDir, path.join(dirOut, name + ".frames"), Math.round(state.clip[0] / FRAME_MS), Math.round(state.clip[1] / FRAME_MS));
-              media[state.id][variant] = clipMedia(name, n);
-            }
             for (const state of states.filter((s) => s.scenario === "fail")) {
               await page.load(base + "?dir=" + dir.id + "&scenario=fail&render=1");
               const name = state.id + "." + variant;
-              const failWriter = frameWriter(path.join(dirOut, name + ".frames"));
-              const first = Math.round(state.clip[0] / FRAME_MS);
-              const last = Math.round(state.clip[1] / FRAME_MS);
-              for (let i = first; i < last; i += 1) {
+              await encoder.start(name);
+              let buffer = null;
+              for (let i = Math.round(state.clip[0] / FRAME_MS); i < Math.round(state.clip[1] / FRAME_MS); i += 1) {
                 await page.advanceTo(i * FRAME_MS);
-                failWriter.add(await page.shot(args.clipScale));
+                buffer = await page.shot(args.clipScale);
+                await encoder.add([name], buffer);
               }
-              media[state.id][variant] = clipMedia(name, failWriter.finish());
+              media[state.id][variant] = await encoder.save(name, dirOut, REL + "/" + dir.id, buffer);
               if (page.errors.length) throw new Error(dir.id + " " + state.id + " " + variant + ": " + page.errors.join(" | "));
             }
-            log(dir.id + " clips " + variant + " (" + total + " flow frames)");
+            const used = duMb(OUT);
+            log(dir.id + " clips " + variant + " (" + total + " flow frames); output now " + used.toFixed(1) + " MB");
+            if (args.budgetMb && used > args.budgetMb) throw new Error("output passed the " + args.budgetMb + " MB budget; stopping");
           }
         }
       } catch (error) {
@@ -438,6 +495,7 @@ async function main() {
         console.error("[calibration] FAILED " + dir.id + ": " + (error.message || error));
       } finally {
         await page.close();
+        await encoder?.close();
       }
       let perf = prevDir?.perf;
       if (args.perf) {
