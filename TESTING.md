@@ -21,8 +21,8 @@ Run one full `make test` before asking for review:
 scripts/lane-test.sh
 ```
 
-Local CI runs it again at every PR head and on main, and posts the
-`local-ci` commit status.
+Local CI runs it again at every PR head, merged into current main, and on
+main, and posts the `local-ci` commit status.
 
 ## The build lane
 

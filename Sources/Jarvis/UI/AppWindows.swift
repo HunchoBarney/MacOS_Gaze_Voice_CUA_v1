@@ -40,7 +40,6 @@ final class AppWindows: NSObject, NSWindowDelegate {
 
     private let controller: VoiceController
     private let microphones: MicrophoneCatalog
-    private let input: FnInputMonitor
     private let indicator = IndicatorPanel()
     private let indicatorHost: FirstClickHostingView<ListeningIndicatorView>
     private var settingsWindow: NSWindow?
@@ -50,10 +49,9 @@ final class AppWindows: NSObject, NSWindowDelegate {
     private var shownPhase: IndicatorPhase = .hidden
     private var observers: Set<AnyCancellable> = []
 
-    init(controller: VoiceController, microphones: MicrophoneCatalog, input: FnInputMonitor) {
+    init(controller: VoiceController, microphones: MicrophoneCatalog) {
         self.controller = controller
         self.microphones = microphones
-        self.input = input
         indicatorHost = FirstClickHostingView(rootView: ListeningIndicatorView(controller: controller))
         super.init()
         indicatorHost.rootView = ListeningIndicatorView(controller: controller, openSettings: { [weak self] anchor in
@@ -124,14 +122,13 @@ final class AppWindows: NSObject, NSWindowDelegate {
     func show(_ section: SettingsNavigation.Section, anchor: SettingsNavigation.Anchor? = nil) {
         controller.refreshPermissions()
         microphones.refresh()
-        input.refresh()
         if section != .voice { controller.stopMicrophoneTest() }
         navigation.section = section
         navigation.anchor = anchor
         let window = settingsWindow ?? makeWindow(
             title: "Jarvis", size: NSSize(width: 820, height: 640), minimum: NSSize(width: 740, height: 520),
             content: SettingsView(controller: controller, config: controller.config,
-                                  microphones: microphones, input: input, navigation: navigation)
+                                  microphones: microphones, navigation: navigation)
                 .environmentObject(agents)
                 .environment(\.openAgents) { [weak self] in self?.showAgents() })
         window.delegate = self

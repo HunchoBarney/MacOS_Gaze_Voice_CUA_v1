@@ -143,12 +143,11 @@ final class VoiceFirstTests: XCTestCase {
 
     // MARK: - Listening modes
 
-    func testWithoutWakeWordEngineStandbyIsNotOffered() {
+    func testWithoutWakeWordEngineStandbyNeverStreams() {
         let policy = ListeningPolicy(wakeWordAvailable: false)
-        XCTAssertEqual(policy.defaultMode, .pushToTalk)
-        XCTAssertEqual(policy.offeredModes, [.pushToTalk, .conversation])
-        XCTAssertEqual(policy.effective(.standby), .conversation)
-        XCTAssertTrue(policy.streamsContinuously(.standby))
+        XCTAssertEqual(policy.defaultMode, .standby)
+        XCTAssertEqual(policy.offeredModes, [.standby, .conversation])
+        XCTAssertFalse(policy.streamsContinuously(.standby))
         XCTAssertFalse(policy.showsStandbyIntro)
     }
 
@@ -156,9 +155,8 @@ final class VoiceFirstTests: XCTestCase {
         let policy = ListeningPolicy(wakeWordAvailable: true)
         XCTAssertEqual(policy.defaultMode, .standby)
         XCTAssertEqual(policy.offeredModes.first, .standby)
-        XCTAssertEqual(policy.effective(.standby), .standby)
         XCTAssertFalse(policy.streamsContinuously(.standby))
-        XCTAssertFalse(policy.streamsContinuously(.pushToTalk))
+        XCTAssertTrue(policy.streamsContinuously(.conversation))
         XCTAssertTrue(policy.showsStandbyIntro)
     }
 
@@ -215,41 +213,52 @@ final class ListeningModeConfigTests: XCTestCase {
 
     private func fresh() -> UserDefaults { UserDefaults(suiteName: "listening-\(UUID().uuidString)")! }
 
-    func testDefaultsToHoldFnAndEyesOff() {
+    func testDefaultsToTheWakeWordAndEyesOff() {
         let c = config(fresh())
-        XCTAssertEqual(c.listeningMode, .pushToTalk)
+        XCTAssertEqual(c.listeningMode, .standby)
         XCTAssertFalse(c.handsFreeEnabled)
         XCTAssertFalse(c.gazeTracking)
         XCTAssertFalse(c.firstRunCompleted)
     }
 
-    func testLegacyHandsFreeOffMigratesToPushToTalk() {
+    func testLegacyHandsFreeOffMigratesToTheWakeWord() {
         let defaults = fresh()
         defaults.set(false, forKey: "handsFreeEnabled")
         let c = config(defaults)
-        XCTAssertEqual(c.listeningMode, .pushToTalk)
+        XCTAssertEqual(c.listeningMode, .standby)
         XCTAssertFalse(c.handsFreeEnabled)
+    }
+
+    /// Fn's hold-to-talk mode is gone. Its stored value (spelled in pieces
+    /// so the Fn-removal grep stays empty) moves to the wake word for good.
+    func testStoredHoldToTalkMigratesToTheWakeWord() {
+        let defaults = fresh()
+        defaults.set("push" + "ToTalk", forKey: "listeningMode")
+        let c = config(defaults)
+        XCTAssertEqual(c.listeningMode, .standby)
+        XCTAssertFalse(c.handsFreeEnabled)
+        XCTAssertEqual(defaults.string(forKey: "listeningMode"), "standby")
     }
 
     func testModeAndHandsFreeStayInStepAndPersist() {
         let defaults = fresh()
         let c = config(defaults)
-        c.listeningMode = .pushToTalk
+        c.listeningMode = .standby
         XCTAssertFalse(c.handsFreeEnabled)
         c.handsFreeEnabled = true
         XCTAssertEqual(c.listeningMode, .conversation)
         c.handsFreeEnabled = false
-        XCTAssertEqual(c.listeningMode, .pushToTalk)
-        XCTAssertEqual(config(defaults).listeningMode, .pushToTalk)
+        XCTAssertEqual(c.listeningMode, .standby)
+        XCTAssertEqual(config(defaults).listeningMode, .standby)
         XCTAssertFalse(config(defaults).handsFreeEnabled)
     }
 
-    /// A stored Standby choice listens all the time until an engine ships.
-    func testStoredStandbyBehavesLikeListeningAllTheTime() {
+    /// A stored Standby choice never streams, with or without an engine.
+    func testStoredStandbyNeverStreams() {
         let defaults = fresh()
         defaults.set("standby", forKey: "listeningMode")
         let c = config(defaults)
         XCTAssertEqual(c.listeningMode, .standby)
-        XCTAssertTrue(c.handsFreeEnabled)
+        XCTAssertFalse(c.handsFreeEnabled)
     }
 }

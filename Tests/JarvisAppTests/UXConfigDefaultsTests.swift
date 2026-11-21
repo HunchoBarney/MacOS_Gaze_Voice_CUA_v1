@@ -19,13 +19,6 @@ final class UXConfigDefaultsTests: XCTestCase {
                openAIKeyStore: MemoryKeys(), environment: [:])
     }
 
-    func testNewFlagDefaults() {
-        let suite = "ux-config-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        let c = config(defaults: defaults)
-        XCTAssertTrue(c.tapToGazeClick)
-    }
-
     func testHandsFreeDefaultsOffAndExplicitChoiceOrPauseSurvivesReload() {
         let defaults = UserDefaults(suiteName: "hands-free-default-\(UUID())")!
         let initial = config(defaults: defaults)
@@ -56,19 +49,6 @@ final class UXConfigDefaultsTests: XCTestCase {
         XCTAssertTrue(config(defaults: defaults).semanticAppSuggestions)
         c.semanticAppSuggestions = false
         XCTAssertFalse(config(defaults: defaults).semanticAppSuggestions)
-    }
-
-    func testNewFlagsPersist() {
-        let suite = "ux-config-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        let c = config(defaults: defaults)
-        c.tapToGazeClick = false
-
-        XCTAssertFalse(defaults.bool(forKey: "tapToGazeClick"))
-
-        // A fresh Config over the same defaults reads the choices back.
-        let reloaded = config(defaults: defaults)
-        XCTAssertFalse(reloaded.tapToGazeClick)
     }
 
     @MainActor
