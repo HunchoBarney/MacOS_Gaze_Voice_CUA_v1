@@ -18,6 +18,7 @@ import {
   type Geometry,
   type HitTrial
 } from "./accuracyProtocol";
+import { CAPTURE_RUN, PointRun, VERIFY_RUN } from "./calibrationRun";
 import { logStatus } from "./logger";
 import { advanceDotSpring, GAZE_STALE_MS, headTilted, isSaccadeJump, leadTarget, schedulePreviewExpiry, shouldRetryCalibrationCapture, TILT_CLEAR_MS } from "./uiState";
 import "./styles.css";
@@ -95,14 +96,6 @@ const CALIBRATION_TIERS: Record<CalibrationTier, [number, number][]> = {
     [0.5, 0.5]
   ]
 };
-// Parked pacing: ~0.5s glide between points (Tobii: the animation must not be
-// too fast or the eye never settles), then 900ms parked — 300ms to rest the
-// eye on it, then the ring contracts and dense samples collect. Features pair
-// every frame, so each point yields ~10 labels — dense data without chasing.
-const PURSUIT_SPEED = 0.7;
-const PURSUIT_DWELL_MS = 900;
-const PURSUIT_LEAD_IN_MS = 1400;
-
 // Verification: same park-and-check UX at points the capture never used, so
 // the gate measures held-out error honestly instead of in-sample fit.
 const VERIFY_WAYPOINTS: [number, number][] = [
@@ -111,9 +104,6 @@ const VERIFY_WAYPOINTS: [number, number][] = [
   [0.68, 0.7], [0.32, 0.7],
   [0.5, 0.5]
 ];
-const VERIFY_SPEED = 0.7;
-const VERIFY_DWELL_MS = 700;
-const VERIFY_LEAD_IN_MS = 700;
 
 // Accuracy test (--accuracy-test): after calibration, the JARA-27 protocol
 // v1 held-out grid — 16 targets in random order, 1.5 s each, scoring only
@@ -158,52 +148,6 @@ interface AccuracyBucket {
 
 function percentile(sorted: number[], q: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
-}
-
-function buildPursuitTimeline(
-  waypoints: [number, number][],
-  speed: number,
-  dwellMs: number,
-  leadInMs: number
-): {
-  duration: number;
-  at: (ms: number) => { pos: [number, number] | null; dwelling: boolean; next: [number, number] | null };
-} {
-  const segments: Array<{ start: number; end: number; dwellEnd: number; from: [number, number]; to: [number, number] }> = [];
-  let t = leadInMs;
-  for (let i = 0; i < waypoints.length - 1; i += 1) {
-    const from = waypoints[i];
-    const to = waypoints[i + 1];
-    const travel = (Math.hypot(to[0] - from[0], to[1] - from[1]) / speed) * 1000;
-    segments.push({ start: t, end: t + travel, dwellEnd: t + travel + dwellMs, from, to });
-    t += travel + dwellMs;
-  }
-  const duration = t;
-  const at = (ms: number): { pos: [number, number] | null; dwelling: boolean; next: [number, number] | null } => {
-    const done = { pos: null, dwelling: false, next: null };
-    if (ms >= duration) {
-      return done;
-    }
-    for (let i = 0; i < segments.length; i += 1) {
-      const s = segments[i];
-      const upcoming = segments[i + 1]?.to ?? null;
-      if (ms < s.start) {
-        // Parked at this leg's origin; `next` shows where it goes next.
-        return { pos: s.from, dwelling: true, next: s.to };
-      }
-      if (ms <= s.end) {
-        const k = (ms - s.start) / (s.end - s.start);
-        // Smoothstep glide: soft acceleration into the park, never a dart.
-        const e = k * k * (3 - 2 * k);
-        return { pos: [s.from[0] + (s.to[0] - s.from[0]) * e, s.from[1] + (s.to[1] - s.from[1]) * e], dwelling: false, next: upcoming };
-      }
-      if (ms < s.dwellEnd) {
-        return { pos: s.to, dwelling: true, next: upcoming };
-      }
-    }
-    return { pos: waypoints[waypoints.length - 1], dwelling: true, next: null };
-  };
-  return { duration, at };
 }
 
 function providerToAccelerator(provider: string | undefined): string {
@@ -318,8 +262,9 @@ function App() {
   const [pursuitPhase, setPursuitPhase] = useState<"capture" | "verify">("capture");
   const [pursuitPos, setPursuitPos] = useState<[number, number] | null>(null);
   const [pursuitDwell, setPursuitDwell] = useState(false);
-  const [pursuitNext, setPursuitNext] = useState<[number, number] | null>(null);
+  const pursuitSampleCountRef = useRef<{ mode: "capture" | "verify"; count: number }>({ mode: "capture", count: 0 });
   const [pursuitProgress, setPursuitProgress] = useState(0);
+  const [pursuitFill, setPursuitFill] = useState(0);
   const [pursuitRun, setPursuitRun] = useState(0);
   // Pose-hold hint for the pursuit modal — flipped by tick() on transitions
   // only, so the ~60Hz loop doesn't render-spam while the gate is steady.
@@ -431,9 +376,9 @@ function App() {
   }
   const [calibratedFlash, setCalibratedFlash] = useState(false);
   // Camera marker: a ~5s orientation hint, then it fades unless pinned on.
-  const [markerVisible, setMarkerVisible] = useState(true);
+  const [markerVisible, setMarkerVisible] = useState(false);
   const markerTimerRef = useRef(0);
-  const markerShownRef = useRef(true);
+  const markerShownRef = useRef(false);
   // Persisted presence settings + diagnostics toggles (settings live in the
   // main process; refs mirror them so stable handlers read the latest).
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSettings>({});
@@ -759,10 +704,13 @@ function App() {
         }
         return;
       }
-      if (payload.status === "missing" && !learnMissing) {
-        // First run: no calibration on disk — invite, don't hijack. Under the
-        // host's --calibrate-if-missing (first enable) it starts directly; a
-        // "not now" from an earlier run still holds.
+      const unverified = payload.status === "loaded" && payload.verified === false;
+      if (payload.status === "missing" || unverified) {
+        // First use: no calibration, or only a map learned in the background
+        // that no verify run ever checked — invite, don't hijack. Background
+        // learning keeps running either way. Under the host's
+        // --calibrate-if-missing (first enable) it starts directly; a "not
+        // now" from an earlier run still holds.
         if (!calibrationActiveRef.current && accuracyIndexRef.current === null && !onboardingDismissedRef.current) {
           if (configRef.current?.calibrateIfMissing) {
             setAutoCalibrate(true);
@@ -779,8 +727,12 @@ function App() {
         }
       }
       if (payload.status === "pursuit_sampled" && payload.count !== undefined) {
-        // Routine progress stays info — the amber is reserved for real failures.
-        showStatus(`calibration: following — ${payload.count} samples`, "info");
+        // Every labelled frame reports its run's count; the point run paces
+        // itself on it, and the status line takes every tenth.
+        pursuitSampleCountRef.current = { mode: payload.mode ?? "capture", count: payload.count };
+        if (payload.count % 10 === 0) {
+          showStatus(`calibration: ${payload.count} samples`, "info");
+        }
       } else {
         // Routine outcomes aren't warnings — amber is for states needing
         // action (missing/invalid/rejected/save_failed).
@@ -858,9 +810,9 @@ function App() {
         lastVerdictRef.current = payload.verdict;
       }
     } else if (payload.type === "cursor_idle") {
-      // Implicit calibration label (COMETIC/WebGazer): a cursor rest, a click,
-      // a voice-named pick or the text caret — a free ground-truth pair the
-      // worker weighs by kind.
+      // Implicit calibration label from the host: a click, a voice-named
+      // pick or the text caret — a free ground-truth pair the worker weighs
+      // by kind.
       webRuntimeRef.current?.implicitSample(payload.x_norm, payload.y_norm, payload.kind);
     } else if (payload.type === "menu_action") {
       if (payload.action === "pause_toggle") {
@@ -1048,10 +1000,6 @@ function App() {
         if (merged.dwell_lock !== undefined) {
           webRuntimeRef.current?.setFilterOptions?.({ dwellLock: merged.dwell_lock });
         }
-        if (merged.show_camera_marker_on_start === false) {
-          window.clearTimeout(markerTimerRef.current);
-          setMarkerVisible(false);
-        }
         if (merged.diagnostics) {
           const next = { ...diagnosticsRef.current, ...merged.diagnostics };
           diagnosticsRef.current = next;
@@ -1069,12 +1017,6 @@ function App() {
       disposed = true;
     };
   }, [config]);
-
-  // Startup camera hint: ~5s of "camera is here", then it fades away.
-  useEffect(() => {
-    markerTimerRef.current = window.setTimeout(() => setMarkerVisible(false), 5000);
-    return () => window.clearTimeout(markerTimerRef.current);
-  }, []);
 
   // "Calibrated" is a moment, not a state — self-dismissing flash.
   useEffect(() => {
@@ -1159,21 +1101,39 @@ function App() {
     pursuitEndedRef.current = false;
     pursuitRejectedRef.current = false;
     pursuitBegunRef.current = true;
-    const captureTimeline = buildPursuitTimeline(CALIBRATION_TIERS[calibrationTier], PURSUIT_SPEED, PURSUIT_DWELL_MS, PURSUIT_LEAD_IN_MS);
-    const verifyTimeline = buildPursuitTimeline(VERIFY_WAYPOINTS, VERIFY_SPEED, VERIFY_DWELL_MS, VERIFY_LEAD_IN_MS);
+    // Eye-paced: each point parks until the tracker has labelled its share of
+    // frames there, so a slow or stalling tracker can't time the run out.
+    // The tier's closing return to centre would only repeat its first point.
+    // Reduced motion: the target steps between points instead of gliding.
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const runFor = (which: "capture" | "verify", now: number) => {
+      pursuitSampleCountRef.current = { mode: which, count: 0 };
+      const options = which === "capture" ? CAPTURE_RUN : VERIFY_RUN;
+      const points = which === "capture" ? CALIBRATION_TIERS[calibrationTier] : VERIFY_WAYPOINTS;
+      return new PointRun(points.slice(0, -1), still ? { ...options, glideMs: 0 } : options, now);
+    };
     let phase: "capture" | "verify" = "capture";
-    let phaseStart = performance.now();
+    let run = runFor("capture", performance.now());
     setPursuitPhase("capture");
-    setCalibrationNotice(pursuitRetryNoticeRef.current ?? "look at the dot — no need to chase it");
+    setCalibrationNotice(pursuitRetryNoticeRef.current ?? "look at each dot until it fills");
     pursuitRetryNoticeRef.current = null;
     runtime.pursuitBegin("capture");
     let raf = 0;
     const tick = (now: number) => {
-      const timeline = phase === "capture" ? captureTimeline : verifyTimeline;
-      const sample = timeline.at(now - phaseStart);
-      if (sample.pos === null) {
+      // Pose gate: a tilted head bends the eye→screen map the fit can't see,
+      // so while the hold deadline is live the target stream pauses — the
+      // worker stops sampling ~250ms after the last forwarded message and
+      // those frames never count toward the fit or the verify tally. The
+      // park clock stops with it, so a point waits for the head to return.
+      const poseBlocked = Date.now() < poseBlockedUntilRef.current;
+      if (poseBlocked !== pursuitPoseHoldRef.current) {
+        pursuitPoseHoldRef.current = poseBlocked;
+        setPursuitPoseHold(poseBlocked);
+      }
+      const sampled = pursuitSampleCountRef.current;
+      const frame = run.step(now, sampled.mode === phase ? sampled.count : 0, poseBlocked);
+      if (frame.done) {
         setPursuitDwell(false);
-        setPursuitNext(null);
         if (phase === "capture") {
           // finishPursuit can emit rejected_fit synchronously inside this
           // call — the flag marks the run as settled (a retry owns the screen
@@ -1185,9 +1145,9 @@ function App() {
           pursuitRejectedRef.current = false;
           if (!superseded && !calibrationCancelledRef.current) {
             phase = "verify";
-            phaseStart = now;
+            run = runFor("verify", now);
             setPursuitPhase("verify");
-            setCalibrationNotice("almost done — look at each dot as it stops");
+            setCalibrationNotice("almost done — a few more dots");
             runtime.pursuitBegin("verify");
             // The verify phase is now the in-flight run — it owns the end flag.
             pursuitEndedRef.current = false;
@@ -1205,29 +1165,17 @@ function App() {
         pursuitEndedRef.current = true;
         return;
       }
-      const elapsed = now - phaseStart;
       const share = phase === "capture" ? 0.75 : 0.25;
       const base = phase === "capture" ? 0 : 0.75;
-      setPursuitProgress(Math.min(1, base + (elapsed / timeline.duration) * share));
-      setPursuitPos(sample.pos);
-      setPursuitDwell(sample.dwelling);
-      setPursuitNext(sample.dwelling ? null : sample.next);
-      // Pose gate: a tilted head bends the eye→screen map the fit can't see,
-      // so while the hold deadline is live the target stream pauses — the
-      // worker stops sampling ~250ms after the last forwarded message and
-      // those frames never count toward the fit or the verify tally. The
-      // dot's own motion is untouched: we gate label collection, not the
-      // animation.
-      const poseBlocked = Date.now() < poseBlockedUntilRef.current;
-      if (poseBlocked !== pursuitPoseHoldRef.current) {
-        pursuitPoseHoldRef.current = poseBlocked;
-        setPursuitPoseHold(poseBlocked);
-      }
+      setPursuitProgress(base + frame.progress * share);
+      setPursuitPos(frame.pos);
+      setPursuitDwell(frame.parked);
+      setPursuitFill(frame.pointProgress);
       // Only collect while parked: during the glide the user is saccading to
       // the target, so those frames are noise, not labels (Tobii likewise
-      // collects only after the eye settles on the shrunken point).
-      if (sample.dwelling && !poseBlocked) {
-        runtime.pursuitTarget(sample.pos[0], sample.pos[1]);
+      // collects only after the eye settles on the point).
+      if (frame.parked && frame.pos && !poseBlocked) {
+        runtime.pursuitTarget(frame.pos[0], frame.pos[1]);
       }
       raf = window.requestAnimationFrame(tick);
     };
@@ -1249,8 +1197,8 @@ function App() {
       }
       setPursuitDwell(false);
       setPursuitPos(null);
-      setPursuitNext(null);
       setPursuitProgress(0);
+      setPursuitFill(0);
       pursuitPoseHoldRef.current = false;
       setPursuitPoseHold(false);
     };
@@ -1561,7 +1509,7 @@ function App() {
   const accuracyStepTotal =
     (config?.accuracyTest || accuracyCheck ? ACCURACY_GRID.length : 0) + (config?.hitTest || accuracyCheck ? HIT_STEPS : 0);
   const modalActive = calibrationActive || accuracyIndex !== null;
-  const markerShown = markerVisible || calibrationCountdown !== null || Boolean(config?.showCameraMarker);
+  const markerShown = markerVisible || Boolean(config?.showCameraMarker);
 
   // Mirrored for the stable message handlers, which read modal state between
   // renders without re-subscribing.
@@ -1612,9 +1560,9 @@ function App() {
     setPursuitActive(false);
     setPursuitPhase("capture");
     setPursuitPos(null);
-    setPursuitNext(null);
     setPursuitDwell(false);
     setPursuitProgress(0);
+    setPursuitFill(0);
     setCalibrationNotice(null);
     setDriftNotice(null);
     setCalibrationDone(true);
@@ -1714,7 +1662,7 @@ function App() {
       {onboarding && (
         <div className="onboarding-card" role="dialog" aria-label="Calibrate eye tracking">
           <div className="onboarding-title">Tune the tracker to your eyes</div>
-          <p>Follow the dot for about 20 seconds — it only needs to happen once.</p>
+          <p>Look at each dot until it fills. It takes about 15 seconds, once.</p>
           <div className="onboarding-actions">
             <button
               type="button"
@@ -1765,9 +1713,8 @@ function App() {
       )}
       {/* Modal phases keep only the scrim, exit button, progress rail, target,
           countdown and notices — everything else would occlude targets. The
-          camera marker is the exception: it stays up through the countdown so
-          the user knows where to face before the pursuit starts. */}
-      {(!modalActive || calibrationCountdown !== null) && (
+          camera marker shows only when asked for (menu or --show-camera-marker). */}
+      {!modalActive && (
         <div
           ref={cameraMarkerRef}
           className={`camera-marker${markerShown ? "" : " faded"}`}
@@ -1795,14 +1742,6 @@ function App() {
           <span key={calibrationCountdown}>{calibrationCountdown}</span>
         </div>
       )}
-      {pursuitNext && (
-        <div
-          className="pursuit-ghost"
-          style={{
-            transform: `translate(${pursuitNext[0] * window.innerWidth}px, ${pursuitNext[1] * window.innerHeight}px)`
-          }}
-        />
-      )}
       {pursuitPos && (
         <div
           ref={calibrationTargetRef}
@@ -1812,7 +1751,7 @@ function App() {
           }}
         >
           <div className="pursuit-ring" />
-          <div className="pursuit-dot" />
+          <div className="pursuit-dot" style={{ transform: `scale(${0.5 + pursuitFill * 0.5})` }} />
         </div>
       )}
       {accuracyIndex !== null && accuracyStep?.kind === "grid" && (

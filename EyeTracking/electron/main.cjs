@@ -617,9 +617,10 @@ function handleControlAction(action, value) {
     return;
   }
   if (action === "implicit_sample") {
-    // The host's commit-time implicit label — forwarded as the same
-    // cursor_idle message the idle sampler emits, so the renderer feeds it
-    // through the inference worker's COMETIC quality gate unchanged.
+    // The host's implicit label (a click, the caret, a voice-named pick) —
+    // forwarded as a cursor_idle message so the renderer feeds it through
+    // the inference worker's quality gate. Resting-cursor labels were
+    // dropped: people read elsewhere while the cursor sits still.
     // externalApi already range-validates the point; the second check keeps
     // this entry honest if another caller ever bypasses the HTTP layer.
     if (!value || !Number.isFinite(value.x_norm) || !Number.isFinite(value.y_norm) ||
@@ -964,42 +965,6 @@ function sanitizeOverlayRegions(regions) {
     .filter((region) => region.width > 0 && region.height > 0);
 }
 
-// Implicit-calibration source (COMETIC/WebGazer): when the cursor rests on a
-// spot inside the calibrated display for a beat, that point is a likely gaze
-// target — emitted once per rest, the worker decides whether to keep it.
-let cursorIdlePoll = null;
-function startCursorIdlePoll(bounds) {
-  let last = { x: Number.NaN, y: Number.NaN };
-  let movedAt = 0;
-  let emitted = false;
-  cursorIdlePoll = setInterval(() => {
-    // modalInteractive/paused: an implicit label mutating the feature map
-    // while the accuracy test scores it corrupts the measurement — and a
-    // paused tracker must not learn from a cursor it isn't driving.
-    if (!mainWindow || mainWindow.isDestroyed() || !rendererReady || modalInteractive || paused) {
-      return;
-    }
-    const point = screen.getCursorScreenPoint();
-    const now = Date.now();
-    if (!Number.isFinite(last.x) || Math.hypot(point.x - last.x, point.y - last.y) > 8) {
-      last = { x: point.x, y: point.y };
-      movedAt = now;
-      emitted = false;
-      return;
-    }
-    if (emitted || now - movedAt < 700) {
-      return;
-    }
-    const xNorm = (point.x - bounds.x) / bounds.width;
-    const yNorm = (point.y - bounds.y) / bounds.height;
-    if (xNorm < 0 || xNorm > 1 || yNorm < 0 || yNorm > 1) {
-      return;
-    }
-    emitted = true;
-    sendToRenderer({ type: "cursor_idle", x_norm: xNorm, y_norm: yNorm }, { updateStore: false });
-  }, 100);
-}
-
 function createWindow() {
   const args = cliArgs();
   const runtime = resolveRuntime(args);
@@ -1120,7 +1085,6 @@ function createWindow() {
     mainWindow.setContentProtection(true);
   }
   applyPassiveOverlayMode();
-  startCursorIdlePoll(bounds);
   console.log(
     `Overlay display ${rendererConfig.displayIndex + 1}/${displays.length}: x=${bounds.x}, y=${bounds.y}, width=${bounds.width}, height=${bounds.height}`
   );
@@ -1517,10 +1481,6 @@ app.on("window-all-closed", () => {
     return;
   }
   lipClickController?.releaseNow();
-  if (cursorIdlePoll) {
-    clearInterval(cursorIdlePoll);
-    cursorIdlePoll = null;
-  }
   stopExternalApi();
   app.quit();
 });
@@ -1540,10 +1500,6 @@ app.on("child-process-gone", (_event, details) => {
 
 app.on("before-quit", () => {
   lipClickController?.releaseNow();
-  if (cursorIdlePoll) {
-    clearInterval(cursorIdlePoll);
-    cursorIdlePoll = null;
-  }
   stopExternalApi();
   if (trayLabelPoll) {
     clearInterval(trayLabelPoll);

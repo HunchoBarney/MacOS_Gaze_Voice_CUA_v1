@@ -70,7 +70,7 @@ export function loadConfig(env: Record<string, unknown>): Config {
         jev: number("JEV_PER_MINUTE", 120),
       },
       installDailyCents: number("INSTALL_DAILY_CENTS", 100),
-      globalDailyCents: number("GLOBAL_DAILY_CENTS", 2_000),
+      globalDailyCents: number("GLOBAL_DAILY_CENTS", 500),
       registrationsPerIPPerDay: number("REGISTRATIONS_PER_IP_PER_DAY", 5),
       registrationsPerDay: number("REGISTRATIONS_PER_DAY", 500),
     },

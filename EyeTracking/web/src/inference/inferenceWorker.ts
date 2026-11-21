@@ -210,7 +210,6 @@ function pursuitDwellMs(t: number, pos: [number, number]): number {
   return t - first;
 }
 const PURSUIT_SETTLE_MS = 280;
-let lastPursuitCountEmit = 0;
 
 // On a dropped frame the marker should hold at the last stable pose rather
 // than freeze-and-expire; hold emits carry the reason for diagnostics. After
@@ -450,7 +449,6 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     pursuitActive = true;
     pursuitTargetHistory.length = 0;
     pursuitLastMsgAt = 0;
-    lastPursuitCountEmit = 0;
   } else if (message.type === "pursuit_target") {
     pursuitTargetHistory.push({ at: message.at, pos: [message.x, message.y] });
     pursuitLastMsgAt = performance.now();
@@ -466,7 +464,6 @@ async function handleMessage(message: MainToWorkerMessage): Promise<void> {
     pursuitMode = "capture";
     pursuitTargetHistory.length = 0;
     pursuitLastMsgAt = 0;
-    lastPursuitCountEmit = 0;
     calibration?.abortPursuit();
   } else if (message.type === "implicit_sample") {
     handleImplicitSample(message.x_norm, message.y_norm, message.kind ?? "cursor_rest");
@@ -562,7 +559,6 @@ async function initialize(nextConfig: WebInferenceConfig): Promise<void> {
   pursuitMode = "capture";
   pursuitTargetHistory.length = 0;
   pursuitLastMsgAt = 0;
-  lastPursuitCountEmit = 0;
   // A fresh init is a new demotion episode — cancel any pending re-promotion
   // and re-arm the attempt budget.
   if (repromotionTimer !== null) {
@@ -1224,11 +1220,15 @@ async function processFrameMessage(message: Extract<MainToWorkerMessage, { type:
           calibration.captureVerifyError(feature, label);
         } else {
           calibration.capturePursuit(feature, label);
-          if (sampleAt - lastPursuitCountEmit > 500) {
-            emit({ type: "calibration", status: "pursuit_sampled", count: calibration.samples.length });
-            lastPursuitCountEmit = sampleAt;
-          }
         }
+        // Every labelled frame reports: the point run parks each target until
+        // its share of frames has arrived, so it paces itself on this count.
+        emit({
+          type: "calibration",
+          status: "pursuit_sampled",
+          mode: pursuitMode,
+          count: pursuitMode === "verify" ? calibration.verifyCount : calibration.samples.length
+        });
       }
     }
     const corrected = calibration.applyFeature(feature);

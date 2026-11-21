@@ -62,7 +62,7 @@ final class WritingByInstruction {
          localTranscript: @escaping () async -> String? = { nil },
          insert: @escaping (String) async throws -> Void = { try await DictationDelivery().deliverVerbatim($0) },
          readField: @escaping () async -> Field? = { WritingByInstruction.focusedField() },
-         referent: @escaping (TimeInterval?) async -> Referent? = { _ in WritingByInstruction.focusedReferent() },
+         referent: @escaping (TimeInterval?) async -> Referent? = { await WritingByInstruction.deicticReferent(wordTime: $0) },
          compose: @escaping (Referent) async throws -> String,
          send: @escaping (Draft) async -> String,
          show: @escaping ([String]) -> Void = { _ in },
@@ -256,8 +256,44 @@ final class WritingByInstruction {
                      pid: pid)
     }
 
-    /// Until L6's DeicticResolver lands: the selected text, else the
-    /// focused element's own text when it isn't the field being typed in.
+    /// "This" for a reply: what L6's resolver names at word time (gaze, then
+    /// selection, focus or pointer), read as the element's text or else its
+    /// label. A text field is where the reply goes, never what it answers,
+    /// so one (unless text is selected in it) and "which one?" fall back to
+    /// the selected or focused text.
+    static func deicticReferent(
+        wordTime: TimeInterval?,
+        resolve: (TimeInterval) async -> DeicticResolution = { await DeicticResolver.shared.resolve(wordTime: $0) },
+        read: @escaping @Sendable (DeicticReferent) -> String? = { WritingByInstruction.elementText($0) },
+        fallback: @escaping @Sendable () -> Referent? = { WritingByInstruction.focusedReferent() }
+    ) async -> Referent? {
+        let resolution = await resolve(wordTime ?? ProcessInfo.processInfo.systemUptime)
+        if case .resolved(let found) = resolution,
+           found.source == .selection || !inputRoles.contains(found.role) {
+            let text = (await Task.detached { read(found) }.value ?? found.label)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                return Referent(text: String(text.prefix(4_000)), appName: found.appName,
+                                windowTitle: found.windowTitle)
+            }
+        }
+        return await Task.detached { fallback() }.value
+    }
+
+    private static let inputRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
+
+    /// The referent's own text through Accessibility; gaze referents carry
+    /// no live element, so their label stands.
+    nonisolated static func elementText(_ referent: DeicticReferent) -> String? {
+        guard let element = referent.element?.element else { return nil }
+        let text = [kAXSelectedTextAttribute, kAXValueAttribute]
+            .lazy.compactMap { attribute(element, $0) as? String }
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return text
+    }
+
+    /// The selected text, else the focused element's own text when it
+    /// isn't the field being typed in.
     nonisolated static func focusedReferent() -> Referent? {
         guard let field = focusedField() else { return nil }
         let text = [field.selectedText, field.editable ? nil : field.value]
