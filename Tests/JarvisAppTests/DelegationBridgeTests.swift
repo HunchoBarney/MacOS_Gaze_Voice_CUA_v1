@@ -190,6 +190,12 @@ final class DelegationBridgeTests: XCTestCase {
         XCTAssertEqual(spine.requests.map(\.text), ["type never mind"])
     }
 
+    func testTakeBackWordsAfterAWritingLeadInAreStillTyped() async throws {
+        try await replay([started(), said("type this", 100, 400), delegation("del_1", at: 500),
+                          said("never mind", 450, 900)].joined(separator: "\n"))
+        XCTAssertEqual(spine.requests.map(\.text), ["type this never mind"])
+    }
+
     func testWordsLaterThanTheLagWaitGoToTheNextRequest() async throws {
         try await replay([started(), delegation("del_1", at: 1000)].joined(separator: "\n"))
         XCTAssertTrue(spine.requests.isEmpty)

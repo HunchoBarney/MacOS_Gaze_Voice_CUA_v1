@@ -305,10 +305,12 @@ final class DelegationBridge {
     }
 
     /// Whether a fragment is the text of a "type …" request that had none
-    /// yet. Once the text has been said, a take-back fragment is a stop.
+    /// yet, by the fast lane's parser or writing's lead-ins ("type this").
+    /// Once the text has been said, a take-back fragment is a stop.
     private static func isTypedText(_ fragment: String, after before: String) -> Bool {
-        (typedLiteral(before) ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-            && typedLiteral(before + " " + fragment) != nil
+        let after = before + " " + fragment
+        return ((typedLiteral(before) ?? "").trimmingCharacters(in: .whitespaces).isEmpty && typedLiteral(after) != nil)
+            || (WritingInstruction.literal(in: before) == nil && WritingInstruction.literal(in: after) != nil)
     }
 
     private static let deicticWords: Set<String> = ["this", "that", "these", "those", "here", "it"]
