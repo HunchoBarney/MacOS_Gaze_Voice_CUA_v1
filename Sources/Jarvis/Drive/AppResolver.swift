@@ -17,6 +17,7 @@ actor AppResolver {
     private var running: (at: Date, apps: [App])?
     private let listApps: () async throws -> [App]
     private let exactBundleApps: ((String) -> [App])?
+    private let installedApp: (String) -> App?
 
     init() {
         self.init(exactBundleApps: { query in
@@ -26,15 +27,23 @@ actor AppResolver {
         })
     }
 
-    init(listApps: @escaping () async throws -> [App]) {
+    /// `installedApp` is the dormant fallback for a name no running app
+    /// matches. It reads LaunchServices and the Applications folders by
+    /// default; tests pass a fixture so the result never depends on what
+    /// this Mac has installed.
+    init(listApps: @escaping () async throws -> [App],
+         installedApp: @escaping (String) -> App? = AppResolver.installedLookup) {
         self.listApps = listApps
         self.exactBundleApps = nil
+        self.installedApp = installedApp
     }
 
     init(exactBundleApps: @escaping (String) -> [App],
-         listApps: @escaping () async throws -> [App]) {
+         listApps: @escaping () async throws -> [App],
+         installedApp: @escaping (String) -> App? = AppResolver.installedLookup) {
         self.listApps = listApps
         self.exactBundleApps = exactBundleApps
+        self.installedApp = installedApp
     }
 
     private static func apps(_ applications: [NSRunningApplication]) -> [App] {
@@ -67,7 +76,7 @@ actor AppResolver {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             })
         }
-        if let dormant = bundleLookup(q) { return (dormant, [dormant]) }
+        if let dormant = installedApp(q) { return (dormant, [dormant]) }
         return (App(name: q), [])
     }
 
@@ -95,7 +104,7 @@ actor AppResolver {
     }
 
     /// Installed-but-not-running lookup by display name or bundle id.
-    private func bundleLookup(_ query: String) -> App? {
+    static func installedLookup(_ query: String) -> App? {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: query),
            let bundle = Bundle(url: url) {
             return App(name: bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? query,

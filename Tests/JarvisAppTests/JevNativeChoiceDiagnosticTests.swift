@@ -172,7 +172,7 @@ final class JevNativeChoiceDiagnosticTests: XCTestCase {
         let choose = JevChooser.make(model: client.model) { state, questions in
             try await capture.infer(state, questions)
         }
-        let loop = DriveLoop(call: { tool, arguments in
+        let loop = DriveLoop.inert(call: { tool, arguments in
             switch tool {
             case "list_apps":
                 return try XCTUnwrap(input["apps"])

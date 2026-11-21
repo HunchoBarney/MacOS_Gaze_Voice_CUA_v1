@@ -516,7 +516,7 @@ final class FastLaneTests: XCTestCase {
             .object(["activated": .bool(true),
                      "exact_window_effect": .object(["verified": .bool(true)])])
         ]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "open Notes"), session: "t")
         XCTAssertEqual(result.status, .done)
@@ -532,10 +532,10 @@ final class FastLaneTests: XCTestCase {
         driver.responses["bring_to_front"] = [.object([
             "activated": .bool(true), "exact_window_effect": .object(["verified": .bool(true)])
         ])]
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("canonical open needs no model"); return nil },
             ask: nil, granted: { true },
-            resolver: AppResolver(listApps: {
+            resolver: AppResolver.fixture(listApps: {
                 [AppResolver.App(name: "Calculator", bundle: "com.apple.calculator", pid: 42)]
             }))
         let task = await VoiceTaskCoordinator.voiceTaskSpec("show Calculator", app: "com.apple.calculator")
@@ -548,7 +548,7 @@ final class FastLaneTests: XCTestCase {
 
     func testCapturedAppCannotBeReplacedByFreshAliasMatch() async {
         var mutations: [String] = []
-        let loop = DriveLoop(call: { tool, _ in
+        let loop = DriveLoop.inert(call: { tool, _ in
             if tool == "list_apps" {
                 return .object(["apps": .array([.object([
                     "name": .string("Google Chrome"),
@@ -558,7 +558,7 @@ final class FastLaneTests: XCTestCase {
             if tool != "list_windows" { mutations.append(tool) }
             return self.windows([7])
         }, choose: { _, _ in XCTFail("missing captured app must not reach a model"); return nil },
-        ask: nil, granted: { true }, resolver: AppResolver(listApps: { [] }),
+        ask: nil, granted: { true }, resolver: AppResolver.fixture(listApps: { [] }),
         appIsHidden: { _ in false }, activateRestoredApp: { _, _ in mutations.append("host_reopen") })
         for goal in ["show Chrome", "focus Chrome", "bring Google to the front"] {
             let task = await VoiceTaskCoordinator.voiceTaskSpec(goal, app: "fixture.captured.chrome")
@@ -573,7 +573,7 @@ final class FastLaneTests: XCTestCase {
 
     func testForegroundOpenActivatesBeforeWindowEnumeration() async {
         var activated = false
-        let loop = DriveLoop(call: { tool, _ in
+        let loop = DriveLoop.inert(call: { tool, _ in
             switch tool {
             case "list_windows": return self.windows(activated ? [7] : [])
             case "bring_to_front":
@@ -582,7 +582,7 @@ final class FastLaneTests: XCTestCase {
             default: return .object([:])
             }
         }, choose: { _, _ in XCTFail("foreground open needs no model"); return nil },
-        ask: nil, granted: { true }, resolver: AppResolver(listApps: {
+        ask: nil, granted: { true }, resolver: AppResolver.fixture(listApps: {
             [AppResolver.App(name: "Calculator", bundle: "com.apple.calculator", pid: 42)]
         }), appIsHidden: { _ in false }, activateRestoredApp: { _, bundle in
             XCTAssertEqual(bundle, "com.apple.calculator"); activated = true
@@ -601,9 +601,9 @@ final class FastLaneTests: XCTestCase {
         driver.responses["bring_to_front"] = [.object([
             "activated": .bool(true), "exact_window_effect": .object(["verified": .bool(true)])
         ])]
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in nil }, ask: nil, granted: { true },
-            resolver: AppResolver(listApps: {
+            resolver: AppResolver.fixture(listApps: {
                 [AppResolver.App(name: "Calculator", bundle: "com.apple.calculator", pid: 42)]
             }))
         let result = await loop.run(DriveTask(goal: "show Calculator",
@@ -621,7 +621,7 @@ final class FastLaneTests: XCTestCase {
         var activationCount = 0
         var calls: [String] = []
         let stages = LockedBox<[String]>([])
-        let loop = DriveLoop(call: { tool, _ in
+        let loop = DriveLoop.inert(call: { tool, _ in
             calls.append(tool)
             switch tool {
             case "list_apps":
@@ -661,7 +661,7 @@ final class FastLaneTests: XCTestCase {
 
     func testHiddenRaiseRefusesWhenUnhideFails() async {
         var calls: [String] = []
-        let loop = DriveLoop(call: { tool, _ in
+        let loop = DriveLoop.inert(call: { tool, _ in
             calls.append(tool)
             return tool == "list_apps"
                 ? self.apps([self.appRow("Calculator", "com.apple.calculator", pid: 42)])
@@ -679,7 +679,7 @@ final class FastLaneTests: XCTestCase {
 
     func testPinnedHiddenRaiseDoesNotUnhideAnotherWindow() async {
         var unhideCount = 0
-        let loop = DriveLoop(call: { tool, _ in
+        let loop = DriveLoop.inert(call: { tool, _ in
             switch tool {
             case "list_apps":
                 return self.apps([self.appRow("Calculator", "com.apple.calculator", pid: 42)])
@@ -705,7 +705,7 @@ final class FastLaneTests: XCTestCase {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Calculator", "com.apple.calculator", pid: 42)])]
         driver.responses["list_windows"] = [windows([7]), windows([7])]
-        let loop = DriveLoop(call: { tool, args in
+        let loop = DriveLoop.inert(call: { tool, args in
             if tool == "bring_to_front" {
                 driver.calls.append((tool, args))
                 throw CuaUncertainOutcome(tool: tool, result: .object(["effect": .string("unknown")]))
@@ -725,7 +725,7 @@ final class FastLaneTests: XCTestCase {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Calculator", "com.apple.calculator", pid: 42)])]
         driver.responses["list_windows"] = [windows([7])]
-        let loop = DriveLoop(call: { tool, args in
+        let loop = DriveLoop.inert(call: { tool, args in
             if tool == "bring_to_front" {
                 driver.calls.append((tool, args))
                 throw CuaUncertainOutcome(tool: tool, result: .object(["effect": .string("unknown")]))
@@ -750,7 +750,7 @@ final class FastLaneTests: XCTestCase {
                 : .object(["window_id": .number(7), "is_on_screen": .bool(true)])
             driver.responses["list_windows"] = [windows([7])] + Array(
                 repeating: .object(["windows": .array([row])]), count: 12)
-            let loop = DriveLoop(call: { tool, args in
+            let loop = DriveLoop.inert(call: { tool, args in
                 if tool == "bring_to_front" {
                     driver.calls.append((tool, args))
                     throw CuaUncertainOutcome(tool: tool, result: .object([:]))
@@ -787,9 +787,9 @@ final class FastLaneTests: XCTestCase {
             .object(["activated": .bool(true),
                      "exact_window_effect": .object(["verified": .bool(true)])])
         ]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
-                             resolver: AppResolver(listApps: { [] }),
+                             resolver: AppResolver.fixture(listApps: { [] }),
                              activateApp: { _ in })
         let result = await loop.run(DriveTask(goal: "open Notes"), session: "t")
         XCTAssertEqual(result.status, .done)
@@ -813,7 +813,7 @@ final class FastLaneTests: XCTestCase {
         ]
         driver.responses["list_windows"] = Array(
             repeating: .object(["windows": .array([])]), count: 20)
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              activateApp: { _ in })
         let result = await loop.run(DriveTask(goal: "open Notes"), session: "t")
@@ -828,7 +828,7 @@ final class FastLaneTests: XCTestCase {
         driver.responses["list_apps"] = [apps([appRow("Notes", "com.apple.Notes", pid: 42)])]
         driver.responses["list_windows"] = Array(
             repeating: .object(["windows": .array([])]), count: 30)
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              activateApp: { _ in })
         let result = await loop.run(DriveTask(goal: "bring Notes to the front"),
@@ -843,7 +843,7 @@ final class FastLaneTests: XCTestCase {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Notes", "com.apple.Notes", pid: 42)])]
         var asked: [DriveLoop.Ask] = []
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil },
                              ask: { ask in asked.append(ask); return "no" },
                              granted: { false })
@@ -863,7 +863,7 @@ final class FastLaneTests: XCTestCase {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([appRow("Notes", "com.apple.Notes", pid: 99999)])]
         var asked: [DriveLoop.Ask] = []
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil },
                              ask: { ask in asked.append(ask); return "no" },
                              granted: { true })
@@ -879,7 +879,7 @@ final class FastLaneTests: XCTestCase {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([])]
         var posted: [MediaKeys.Key] = []
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              postMediaKey: { key in posted.append(key); return true })
         let result = await loop.run(DriveTask(goal: "pause"), session: "t")
@@ -906,8 +906,10 @@ final class FastLaneTests: XCTestCase {
                          "selected": .bool(i == 0)])
             })])
         }
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
-                             choose: { _, _ in nil }, ask: nil, granted: { true })
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
+                             choose: { _, _ in nil }, ask: nil, granted: { true },
+                             resolver: .fixture(running: [.init(name: "Google Chrome",
+                                                                bundle: "com.google.Chrome", pid: 7)]))
         let result = await loop.run(DriveTask(goal: "new tab", application: "com.google.Chrome", pid: 7, windowID: 3),
                                     session: "t")
         XCTAssertEqual(result.status, .done)

@@ -158,7 +158,7 @@ final class GazeRefusalStateTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -180,7 +180,7 @@ final class GazeRefusalStateTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -211,7 +211,7 @@ final class GazeRefusalStateTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -234,7 +234,7 @@ final class GazeRefusalStateTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -258,7 +258,7 @@ final class GazeRefusalStateTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "pause tracking"), session: "t")
         guard case .blocked(let reason) = result.status else {
@@ -289,7 +289,7 @@ final class GazeRefusalStateTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "pause tracking"), session: "t")
         guard case .blocked(let reason) = result.status else {
@@ -310,7 +310,7 @@ final class GazeRefusalStateTests: XCTestCase {
             .object(["windows": .array([
                 windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                           x: 0, y: 0, w: 800, h: 600)])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable },
                              frontmostBundleID: { "com.apple.Notes" })
@@ -337,7 +337,7 @@ final class GazeRefusalStateTests: XCTestCase {
             .object(["windows": .array([
                 windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                           x: 0, y: 0, w: 800, h: 600)])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(1800, 900), // outside the one window
                              frontmostBundleID: { "com.apple.Notes" })
@@ -358,7 +358,7 @@ final class GazeRefusalStateTests: XCTestCase {
             .object(["windows": .array([
                 windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                           x: 0, y: 0, w: 800, h: 600)])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable },
                              frontmostBundleID: { "com.apple.Notes" })
