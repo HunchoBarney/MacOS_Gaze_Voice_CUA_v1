@@ -177,17 +177,20 @@ struct IslandButton: View {
     var title: String
     var key: String?
     var primary: Bool
+    /// The bigger-labels comfort setting (1 to 2); 1 is batch 1's size.
+    var scale: CGFloat = 1
     var body: some View {
-        HStack(spacing: 7) {
-            Text(title).font(.system(size: 13.5, weight: .semibold))
+        HStack(spacing: 7 * scale) {
+            Text(title).font(.system(size: 13.5 * scale, weight: .semibold))
             if let key {
-                Text(key).font(.system(size: 11, weight: .semibold, design: .rounded))
+                Text(key).font(.system(size: 11 * scale, weight: .semibold, design: .rounded))
                     .opacity(0.5)
             }
         }
         .foregroundStyle(primary ? Color.black : Color.white)
-        .padding(.horizontal, 14)
-        .frame(height: 30)
+        .padding(.horizontal, 14 * scale)
+        .frame(height: 30 * scale)
+        .fixedSize()
         .background(primary ? Color.white : Color.white.opacity(0.14), in: Capsule())
     }
 }
