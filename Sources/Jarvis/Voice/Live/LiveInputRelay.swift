@@ -29,8 +29,8 @@ final class LiveInputRelay: @unchecked Sendable {
     let sampleRate: Double
     /// How much of the ring before the wake moment to keep.
     let lead: Double
-    /// Beyond this lag the capture is abandoned and the user is asked to
-    /// say it again; nothing is lost silently.
+    /// Beyond this lag the backlog is dropped and the user is asked to say
+    /// it again; nothing is lost silently, and what they say next still plays.
     let maxBehind: Double
 
     private struct State {
@@ -64,7 +64,6 @@ final class LiveInputRelay: @unchecked Sendable {
                 state.queue.append(contentsOf: samples)
                 if Double(state.queue.count - state.head) / sampleRate > maxBehind {
                     state.overflowed = true
-                    state.capturing = false
                     state.queue = []
                     state.head = 0
                 }

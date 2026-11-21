@@ -8,8 +8,9 @@ final class LiveVoiceTests: XCTestCase {
         let relay = LiveInputRelay(sampleRate: 1000)
         var onInput: (@Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void)?
         var starts = 0, stops = 0
+        var tappedAtStop: [Bool] = []
         func start() throws { starts += 1 }
-        func stop() { stops += 1 }
+        func stop() { stops += 1; tappedAtStop.append(onInput != nil) }
     }
 
     private final class FakeWakeWord: WakeWordDetecting, @unchecked Sendable {
@@ -192,6 +193,8 @@ final class LiveVoiceTests: XCTestCase {
         voice.disarm()
         XCTAssertFalse(voice.armed)
         XCTAssertEqual(microphone.stops, 1)
+        XCTAssertEqual(microphone.tappedAtStop, [true], "The engine stops before its tap is cleared, so the audio thread never reads a torn closure")
+        XCTAssertNil(microphone.onInput)
         try await waitUntil { transports[0].sent.contains("session.close") }
         wakeWord.heard?(1)
         XCTAssertEqual(transports.count, 1)

@@ -95,8 +95,8 @@ final class LiveVoice {
         armed = false
         apply(listening.handle(.pause, at: now()))
         wakeWord.stop()
-        microphone.onInput = nil
         microphone.stop()
+        microphone.onInput = nil
         _ = listening.handle(.resume, at: now())
     }
 
