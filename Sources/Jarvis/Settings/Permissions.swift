@@ -13,7 +13,7 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
     // needed. The other three cover the rest of what the app touches:
     // Camera feeds the eye tracker (spawned children inherit this app's
     // TCC identity), Screen Recording covers the tracker's display reads
-    // and computer-use screenshots, Accessibility drives Fn and input.
+    // and computer-use screenshots, Accessibility drives input.
     static let allCases: [Permission] = [.microphone, .camera, .screenRecording, .accessibility]
 
     var id: String { rawValue }
@@ -170,6 +170,10 @@ final class PermissionStatusMonitor {
 /// granted the app that launched the tests. A live test opts in with
 /// JARVIS_LIVE_MIC=1.
 enum MicrophoneTestGuard {
-    static let blocksRealMicrophone = NSClassFromString("XCTestCase") != nil
-        && ProcessInfo.processInfo.environment["JARVIS_LIVE_MIC"] != "1"
+    static let blocksRealMicrophone = runningTests(hasXCTest: NSClassFromString("XCTestCase") != nil,
+                                                   environment: ProcessInfo.processInfo.environment)
+
+    static func runningTests(hasXCTest: Bool, environment: [String: String]) -> Bool {
+        hasXCTest && environment["JARVIS_LIVE_MIC"] != "1"
+    }
 }

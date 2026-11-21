@@ -12,12 +12,7 @@ import JarvisCore
 ///       execute under the app's TCC identity — real launches, real windows,
 ///       real raises.
 ///
-///   JARVIS_LIVE_INPUT=1 — posts synthetic Fn `flagsChanged` events through
-///       the session event tap a real `FnInputMonitor` installs. The test
-///       host needs Accessibility/Input Monitoring. This exercises the
-///       physical Fn path end to end minus the microphone.
-///
-/// Neither flag proves the mic/ASR hop — that's hardware. Everything else
+/// The flag doesn't prove the mic/ASR hop — that's hardware. Everything else
 /// in the voice hot path is real.
 final class LiveWorkflowTests: XCTestCase {
 
@@ -236,49 +231,6 @@ final class LiveWorkflowTests: XCTestCase {
         print("RESULT: \(result.status) in \(Int(Date().timeIntervalSince(started) * 1000))ms reason=\(result.blockedReason ?? "-")")
         XCTAssertLessThan(Date().timeIntervalSince(started), 20,
                           "a bare search must settle in seconds, not minutes")
-    }
-
-    /// Synthetic Fn through the REAL tap: posts flagsChanged events to the
-    /// HID tap, which every session tap (including ours) observes. This is
-    /// the physical "press and release Fn" the reducer can't prove alone.
-    @MainActor
-    func testLiveSyntheticFnDrivesCapture() async throws {
-        guard env["JARVIS_LIVE_INPUT"] == "1" else {
-            throw XCTSkip("set JARVIS_LIVE_INPUT=1 with the test host in Accessibility")
-        }
-        let monitor = FnInputMonitor()
-        monitor.canBegin = { true }
-        let began = expectation(description: "Fn down begins capture")
-        let finished = expectation(description: "Fn up finishes capture")
-        var actions: [FnInputState.Action] = []
-        monitor.onAction = { action in
-            actions.append(action)
-            if action == .begin { began.fulfill() }
-            if action == .finish { finished.fulfill() }
-        }
-        monitor.start()
-        defer { monitor.stop() }
-
-        // A beat for the tap to install before events fly.
-        try await Task.sleep(for: .milliseconds(300))
-
-        guard let source = CGEventSource(stateID: .hidSystemState) else {
-            return XCTFail("no HID event source — Accessibility missing?")
-        }
-        // Fn press: the session tap reads flagsChanged(key=63, fn=true).
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 63, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 63, keyDown: false) else {
-            return XCTFail("could not construct Fn events")
-        }
-        down.flags = .maskSecondaryFn
-        down.post(tap: .cghidEventTap)
-        try await Task.sleep(for: .milliseconds(250))
-        up.flags = []
-        up.post(tap: .cghidEventTap)
-
-        await fulfillment(of: [began, finished], timeout: 4)
-        XCTAssertEqual(actions.prefix(2), [.begin, .finish],
-                       "synthetic Fn should drive the same begin/finish as a physical press")
     }
 
     /// The `wc:` lane end-to-end on Calculator: host-side AX reads the

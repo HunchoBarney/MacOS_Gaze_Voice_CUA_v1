@@ -125,11 +125,12 @@ private final class FakeDesk {
             stageManager: { self.stageManager })
     }
 
-    func loop(apps: [AppResolver.App] = [], front: Int? = nil,
+    func loop(apps: [AppResolver.App] = [], installed: [AppResolver.App] = [], front: Int? = nil,
               frontBundle: String? = nil) -> DriveLoop {
-        DriveLoop(call: { t, a in try self.call(t, a) },
+        DriveLoop.inert(call: { t, a in try self.call(t, a) },
                   choose: { _, _ in nil }, ask: nil, granted: { true },
-                  resolver: AppResolver(exactBundleApps: { _ in [] }, listApps: { apps }),
+                  resolver: AppResolver.fixture(exactBundleApps: { _ in [] }, listApps: { apps },
+                                                installed: installed),
                   activateApp: { pid in
                       self.steps.append("activate \(pid)")
                       self.onActivate(self, pid)
@@ -281,9 +282,10 @@ final class LostWindowLocateTests: XCTestCase {
     private let normal = CGRect(x: 100, y: 100, width: 800, height: 600)
 
     private func run(_ desk: FakeDesk, _ goal: String, apps: [AppResolver.App] = [],
-                     front: Int? = nil) async -> DriveResult {
+                     installed: [AppResolver.App] = [], front: Int? = nil) async -> DriveResult {
         await withDisplay {
-            await desk.loop(apps: apps, front: front).run(DriveTask(goal: goal), session: "t")
+            await desk.loop(apps: apps, installed: installed, front: front)
+                .run(DriveTask(goal: goal), session: "t")
         }
     }
 
@@ -402,15 +404,16 @@ final class LostWindowLocateTests: XCTestCase {
         XCTAssertEqual(desk.steps.first, "reopen 42")
     }
 
-    /// TextEdit ships in /System/Applications on every Mac, so the resolver
-    /// finds it installed and not running without anything launching.
+    /// TextEdit is installed and not running, so the resolver finds it
+    /// without anything launching.
     func testQuitAppIsOpenedAgain() async {
         let desk = FakeDesk()
         desk.onLaunch = { desk, _ in
             desk.windows.append(.init(id: 12, pid: 77, app: "TextEdit", title: "Untitled", frame: CGRect(x: 100, y: 100, width: 800, height: 600)))
             return 77
         }
-        let result = await run(desk, "where did textedit go")
+        let result = await run(desk, "where did textedit go",
+                               installed: [.init(name: "TextEdit", bundle: "com.apple.TextEdit")])
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(said(result), "TextEdit had closed. I've opened it again.")
         XCTAssertEqual(desk.steps.first, "launch com.apple.TextEdit")
@@ -500,7 +503,7 @@ final class LostWindowLocateTests: XCTestCase {
         defer { DriveLoop.pointerLocation = old }
         DriveLoop.pointerLocation = { CGPoint(x: 500, y: 300) }
         let shown = LockedBox<[CGRect]>([])
-        let loop = DriveLoop(call: { _, _ in .object([:]) }, choose: { _, _ in nil }, ask: nil, granted: { true },
+        let loop = DriveLoop.inert(call: { _, _ in .object([:]) }, choose: { _, _ in nil }, ask: nil, granted: { true },
                              overlayDispatch: { verb, targets, _ in
                                  if verb == .highlight { shown.set(shown.value + targets.map(\.frame)) }
                                  return DriveResult(status: .done)

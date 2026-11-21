@@ -142,22 +142,18 @@ final class VoiceTaskContractTests: XCTestCase {
         actor Log { var events: [String] = []
             func mark(_ e: String) { events.append(e) } }
         let log = Log()
-        async let first: Void = {
-            await lease.acquire()
-            await log.mark("a-in")
-            try? await Task.sleep(for: .milliseconds(80))
-            await log.mark("a-out")
-            await lease.release()
-        }()
-        // Let A win the race deterministically before B queues.
-        try? await Task.sleep(for: .milliseconds(20))
+        await lease.acquire()
+        await log.mark("a-in")
         async let second: Void = {
             await lease.acquire()
             await log.mark("b-in")
             await log.mark("b-out")
             await lease.release()
         }()
-        _ = await (first, second)
+        while await lease.queuedCount == 0, !(await log.events).contains("b-in") { await Task.yield() }
+        await log.mark("a-out")
+        await lease.release()
+        await second
         let events = await log.events
         XCTAssertEqual(events, ["a-in", "a-out", "b-in", "b-out"])
     }

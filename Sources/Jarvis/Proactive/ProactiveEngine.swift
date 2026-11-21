@@ -14,6 +14,8 @@ final class ProactiveEngine: ObservableObject {
     /// How long Jarvis takes an answer after it finishes speaking.
     static let replyWindow: TimeInterval = 8
     static let digestLimit = 50
+    /// Items read per "what's up" or "what did I miss".
+    static let readLimit = 5
 
     enum ReplyOutcome: Equatable {
         /// No alert was waiting for an answer.
@@ -110,21 +112,26 @@ final class ProactiveEngine: ObservableObject {
         }
     }
 
-    /// "What's up?": the glow items, then the badge clears.
+    /// "What's up?": the glow items, up to `readLimit` at a time. Only the
+    /// items read leave the badge, so asking again reads the rest.
     func whatsUp() -> String {
-        let items = glow
-        glow = []
+        let items = Array(glow.prefix(Self.readLimit))
+        glow.removeFirst(items.count)
         guard !items.isEmpty else { return "Nothing new." }
-        return Self.list(items, lead: items.count == 1 ? "One thing" : "\(Self.count(items.count)) things")
+        let total = items.count + glow.count
+        return Self.list(items, lead: total == 1 ? "One thing" : "\(Self.count(total)) things", left: glow.count)
     }
 
-    /// "What did I miss?": everything saved for later and on the glow.
+    /// "What did I miss?": what was saved for later, then the glow, up to
+    /// `readLimit` at a time. Only the items read are removed.
     func whatDidIMiss() -> String {
-        let items = digest + glow
-        digest = []
-        glow = []
+        let saved = Array(digest.prefix(Self.readLimit))
+        digest.removeFirst(saved.count)
+        let glowing = Array(glow.prefix(Self.readLimit - saved.count))
+        glow.removeFirst(glowing.count)
+        let items = saved + glowing
         guard !items.isEmpty else { return "You haven't missed anything." }
-        return Self.list(items, lead: "While you were busy")
+        return Self.list(items, lead: "While you were busy", left: digest.count + glow.count)
     }
 
     func dismissCard() {
@@ -209,10 +216,9 @@ final class ProactiveEngine: ObservableObject {
         return "Heads up: \(joined). Want the details?"
     }
 
-    private static func list(_ items: [ProactiveAlert], lead: String) -> String {
-        let shown = items.prefix(5).map(\.headline)
-        var text = "\(lead): " + shown.joined(separator: "; ") + "."
-        if items.count > shown.count { text += " And \(items.count - shown.count) more." }
+    private static func list(_ items: [ProactiveAlert], lead: String, left: Int) -> String {
+        var text = "\(lead): " + items.map(\.headline).joined(separator: "; ") + "."
+        if left > 0 { text += " \(left) more. Ask again to hear them." }
         return text
     }
 

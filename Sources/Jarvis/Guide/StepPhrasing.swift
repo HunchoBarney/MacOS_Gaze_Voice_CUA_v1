@@ -174,6 +174,7 @@ enum StepPhrasing {
         case .call: return "starts a call"
         case .account: return "changes your account"
         case .permission: return "gives an app new access to your Mac"
+        case .restart: return "restarts or shuts down your Mac"
         case .unnamed: return nil
         }
     }

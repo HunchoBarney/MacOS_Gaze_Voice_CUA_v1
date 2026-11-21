@@ -30,6 +30,27 @@ export interface Usage {
   top: { installID: string; cents: number }[];
 }
 
+export interface Tier {
+  liveMinutes: number | null;
+  tasks: number | null;
+  priceUSD: number;
+}
+
+export interface Plans {
+  tiers: Record<string, Tier>;
+  defaultTier: string;
+}
+
+export interface LiveStatus {
+  tier: string;
+  period: string;
+  periodEnds: string;
+  liveSeconds: number;
+  liveSecondsLimit: number | null;
+  tasksLimit: number | null;
+  capped: boolean;
+}
+
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS installs (
     id TEXT PRIMARY KEY,
@@ -52,6 +73,22 @@ export const SCHEMA = [
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS install_tiers (
+    install_id TEXT PRIMARY KEY,
+    tier TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS live_usage (
+    install_id TEXT NOT NULL,
+    period TEXT NOT NULL,
+    seconds REAL NOT NULL,
+    PRIMARY KEY (install_id, period)
+  )`,
+  `CREATE TABLE IF NOT EXISTS live_sessions (
+    session_id TEXT PRIMARY KEY,
+    seconds REAL NOT NULL,
+    cents REAL NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
 ];
 
 const DAY = 86_400_000;
@@ -66,14 +103,21 @@ export const PAUSED: Denial = {
 
 const untilTomorrow = (now: number) => Math.ceil((DAY - (now % DAY)) / 1000);
 const utcDay = (now: number) => new Date(now).toISOString().slice(0, 10);
+/** The metering period: the UTC calendar month, such as "2026-11". */
+export const utcPeriod = (now: number) => new Date(now).toISOString().slice(0, 7);
+const periodEnds = (now: number) => {
+  const date = new Date(now);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1)).toISOString();
+};
 
 /**
- * The service's state: installs, per-minute counters, daily spend and the
- * kill switch. Every method is synchronous, so inside one Durable Object
- * each call is atomic and two requests can't both take the last slot.
+ * The service's state: installs, per-minute counters, daily spend, tiers,
+ * monthly Live usage and the kill switch. Every method is synchronous, so
+ * inside one Durable Object each call is atomic and two requests can't both
+ * take the last slot.
  */
 export class Ledger {
-  constructor(private readonly sql: Sql) {
+  constructor(private readonly sql: Sql, private readonly plans: Plans) {
     for (const statement of SCHEMA) sql.all(statement);
   }
 
@@ -99,16 +143,10 @@ export class Ledger {
    * spend past a cap. The caller settles the difference with `charge`.
    */
   admit(input: { tokenHash: string; route: Route; reserveCents: number; limits: Limits; now: number }): { installID: string } | Denial {
-    const { tokenHash, route, reserveCents, limits, now } = input;
-    if (this.paused()) return PAUSED;
-    const install = this.sql.all<{ id: string; revoked_at: number | null }>(
-      "SELECT id, revoked_at FROM installs WHERE token_hash = ?", tokenHash)[0];
-    if (!install) {
-      return { status: 401, code: "unknown_install", message: "This install isn't registered." };
-    }
-    if (install.revoked_at !== null) {
-      return { status: 403, code: "revoked", message: "This Mac's access to Jarvis's service was turned off." };
-    }
+    const { route, reserveCents, limits, now } = input;
+    const found = this.lookup(input);
+    if ("status" in found) return found;
+    const install = { id: found.installID };
     const day = utcDay(now);
     const overCap = (scope: string, cap: number) => {
       const spent = this.spent(scope, day);
@@ -140,6 +178,77 @@ export class Ledger {
     }
     this.charge({ installID: install.id, cents: reserveCents, now });
     return { installID: install.id };
+  }
+
+  /** Finds a registered, unrevoked install by its token's hash, without charging or counting. */
+  lookup(input: { tokenHash: string }): { installID: string } | Denial {
+    if (this.paused()) return PAUSED;
+    const install = this.sql.all<{ id: string; revoked_at: number | null }>(
+      "SELECT id, revoked_at FROM installs WHERE token_hash = ?", input.tokenHash)[0];
+    if (!install) {
+      return { status: 401, code: "unknown_install", message: "This install isn't registered." };
+    }
+    if (install.revoked_at !== null) {
+      return { status: 403, code: "revoked", message: "This Mac's access to Jarvis's service was turned off." };
+    }
+    return { installID: install.id };
+  }
+
+  /** Puts an install on a tier; false for an unknown install. The caller checks the tier exists. */
+  setTier(input: { installID: string; tier: string }): boolean {
+    if (this.sql.all("SELECT id FROM installs WHERE id = ?", input.installID).length === 0) return false;
+    this.sql.all(
+      "INSERT INTO install_tiers (install_id, tier) VALUES (?, ?) ON CONFLICT (install_id) DO UPDATE SET tier = excluded.tier",
+      input.installID, input.tier);
+    return true;
+  }
+
+  /**
+   * Records a metered Live session's totals so far, in weighted seconds and
+   * cents. Only the increase since the session's last report is added to the
+   * install's usage for the month and to the day's spend, so a replayed
+   * report counts once.
+   */
+  addLiveUsage(input: { installID: string; sessionID: string; weightedSeconds: number; cents: number; now: number }): {
+    used: number; limit: number | null; capped: boolean;
+  } {
+    const { installID, sessionID, now } = input;
+    const prior = this.sql.all<{ seconds: number; cents: number }>(
+      "SELECT seconds, cents FROM live_sessions WHERE session_id = ?", sessionID)[0] ?? { seconds: 0, cents: 0 };
+    const total = (value: number, before: number) => (Number.isFinite(value) ? Math.max(value, before) : before);
+    const seconds = total(input.weightedSeconds, prior.seconds);
+    const cents = total(input.cents, prior.cents);
+    this.sql.all("DELETE FROM live_sessions WHERE updated_at < ?", now - 7 * DAY);
+    this.sql.all(
+      "INSERT INTO live_sessions (session_id, seconds, cents, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (session_id) DO UPDATE SET seconds = excluded.seconds, cents = excluded.cents, updated_at = excluded.updated_at",
+      sessionID, seconds, cents, now);
+    if (seconds > prior.seconds) {
+      this.sql.all(
+        "INSERT INTO live_usage (install_id, period, seconds) VALUES (?, ?, ?) ON CONFLICT (install_id, period) DO UPDATE SET seconds = seconds + excluded.seconds",
+        installID, utcPeriod(now), seconds - prior.seconds);
+    }
+    this.charge({ installID, cents: cents - prior.cents, now });
+    const status = this.liveStatus(installID, now);
+    return { used: status.liveSeconds, limit: status.liveSecondsLimit, capped: status.capped };
+  }
+
+  liveStatus(installID: string, now: number): LiveStatus {
+    const stored = this.sql.all<{ tier: string }>("SELECT tier FROM install_tiers WHERE install_id = ?", installID)[0]?.tier;
+    const name = stored !== undefined && Object.hasOwn(this.plans.tiers, stored) ? stored : this.plans.defaultTier;
+    const tier = this.plans.tiers[name];
+    const period = utcPeriod(now);
+    const used = this.sql.all<{ seconds: number }>(
+      "SELECT seconds FROM live_usage WHERE install_id = ? AND period = ?", installID, period)[0]?.seconds ?? 0;
+    const limit = tier.liveMinutes === null ? null : tier.liveMinutes * 60;
+    return {
+      tier: name,
+      period,
+      periodEnds: periodEnds(now),
+      liveSeconds: used,
+      liveSecondsLimit: limit,
+      tasksLimit: tier.tasks,
+      capped: limit !== null && used >= limit,
+    };
   }
 
   /** Adds `cents` to the install's and the global spend for the day; negative refunds. */
@@ -202,6 +311,6 @@ export class Ledger {
 
 /** How the app reaches a Ledger: a Durable Object stub in production, a local one in tests. */
 export type LedgerClient = {
-  [K in "register" | "admit" | "charge" | "setPaused" | "setRevoked" | "usage"]:
+  [K in "register" | "admit" | "charge" | "setPaused" | "setRevoked" | "usage" | "lookup" | "setTier" | "addLiveUsage" | "liveStatus"]:
     (...args: Parameters<Ledger[K]>) => Promise<ReturnType<Ledger[K]>>;
 };

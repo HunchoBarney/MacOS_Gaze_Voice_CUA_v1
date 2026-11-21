@@ -147,6 +147,42 @@ final class GuideModeTests: XCTestCase {
                        .consequential(.send, label: "Send", undoSend: true))
     }
 
+    func testGuideUndoWithNothingOfferedPressesNothing() {
+        var machine = GuideMachine(step: step(), at: 100)
+        let heard = machine.heard(.undo, previous: nil, slow: false, at: 101)
+        XCTAssertNil(heard.transition)
+        XCTAssertEqual(says(heard.effects), ["There's nothing to undo yet."])
+    }
+
+    func testGuideUndoRunsOnce() {
+        var machine = GuideMachine(step: step(), at: 100)
+        _ = machine.judged(.consequential(.delete, label: "Delete", undoSend: false), at: 101)
+        XCTAssertEqual(machine.heard(.undo, previous: nil, slow: false, at: 102).transition, .press(.undo))
+        let again = machine.heard(.undo, previous: nil, slow: false, at: 103)
+        XCTAssertNil(again.transition, "a second undo would take back something the person did")
+        XCTAssertEqual(says(again.effects), ["There's nothing to undo yet."])
+    }
+
+    func testGuideUndoThatChangedNothingSaysSo() {
+        var machine = GuideMachine(step: step(), at: 100)
+        _ = machine.judged(.consequential(.delete, label: "Delete", undoSend: false), at: 101)
+        _ = machine.heard(.undo, previous: nil, slow: false, at: 102)
+        XCTAssertEqual(says(machine.pressed(.undo, before: scene(), after: scene(), baseline: scene(), at: 103)),
+                       ["I pressed Undo, but I couldn't see anything change."])
+        XCTAssertEqual(says(machine.pressed(.undo, before: scene(), after: nil, baseline: scene(), at: 104)),
+                       ["I pressed Undo, but I couldn't see anything change."],
+                       "an unreadable scene is no evidence the undo took")
+    }
+
+    func testGuideSendWordingFollowsUndoSend() {
+        var machine = GuideMachine(step: step(), at: 100)
+        XCTAssertEqual(says(machine.judged(.consequential(.send, label: "Send", undoSend: true), at: 101).effects),
+                       ["That sent it. It can still be taken back: say \u{201C}undo\u{201D} and I'll press Undo Send."])
+        var plain = GuideMachine(step: step(), at: 100)
+        XCTAssertEqual(says(plain.judged(.consequential(.send, label: "Send", undoSend: false), at: 101).effects),
+                       ["That pressed Send, so it may have gone. Say \u{201C}undo\u{201D} and I'll try to take it back."])
+    }
+
     func testGoingSomewhereNewOnPurposeReplans() {
         let photos = scene([GuideElement(role: "AXButton", label: "Library")], pid: 77, windowID: 9, app: "Photos")
         let verdict = judge(click(GuideElement(role: "AXButton", label: "Library",
@@ -392,7 +428,7 @@ final class GuideModeTests: XCTestCase {
 
     private func showLoop(_ driver: Driver, session: GuideSession) -> DriveLoop {
         var picks = ["e3", "done", "done"]
-        return DriveLoop(call: { tool, args in driver.call(tool, args) },
+        return DriveLoop.inert(call: { tool, args in driver.call(tool, args) },
                          choose: { _, _ in picks.isEmpty ? nil : DriveLoop.JevChoice(id: picks.removeFirst()) },
                          ask: nil, granted: { true },
                          windowControlButtons: { _ in [] }, windowControlPress: { _, _ in false },

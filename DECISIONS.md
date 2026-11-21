@@ -2,6 +2,109 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Ask rarely, offer undo (KAR-69)
+
+- A consequential press Jarvis chose itself no longer asks first when the
+  app can take it back: Move to Trash in Finder, Delete and Archive in
+  Mail, Delete in Notes, TextEdit, Pages, Numbers and Keynote, and Send in
+  Mail inside its Undo Send delay. Jarvis presses, then says what it did
+  and "Say undo to bring it back"; the offer stands for 10 s from when it
+  is spoken (Mail: never past its delay, less 3 s), once per task.
+- Undo is the app's own ⌘Z menu item, read over Accessibility by its key
+  equivalent before and after the press (Apple platform API, no new
+  dependency). An offer stands only when the press changed that item, and
+  a spoken "undo" invokes that exact item in that app, and refuses if the
+  app shows anything else since.
+- Mail's delay is read from `UndoSendDelayTime` in the `com.apple.mail`
+  domain, a name taken from Mail's binary. It fails closed: a send asks
+  unless Mail has written that key with at least 7 s (4 s of offer after
+  3 s to say it). Mail's shipped default, with no key written, still asks.
+- Update Now, Upgrade Now, Restart Now, Install and Restart, Restart and
+  Shut Down are a `.restart` consequence. Nothing takes a restart back,
+  so Jarvis always asks when it chose the press, and the person's words
+  cover it only as "click Restart". "Format" is no longer a delete phrase
+  (Format Disk stays on the never list), and a "show me how" or "how do I"
+  goal covers no press.
+- Known limit: Mail's undo item reads only "Undo Delete". If the person
+  deletes another message inside the window, a spoken "undo" reverses
+  their newer delete; Accessibility can't tell the two apart.
+- Still asking: Pay, Call, Allow and other permission prompts, account
+  changes, unnamed presses, permanent or wholesale deletes, sends outside
+  Mail, and any press with nobody to hear the offer. The never list and the
+  password refusal run before any of this and are unchanged.
+- Not physically verified yet: the AX titles each app shows, and invoking
+  Undo by menu path in a background app.
+
+## 2026-11-21 — The gaze ring lights only a control the tracker can resolve (JARA-55)
+
+- Main's ring stays the one gaze highlight, and it takes a control only when
+  the error band can single it out: σ at most 1.5× the control's larger
+  side, no bigger than 320×200 pt, never a window or container (group,
+  table, list, scroll area). Past that, nothing highlights; there is still
+  no permanently drawn gaze pointer (KAR-75). A press glow (Jarvis pressing
+  a named control) is not a gaze guess and skips the gate, and dwell never
+  fires on a target the ring refused.
+- A cursor parked on a control weighs ×2.5 up to σ 40 pt; above that its
+  log-bonus scales by (40/σ)², the rate gaze evidence itself thins out. A
+  tie that includes the highlighted control holds for the 0.2 s consensus
+  window and then releases it. The listening-start halo is gone, and the
+  gaze ring stands down whenever the answer or guide halo shows.
+- New gaze visuals (orb, glow, calibration look) moved to JARA-57's UI Lab.
+  Evaluated during this work and rejected: libraries.dev ThinkingOrbsKit (MIT,
+  14ae9d2; filled fixed-size loader redrawn every frame) and metasidd/Orb
+  0.2 (MIT, a48fc33; filled orb with endless blurs and particles).
+
+## 2026-11-21 — Every visible surface lives in the UI gallery
+
+- The owner asked for one page that shows every visible component on its
+  own and together. `make gallery` renders each surface offscreen from
+  fixture state, in every state, light and dark, with Reduce Motion off and
+  on, plus combined desktop scenes. `make gallery-deploy` publishes the
+  site to Cloudflare Pages (project `jarvis-ui-gallery`). See
+  gallery/README.md.
+- A PR that adds or changes a visible component updates its gallery page
+  in the same PR, redeploys, and links before and after in its body.
+- The native harness hosts the real views through `@testable import`. It
+  copies product code only where the state is private (the menu-bar item
+  and menu), and those replicas cite their lines. No product code changes
+  to make the gallery work.
+- The site's libraries (Motion, cmdk, Lenis, NumberFlow and Sonner, all
+  MIT, plus Paper Shaders under Apache-2.0) are pinned in gallery/site
+  and listed with versions in gallery/site/REUSE.md.
+
+## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
+
+- The owner: "the chimes and noises it makes are super annoying and not
+  good experience". Jarvis is always listening, so it plays no non-speech
+  sound by default. The glow, the indicator and the task row carry
+  success, failure, stalls and questions; speech is heard only where words
+  are needed, and spoken answers and the "Looking…" filler are unchanged.
+- One setting, Settings → Replies → Sounds (`soundsEnabled`), off by
+  default, brings back the Glass and Basso earcons. Installs that had it on
+  are moved to off once (`soundsQuietByDefault`); a later choice sticks.
+- New feedback, Live (L3+) included, follows the same rule: visual first,
+  speech only for words, never a new chime.
+
+## 2026-11-20 — Memory stays on the Mac, in SQLite through GRDB
+
+- Behind `voice.live` (JARA-49 L8). Jarvis remembers people, preferences,
+  things you asked it to remember, and one-line summaries of finished
+  requests (kept 90 days) in one SQLite file,
+  `~/Library/Application Support/Jarvis/Memory/memory.sqlite`. It writes
+  nowhere else, opens the file only on first use, and never syncs it. Raw
+  audio and transcripts are never stored.
+- Open source: GRDB.swift 7.12.0 (MIT), pinned in `Package.swift` and
+  recorded in `ThirdParty/GRDB`, with SQLite's FTS5 for relevance. Our code
+  is the schema, the intents and the Settings screen.
+- Forgetting means gone: `secure_delete` and FTS5 `secure-delete` overwrite
+  deleted text, and Forget Everything rebuilds the index and vacuums the
+  file. Context for a Live session is read fresh on every call, so a deleted
+  memory never reaches a later session.
+- "Remember X", "who's X?" / "what do you remember about X" and "forget
+  that" are answered before a request becomes a task, so they never reach
+  the activity log. A bare "who's X?" with no memory goes on to the rest of
+  Jarvis.
+
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
 - "Type this …" takes the exact span after the lead-in ("type this",
@@ -241,7 +344,8 @@ Settled choices, newest first. Change one only with a new entry here.
 - Limits live in one SQLite-backed Durable Object, so checks and charges are
   strongly consistent; KV is eventually consistent and can't hold a limit.
   Per install: requests per minute per route and estimated spend per UTC
-  day ($1 default). Global: $20 a day, new installs per network and per day,
+  day ($1 default). Global: $5 a day (lowered from $20 when the repository
+  went public), new installs per network and per day,
   a `PAUSED` variable and an admin pause, and per-install revoke.
 - Open source: Hono 4.13.19 (MIT) for routing, Wrangler 4.165.0 (MIT or
   Apache-2.0) to run and deploy. Our code is the ledger and the proxy rules.
@@ -291,6 +395,45 @@ Settled choices, newest first. Change one only with a new entry here.
   openWakeWord's pretrained models (CC BY-NC-SA); Picovoice (cost); and
   any hand-built detector.
 - The app grows by 80 MB (68 MB model, 12 MB library).
+
+## 2026-11-20 — GPT-Live runs over LiveKit's WebRTC build (L1, behind voice.live)
+
+- GPT-Live-1.1 sessions use WebRTC (`v1/live/sessions`), the transport
+  OpenAI recommends and the only one billed at the Standby rate. The Mac
+  never holds a key: it sends its SDP offer to the credential Worker's
+  `POST /v1/live/sessions` (#582), which fixes the model, client
+  delegation, no tools, `store: false` and the speech wake policy.
+- libwebrtc comes from LiveKit's build, livekit/webrtc-xcframework
+  150.7871.08 (BSD-3-Clause libwebrtc, Apache-2.0 packaging), pinned in
+  `ThirdParty/WebRTC`. Only its 29 MB macOS framework is fetched.
+- Why not stasel/WebRTC: its macOS build has no custom audio device, and
+  two captures of one microphone failed on the owner's Mac: without voice
+  processing our tap lost up to 3.35 s at a time, and with it WebRTC heard
+  near-silence. LiveKit's AVAudioEngine audio module owns the microphone
+  once, records without a call, and lets Jarvis tap the same engine, which
+  kept our tap continuous before, during and after a call
+  (`ThirdParty/WebRTC/README.md`).
+
+## 2026-11-21 — Live listening states and the one-breath request (L3, behind voice.live)
+
+- One microphone owner: LiveKit's audio engine records from the moment
+  listening is armed. The Vosk wake word hears its input on the Mac, and
+  nothing else opens an input while `voice.live` is on.
+- "Hey Jarvis" opens a Live session. Jarvis closes it 8 s after a wake
+  that brought no request, 90 s after the last turn, on "that's all", or,
+  after "stay with me", 30 minutes after the last turn. Live's own idle
+  timeout (8 s) moves it to Standby in between. The glow shows hearing and
+  thinking, silently.
+- The request said in the same breath reaches Live as audio. The engine's
+  input runs through `LiveInputRelay`: from just before the wake moment it
+  is held until `session.started`, then played into the input track in
+  real time, skipping quiet 10 ms frames while behind, so the connect lag
+  is gone by the first pause. WebRTC forbids `session.input_audio.append`,
+  and with client delegation GPT-Live has no typed user turn
+  (`response.item.create` is Responses-only), so neither faster-than-real
+  time replay nor a transcribed text turn is available. If the capture
+  falls 8 s behind it is dropped and Live asks the user to say it again.
+
 ## 2026-11-20 — CI runs on the owner's Mac
 
 - GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI
@@ -299,6 +442,11 @@ Settled choices, newest first. Change one only with a new entry here.
   PRs and main every 5 minutes, one job at a time, at low priority, and only
   while no other `swift-build`/`swift-test`/`swift-frontend`/`xcodebuild`
   runs. Dependabot PRs run only with the `local-ci` label; fork PRs never run.
+- Local CI tests a PR head merged into current main (`git merge-tree`, never
+  committed) and names that main in the status, so a green PR doesn't need
+  main merged in just to refresh CI. A result stays valid while main's later
+  commits touch none of the PR's non-Markdown files; a conflict posts
+  `error` without a run.
 - nektos/act (MIT) was considered to run `ci.yml` itself. In host mode it
   copies the local directory instead of checking out the head, and
   `setup-node` downloads its own Node, while the job's only real step is

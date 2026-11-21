@@ -17,7 +17,7 @@ enum IndicatorPhase: Equatable {
         default: break
         }
         switch capture {
-        case .starting, .listening, .finishing, .awaitingRelease: return .hearing
+        case .starting, .listening, .finishing: return .hearing
         case .idle, .testingMicrophone, .stopping: break
         }
         if case .error = status { return .problem }
@@ -33,6 +33,11 @@ enum IndicatorPhase: Equatable {
     @MainActor
     static func current(_ controller: VoiceController) -> IndicatorPhase {
         guard !controller.isMicrophoneTest else { return .hidden }
+        switch controller.liveGlow {
+        case .hearing: return .hearing
+        case .thinking: return .working
+        case .hidden: break
+        }
         return resolve(capture: controller.captureState, status: controller.status,
                        conversationTurnOpen: controller.conversationTurnOpen,
                        activeWork: controller.cuaTasks.contains(where: \.active),

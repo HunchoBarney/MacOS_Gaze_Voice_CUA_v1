@@ -10,7 +10,7 @@ final class ConsequenceTests: XCTestCase {
 
     private func makeLoop(ask: DriveLoop.AskFn? = nil, grant: Bool = false,
                           overlay: ((FastAction.OverlayVerb, [(frame: CGRect, label: String)], CGPoint?) async -> DriveResult?)? = nil) -> DriveLoop {
-        DriveLoop(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
+        DriveLoop.inert(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
                   ask: ask, granted: { grant }, overlayDispatch: overlay)
     }
 
@@ -371,6 +371,30 @@ final class ConsequenceTests: XCTestCase {
         try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
                                    denied: [], confirmed: &confirmed)
         XCTAssertEqual(asked, 0)
+    }
+
+    /// Words inside a dictated message are what to write, not what to
+    /// press: "saying send me the photos" names no Send.
+    func testAControlNamedOnlyInsideTheDictatedMessageIsNotCovered() {
+        XCTAssertFalse(Consequence.covers(goal: "reply to Mom saying send me the photos", control: "Send"))
+        XCTAssertFalse(Consequence.covers(goal: "text Dad that says delete the old ones", control: "Delete"))
+        XCTAssertTrue(Consequence.covers(goal: "reply to Mom saying send me the photos and send it", control: "Send"))
+    }
+
+    /// An agent's drive_until goal is model-authored, so its words never
+    /// cover a consequential press: "click Send" written by an agent still
+    /// asks before Send, even with the standing grant.
+    func testAnAgentGoalNeverCoversItsOwnPress() async throws {
+        var asked: [DriveLoop.Ask] = []
+        let loop = DriveLoop(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
+                             ask: { ask in asked.append(ask); return "yes" }, granted: { true },
+                             explicitConsent: false)
+        _ = await loop.run(DriveTask(goal: "click Send"), session: "agent")
+        asked = []
+        var confirmed = false
+        try await loop.consentGate(tool: "click", args: [:], elementText: "Send",
+                                   denied: [], confirmed: &confirmed)
+        XCTAssertEqual(asked, [.confirm(Consequence.send.question(target: "Send"))])
     }
 
     func testSpokenCommandPressesWithoutAsking() async throws {

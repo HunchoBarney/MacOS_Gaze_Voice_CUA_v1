@@ -8,6 +8,9 @@ import JarvisCore
 final class DriveLoopTests: XCTestCase {
     override func setUp() {
         usePrivateStandingGrants()
+        let savedGaze = DriveLoop.gazeEnabled
+        DriveLoop.gazeEnabled = { false }
+        addTeardownBlock { DriveLoop.gazeEnabled = savedGaze }
     }
 
     /// A scripted driver: `responses` maps tool name → ordered results;
@@ -123,7 +126,7 @@ final class DriveLoopTests: XCTestCase {
         // A fresh resurrector per loop — rotations stick for a daemon's
         // lifetime, so sharing the production singleton would leak label
         // state between tests.
-        let loop = DriveLoop(call: call, choose: choose, ask: ask,
+        let loop = DriveLoop.inert(call: call, choose: choose, ask: ask,
                              granted: { grant }, config: config, gaze: gaze,
                              windowControlButtons: windowControlButtons ?? { _ in [] },
                              windowControlPress: windowControlPress ?? { _, _ in false },
@@ -139,9 +142,9 @@ final class DriveLoopTests: XCTestCase {
                                  scopedButtons: @escaping (pid_t, Int) -> [WindowControls.Button] = { _, _ in [] },
                                  scopedPress: @escaping (WindowControls.Kind, pid_t, Int) -> Bool = { _, _, _ in false })
         -> DriveLoop {
-        DriveLoop(call: { try driver.call($0, $1) }, choose: choose,
+        DriveLoop.inert(call: { try driver.call($0, $1) }, choose: choose,
                   ask: nil, granted: { true },
-                  resolver: AppResolver(listApps: {
+                  resolver: AppResolver.fixture(listApps: {
                       [.init(name: "Owned Editor", bundle: "test.owned.editor", pid: 42)]
                   }), config: .init(windowOnly: true), postMediaKey: postMedia,
                   windowControlButtons: { _ in XCTFail("unscoped discovery"); return [] },
@@ -261,7 +264,7 @@ final class DriveLoopTests: XCTestCase {
         driver.snapshotForRound = { _ in
             FakeDriver.snap([FakeDriver.element(3, label: "Continue")])
         }
-        return DriveLoop(call: { tool, args in
+        return DriveLoop.inert(call: { tool, args in
             if tool == "list_windows" {
                 driver.calls.append((tool, args))
                 if let error = driver.errors[tool] { throw error }
@@ -269,7 +272,7 @@ final class DriveLoopTests: XCTestCase {
             }
             return try driver.call(tool, args)
         }, choose: choose, ask: nil, granted: { true },
-        resolver: AppResolver(listApps: {
+        resolver: AppResolver.fixture(listApps: {
             pids.map { .init(name: names[$0] ?? "Owned Editor",
                             bundle: bundles[$0] ?? "test.owned.editor", pid: $0) }
         }), config: .init(windowOnly: windowOnly),
@@ -462,10 +465,10 @@ final class DriveLoopTests: XCTestCase {
         driver.responses["list_windows"] = [.object(["windows": .array([
             .object(["window_id": .number(7), "is_on_screen": .bool(true)]),
         ])])]
-        let loop = DriveLoop(
+        let loop = DriveLoop.inert(
             call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("binding proof must not call inference"); return nil },
-            ask: nil, granted: { true }, resolver: AppResolver(listApps: { [] }),
+            ask: nil, granted: { true }, resolver: AppResolver.fixture(listApps: { [] }),
             activateApp: { _ in XCTFail("binding proof must not activate an app") },
             windowControlButtons: { _ in [] },
             frontmostBundleID: { "test.owned.editor" },
@@ -1054,7 +1057,7 @@ final class DriveLoopTests: XCTestCase {
         driver.responses["list_windows"] = Array(repeating: .object(["windows": .array([
             .object(["window_id": .number(7), "is_on_screen": .bool(true)])
         ])]), count: 2)
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("open scope must not invoke a chooser"); return nil },
             ask: nil, granted: { true }, frontmostPID: { 42 }, frontmostWindowID: { 7 })
         let result = await loop.run(DriveTask(goal: "check something", pid: 42,
@@ -1073,7 +1076,7 @@ final class DriveLoopTests: XCTestCase {
             .object(["window_id": .number(7), "title": .string("Unrelated"),
                      "is_on_screen": .bool(true)])
         ])])]
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("missing named target must not invoke chooser"); return nil },
             ask: nil, granted: { true },
             activateRestoredApp: { _, _ in XCTFail("named window must not reopen whole app") })
@@ -1171,7 +1174,7 @@ final class DriveLoopTests: XCTestCase {
             offered = candidates.map(\.id)
             return .pick("stuck")
         }
-        let loop = DriveLoop(call: call, choose: choose, ask: nil, granted: { true })
+        let loop = DriveLoop.inert(call: call, choose: choose, ask: nil, granted: { true })
         _ = await loop.run(DriveTask(goal: "open the display settings",
                                      pid: 42, windowID: 7), session: "t")
         XCTAssertFalse(offered.isEmpty, "the chooser ran — the goal reached the loop")
@@ -1294,7 +1297,7 @@ final class DriveLoopTests: XCTestCase {
         let choose: DriveLoop.Choose = { _, _ in
             throw JevSelection.Failure.invalidAnswer
         }
-        let loop = DriveLoop(call: call, choose: choose, ask: nil, granted: { true })
+        let loop = DriveLoop.inert(call: call, choose: choose, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "x", pid: 42, windowID: 7),
                                     session: "t")
         guard case .blocked = result.status else {
@@ -1365,7 +1368,7 @@ final class DriveLoopTests: XCTestCase {
             return .pick("stuck")
         }
         // Gaze is already in the native element's global screen-point space.
-        let loop = DriveLoop(call: call, choose: choose, ask: nil,
+        let loop = DriveLoop.inert(call: call, choose: choose, ask: nil,
                              granted: { true },
                              gaze: {
                                  GazeSample(x: 80, y: 20, confidence: 0.9,
@@ -1388,7 +1391,7 @@ final class DriveLoopTests: XCTestCase {
     func testSpokenFastLaneNeedsNoGrant() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { false })
         let result = await loop.run(DriveTask(goal: "lock screen"), session: "t")
         XCTAssertEqual(result.status, .done)
@@ -1402,7 +1405,7 @@ final class DriveLoopTests: XCTestCase {
     func testAgentFastLaneDeclineNeverDispatches() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil },
                              ask: { _ in "no" }, granted: { false },
                              explicitConsent: false)
@@ -1419,7 +1422,7 @@ final class DriveLoopTests: XCTestCase {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
         var asks = 0
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil },
                              ask: { _ in asks += 1; return "yes" }, granted: { false },
                              explicitConsent: false)
@@ -1437,7 +1440,7 @@ final class DriveLoopTests: XCTestCase {
             driver.responses["list_apps"] = [.object(["apps": .array([
                 .object(["name": .string("Notes"),
                          "bundle_id": .string("com.apple.Notes")])])])]
-            let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+            let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                                  choose: { _, _ in nil }, ask: nil,
                                  granted: { grant })
             let result = await loop.run(
@@ -1457,7 +1460,7 @@ final class DriveLoopTests: XCTestCase {
         driver.responses["list_apps"] = [.object(["apps": .array([
             .object(["name": .string("Notes"),
                      "bundle_id": .string("com.apple.Notes")])])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil,
                              granted: { true }, explicitConsent: false)
         let result = await loop.run(
@@ -1472,7 +1475,7 @@ final class DriveLoopTests: XCTestCase {
     /// path a declined confirm means bring_to_front never dispatches.
     func testAgentBringToFrontDeclineNeverDispatches() async {
         let driver = FakeDriver()
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil },
                              ask: { _ in "no" }, granted: { false },
                              explicitConsent: false)
@@ -1493,7 +1496,7 @@ final class DriveLoopTests: XCTestCase {
         let driver = FakeDriver()
         driver.snapshotForRound = { _ in FakeDriver.snap([]) }
         var posted = 0
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in .init(id: "media:volume_up") },
                              ask: { _ in "no" }, granted: { false },
                              postMediaKey: { _ in posted += 1; return true })
@@ -1512,7 +1515,7 @@ final class DriveLoopTests: XCTestCase {
         driver.snapshotForRound = { _ in FakeDriver.snap([]) }
         var pickQueue: [DriveLoop.JevChoice] = [.init(id: "media:volume_up"),
                                               .init(id: "stuck")]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in pickQueue.isEmpty ? nil : pickQueue.removeFirst() },
                              ask: nil, granted: { true },
                              postMediaKey: { _ in false })
@@ -1616,7 +1619,7 @@ final class DriveLoopTests: XCTestCase {
             contexts.append(state["clipboard_or_context"]?.string)
             return pickQueue.isEmpty ? nil : pickQueue.removeFirst()
         }
-        let loop = DriveLoop(call: call, choose: choose, ask: nil,
+        let loop = DriveLoop.inert(call: call, choose: choose, ask: nil,
                              granted: { false })
         _ = await loop.run(DriveTask(goal: "what's on the clipboard",
                                      pid: 42, windowID: 7), session: "t")
@@ -1641,7 +1644,7 @@ final class DriveLoopTests: XCTestCase {
             contexts.append(state["clipboard_or_context"]?.string)
             return pickQueue.isEmpty ? nil : pickQueue.removeFirst()
         }
-        let loop = DriveLoop(call: call, choose: choose, ask: nil,
+        let loop = DriveLoop.inert(call: call, choose: choose, ask: nil,
                              granted: { true })
         _ = await loop.run(DriveTask(goal: "what's on the clipboard",
                                      pid: 42, windowID: 7), session: "t")

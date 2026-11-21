@@ -9,9 +9,9 @@ import JarvisCore
 /// commit-time implicit labels. VoiceTaskCoordinator wires the seams in
 /// `configureGazeService`; tests inject them wholesale.
 ///
-/// Lifecycle deliberately coexists with the Fn hold's pump: the service
-/// owns `GazeStream.shared` while `running`, and the coordinator's
-/// hold-scoped pump reads the same `latest()` — its teardown checks
+/// Lifecycle deliberately coexists with the speech-start pre-observe's
+/// pump: the service owns `GazeStream.shared` while `running`, and the
+/// coordinator's turn-scoped pump reads the same `latest()` — its teardown checks
 /// `running` before stopping the socket.
 @MainActor
 final class GazeService {
@@ -41,9 +41,15 @@ final class GazeService {
     var gazePointSink: (CGPoint) -> Void = { TargetOverlay.shared.ingestGaze($0) }
     /// Scorer transitions → the gaze highlight.
     var eventSink: (IntentEvent) -> Void = { TargetOverlay.shared.intentEvent($0) }
+    /// The σ the scorer uses, on every re-read — the highlight locks only
+    /// onto controls that error band can tell apart.
+    var sigmaSink: (Double) -> Void = { TargetOverlay.shared.gazeSigmaPt = $0 }
     /// Whether the highlight sweeps a dwell countdown — only when dwell
     /// can actually click; otherwise it's a plain look-highlight.
     var dwellProgressSink: (Bool) -> Void = { TargetOverlay.shared.showsDwellProgress = $0 }
+    /// Whether the answer or guide halo is up — the ring stands down
+    /// under it, so dwell has no countdown to show and must not fire.
+    var haloShowing: () -> Bool = { TargetOverlay.shared.haloArmed }
     /// Feed health → stale-dim; while the feed is stale it carries the
     /// live outage duration (seconds since the last fresh sample) on
     /// every tick, so duration-keyed thresholds actually fire; a 0
@@ -66,6 +72,12 @@ final class GazeService {
     var noteOut: (String) -> Void = { _ in }
     /// Monotonic clock — tests drive ticks deterministically.
     var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// The one wall clock behind sample freshness, the scorer's evidence
+    /// and commits, and referent recency — tests step it with `now`.
+    var wallClock: () -> Date = { Date() }
+    /// False leaves the pump to `tickForTest()`, so a test advances the
+    /// service one tick at a time on its own clocks.
+    var pumpsAutomatically = true
 
     /// The dwell policy — loaded once from defaults; `reloadPolicy()`
     /// re-reads after a mode flip or exemptions change.
@@ -79,6 +91,9 @@ final class GazeService {
     private var interactionLabels: InteractionLabels?
     /// Last σ re-read — the learning report changes as the map learns.
     private var sigmaReadAt: TimeInterval = -.greatestFiniteMagnitude
+    /// The σ last handed to the highlight — dwell fires only on a target
+    /// the highlight could lock onto, so it never clicks unannounced.
+    private var sigmaPt = GazeErrorBand.minimumSigmaPt
     static let sigmaRefreshInterval: TimeInterval = 5
 
     private var pump: Task<Void, Never>?
@@ -168,7 +183,7 @@ final class GazeService {
             interaction.start()
             interactionLabels = interaction
         }
-        guard pump == nil else { return }
+        guard pumpsAutomatically, pump == nil else { return }
         pump = Task { @MainActor [weak self] in
             var seen = 0
             while let self, !Task.isCancelled, self.running {
@@ -178,7 +193,7 @@ final class GazeService {
         }
     }
 
-    /// The service, not its callers, owns teardown — the Fn pump and
+    /// The service, not its callers, owns teardown — the pre-observe pump and
     /// voice tasks read `latest()`, they never hold the socket.
     func stop() {
         running = false
@@ -218,11 +233,18 @@ final class GazeService {
 
     // MARK: - One tick
 
+    /// One pump step, in place of the real pump's sample-or-66 ms beat.
+    func tickForTest() async {
+        guard running else { return }
+        await tick()
+    }
+
     private func tick() async {
         let t = now()
         if t - sigmaReadAt >= Self.sigmaRefreshInterval {
             sigmaReadAt = t
-            await scorer.refreshMeasuredSigma()
+            sigmaPt = await scorer.refreshMeasuredSigma()
+            sigmaSink(sigmaPt)
         }
         // A dropped socket reconnects on a budgeted cadence — fast while
         // the tracker was recently alive, slow once it's clearly down.
@@ -235,7 +257,7 @@ final class GazeService {
                 await stream.start()
             }
         }
-        if let sample = await stream.latest(), sample.isFresh {
+        if let sample = await stream.latest(), sample.isFresh(at: wallClock()) {
             lastFreshAt = t
             restarts = 0
             reportStale(false)
@@ -249,7 +271,8 @@ final class GazeService {
             let event = await scorer.update(candidates: batch.candidates,
                                             at: point, isSaccade: saccade,
                                             speechHint: speechHint(),
-                                            cursorPoint: cursorPoint())
+                                            cursorPoint: cursorPoint(),
+                                            now: wallClock())
             await handle(event)
             gazePointSink(point)
         } else {
@@ -265,7 +288,8 @@ final class GazeService {
             if let point = lastPoint {
                 let event = await scorer.update(candidates: [], at: point,
                                                 isSaccade: true,
-                                                freshGaze: false)
+                                                freshGaze: false,
+                                                now: wallClock())
                 await handle(event, dwellLive: false)
             }
         }
@@ -320,8 +344,7 @@ final class GazeService {
         // synchronously — the scorer's own reset is async.
         switch event {
         case .acquire(let c), .hold(let c, _): liveCandidate = c
-        case .release, .none: liveCandidate = nil
-        case .ambiguous: break
+        case .release, .none, .ambiguous: liveCandidate = nil
         }
         var referent: GazeReferent?
         if case .hold = event { referent = await scorer.currentReferent }
@@ -350,6 +373,9 @@ final class GazeService {
         }
         switch dwell.advance(event, share: share, policy: dwellPolicy) {
         case .fire(let candidate):
+            // The ring refused this target, so the user never saw it
+            // or its countdown: a click there would come unannounced.
+            guard !haloShowing(), TargetOverlay.canLock(candidate, sigmaPt: sigmaPt) else { return }
             // A suppressed fire is an aborted intent — feed it into the
             // learned-multiplier accounting or suppression would silently
             // tighten nothing and widen nothing.
@@ -389,7 +415,8 @@ final class GazeService {
     func commitTarget(lookBackSec: Double = 0.6,
                       recordSelection: Bool = true) async -> (IntentCandidate, Double)? {
         guard let hit = await scorer.commitTarget(lookBackSec: lookBackSec,
-                                                  recordSelection: recordSelection)
+                                                  recordSelection: recordSelection,
+                                                  now: wallClock())
         else { return nil }
         if recordSelection {
             // The element's centre, never the gaze point inside it — a
@@ -436,7 +463,7 @@ final class GazeService {
         }
         let recent = await scorer.recentReferents
         let fresh = recent.suffix(2).filter {
-            Date().timeIntervalSince($0.at) <= Self.recentReferentTTL
+            wallClock().timeIntervalSince($0.at) <= Self.recentReferentTTL
                 && $0.confidence >= Self.referentShareFloor
         }
         if !fresh.isEmpty {

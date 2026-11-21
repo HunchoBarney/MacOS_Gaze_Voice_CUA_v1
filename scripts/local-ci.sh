@@ -1,9 +1,11 @@
 #!/bin/bash
 # Local CI for Jarvis on the owner's Mac. GitHub Actions is off, so this runs
 # the CI test job (make test) and posts the result as a "local-ci" commit status.
+# It tests a head merged into current origin/main, the tree the PR would land
+# as, and the status on the head names that main.
 #
-#   scripts/local-ci.sh <pr-number|sha|branch>   queue one head; poll tests it in first-seen order
-#   scripts/local-ci.sh poll                     test the untested head that has waited longest (launchd)
+#   scripts/local-ci.sh <pr-number|sha|branch>   queue one head; poll tests requests oldest first
+#   scripts/local-ci.sh poll                     test the oldest request, else an untested open head (launchd)
 #   scripts/local-ci.sh summary <log>            print the counts it would post for a log
 set -uo pipefail
 
@@ -16,7 +18,6 @@ LOCK=$CI_HOME/lock
 LANE_TIMEOUT=${LOCAL_CI_LANE_TIMEOUT:-3600}
 LANE_SH=${LOCAL_CI_LANE:-$HOME/.capy/work/lane/lane.sh}
 TEST_TIMEOUT=${LOCAL_CI_TEST_TIMEOUT:-5400}
-RETRY_ERROR_AFTER=3600
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 GH=${GH:-$(command -v gh || echo "$HOME/.local/bin/gh")}
 
@@ -104,17 +105,19 @@ stop_group() {
     kill -KILL -- "-$1" 2>/dev/null
 }
 
-test_pid=""
+test_pid="" watchdog=""
 on_signal() {
     [ -n "$test_pid" ] && stop_group "$test_pid" 10
+    [ -n "$watchdog" ] && { pkill -P "$watchdog" sleep; kill "$watchdog"; } 2>/dev/null
     [ -n "${sha:-}" ] && post "$sha" error "cancelled on the Mac"
     exit 130
 }
 
-# Runs make test on one commit. The caller holds the lock.
+# Runs make test on one commit merged into current main, without committing
+# the merge. The caller holds the lock.
 run_sha() {
     sha=$1
-    local log=$LOGS/$sha.log short=${1:0:12}
+    local log=$LOGS/$sha.log short=${1:0:12} main tree rc
     mkdir -p "$LOGS"
     : >"$log"
     post "$sha" pending "checking out" || { say "could not post status for $sha"; return 1; }
@@ -125,30 +128,43 @@ run_sha() {
             post "$sha" error "clone failed · log $short.log"; return 1; }
         git -C "$CHECKOUT" config credential.https://github.com.helper "!$GH auth git-credential"
     fi
-    if ! { git -C "$CHECKOUT" fetch --quiet --no-tags origin "$sha" &&
-           git -C "$CHECKOUT" checkout --quiet --force --detach "$sha" &&
+    if ! { git -C "$CHECKOUT" fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main" "$sha" &&
+           git -C "$CHECKOUT" checkout --quiet --force --detach origin/main &&
            git -C "$CHECKOUT" clean -ffdxq -e .build -e node_modules; } >>"$log" 2>&1; then
         post "$sha" error "checkout failed · log $short.log"; return 1
     fi
+    main=$(git -C "$CHECKOUT" rev-parse --short=7 origin/main)
+    tree=$(git -C "$CHECKOUT" merge-tree --write-tree origin/main "$sha" 2>>"$log"); rc=$?
+    if [ "$rc" -eq 1 ]; then
+        say "$sha conflicts with main $main" | tee -a "$log"
+        git -C "$CHECKOUT" merge-tree --write-tree --name-only origin/main "$sha" 2>&1 | sed '1d' >>"$log"
+        post "$sha" error "conflicts with main $main"
+        return 1
+    fi
+    if [ "$rc" -ne 0 ] || ! git -C "$CHECKOUT" read-tree -u --reset "$tree" >>"$log" 2>&1; then
+        post "$sha" error "could not merge into main $main · log $short.log"; return 1
+    fi
+    say "testing $sha merged into main $main (tree $tree)" | tee -a "$log"
 
-    # Captain gate (2026-11-20): a head without #598's Keychain test guard
+    # Captain gate (2026-11-20): a tree without #598's Keychain test guard
     # would raise Keychain dialogs on the owner's screen. Refuse to test it.
-    if ! git -C "$CHECKOUT" grep -q JARVIS_LIVE_KEYCHAIN HEAD -- Sources; then
-        say "no Keychain test guard at $sha" | tee -a "$log"
-        post "$sha" error "merge main first: head lacks the #598 Keychain test guard"
+    if ! git -C "$CHECKOUT" grep -q JARVIS_LIVE_KEYCHAIN "$tree" -- Sources; then
+        say "no Keychain test guard in $sha merged into main $main" | tee -a "$log"
+        post "$sha" error "the merge with main $main lacks the #598 Keychain test guard"
         return 1
     fi
 
     if [ ! -x "$LANE_SH" ]; then
         say "no build lane at $LANE_SH" | tee -a "$log"
         post "$sha" error "no build lane at $LANE_SH; will retry"
+        requeue "$sha"
         return 1
     fi
     # The build lane serves local CI ahead of every normal job, in this
     # checkout rather than the lane's mirror.
     post "$sha" pending "queued in the build lane for make test"
     say "make test at $sha" | tee -a "$log"
-    local start=$SECONDS rc
+    local start=$SECONDS
     set -m
     (cd "$CHECKOUT" && LANE_PRIORITY=high LANE_NO_MIRROR=1 JARVIS_LANE_TIMEOUT=$LANE_TIMEOUT \
         exec nice -n 10 "$LANE_SH" make test) >>"$log" 2>&1 &
@@ -156,7 +172,7 @@ run_sha() {
     set +m
     rm -f "$CI_HOME/timed-out"
     (sleep $((LANE_TIMEOUT + TEST_TIMEOUT)) && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
-    local watchdog=$!
+    watchdog=$!
     wait "$test_pid"; rc=$?
     test_pid=""
     if [ -e "$CI_HOME/timed-out" ]; then
@@ -164,10 +180,12 @@ run_sha() {
     else
         pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
     fi
+    watchdog=""
     local minutes=$(((SECONDS - start + 59) / 60)) counts
     if grep -aq '^lane: gave up after' "$log"; then
         say "the build lane did not free up in $LANE_TIMEOUT s" | tee -a "$log"
         post "$sha" error "build lane busy for $((LANE_TIMEOUT / 60)) min; will retry"
+        requeue "$sha"
         return 1
     fi
     counts=$(summary "$log")
@@ -175,74 +193,105 @@ run_sha() {
         say "make test exited 0 but the log has no complete swift and vitest count" | tee -a "$log"
         rc=1 counts="no complete test count in the log"
     fi
-    say "make test exited $rc after $minutes min: $counts" | tee -a "$log"
+    say "make test exited $rc after $minutes min on main $main: $counts" | tee -a "$log"
     if [ "$rc" -eq 0 ]; then
-        post "$sha" success "${counts:-make test passed} · ${minutes} min"
+        post "$sha" success "success on main $main · ${counts:-make test passed} · ${minutes} min"
     elif [ -e "$CI_HOME/timed-out" ]; then
-        post "$sha" failure "timed out after $minutes min · log $short.log"
+        post "$sha" failure "timed out on main $main after $minutes min · log $short.log"
     else
-        post "$sha" failure "make test failed${counts:+ · $counts} · log $short.log"
+        post "$sha" failure "failed on main $main${counts:+ · $counts} · log $short.log"
     fi
     return "$rc"
 }
 
 # Open same-repository PRs (Dependabot only with the local-ci label) and main:
-# "<timestamp> <sha> <label>".
+# "<timestamp> <sha> <label> <draft>".
 candidates() {
     "$GH" pr list -R "$REPO" --state open --limit 100 \
-        --json number,headRefOid,updatedAt,author,labels,isCrossRepository \
+        --json number,headRefOid,updatedAt,author,labels,isCrossRepository,isDraft \
         --jq '.[] | select(.isCrossRepository | not)
               | select((.author.login | test("dependabot") | not) or any(.labels[]; .name == "local-ci"))
-              | "\(.updatedAt) \(.headRefOid) pr#\(.number)"'
-    "$GH" api "repos/$REPO/commits/main" --jq '"\(.commit.committer.date) \(.sha) main"'
+              | "\(.updatedAt) \(.headRefOid) pr#\(.number) \(.isDraft)"'
+    "$GH" api "repos/$REPO/commits/main" --jq '"\(.commit.committer.date) \(.sha) main false"'
 }
 
-# Heads queued by hand: "<timestamp> <sha> requested".
+# Queues a head again after a failure that says it will retry.
+requeue() {
+    mkdir -p "$CI_HOME/requested" && date -u +%Y-%m-%dT%H:%M:%SZ >"$CI_HOME/requested/$1"
+}
+
+# Heads queued by hand, oldest request first: "<requested at> <sha> <pr>".
+# The PR is the one the head belonged to when it was requested, if known.
 requested() {
-    local f
+    local f at pr
     for f in "$CI_HOME"/requested/*; do
-        [ -f "$f" ] && echo "$(cat "$f") ${f##*/} requested"
-    done
+        [ -f "$f" ] || continue
+        read -r at pr <"$f"
+        echo "$at ${f##*/} $pr"
+    done | sort -k1,1 -k2,2
 }
 
-needs_run() {
-    local state when
-    read -r state when <<<"$(latest_status "$1")"
-    case $state in
-        "" | pending) return 0 ;;
-        error) [ $(($(date +%s) - $(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$when" +%s))) -ge "$RETRY_ERROR_AFTER" ] ;;
-        *) return 1 ;;
-    esac
+# Prints the newer head of the PR a requested head belonged to, if that PR
+# has moved on. Without a recorded PR, a head that is in open PRs but heads
+# none of them has been replaced.
+newer_head() {
+    if [ -n "$2" ]; then
+        "$GH" pr view "$2" -R "$REPO" --json headRefOid,state \
+            --jq "select(.state == \"OPEN\" and .headRefOid != \"$1\") | .headRefOid"
+    else
+        "$GH" api "repos/$REPO/commits/$1/pulls" \
+            --jq "map(select(.state == \"open\")) | select(length > 0 and all(.head.sha != \"$1\")) | .[0].head.sha"
+    fi
 }
 
-# When poll first listed a head, in epoch seconds. Heads are tested oldest
-# first by this, so a busy stream of new pushes can't starve an older one.
+# PR numbers listed one per line in $CI_HOME/held wait for their owner's
+# retest and are never tested unless requested.
+held() {
+    [ "${1#pr#}" != "$1" ] && grep -qx "${1#pr#}" "$CI_HOME/held" 2>/dev/null
+}
+
+# When poll first listed an open head, in epoch seconds. Unrequested heads
+# are tested oldest first by this, so new pushes can't starve an older one.
 first_seen() {
     local f=$CI_HOME/seen/$1
     [ -s "$f" ] || { mkdir -p "$CI_HOME/seen" && date +%s >"$f"; }
     cat "$f"
 }
 
+# Requests come first, oldest request first; a request whose PR has a newer
+# head is dropped untested. Only with no request left does poll test an open
+# head, and only one with no $CONTEXT status that is not a draft or held.
 poll() {
     take_lock || { say "another local-ci job is running"; return 0; }
     trap release_lock EXIT
-    local list seen ts sha label
-    list=$(candidates) || { say "could not list heads"; return 1; }
-    list+=$'\n'$(requested)
+    local list seen ts sha label draft pr newer status
     find "$CI_HOME/seen" "$CI_HOME/requested" -type f -mtime +30 -delete 2>/dev/null
-    while read -r seen ts sha label; do
+    while read -r ts sha pr; do
         [ -n "$sha" ] || continue
-        if needs_run "$sha"; then
-            say "testing $label $sha"
-            rm -f "$CI_HOME/requested/$sha"
-            run_sha "$sha"
-            return
-        fi
         rm -f "$CI_HOME/requested/$sha"
-    done <<<"$(while read -r ts sha label; do
-                   [ -n "$sha" ] && echo "$(first_seen "$sha") $ts $sha $label"
+        newer=$(newer_head "$sha" "$pr")
+        if [ -n "$newer" ]; then
+            say "dropping request $sha: ${pr:+pr#$pr }has a newer head $newer"
+            post "$sha" error "not tested: replaced by newer head ${newer:0:7}"
+            continue
+        fi
+        say "testing requested $sha"
+        run_sha "$sha"
+        return
+    done <<<"$(requested)"
+    list=$(candidates) || { say "could not list heads"; return 1; }
+    while read -r seen ts sha label draft; do
+        [ -n "$sha" ] || continue
+        [ "$draft" = true ] && continue
+        held "$label" && continue
+        status=$(latest_status "$sha") && [ -z "$status" ] || continue
+        say "testing $label $sha"
+        run_sha "$sha"
+        return
+    done <<<"$(while read -r ts sha label draft; do
+                   [ -n "$sha" ] && echo "$(first_seen "$sha") $ts $sha $label $draft"
                done <<<"$list" | sort -k1,1n -k2,2)"
-    say "every head has a $CONTEXT status"
+    say "no requests, and every open head has a $CONTEXT status"
 }
 
 trap on_signal TERM INT HUP
@@ -254,19 +303,16 @@ case ${1:-} in
     *)
         target=$(resolve "$1") && [ -n "$target" ] || { echo "cannot resolve $1" >&2; exit 2; }
         [ "$target" = fork ] && { echo "refusing PR #$1: its head is in a fork" >&2; exit 2; }
-        # Queue it for poll rather than racing other callers for the lock. A
-        # head that already has a result waits from now, not from when it was
-        # first seen, and its pending status makes poll test it again. The
-        # status goes up before the request is recorded, so a poll that lists
-        # the request never sees the old result and drops it untested.
-        read -r state _ <<<"$(latest_status "$target")"
-        post "$target" pending "queued for local CI" || { echo "could not post a status for $target" >&2; exit 1; }
-        case $state in
-            "" | pending) first_seen "$target" >/dev/null ;;
-            *) mkdir -p "$CI_HOME/seen" && date +%s >"$CI_HOME/seen/$target" ;;
+        # Queue it for poll rather than racing other callers for the lock,
+        # with the PR it heads so poll can drop it once that PR moves on.
+        case $1 in
+            [0-9]|[0-9][0-9]|[0-9][0-9][0-9]|[0-9][0-9][0-9][0-9]) pr=$1 ;;
+            *) pr=$("$GH" api "repos/$REPO/commits/$target/pulls" \
+                   --jq "map(select(.state == \"open\" and .head.sha == \"$target\"))[0].number // empty" 2>/dev/null) ;;
         esac
+        post "$target" pending "queued for local CI" || { echo "could not post a status for $target" >&2; exit 1; }
         mkdir -p "$CI_HOME/requested"
-        date -u +%Y-%m-%dT%H:%M:%SZ >"$CI_HOME/requested/$target"
-        say "queued $1 ($target); poll tests heads oldest first, so watch its $CONTEXT status"
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $pr" >"$CI_HOME/requested/$target"
+        say "queued $1 ($target); poll tests requests oldest first, so watch its $CONTEXT status"
         ;;
 esac

@@ -1,7 +1,11 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# development/ holds vendored upstream source (cua-source) that moves only
+# with its pin, so Dependabot ignores every dependency in its manifests,
+# security updates included. Security updates for the app's own manifests
+# (EyeTracking, CredentialService, e2e, spikes) keep working with no config.
+# Security updates take settings only from a block whose directory matches
+# the manifest's exactly, so these list each vendored directory instead of
+# a glob or exclude-paths.
+# https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
 version: 2
 updates:
@@ -9,3 +13,45 @@ updates:
     directory: "/" # GitHub Actions workflows in .github/workflows
     schedule:
       interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directories:
+      - "/development/Jarvis/cua-source"
+      - "/development/Jarvis/cua-source/docs"
+      - "/development/Jarvis/cua-source/libs/cua-driver/examples/jev-use"
+      - "/development/Jarvis/cua-source/libs/cua-driver/typescript"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: "uv"
+    directories:
+      - "/development/Jarvis/cua-source"
+      - "/development/Jarvis/cua-source/libs/cua-driver/examples/jev-use"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: "pip"
+    directories:
+      - "/development/Jarvis/cua-source"
+      - "/development/Jarvis/cua-source/libs/cua-driver/examples/jev-use"
+      - "/development/Jarvis/cua-source/libs/cua-driver/python"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: "cargo"
+    directories:
+      - "/development/Jarvis/cua-source/libs/cua-driver/rust"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
