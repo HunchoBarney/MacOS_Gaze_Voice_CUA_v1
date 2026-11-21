@@ -171,7 +171,7 @@ extension DriveLoop {
         // dictation verbs steer the capture lane. Peeled qualifiers are
         // emphasis, the same as the gaze referents above.
         switch parsed.action.body {
-        case .systemHotkey, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
+        case .systemHotkey, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop, .comfort:
             guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
             else { return .vetoed }
             return .resolved(FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: ""))
@@ -374,6 +374,11 @@ extension DriveLoop {
                     ? "Dictation is on — speak, then say 'stop dictating' to finish."
                     : "Stopped dictating.",
                     task, history, effect: true)
+            case .comfort(let change):
+                feed(action.description)
+                try await gateExplicit("comfort preference", corpus: action.description,
+                                       denied: task.deny, confirmed: &confirmed)
+                return done(await Self.applyComfort(change), task, history, effect: true)
             case .tracker(let verb):
                 feed(action.description)
                 try await gateExplicit("tracker control", corpus: action.description,
@@ -704,7 +709,7 @@ extension DriveLoop {
                                                task: task, session: session, history: &history,
                                                confirmed: &confirmed)
         case .mediaKey, .systemHotkey, .navigateURL, .webSearch, .appControl,
-             .gaze, .tracker, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
+             .gaze, .tracker, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop, .comfort:
             return nil // handled above
         }
     }
@@ -889,6 +894,15 @@ extension DriveLoop {
         try? await focusLeased { self.activateApp(pid) }
         return done(didLaunch ? "Opened \(name)." : "\(name) was already running; brought it forward.",
                     task, history, pid: pid, bundleID: bundle, effect: true)
+    }
+
+    // MARK: - Comfort preferences
+
+    /// Stores a comfort preference in Config and returns what to say. The
+    /// voice lane and the overlay read Config, so the change applies from
+    /// the next reply or label without a restart. Tests replace it.
+    static var applyComfort: @Sendable (ComfortChange) async -> String = { change in
+        await MainActor.run { change.applyToSharedConfig() }
     }
 
     // MARK: - Tracker self-control
@@ -3519,6 +3533,7 @@ extension DriveLoop {
         case .desktop: return "desktop switch"
         case .locatePointer: return "highlight pointer"
         case .dictation: return "dictation"
+        case .comfort: return "comfort preference"
         }
     }
 

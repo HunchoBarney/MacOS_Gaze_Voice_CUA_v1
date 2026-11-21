@@ -46,6 +46,35 @@ final class TargetOverlay {
     static let numberNudge = CGPoint(x: -6, y: -6)
     /// Floored chip side so dwell hit rects never degenerate.
     static let minChipSide: CGFloat = 22
+
+    /// Point sizes of the overlay's labels at the person's label scale
+    /// (`Config.labelScale`), kept inside `LabelScale.range`.
+    struct LabelSizes: Equatable {
+        let number: CGFloat
+        let caption: CGFloat
+        let chipMinimum: CGFloat
+        let chipPadding: CGFloat
+        let chipSide: CGFloat
+        let cheatTitle: CGFloat
+        let cheatLine: CGFloat
+
+        init(scale: Double) {
+            let s = CGFloat(min(max(scale, LabelScale.range.lowerBound), LabelScale.range.upperBound))
+            number = 13 * s
+            caption = 12 * s
+            chipMinimum = 24 * s
+            chipPadding = 9 * s
+            chipSide = TargetOverlay.minChipSide * s
+            cheatTitle = 13 * s
+            cheatLine = 15 * s
+        }
+    }
+
+    /// The person's label scale, mirrored from Config at launch and on every
+    /// change and read each time labels are drawn, so the next set shows it
+    /// without a restart.
+    var labelScale = LabelScale.standard
+    var labelSizes: LabelSizes { LabelSizes(scale: labelScale) }
     static let flashCanvas: CGFloat = 80
     static let flashStart: CGFloat = 8
     static let flashEnd: CGFloat = 36
@@ -443,21 +472,22 @@ final class TargetOverlay {
     private struct TargetChip: View {
         let index: Int
         var caption: String? = nil
+        var sizes = LabelSizes(scale: LabelScale.standard)
         var body: some View {
             HStack(spacing: 5) {
                 if index > 0 {
                     Text("\(index)")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.system(size: sizes.number, weight: .bold, design: .rounded))
                 }
                 if let caption, !caption.isEmpty {
                     Text(caption)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: sizes.caption, weight: .medium))
                         .lineLimit(1)
                 }
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, caption?.isEmpty == false ? 9 : 0)
-            .frame(minWidth: 24, minHeight: 24)
+            .padding(.horizontal, caption?.isEmpty == false ? sizes.chipPadding : 0)
+            .frame(minWidth: sizes.chipMinimum, minHeight: sizes.chipMinimum)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
             .colorScheme(.dark)
@@ -485,12 +515,13 @@ final class TargetOverlay {
         self.onPick = onPick
         self.dismissOnPick = dismissOnPick
         var rects: [(index: Int, rect: CGRect)] = []
+        let sizes = labelSizes
         for (i, spec) in specs.enumerated() {
             let (panel, hosting) = chipPanel(at: i)
-            hosting.rootView = TargetChip(index: spec.index, caption: spec.caption)
+            hosting.rootView = TargetChip(index: spec.index, caption: spec.caption, sizes: sizes)
             let fit = hosting.fittingSize
-            let size = CGSize(width: max(fit.width, Self.minChipSide),
-                              height: max(fit.height, Self.minChipSide))
+            let size = CGSize(width: max(fit.width, sizes.chipSide),
+                              height: max(fit.height, sizes.chipSide))
             let rect = CGRect(x: spec.center.x - size.width / 2,
                               y: spec.center.y - size.height / 2,
                               width: size.width, height: size.height)
@@ -551,12 +582,13 @@ final class TargetOverlay {
     @discardableResult
     func showNames(targets: [(frame: CGRect, label: String)]) -> Int {
         clearChips()
+        let sizes = labelSizes
         for (i, target) in targets.prefix(Self.maxNumberChips).enumerated() {
             let (panel, hosting) = chipPanel(at: i)
-            hosting.rootView = TargetChip(index: 0, caption: target.label)
+            hosting.rootView = TargetChip(index: 0, caption: target.label, sizes: sizes)
             let fit = hosting.fittingSize
-            let size = CGSize(width: max(fit.width, Self.minChipSide),
-                              height: max(fit.height, Self.minChipSide))
+            let size = CGSize(width: max(fit.width, sizes.chipSide),
+                              height: max(fit.height, sizes.chipSide))
             let rect = CGRect(x: target.frame.minX + Self.numberNudge.x,
                               y: target.frame.minY + Self.numberNudge.y - size.height / 2,
                               width: size.width, height: size.height)
@@ -902,12 +934,13 @@ final class TargetOverlay {
     /// Compact "category: phrases" listing for the cheat-sheet panel.
     private struct CheatSheet: View {
         let lines: [String]
+        let sizes: LabelSizes
         var body: some View {
             VStack(alignment: .leading, spacing: 7) {
-                Text("Things you can say").font(.system(size: 13, weight: .semibold))
+                Text("Things you can say").font(.system(size: sizes.cheatTitle, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
                 ForEach(lines.indices, id: \.self) {
-                    Text(lines[$0]).font(.system(size: 15))
+                    Text(lines[$0]).font(.system(size: sizes.cheatLine))
                 }
             }
             .foregroundStyle(.white)
@@ -933,7 +966,7 @@ final class TargetOverlay {
     /// "Type this?" and reply drafts.
     func showSheet(lines: [String]) {
         hideSheet()
-        let hosting = NSHostingView(rootView: CheatSheet(lines: lines))
+        let hosting = NSHostingView(rootView: CheatSheet(lines: lines, sizes: labelSizes))
         let panel = Self.makePanel()
         panel.contentView = hosting
         let size = hosting.fittingSize

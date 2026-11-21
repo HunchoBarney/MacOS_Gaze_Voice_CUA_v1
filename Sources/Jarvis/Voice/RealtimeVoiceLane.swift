@@ -2046,6 +2046,16 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
     }
 
+    /// The person's reply speed and length. A live session gets them as a
+    /// `session.update`, so the next reply uses them; a later connect
+    /// starts with them.
+    func setReplyStyle(_ style: RealtimeVoiceClient.ReplyStyle) {
+        Task { [client] in
+            do { try await client.setReplyStyle(style) }
+            catch { Self.log.notice("reply_style_send_failed error=\(error.localizedDescription, privacy: .public)") }
+        }
+    }
+
     func speakFeedback(_ text: String) {
         quietFiller()
         guard audioRepliesEnabled, !text.isEmpty,
