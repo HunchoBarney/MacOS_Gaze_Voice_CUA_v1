@@ -10,10 +10,11 @@ also get 60 fps frame sequences. The output is the gallery's
 
 Options: `--only id[/state],...` renders a subset and writes
 `manifest.tracker.partial.json` when a full manifest already exists.
-`--no-clips` skips the frame sequences. `--work-dir` sets the build and
-Chrome-profile scratch (default `build/gallery-tracker`, gitignored).
+`--no-clips` skips the frame sequences. `--work-dir` sets the build scratch
+(default `build/gallery-tracker`, gitignored); the Chrome profile is a
+temporary folder deleted at exit.
 `--references` points at JARA-55's renders (default: the captain drive).
-`--chrome` sets the Chrome binary. A full run takes about 5 minutes on an M-series
+Chrome comes from its standard install path only. A full run takes about 5 minutes on an M-series
 MacBook, and it exits non-zero if any state fails to render.
 
 ## How it works

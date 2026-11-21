@@ -26,7 +26,6 @@ function parseArgs(argv) {
     else if (a === "--no-clips") args.clips = false;
     else if (a === "--work-dir") args.workDir = argv[++i];
     else if (a === "--references") args.refs = argv[++i];
-    else if (a === "--chrome") args.chrome = argv[++i];
     else if (a === "--help" || a === "-h") args.help = true;
     else throw new Error("Unknown argument: " + a);
   }
@@ -88,12 +87,13 @@ async function buildRenderer(outDir) {
 }
 
 // ---- Static server for the built renderer (loopback, random port) ----------
-function serve(root) {
+function serve(dir) {
+  const root = path.resolve(dir);
   const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".wasm": "application/wasm", ".json": "application/json" };
   const server = http.createServer((req, res) => {
     const rel = decodeURIComponent(new URL(req.url, "http://x").pathname).replace(/^\/+/, "") || "index.html";
     const file = path.resolve(root, rel);
-    if (!file.startsWith(root) || !existsSync(file)) {
+    if ((file !== root && !file.startsWith(root + path.sep)) || !existsSync(file)) {
       res.writeHead(404).end();
       return;
     }
@@ -104,10 +104,10 @@ function serve(root) {
 }
 
 // ---- Headless Chrome over --remote-debugging-pipe (no network port) --------
-function findChrome(explicit) {
-  const candidates = [explicit, process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
+function findChrome() {
+  const candidates = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"];
   const found = candidates.find((p) => existsSync(p));
-  if (!found) throw new Error("Google Chrome not found; pass --chrome <path>");
+  if (!found) throw new Error("Google Chrome not found at " + candidates.join(", "));
   return found;
 }
 
@@ -194,7 +194,7 @@ function pngSize(buffer) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help || !args.out) {
-    console.log("usage: node gallery/tracker/render.mjs --out <absolute OUT dir> [--only id[/state],...] [--no-clips] [--work-dir dir] [--references dir] [--chrome path]");
+    console.log("usage: node gallery/tracker/render.mjs --out <absolute OUT dir> [--only id[/state],...] [--no-clips] [--work-dir dir] [--references dir]");
     process.exit(args.help ? 0 : 2);
   }
   if (!path.isAbsolute(args.out)) throw new Error("--out must be an absolute path");
@@ -209,8 +209,8 @@ async function main() {
 
   const server = await serve(distDir);
   const base = "http://127.0.0.1:" + server.address().port + "/index.html";
-  const profileDir = mkdtempSync(path.join(args.workDir, "chrome-profile-"));
-  const chrome = launchChrome(findChrome(args.chrome), profileDir, path.join(args.workDir, "chrome.log"));
+  const profileDir = mkdtempSync(path.join(os.tmpdir(), "jarvis-gallery-chrome-"));
+  const chrome = launchChrome(findChrome(), profileDir, path.join(args.workDir, "chrome.log"));
   let failures = [];
   const cleanup = async () => {
     try {
