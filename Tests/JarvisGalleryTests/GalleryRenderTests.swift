@@ -341,6 +341,7 @@ final class GalleryRun {
         }
         let same = Self.difference(real, replica)
         log.append("indicator replica vs real (problem): \(same)")
+        if same != "identical" { failures.append("indicator replica drifted from the real view (problem): \(same)") }
         record({ try writer.still(real, component: "listening-indicator", state: "problem-real", title: "Problem (real view)",
                                   note: "The real ListeningIndicatorView driven by a fixture controller (showSetup). Replica check: \(same).",
                                   scheme: .dark, reduceMotion: false, backdrop: "transparent") }, "indicator real")
@@ -834,6 +835,7 @@ final class GalleryRun {
                                 scheme: .light, size: CGSize(width: 520, height: 440)) {
             let result = Self.difference(real, replica)
             log.append("first run replica vs real (listening): \(result)")
+            if result != "identical" { failures.append("first run replica drifted from the real view (listening): \(result)") }
             record({ try writer.still(windowShot(real, title: "Set up Jarvis", scheme: .light), component: "first-run", state: "listening-real",
                                       title: "How should Jarvis listen? (real view)", note: "The real FirstRunView. Replica check: \(result).",
                                       scheme: .light, reduceMotion: false, backdrop: "window") }, "first run real")
