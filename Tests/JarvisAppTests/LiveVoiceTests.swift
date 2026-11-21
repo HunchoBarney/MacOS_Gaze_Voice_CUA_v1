@@ -147,6 +147,7 @@ final class LiveVoiceTests: XCTestCase {
         wakeWord.heard?(0)
         try await waitUntil { !transports.isEmpty }
         transports[0].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
         transports[0].deliver(heard("What's the capital of Japan?"))
         try await waitUntil { voice.glow == .thinking }
         transports[0].deliver(answer)
@@ -201,6 +202,7 @@ final class LiveVoiceTests: XCTestCase {
         wakeWord.heard?(0)
         try await waitUntil { !transports.isEmpty }
         transports[0].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
         transports[0].deliver(#"{"type":"session.output_transcript.delta","delta":"Tokyo","start_ms":20,"end_ms":30}"#)
         transports[0].deliver(#"{"type":"session.output_transcript.delta","delta":" it is.","start_ms":30,"end_ms":40}"#)
         transports[0].deliver(heard("And France?"))
