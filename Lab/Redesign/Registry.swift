@@ -3,7 +3,7 @@ import SwiftUI
 /// The lab's catalog: every redesigned component, its states and its directions.
 @MainActor
 public enum Redesign {
-    public static var components: [ComponentEntry] { [voice] + highlightComponents + agentComponents + askComponents }
+    public static var components: [ComponentEntry] { [voice] + highlightComponents + agentComponents + askComponents + windowComponents }
 
     public static let voice = ComponentEntry(
         id: "voice-island", title: "Voice surface", batch: 1,
