@@ -105,7 +105,7 @@ enum GuideMotion {
             let on = f.visible && f.step == step && (c.reduceMotion || c.previous == nil || c.local > 0.08 || stepOf(c.previous) == step)
             m.set("t\(step)", on ? 1 : 0, on ? c.fade(.easeOut(0.2)) : c.fade(.easeOut(0.1)))
         }
-        let arrived = f.visible && c.local > 0.3 && c.local < 0.42 && f.phase != .large
+        let arrived = !c.reduceMotion && f.visible && c.local > 0.3 && c.local < 0.42 && f.phase != .large
         m.set("pop", arrived ? 1 : 0, c.reduceMotion ? .snap : .spring(response: 0.28, damping: 0.7))
     }
 

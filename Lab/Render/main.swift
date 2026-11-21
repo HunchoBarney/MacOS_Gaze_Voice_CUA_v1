@@ -336,7 +336,8 @@ func posters(_ options: Options) throws {
 }
 
 /// Reduce Motion check: each direction, one state per component, every
-/// channel settled, rendered at two instants 1 s apart under Reduce Motion.
+/// channel settled, rendered under Reduce Motion 0.37 s into the state (inside
+/// the guide's arrival window), then at two instants 1 s apart.
 /// Anything still moving (a beam travelling its border, an orb turning) makes
 /// the frames differ and the check fail. Writes both frames of a failure to
 /// `out` when given. `rmcheck-control` runs the same frames with motion on, to
@@ -362,26 +363,34 @@ func rmcheck(out: String?, control: Bool = false) -> Bool {
                 stage.scheme = scheme
                 stage.reduceMotion = !control
                 stage.settle(at: index)
-                for _ in 0..<120 { stage.advance(1.0 / 60) }
-                let renderer = ImageRenderer(content: StageView(stage: stage, backdrop: false))
-                renderer.scale = 1
-                guard let a = renderer.cgImage else { continue }
-                for _ in 0..<60 { stage.advance(1.0 / 60) }
-                let fresh = ImageRenderer(content: StageView(stage: stage, backdrop: false))
-                fresh.scale = 1
-                guard let b = fresh.cgImage else { continue }
-                let pa = pixels(a), pb = pixels(b)
-                var changed = 0
-                for i in stride(from: 0, to: min(pa.count, pb.count), by: 4)
-                where abs(Int(pa[i]) - Int(pb[i])) + abs(Int(pa[i + 1]) - Int(pb[i + 1])) + abs(Int(pa[i + 2]) - Int(pb[i + 2])) + abs(Int(pa[i + 3]) - Int(pb[i + 3])) > 8 {
-                    changed += 1
+                func shot() -> CGImage? {
+                    let renderer = ImageRenderer(content: StageView(stage: stage, backdrop: false))
+                    renderer.scale = 1
+                    return renderer.cgImage
                 }
+                for _ in 0..<22 { stage.advance(1.0 / 60) }
+                guard let early = shot() else { continue }
+                for _ in 22..<120 { stage.advance(1.0 / 60) }
+                guard let a = shot() else { continue }
+                for _ in 0..<60 { stage.advance(1.0 / 60) }
+                guard let b = shot() else { continue }
+                func changed(_ x: CGImage, _ y: CGImage) -> Int {
+                    let px = pixels(x), py = pixels(y)
+                    var n = 0
+                    for i in stride(from: 0, to: min(px.count, py.count), by: 4)
+                    where abs(Int(px[i]) - Int(py[i])) + abs(Int(px[i + 1]) - Int(py[i + 1])) + abs(Int(px[i + 2]) - Int(py[i + 2])) + abs(Int(px[i + 3]) - Int(py[i + 3])) > 8 {
+                        n += 1
+                    }
+                    return n
+                }
+                let late = changed(a, b), arrival = changed(early, b)
                 let name = "\(id) \(entry.directions[d].info.id) \(stateID) \(scheme == .dark ? "dark" : "light")"
-                print("\(changed == 0 ? "PASS" : "FAIL") \(name): \(changed) pixels changed between t and t+1s")
-                if changed > 0 {
+                print("\(late + arrival == 0 ? "PASS" : "FAIL") \(name): \(late) pixels changed between t and t+1s, \(arrival) between 0.37 s in and t+1s")
+                if late + arrival > 0 {
                     ok = false
                     if let out {
                         let base = out + "/\(id)-\(entry.directions[d].info.id)-\(stateID)-\(scheme == .dark ? "dark" : "light")"
+                        try? writePNG(early, to: URL(fileURLWithPath: base + "-early.png"))
                         try? writePNG(a, to: URL(fileURLWithPath: base + "-t0.png"))
                         try? writePNG(b, to: URL(fileURLWithPath: base + "-t1.png"))
                     }
