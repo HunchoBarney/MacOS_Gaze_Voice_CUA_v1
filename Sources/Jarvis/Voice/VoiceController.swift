@@ -486,6 +486,10 @@ final class VoiceController: ObservableObject {
     /// KAR-75 L3: under `voice.live`, LiveKit's engine owns the microphone
     /// and the wake word opens a GPT-Live session instead of this lane.
     @Published private(set) var liveGlow: LiveVoice.Glow = .hidden
+    /// KAR-75 L10: one quiet line on the glow, such as the Live voice
+    /// warning or a basic-voice reply that isn't spoken. It clears itself.
+    @Published private(set) var liveNotice: String?
+    private var liveNoticeClear: Task<Void, Never>?
     lazy var liveVoice: LiveVoice? = makeLiveVoice()
     /// Releases this lane's microphone, then arms Live: one owner at a time.
     private var liveArming: Task<Void, Never>?
@@ -509,6 +513,16 @@ final class VoiceController: ObservableObject {
                                config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
         }
         live.onGlow = { [weak self] glow in self?.liveGlow = glow }
+        live.allowance = .shared
+        live.onNotice = { [weak self] line in self?.showLiveNotice(line) }
+        live.speaksWarnings = { [weak self] in self?.config.ttsEnabled ?? false }
+        live.onBasicRequest = { [weak self] samples, until in
+            let speech = BasicVoiceTurn.speech(samples, sampleRate: LiveMicrophone.format.sampleRate)
+            let text = await LocalSpanTranscriber().transcribe(speech)
+            guard let self else { return }
+            guard let text else { return self.showLiveNotice("I didn't catch that.") }
+            await self.basicVoiceTurn.handle(text, until: until)
+        }
         live.onReply = { [weak self] text in
             guard let self, !self.config.ttsEnabled else { return }
             self.detail = text
@@ -519,6 +533,32 @@ final class VoiceController: ObservableObject {
         #else
         return nil
         #endif
+    }
+
+    /// Basic voice's way into the spine and back out: the reply is spoken
+    /// on the Mac's own voice when "Say replies out loud" is on, otherwise
+    /// it shows on the glow.
+    var basicVoiceTurn: BasicVoiceTurn {
+        BasicVoiceTurn(run: { [weak self] text in
+            guard let self else { return "" }
+            return await self.cua.beginVoiceTask(text, frontmostHint: self.frontmost() ?? self.lastExternalApp,
+                                                 transcriptHint: text)
+        }, speak: { [weak self] line in
+            self?.onSpokenLine?(line)
+            self?.speaker?.speak(line)
+        }, show: { [weak self] lines in
+            self?.showLiveNotice(lines.joined(separator: " "))
+        }, speaksReplies: { [weak self] in self?.config.ttsEnabled ?? false })
+    }
+
+    func showLiveNotice(_ line: String, for seconds: Double = 8) {
+        liveNotice = line
+        liveNoticeClear?.cancel()
+        liveNoticeClear = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.liveNotice = nil
+        }
     }
     private var armedName = ""
     private var wakeSession: Task<Void, Never>?

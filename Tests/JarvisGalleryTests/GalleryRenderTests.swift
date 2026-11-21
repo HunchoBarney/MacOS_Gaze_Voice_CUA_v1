@@ -197,6 +197,7 @@ final class GalleryRun {
         guideCallout()
         agentsOverlays()
         try await windows()
+        liveUsage()
         firstRun()
         scenes()
         proposals()
@@ -273,12 +274,18 @@ final class GalleryRun {
             ("problem", "Problem", "Shown when something failed that the person has to read.",
              IndicatorFixture(phase: .problem, problem: "I couldn't reach OpenAI just now.",
                               detail: "Check your internet connection, then try again.", canOpenSettings: true)),
+            ("notice-live-warning", "Live voice warning", "Under voice.live, once a month's Live voice passes 80%: one quiet line for 8 s (KAR-75 L10).",
+             IndicatorFixture(phase: .notice, notice: "You've used 82% of this month's Live voice. It renews on December 1.")),
+            ("notice-basic-reply", "Basic voice, needs Live", "A basic-voice reply shows here when Say replies out loud is off.",
+             IndicatorFixture(phase: .notice, notice: LiveAllowance.needsLiveLine(until: Self.renewal))),
         ]
     }
 
+    static let renewal = Date(timeIntervalSince1970: 1_796_083_200)
+
     func indicator() {
         writer.declare("listening-indicator", title: "Listening indicator", area: "Voice",
-                       summary: "The black tab that drops from the notch while Jarvis hears, works, asks or hits a problem, with its ask and problem cards.",
+                       summary: "The black tab that drops from the notch while Jarvis hears, works, asks or hits a problem, with its ask and problem cards, and a few seconds' notice under voice.live.",
                        sources: ["Sources/Jarvis/UI/ListeningIndicator.swift:65", "Sources/Jarvis/UI/AppWindows.swift:73",
                                  "Sources/Jarvis/UI/Components.swift:19"])
         let replicaNote = "Rendered from the harness replica of ListeningIndicator.swift (VoiceController's state is private(set)); the replica is checked pixel for pixel against the real view in the Problem state."
@@ -345,6 +352,19 @@ final class GalleryRun {
         record({ try writer.still(real, component: "listening-indicator", state: "problem-real", title: "Problem (real view)",
                                   note: "The real ListeningIndicatorView driven by a fixture controller (showSetup). Replica check: \(same).",
                                   scheme: .dark, reduceMotion: false, backdrop: "transparent") }, "indicator real")
+
+        let notice = Fixtures.controller(Fixtures.config(), missing: [])
+        let line = LiveAllowance.needsLiveLine(until: Self.renewal)
+        notice.showLiveNotice(line)
+        spin(0.05)
+        guard IndicatorPhase.current(notice) == .notice,
+              let realNotice = hosted(ListeningIndicatorView(controller: notice), scheme: .dark),
+              let replicaNotice = hosted(IndicatorReplica(fixture: IndicatorFixture(phase: .notice, notice: line)), scheme: .dark) else {
+            failures.append("indicator check: controller did not reach .notice"); return
+        }
+        let sameNotice = Self.difference(realNotice, replicaNotice)
+        log.append("indicator replica vs real (notice): \(sameNotice)")
+        if sameNotice != "identical" { failures.append("indicator replica drifted from the real view (notice): \(sameNotice)") }
     }
 
     static func difference(_ a: CGImage, _ b: CGImage) -> String {
@@ -782,6 +802,54 @@ final class GalleryRun {
                 for reduce in [false, true] {
                     record({ try writer.still(shot, component: "agents-window", state: id, title: title, scheme: scheme,
                                               reduceMotion: reduce, backdrop: "window") }, "agents \(id)")
+                }
+            }
+        }
+    }
+
+    // MARK: Live usage
+
+    /// Settings → Live voice under `voice.live` (KAR-75 L10), from the real
+    /// LiveUsageSection with a fixture allowance. SettingsSection is private
+    /// to SettingsView.swift:398, so its card and header are copied here.
+    func liveUsage() {
+        writer.declare("live-usage", title: "Live voice usage", area: "Windows",
+                       summary: "This month's Live voice in Settings while voice.live is on: time used, renewal day, the 80% note and basic voice.",
+                       sources: ["Sources/Jarvis/UI/LiveUsageSection.swift:6", "Sources/Jarvis/UI/SettingsView.swift:121",
+                                 "Sources/Jarvis/Voice/Live/LiveAllowance.swift:66"])
+        func status(_ seconds: Double, metering: Bool = true, capped: Bool = false) -> LiveAllowanceStatus {
+            LiveAllowanceStatus(metering: metering, tier: "standard", period: "2026-11", periodEnds: Self.renewal,
+                                liveSeconds: seconds, liveSecondsLimit: 18_000, warnAt: 0.8, capped: capped, tasksLimit: 100)
+        }
+        let cases: [(String, String, String?, LiveAllowanceStatus?)] = [
+            ("checking", "Checking", "Before the first answer from the voice service, or when it can't be reached.", nil),
+            ("unmetered", "Not metered", "Metering is off on the Worker (LIVE_METERING=0), as it is today.", status(0, metering: false)),
+            ("partway", "Partway through the month", nil, status(7_800)),
+            ("warning", "Past 80%", "From the warning share on, a note says basic voice takes over at the cap.", status(14_760)),
+            ("basic", "Basic voice", "The month's Live voice is used up: basic voice until the renewal day.", status(18_000, capped: true)),
+        ]
+        for (id, title, note, fixture) in cases {
+            for scheme in Scheme.allCases {
+                let defaults = UserDefaults(suiteName: "jarvis-gallery-\(UUID().uuidString)")!
+                let allowance = LiveAllowance(fetch: {
+                    guard let fixture else { throw LiveBrokerError(status: 0, code: nil, message: "fixture") }
+                    return fixture
+                }, defaults: defaults)
+                if let fixture { allowance.apply(fixture) }
+                let view = JarvisCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Live voice", systemImage: "waveform").font(.system(size: 17, weight: .semibold))
+                        LiveUsageSection(allowance: allowance).font(.system(size: 14))
+                    }
+                }
+                .frame(width: 560)
+                .padding(24)
+                .background(Color(nsColor: .windowBackgroundColor))
+                guard let image = hosted(view, scheme: scheme) else { failures.append("live usage \(id)"); continue }
+                let shot = windowShot(image, title: "Jarvis", scheme: scheme)
+                for reduce in [false, true] {
+                    record({ try writer.still(shot, component: "live-usage", state: id, title: title, note: note,
+                                              scheme: scheme, reduceMotion: reduce, backdrop: "window") }, "live usage \(id)")
                 }
             }
         }

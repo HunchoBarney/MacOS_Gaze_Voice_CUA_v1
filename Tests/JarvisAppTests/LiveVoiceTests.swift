@@ -48,6 +48,13 @@ final class LiveVoiceTests: XCTestCase {
         }
     }
 
+    /// The Worker at the cap: `POST /v1/live/sessions` answers `live_limit`.
+    private struct CappedBroker: LiveSessionCreating {
+        func createSession(offer: String, config: LiveSessionConfig) async throws -> LiveSessionAnswer {
+            throw LiveBrokerError(status: 429, code: "live_limit", message: "This month's Live voice is used up.")
+        }
+    }
+
     private let started = #"{"type":"session.started","session":{"id":"live_1"}}"#
     private func heard(_ text: String) -> String {
         #"{"type":"session.input_transcript.delta","delta":"\#(text)","start_ms":0,"end_ms":10}"#
@@ -60,7 +67,8 @@ final class LiveVoiceTests: XCTestCase {
     private var transports: [FakeTransport] = []
     private var configs: [LiveSessionConfig] = []
 
-    private func voice(_ timings: LiveListening.Timings = .init()) throws -> LiveVoice {
+    private func voice(_ timings: LiveListening.Timings = .init(), broker: LiveSessionCreating = FakeBroker(),
+                       before arming: (LiveVoice) -> Void = { _ in }) throws -> LiveVoice {
         microphone = FakeMicrophone()
         wakeWord = FakeWakeWord()
         let voice = LiveVoice(microphone: microphone, wakeWord: wakeWord, timings: timings) { [unowned self] name in
@@ -68,10 +76,43 @@ final class LiveVoiceTests: XCTestCase {
             self.transports.append(transport)
             let config = LiveSessionConfig(instructions: LiveVoice.instructions(name: name))
             self.configs.append(config)
-            return LiveSession(transport: transport, broker: FakeBroker(), config: config)
+            return LiveSession(transport: transport, broker: broker, config: config)
         }
+        arming(voice)
         try voice.arm(name: "Nova")
         return voice
+    }
+
+    private let renews = Date(timeIntervalSince1970: 1_796_083_200)
+
+    /// What the fake Worker's `GET /v1/usage` answers now.
+    private var worker: LiveAllowanceStatus?
+
+    private func usage(_ used: Double, capped: Bool = false) -> LiveAllowanceStatus {
+        LiveAllowanceStatus(metering: true, tier: "jarvis", period: "2026-11", periodEnds: renews,
+                            liveSeconds: used, liveSecondsLimit: 18_000, warnAt: 0.8, capped: capped,
+                            tasksLimit: 100)
+    }
+
+    /// This month's Live voice, read from a fake Worker that answers `used`
+    /// seconds of 5 h. Nothing leaves the Mac.
+    private func allowance(used: Double, capped: Bool = false) -> LiveAllowance {
+        let name = "live-voice-\(UUID().uuidString)"
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: name) }
+        let status = usage(used, capped: capped)
+        worker = status
+        let allowance = LiveAllowance(fetch: { @MainActor [unowned self] in self.worker ?? status },
+                                      defaults: UserDefaults(suiteName: name)!)
+        allowance.apply(status)
+        return allowance
+    }
+
+    /// The request after the wake: speech, then a pause longer than `settle`.
+    private func say(_ seconds: Double, thenQuiet quiet: Double, at end: TimeInterval = 1) {
+        let speech = [Float](repeating: 0.2, count: Int(seconds * 1000))
+        let silence = [Float](repeating: 0, count: Int(quiet * 1000))
+        speech.withUnsafeBufferPointer { microphone.relay.write($0, endingAt: end) }
+        silence.withUnsafeBufferPointer { microphone.relay.write($0, endingAt: end + quiet) }
     }
 
     private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
@@ -267,5 +308,153 @@ final class LiveVoiceTests: XCTestCase {
         transports[0].deliver(closed)
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertEqual(microphone.starts, 1, "A disarmed microphone stays off after the session closes")
+    }
+
+    // MARK: KAR-75 L10, basic voice and the warning
+
+    func testACappedWakeHearsTheRequestOnTheMacAndOpensNoSession() async throws {
+        var requests: [(samples: [Float], until: Date, glow: LiveVoice.Glow)] = []
+        var voiceRef: LiveVoice?
+        let voice = try voice(LiveListening.Timings(settle: 0.05)) { voice in
+            voice.allowance = self.allowance(used: 18_000, capped: true)
+            voice.onBasicRequest = { samples, until in requests.append((samples, until, voiceRef?.glow ?? .hidden)) }
+        }
+        voiceRef = voice
+        wakeWord.heard?(0)
+        XCTAssertEqual(voice.glow, .hearing)
+        XCTAssertEqual(wakeWord.stops, 1)
+        say(0.4, thenQuiet: 0.1)
+        try await waitUntil { requests.count == 1 }
+        XCTAssertTrue(transports.isEmpty, "Basic voice opens no Live session")
+        XCTAssertEqual(requests[0].samples.count, 500)
+        XCTAssertEqual(Array(requests[0].samples.prefix(400)), [Float](repeating: 0.2, count: 400))
+        XCTAssertEqual(requests[0].until, renews)
+        XCTAssertEqual(requests[0].glow, .thinking, "The glow thinks while the spine works on it")
+        try await waitUntil { voice.listening.state == .asleep }
+        XCTAssertEqual(voice.glow, .hidden)
+        XCTAssertEqual(wakeWord.starts, 2, "Back to the wake word")
+        XCTAssertEqual(microphone.starts, 1, "No call was opened, so recording never stopped")
+    }
+
+    func testABasicVoiceWakeWithNoRequestIsAFalseWake() async throws {
+        var requests = 0
+        let voice = try voice(LiveListening.Timings(falseWake: 0.2, settle: 0.05)) { voice in
+            voice.allowance = self.allowance(used: 18_000, capped: true)
+            voice.onBasicRequest = { _, _ in requests += 1 }
+        }
+        wakeWord.heard?(0)
+        say(0, thenQuiet: 0.5)
+        try await waitUntil { voice.listening.state == .asleep }
+        XCTAssertEqual(requests, 0)
+        XCTAssertTrue(transports.isEmpty)
+        XCTAssertEqual(wakeWord.starts, 2)
+    }
+
+    func testABrokerRefusalAtTheCapFallsBackToBasicVoiceWithTheSameBreath() async throws {
+        var requests: [[Float]] = []
+        let allowance = allowance(used: 17_900)
+        let voice = try voice(LiveListening.Timings(settle: 0.05), broker: CappedBroker()) { voice in
+            voice.allowance = allowance
+            voice.onBasicRequest = { samples, _ in requests.append(samples) }
+        }
+        wakeWord.heard?(0)
+        worker = usage(18_000, capped: true)
+        say(0.3, thenQuiet: 0.1)
+        try await waitUntil { requests.count == 1 }
+        XCTAssertEqual(transports.count, 1, "Live was tried once")
+        XCTAssertEqual(allowance.mode, .basic(until: renews))
+        XCTAssertEqual(Array(requests[0].prefix(300)), [Float](repeating: 0.2, count: 300), "The words said with the wake reach basic voice")
+        XCTAssertEqual(microphone.starts, 2, "The refused call stopped the engine, so recording starts again")
+        try await waitUntil { voice.listening.state == .asleep }
+        wakeWord.heard?(1)
+        say(0.2, thenQuiet: 0.1, at: 2)
+        try await waitUntil { requests.count == 2 }
+        XCTAssertEqual(transports.count, 1, "Once refused, the next wake goes straight to basic voice")
+    }
+
+    func testBasicVoiceEndsOnceTheWorkerSaysLiveVoiceIsBack() async throws {
+        var requests = 0
+        let voice = try voice(LiveListening.Timings(settle: 0.05)) { voice in
+            voice.allowance = self.allowance(used: 18_000, capped: true)
+            voice.onBasicRequest = { _, _ in
+                requests += 1
+                self.worker = self.usage(0)
+            }
+        }
+        wakeWord.heard?(0)
+        say(0.3, thenQuiet: 0.1)
+        try await waitUntil { requests == 1 }
+        try await waitUntil { voice.allowance?.mode == .live }
+        try await waitUntil { voice.listening.state == .asleep }
+        XCTAssertTrue(transports.isEmpty)
+        wakeWord.heard?(1)
+        try await waitUntil { transports.count == 1 }
+        XCTAssertEqual(requests, 1, "The month renewed, so the next wake opens Live")
+    }
+
+    func testALongBasicVoiceRequestIsHandedOverBeforeTheRelayDropsIt() async throws {
+        var requests: [[Float]] = []
+        let voice = try voice(LiveListening.Timings(settle: 0.05)) { voice in
+            voice.allowance = self.allowance(used: 18_000, capped: true)
+            voice.onBasicRequest = { samples, _ in requests.append(samples) }
+        }
+        wakeWord.heard?(0)
+        say(7.9, thenQuiet: 0)
+        try await waitUntil { requests.count == 1 }
+        XCTAssertEqual(requests[0].count, 7_900, "Nothing said is lost to the relay's overflow")
+        try await waitUntil { voice.listening.state == .asleep }
+    }
+
+    func testAnUncappedWakeOpensLiveAndTheWarningShowsOnceThenLiveSaysItAtTheNextWake() async throws {
+        var notices: [String] = []
+        var requests = 0
+        let voice = try voice(LiveListening.Timings(settle: 0.05)) { voice in
+            voice.allowance = self.allowance(used: 14_760)
+            voice.onNotice = { notices.append($0) }
+            voice.speaksWarnings = { true }
+            voice.onBasicRequest = { _, _ in requests += 1 }
+        }
+        try await waitUntil { notices.count == 1 }
+        XCTAssertEqual(notices, ["You've used 82% of this month's Live voice. It renews on December 1."])
+        wakeWord.heard?(0)
+        try await waitUntil { !transports.isEmpty }
+        transports[0].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
+        XCTAssertTrue(transports[0].sent.contains("session.instructions.append"), "Live says the warning once")
+        transports[0].deliver(heard("That's all, Nova."))
+        try await waitUntil { transports[0].sent.contains("session.close") }
+        transports[0].deliver(closed)
+        try await waitUntil { microphone.starts == 2 }
+        wakeWord.heard?(1)
+        try await waitUntil { transports.count == 2 }
+        transports[1].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
+        XCTAssertFalse(transports[1].sent.contains("session.instructions.append"), "Only the next wake")
+        XCTAssertEqual(notices.count, 1, "Once a period")
+        XCTAssertEqual(requests, 0)
+    }
+
+    func testTheWarningIsNotSpokenWhenRepliesAreQuiet() async throws {
+        var notices: [String] = []
+        let voice = try voice { voice in
+            voice.allowance = self.allowance(used: 14_760)
+            voice.onNotice = { notices.append($0) }
+            voice.speaksWarnings = { false }
+        }
+        try await waitUntil { notices.count == 1 }
+        wakeWord.heard?(0)
+        try await waitUntil { !transports.isEmpty }
+        transports[0].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
+        XCTAssertFalse(transports[0].sent.contains("session.instructions.append"), "The line on the glow is the whole warning")
+    }
+
+    func testBasicVoiceSpeechIs24kHzPCM16ForTheOnDeviceTranscriber() {
+        let second = (0..<48_000).map { Float(sin(Double($0) * 2 * .pi * 220 / 48_000)) * 0.5 }
+        let pcm = BasicVoiceTurn.speech(second, sampleRate: 48_000)
+        XCTAssertEqual(Double(pcm.count) / 2, RecentSpeechAudio.sampleRate, accuracy: 600)
+        let peak = pcm.withUnsafeBytes { $0.bindMemory(to: Int16.self).map { abs(Int($0)) }.max() ?? 0 }
+        XCTAssertEqual(Double(peak), 0.5 * 32_767, accuracy: 1_500)
+        XCTAssertTrue(BasicVoiceTurn.speech([], sampleRate: 48_000).isEmpty)
     }
 }

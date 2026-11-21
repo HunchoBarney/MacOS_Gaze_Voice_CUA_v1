@@ -30,6 +30,12 @@ final class VoiceLiveStandbyTests: XCTestCase {
         func useInput(uid: String) {}
     }
 
+    private final class FakeSpeaker: SpeechSynthesizing, @unchecked Sendable {
+        private(set) var spoken: [String] = []
+        func speak(_ text: String) { spoken.append(text) }
+        func stop() {}
+    }
+
     private final class FakeWakeWord: WakeWordDetecting, @unchecked Sendable {
         func start(name: String, heard: @escaping @MainActor (TimeInterval) -> Void) throws {}
         func stop() {}
@@ -79,6 +85,44 @@ final class VoiceLiveStandbyTests: XCTestCase {
         XCTAssertEqual(microphone.laneOpenAtStart, [false], "The lane's microphone is released before Live records")
         XCTAssertGreaterThanOrEqual(capture.suspends, 1)
         XCTAssertEqual(controller.handsFreeState, .standby)
+    }
+
+    func testALiveNoticeShowsOnTheTabWhenNothingElseDoesThenClears() async throws {
+        let config = Config(defaults: UserDefaults(suiteName: "voice-live-notice-\(UUID().uuidString)")!,
+                            keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.voiceLive = true
+        let controller = VoiceController(config: config, speech: StubCapture(), authorize: { true },
+                                         timings: VoiceTimings(), cuaRuntime: testCoordinator(config),
+                                         otherAppUsesMicrophone: { false })
+        addTeardownBlock { await controller.shutdown() }
+        XCTAssertEqual(IndicatorPhase.current(controller), .hidden)
+        controller.showLiveNotice("You've used 82% of this month's Live voice. It renews on December 1.", for: 0.1)
+        XCTAssertEqual(IndicatorPhase.current(controller), .notice)
+        try await waitUntil { controller.liveNotice == nil }
+        XCTAssertEqual(IndicatorPhase.current(controller), .hidden)
+    }
+
+    func testABasicVoiceReplyIsShownWhenRepliesAreQuietAndSpokenOnlyWhenTheyAreNot() async throws {
+        let config = Config(defaults: UserDefaults(suiteName: "voice-basic-reply-\(UUID().uuidString)")!,
+                            keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.voiceLive = true
+        config.ttsEnabled = false
+        let speaker = FakeSpeaker()
+        let controller = VoiceController(config: config, speech: StubCapture(), authorize: { true },
+                                         timings: VoiceTimings(), cuaRuntime: testCoordinator(config),
+                                         speaker: speaker, otherAppUsesMicrophone: { false })
+        addTeardownBlock { await controller.shutdown() }
+        let renews = Date(timeIntervalSince1970: 1_796_083_200)
+        let line = LiveAllowance.needsLiveLine(until: renews)
+
+        await controller.basicVoiceTurn.handle("what is the capital of Peru", until: renews)
+        XCTAssertEqual(controller.liveNotice, line)
+        XCTAssertEqual(IndicatorPhase.current(controller), .notice)
+        XCTAssertTrue(speaker.spoken.isEmpty, "Quiet by default: shown, not spoken")
+
+        config.ttsEnabled = true
+        await controller.basicVoiceTurn.handle("what is the capital of Peru", until: renews)
+        XCTAssertEqual(speaker.spoken, [line])
     }
 
     private func testCoordinator(_ config: Config) -> VoiceTaskCoordinator {

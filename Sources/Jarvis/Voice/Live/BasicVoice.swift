@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// One request in basic voice, after this month's Live voice is used up
@@ -22,6 +23,31 @@ struct BasicVoiceTurn {
         guard !reply.isEmpty else { return reply }
         if speaksReplies() { speak(reply) } else { show([reply]) }
         return reply
+    }
+
+    /// The relay's recording as `LocalSpanTranscriber` takes it: mono
+    /// float samples at `sampleRate` to 24 kHz PCM16.
+    static func speech(_ samples: [Float], sampleRate: Double) -> Data {
+        guard !samples.isEmpty,
+              let source = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false),
+              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: RecentSpeechAudio.sampleRate,
+                                         channels: 1, interleaved: true),
+              let input = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: AVAudioFrameCount(samples.count)),
+              let converter = AVAudioConverter(from: source, to: target),
+              let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: AVAudioFrameCount(
+                  (Double(samples.count) * target.sampleRate / sampleRate).rounded(.up)) + 1024) else { return Data() }
+        input.frameLength = input.frameCapacity
+        samples.withUnsafeBufferPointer { input.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
+        var supplied = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, inputStatus in
+            if supplied { inputStatus.pointee = .endOfStream; return nil }
+            supplied = true
+            inputStatus.pointee = .haveData
+            return input
+        }
+        guard status != .error, let pcm = output.int16ChannelData?[0] else { return Data() }
+        return Data(bytes: pcm, count: Int(output.frameLength) * 2)
     }
 
     /// Requests only a conversation or a model can answer: questions,
