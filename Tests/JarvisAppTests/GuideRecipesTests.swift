@@ -45,7 +45,9 @@ final class GuideRecipesTests: XCTestCase {
     func testUnmatchedAndAmbiguousGoalsRunPlainGuideMode() {
         for goal in ["send Linda a photo", "search the internet for recipes", "make it full screen",
                      "fix the printer", "update my apps", "make the text on this page bigger",
-                     "reply to an email", "print the photo from this email and save it"] {
+                     "reply to an email", "print the photo from this email and save it",
+                     "make the text smaller", "reduce the text size", "shrink the font",
+                     "make the pointer smaller", "decrease the pointer size"] {
             XCTAssertNil(Recipe.match(goal), goal)
         }
         XCTAssertTrue(Recipe.printing.matches("print the photo from this email and save it"))
