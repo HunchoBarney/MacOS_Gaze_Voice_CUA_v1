@@ -63,7 +63,7 @@ final class MemoryCommands {
         switch MemoryIntent.parse(utterance) {
         case nil: return false
         case .remember, .recall(_, explicit: true): return true
-        case .recall(let subject, explicit: false): return (try? store().recall(subject).isEmpty == false) ?? true
+        case .recall(let subject, explicit: false): return (try? store().recall(subject).isEmpty == false) ?? false
         case .forgetLast: return lastTouched.map { now().timeIntervalSince($0.at) <= Self.forgetWindow } ?? false
         }
     }

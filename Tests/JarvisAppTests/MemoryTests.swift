@@ -263,6 +263,17 @@ final class MemoryCommandsTests: MemoryTestCase {
         XCTAssertEqual(off.route, .remote)
     }
 
+    @MainActor func testUnreadableMemoryLeavesBareWhoQuestionsToTheModel() throws {
+        let blocker = root.appendingPathComponent("not-a-directory")
+        try Data().write(to: blocker)
+        let broken = MemoryStore(directory: blocker.appendingPathComponent("Memory", isDirectory: true),
+                                 isEnabled: { true })
+        let commands = MemoryCommands(store: { broken })
+        XCTAssertFalse(commands.answers("Who's the CEO of Apple?"))
+        XCTAssertTrue(commands.answers("What do you remember about Dana?"))
+        XCTAssertTrue(commands.answers("Remember Dana is my manager"))
+    }
+
     @MainActor func testHandsFreeConversationAnswersMemoryIntentsWithoutTheModel() async throws {
         let s = store()
         let commands = MemoryCommands(store: { s })
