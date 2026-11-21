@@ -150,11 +150,7 @@ final class LiveVoice {
         let session = makeSession(listening.name)
         self.session = session
         session.onEvent = { [weak self, weak session] event in
-            guard let self, let session else { return }
-            guard self.session === session else {
-                if self.session == nil, case .closed = event { self.onSessionEvent?(event) }
-                return
-            }
+            guard let self, let session, self.session === session else { return }
             self.receive(event)
         }
         Task { [weak self] in
@@ -264,6 +260,7 @@ final class LiveVoice {
     /// LiveKit's engine (ThirdParty/WebRTC/README.md), so once `closing` has
     /// closed, recording starts again for the wake word.
     private func ended(closing: LiveSession? = nil) {
+        if closing != nil { onSessionEvent?(.closed(reason: .closeRequested, usage: nil)) }
         session = nil
         wokeAt = nil
         microphone.relay.stop()
