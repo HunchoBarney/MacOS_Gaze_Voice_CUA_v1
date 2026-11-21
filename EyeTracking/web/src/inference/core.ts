@@ -3321,6 +3321,10 @@ export class Calibration {
   // Bundled starting samples (see seedPrior) — fit-pool filler only.
   readonly priorSamples: Array<[GazeFeature, [number, number]]> = [];
   private readonly learnedErrors: number[] = [];
+  // Labels scored against the map that is live now; adopt and commit reset
+  // it, so the refit judge never credits the live map with its predecessor's
+  // errors.
+  private errorsSinceMapChange = 0;
   private lastImplicitRefit = 0;
   // Consecutive implicit labels resting on (nearly) the same spot — a parked
   // cursor must not flood the pool or it starves spread (see refit gate).
@@ -3433,10 +3437,15 @@ export class Calibration {
     // RBF interpolates its own pool, so an in-sample comparison adopted
     // memorising maps every time (logged 0.152 → 0.016 on a map whose
     // held-out error was no better than guessing the screen centre). The live
-    // map's honest error is the running out-of-sample label error, or its
+    // map's honest error is its out-of-sample error on labels since it went
+    // live, or its
     // error on the fresh labels it hasn't absorbed yet; the candidate's is a
     // k-fold refit of the same pool.
-    const oldError = this.learnedError?.median ?? medianOf(this.implicitSamples.map(([feature, target]) => pointError(this.applyFeature(feature), target))) ?? Infinity;
+    const fresh = Math.min(this.errorsSinceMapChange, this.learnedErrors.length);
+    const oldError =
+      (fresh >= LEARNED_ERROR_MIN_LABELS ? medianOf(this.learnedErrors.slice(-fresh)) : null) ??
+      medianOf(this.implicitSamples.map(([feature, target]) => pointError(this.applyFeature(feature), target))) ??
+      Infinity;
     const newError = this.heldOutError(merged);
     if (!(newError < oldError)) {
       console.info("Implicit refit kept old map", JSON.stringify({ oldError: Number(oldError.toFixed(4)), heldOutError: Number(newError.toFixed(4)) }));
@@ -3488,6 +3497,7 @@ export class Calibration {
   // the prior seed.
   private adopt(result: PendingFit, merged: Array<[GazeFeature, [number, number]]>, now: number, persist: boolean): void {
     const previousGeometry = this.geometry;
+    this.errorsSinceMapChange = 0;
     this.matrix = result.matrix;
     this.rbf = result.rbf;
     // When the refit prefers the affine chain the old feature map must go —
@@ -3586,6 +3596,7 @@ export class Calibration {
       return;
     }
     this.learnedErrors.push(error);
+    this.errorsSinceMapChange += 1;
     if (this.learnedErrors.length > LEARNED_ERROR_WINDOW) {
       this.learnedErrors.shift();
     }
@@ -3746,6 +3757,7 @@ export class Calibration {
     if (response.ok) {
       this.outputOffset = [0, 0];
       this.residualMap = residualMap;
+      this.errorsSinceMapChange = 0;
       this.matrix = pending.matrix;
       this.rbf = pending.rbf;
       this.featureMap = pending.useFeatureMap ? pending.featureMap : null;

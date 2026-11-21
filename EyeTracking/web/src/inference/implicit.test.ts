@@ -214,6 +214,36 @@ describe("invisible calibration", () => {
     expect(calibration.heldOutError(pool)).toBeGreaterThan(typicalMiss * 0.5);
   }, SIMULATION_TIMEOUT_MS);
 
+  it("judges a refit against the live map, not the map it replaced", async () => {
+    const { calibration } = makeCalibration();
+    await calibration.load();
+    let now = await useFor(calibration, owner, BOOTSTRAP_MIN_LABELS + 30, 0, 7, 0);
+    // The map that was live missed every label badly; a refit replaces it.
+    for (let i = 0; i < 40; i += 1) {
+      calibration.recordLabelError(0.45);
+    }
+    const next = rng(11);
+    const addClean = (count: number) => {
+      for (let i = 0; i < count; i += 1) {
+        const t: [number, number] = [0.1 + 0.8 * next(), 0.1 + 0.8 * next()];
+        calibration.addImplicitSample(owner(t), t);
+      }
+    };
+    addClean(10);
+    now += 120_000;
+    expect(await calibration.refitWithImplicit(now)).toBe(true);
+    // The next refit must score the live map on its own error, not the 0.45
+    // its predecessor earned.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    addClean(10);
+    now += 120_000;
+    await calibration.refitWithImplicit(now);
+    const judged = info.mock.calls.find(([message]) => typeof message === "string" && message.startsWith("Implicit refit"));
+    info.mockRestore();
+    expect(judged).toBeDefined();
+    expect(JSON.parse(String(judged?.[1])).oldError).toBeLessThan(0.1);
+  }, SIMULATION_TIMEOUT_MS);
+
   it("keeps the live map when a refit would only memorise its pool", async () => {
     const { calibration } = makeCalibration();
     await calibration.load();
