@@ -108,6 +108,11 @@ check "$home" gh.log "state=error -f context=local-ci -f description=build lane 
 if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a lane that never freed up must not post failure"; failures=$((failures + 1))
 fi
+if [ -e "$home/requested/$(git -C "$dir/origin-lane-busy" rev-parse HEAD)" ]; then
+    echo "ok   ci-lane-busy queues the head again"
+else
+    echo "FAIL a lane that never freed up must queue the head again"; failures=$((failures + 1))
+fi
 
 home=$(ci_run no-guard 0 none)
 check "$home" gh.log "state=error -f context=local-ci -f description=the merge with main $(git -C "$dir/origin-no-guard" rev-parse --short=7 HEAD) lacks the #598 Keychain test guard"
@@ -123,6 +128,11 @@ done
 check "$home" gh.log "state=error -f context=local-ci -f description=no build lane at"
 if grep -q state=failure "$home/gh.log"; then
     echo "FAIL a missing lane must not post failure"; failures=$((failures + 1))
+fi
+if [ -e "$home/requested/$(git -C "$dir/origin-no-lane" rev-parse HEAD)" ]; then
+    echo "ok   ci-no-lane queues the head again"
+else
+    echo "FAIL a missing lane must queue the head again"; failures=$((failures + 1))
 fi
 
 # A PR head is tested merged into current main: main moved on after the PR
@@ -206,6 +216,11 @@ if pgrep -f "sleep 7777" >/dev/null; then
     echo "FAIL a cancelled run left its watchdog running"; failures=$((failures + 1)); pkill -f "sleep 7777"
 else
     echo "ok   ci-cancel stops its watchdog"
+fi
+if [ -e "$home/requested/$(cat "$dir/origin-cancel.head")" ]; then
+    echo "FAIL a cancelled run must not queue the head again"; failures=$((failures + 1))
+else
+    echo "ok   ci-cancel does not queue the head again"
 fi
 
 # poll tests the head it first listed longest ago, not the most recently
