@@ -987,6 +987,7 @@ final class VoiceTaskCoordinator {
             previousContext: previousContext.isEmpty ? nil : previousContext,
             values: values, windowID: pinnedWindowID)
         spec.speakerVerified = speakerVerified
+        spec.questionPending = pendingAskCount > 0
 
         let label = guideGoal.map { "Showing how to \($0)" } ?? Self.gerundPhrase(for: trimmed) ?? trimmed
         guard !Task.isCancelled, admissionIsCurrent() else {

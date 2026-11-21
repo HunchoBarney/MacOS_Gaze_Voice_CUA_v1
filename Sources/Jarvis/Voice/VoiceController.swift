@@ -619,6 +619,7 @@ final class VoiceController: ObservableObject {
             }
         }
         context.currentAsks = context.capturedAsks
+        context.undoOffered = UndoOffers.shared.standing()
         return context
     }
     var isListening: Bool { status == .listening }

@@ -229,6 +229,11 @@ final class UndoOffers: Sendable {
     }
 
     var current: PendingUndo? { box.value }
+
+    /// Whether an offer is out and its window still open.
+    func standing(now: Date = Date()) -> Bool {
+        box.value.map { now < $0.expiresAt } ?? false
+    }
 }
 
 /// The drive loop's undo seams: the live ones read Accessibility and
@@ -251,11 +256,21 @@ struct UndoSupport: Sendable {
 extension DriveLoop {
     /// Any new task ends the live offer: whatever it does may put its own
     /// action on top of the app's undo stack, maybe with the same title.
-    /// Only the person's own spoken "undo" gets it back.
-    func claimOffer(for goal: String) -> PendingUndo? {
+    /// Only the person's own spoken "undo" gets it back, or a repair word
+    /// while no question is waiting for it.
+    func claimOffer(for goal: String, questionPending: Bool = false) -> PendingUndo? {
         let pending = undo.offers.take(now: undo.now())
-        guard explicitConsent, !speakerUnverified, Self.asksToUndo(goal) else { return nil }
+        guard explicitConsent, !speakerUnverified,
+              Self.asksToUndo(goal) || (!questionPending && Self.repairsOffer(goal)) else { return nil }
         return pending
+    }
+
+    /// "no", "not that", "wrong one", "that's wrong": the whole utterance
+    /// says the press was wrong. They name nothing to act on, so they take
+    /// back only a live offer; outside one they start nothing new.
+    static func repairsOffer(_ goal: String) -> Bool {
+        ["no", "not that", "wrong one", "that s wrong", "thats wrong"]
+            .contains(VoiceAdmissionPolicy.normalized(goal))
     }
 
     /// "undo", "undo that", "take that back", "put it back": the fast

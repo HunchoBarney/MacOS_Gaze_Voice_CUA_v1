@@ -475,6 +475,98 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertNil(offers.current)
     }
 
+    // MARK: - Saying "no" inside an offer
+
+    private func repairs(_ phrase: String, file: StaticString = #filePath, line: UInt = #line) async {
+        let script = Script([trashItem, Item(menu: "Edit", title: "Redo Move", enabled: true)])
+        let offers = UndoOffers()
+        offered(offers, at: script.now.value)
+        let loop = await makeLoop(script, offers: offers)
+        let result = await loop.run(DriveTask(goal: phrase), session: "s")
+        let menuCalls = script.calls.value.filter { $0.0 == "invoke_menu" }
+        XCTAssertEqual(menuCalls.count, 1, phrase, file: file, line: line)
+        XCTAssertEqual(menuCalls.first?.1["path"], .array([.string("Edit"), .string(trashItem.title)]),
+                       phrase, file: file, line: line)
+        XCTAssertEqual(result.status, .done, phrase, file: file, line: line)
+        XCTAssertEqual(result.spoken, "Put it back.", phrase, file: file, line: line)
+        XCTAssertNil(offers.current, phrase, file: file, line: line)
+    }
+
+    func testNoTakesBackTheOfferedPress() async { await repairs("No.") }
+
+    func testNotThatTakesBackTheOfferedPress() async { await repairs("not that") }
+
+    func testWrongOneTakesBackTheOfferedPress() async { await repairs("Wrong one.") }
+
+    func testThatsWrongTakesBackTheOfferedPress() async {
+        await repairs("that's wrong")
+        await repairs("That\u{2019}s wrong.")
+    }
+
+    func testOnlyTheWholeUtteranceIsARepair() {
+        for phrase in ["no thanks", "no send it", "not that one", "the other one", "wrong", "nope", "that's not wrong"] {
+            XCTAssertFalse(DriveLoop.repairsOffer(phrase), phrase)
+        }
+    }
+
+    func testAPendingQuestionTakesNoBeforeTheOffer() async {
+        let script = Script([trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        for phrase in ["no", "not that", "wrong one", "that's wrong"] {
+            offered(offers, at: script.now.value)
+            let claimed = await loop.claimOffer(for: phrase, questionPending: true)
+            XCTAssertNil(claimed, phrase)
+            XCTAssertNil(offers.current, "the answer is a new turn, so the offer still ends")
+        }
+        XCTAssertTrue(script.calls.value.isEmpty)
+
+        var context = VoiceAdmissionContext()
+        context.targetAppID = finder; context.windowID = 7; context.targetID = "window:4242:7"
+        context.undoOffered = true
+        let ask = VoiceAdmissionContext.Ask(taskID: UUID(), askID: UUID(), kind: .confirm)
+        context.capturedAsks = [ask]; context.currentAsks = [ask]
+        XCTAssertEqual(VoiceAdmissionPolicy.commandText("no", context: context), "no")
+        let proposal = VoiceAdmissionPolicy.propose("no", context: context, speech: true)
+        XCTAssertEqual(proposal.intent, "respond")
+        XCTAssertEqual(proposal.replyTo, VoiceAskBinding(taskID: ask.taskID, askID: ask.askID))
+    }
+
+    func testRepairWordsStaySilentOutsideAnOffer() async {
+        let script = Script([trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        var context = VoiceAdmissionContext()
+        context.targetAppID = finder; context.windowID = 7; context.targetID = "window:4242:7"
+        for phrase in ["no", "not that", "wrong one", "that's wrong"] {
+            let claimed = await loop.claimOffer(for: phrase)
+            XCTAssertNil(claimed, phrase)
+            XCTAssertNotEqual(VoiceAdmissionPolicy.commandText(phrase, context: context), "undo", phrase)
+            XCTAssertNotEqual(VoiceAdmissionPolicy.propose(phrase, context: context, speech: true).intent,
+                              "hotkey", phrase)
+        }
+        XCTAssertTrue(script.calls.value.isEmpty)
+        let now = Date(timeIntervalSince1970: 5_000)
+        offered(offers, at: now)
+        XCTAssertTrue(offers.standing(now: now))
+        XCTAssertFalse(offers.standing(now: now.addingTimeInterval(10)), "an expired offer is no offer")
+    }
+
+    func testTheHandsFreeRouterSendsARepairWordToTheOffer() {
+        var context = VoiceAdmissionContext()
+        context.targetAppID = finder; context.windowID = 7; context.targetID = "window:4242:7"
+        context.undoOffered = true
+        for phrase in ["no", "not that", "wrong one", "that's wrong"] {
+            XCTAssertEqual(VoiceAdmissionPolicy.commandText(phrase, context: context), "undo", phrase)
+            let policy = VoiceAdmissionPolicy.propose(phrase, context: context, speech: true)
+            XCTAssertEqual(policy.route, .local, phrase)
+            XCTAssertEqual(policy.slots["keys"], "cmd+z", phrase)
+            let decision = ConversationContext().localDecision(phrase, context: context, policy: policy)
+            XCTAssertEqual(decision?.kind, .task, phrase)
+            XCTAssertEqual(decision?.scope, .window(app: finder, id: 7), phrase)
+        }
+    }
+
     func testUndoRefusesAfterThePersonTypedOrClicked() async {
         let script = Script([trashItem, Item(menu: "Edit", title: "Redo Move", enabled: true)])
         let offers = UndoOffers()
