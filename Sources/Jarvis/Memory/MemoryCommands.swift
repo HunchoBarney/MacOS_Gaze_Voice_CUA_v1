@@ -4,16 +4,17 @@ import Foundation
 enum MemoryIntent: Equatable {
     case remember(String)
     /// `explicit` is "what do you remember about X": it answers even when
-    /// nothing matches. A bare "who's X?" falls through to the rest of
-    /// Jarvis when memory has nothing, so "who's the CEO of Apple?" still works.
+    /// nothing matches. A bare "who's X?" reads only remembered facts, never
+    /// past requests, and falls through to the rest of Jarvis when there are
+    /// none, so "who's the CEO of Apple?" still works.
     case recall(String, explicit: Bool)
     case forgetLast
 
     static func parse(_ utterance: String) -> MemoryIntent? {
         var text = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
         while let last = text.last, ".?!,".contains(last) { text.removeLast() }
-        for polite in ["please ", "can you ", "could you ", "would you ", "jarvis, ", "jarvis "]
-            where text.lowercased().hasPrefix(polite) {
+        let lead = ["hey jarvis, ", "hey jarvis ", "please ", "can you ", "could you ", "would you ", "jarvis, ", "jarvis "]
+        while let polite = lead.first(where: { text.lowercased().hasPrefix($0) }) {
             text = String(text.dropFirst(polite.count))
         }
         let lower = text.lowercased()
@@ -63,7 +64,8 @@ final class MemoryCommands {
         switch MemoryIntent.parse(utterance) {
         case nil: return false
         case .remember, .recall(_, explicit: true): return true
-        case .recall(let subject, explicit: false): return (try? store().recall(subject).isEmpty == false) ?? false
+        case .recall(let subject, explicit: false):
+            return (try? store().recall(subject, includeRequests: false).isEmpty == false) ?? false
         case .forgetLast: return lastTouched.map { now().timeIntervalSince($0.at) <= Self.forgetWindow } ?? false
         }
     }
@@ -79,7 +81,7 @@ final class MemoryCommands {
                 lastTouched = memory.id.map { ([$0], now()) }
                 return "Okay, I'll remember that."
             case .recall(let subject, let explicit):
-                let found = try store().recall(subject)
+                let found = try store().recall(subject, includeRequests: explicit)
                 guard !found.isEmpty else {
                     return explicit ? "I don't remember anything about \(subject)." : nil
                 }
