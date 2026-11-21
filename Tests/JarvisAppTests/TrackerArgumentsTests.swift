@@ -96,13 +96,13 @@ final class TrackerArgumentsTests: XCTestCase {
 
     /// The hosted gaze rate defaults to 15 fps (under the 30%-of-a-core
     /// budget) and the defaults key opts into 20; the wasm fallback keeps
-    /// its own 10 fps cap and emits no second flag.
+    /// the same hosted rate and emits no second flag.
     func testGazeRateDefaultsToFifteenWithOverride() {
         XCTAssertEqual(value(after: "--gaze-max-fps", in: args()), "15")
         defaults.set(20, forKey: "trackerGazeMaxFps")
         XCTAssertEqual(value(after: "--gaze-max-fps", in: args()), "20")
         XCTAssertEqual(args(forceWasm: true).filter { $0 == "--gaze-max-fps" }.count, 1)
-        XCTAssertEqual(value(after: "--gaze-max-fps", in: args(forceWasm: true)), "10")
+        XCTAssertEqual(value(after: "--gaze-max-fps", in: args(forceWasm: true)), "20")
     }
 
     /// First enable never shows a calibration screen: with no usable
@@ -180,15 +180,16 @@ final class TrackerArgumentsTests: XCTestCase {
 
     // MARK: - Wasm fallback
 
-    /// The wedged-WebGPU session fallback appends the provider switch and
-    /// the fps cap as a contiguous pair, after the geometry flags.
-    func testForceWasmAppendsProviderAndFpsCap() {
+    /// The wedged-boot session fallback appends the provider switch after
+    /// the geometry flags and keeps the hosted 15 fps rate: MediaPipe never
+    /// runs on ONNX Runtime, so a 10 fps cap only slowed tracking.
+    func testForceWasmAppendsProviderAndKeepsHostedRate() {
         let arguments = args(forceWasm: true)
         guard let wasmIndex = arguments.firstIndex(of: "--web-accelerator") else {
             return XCTFail("missing --web-accelerator")
         }
         XCTAssertEqual(Array(arguments[wasmIndex...].prefix(4)),
-                       ["--web-accelerator", "wasm", "--gaze-max-fps", "10"])
+                       ["--web-accelerator", "wasm", "--gaze-max-fps", "15"])
         // It lands after the projection flag, not before it.
         XCTAssertGreaterThan(wasmIndex,
                              arguments.firstIndex(of: "--gaze-projection-mode")!)
@@ -263,7 +264,7 @@ final class TrackerArgumentsTests: XCTestCase {
              "--camera-fov", "87",
              "--gaze-projection-mode", "monocular",
              "--wasm-threads", "4",
-             "--web-accelerator", "wasm", "--gaze-max-fps", "10"])
+             "--web-accelerator", "wasm", "--gaze-max-fps", "15"])
     }
 
     /// Every API request carries the bearer token the tracker requires;

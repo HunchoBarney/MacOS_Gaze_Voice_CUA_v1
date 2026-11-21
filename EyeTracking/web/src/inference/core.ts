@@ -3346,7 +3346,10 @@ export class Calibration {
   private outputOffset: [number, number] = [0, 0];
 
   addImplicitSample(feature: GazeFeature, target: [number, number]): void {
-    if (!this.isUsableSample(feature, target)) {
+    // A fit awaiting its verify sweep owns the pools until it commits or is
+    // rejected; a background label landing now would be restored away, or
+    // refit the live map on the new run's samples.
+    if (this.pending !== null || !this.isUsableSample(feature, target)) {
       return;
     }
     // Same-spot dedupe: the OS emits one label per rest, and a docked cursor
@@ -3372,7 +3375,7 @@ export class Calibration {
   // evidence about the regional bias the fitted map still carries. Weight
   // ~0.3 keeps it subordinate to calibrated samples inside the bias fit.
   addResidualBiasEvidence(feature: GazeFeature, target: [number, number], weight = 0.3): void {
-    if (weight <= 0 || !this.isUsableSample(feature, target)) {
+    if (weight <= 0 || this.pending !== null || !this.isUsableSample(feature, target)) {
       return;
     }
     this.rejectedBiasEvidence.push([feature, target, weight]);
@@ -3388,7 +3391,12 @@ export class Calibration {
     const learning = this.learning;
     const minLabels = learning ? LEARNING_REFIT_MIN_LABELS : 30;
     const cadence = learning ? LEARNING_REFIT_INTERVAL_MS : 90_000;
-    if ((this.featureMap === null && this.matrix === null) || this.implicitSamples.length < minLabels || now - this.lastImplicitRefit < cadence) {
+    if (
+      this.pending !== null ||
+      (this.featureMap === null && this.matrix === null) ||
+      this.implicitSamples.length < minLabels ||
+      now - this.lastImplicitRefit < cadence
+    ) {
       return false;
     }
     // Pool-spread gate: a cursor parked at one spot yields dozens of rests at
