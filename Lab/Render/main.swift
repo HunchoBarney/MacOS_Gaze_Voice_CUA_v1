@@ -346,6 +346,7 @@ func posters(_ options: Options) throws {
 func rmcheck(out: String?, control: Bool = false) -> Bool {
     let states = [("gaze-highlight", "locked"), ("flashes", "confirm"), ("agent-presence", "shelf"),
                   ("agent-presence", "large"), ("guide-callout", "consequential"), ("guide-callout", "large"),
+                  ("settings-window", "missing-permissions"), ("agents-window", "roster"),
                   ("menu-bar-item", "asks-parked"), ("menu-bar-item", "working"), ("menu-bar-menu", "task-running"), ("first-run", "accessibility-waiting")]
     func pixels(_ image: CGImage) -> [UInt8] {
         let w = image.width, h = image.height
