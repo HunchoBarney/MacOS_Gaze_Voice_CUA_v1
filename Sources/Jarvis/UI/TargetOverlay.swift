@@ -3,13 +3,12 @@ import QuartzCore
 import SwiftUI
 
 /// "Aim" — the user's second cursor. Overlay grammar for this file: the
-/// Magnet (GazeMagnet.swift) is the one gaze highlight, an orb at the
-/// gaze that stretches onto the control it settles on; the blue frosted
-/// halo marks a control Jarvis points out (an answer, a guide step) and
-/// the Magnet steps back while it shows; dark compact pills carry the
+/// blue frosted halo marks the user's current target and anchors to
+/// element frames (never the raw gaze point, so it can't lag the
+/// tracker's dead-reckoned pearl dot); dark compact pills carry the
 /// numbered targets and the micro-radial; a ring flash confirms a
 /// verified action landed. While an agent acts on the same element the
-/// glow and halo stand down (dim) rather than fighting the agent's flash.
+/// halo stands down (dims) rather than fighting the agent's flash.
 ///
 /// Every incoming frame/point is a global TOP-LEFT screen point; panel
 /// frames cross `ScreenGeometry.topLeftToAppKit` exactly once, flipped
@@ -53,23 +52,24 @@ final class TargetOverlay {
     static let flashSeconds: CFTimeInterval = 0.4
     /// The cheat sheet hangs this far below the screen's top edge.
     static let cheatSheetDrop: CGFloat = 24
-    /// Gaze highlight: outset off the element frame.
+    /// Gaze highlight: outset off the element frame, how far inside its
+    /// resting shape a fresh highlight lifts from, appear / glide /
+    /// release durations, stroke width, and the padding the panel adds
+    /// around the shape for the glow.
     nonisolated static let ringOutset: CGFloat = 5
-    /// Nothing larger locks the glow — a pane, list or document is not a
+    nonisolated static let ringLiftInset: CGFloat = 3
+    static let ringAppearSeconds: CFTimeInterval = 0.08
+    static let ringRetargetSeconds: CFTimeInterval = 0.10
+    static let ringReleaseSeconds: CFTimeInterval = 0.12
+    static let ringLineWidth: CGFloat = 1.5
+    static let ringPanelPad: CGFloat = 14
+    /// Nothing larger takes the ring — a pane, list or document is not a
     /// control, and outlining one reads as "the whole screen".
     nonisolated static let lockMaxSize = CGSize(width: 320, height: 200)
-    /// The glow locks onto a control only while the gaze error band σ is
-    /// at most this many times the control's size; past it the tracker
-    /// can't tell the control from its neighbours, so only the orb shows.
+    /// The ring takes a control only while the gaze error band σ is at
+    /// most this many times the control's larger side; past it the tracker
+    /// can't tell the control from its neighbours, so nothing highlights.
     nonisolated static let lockSigmaFactor: Double = 1.5
-    /// The orb follows the gaze on a critically damped spring — it smooths
-    /// the tracker's 15 Hz steps without overshoot on a surface that moves
-    /// all the time.
-    static let orbFollow = Animation.spring(duration: 0.35, bounce: 0)
-    /// Orb ↔ glow: one quick spring with a touch of life, interruptible
-    /// mid-flight. Reduce Motion crossfades instead.
-    static let magnetMorph = Animation.spring(duration: 0.3, bounce: 0.12)
-    static let magnetCrossfade = Animation.easeOut(duration: 0.15)
     /// Meta's sustained-dwell fade — the ring settles toward this alpha
     /// once the countdown passes halfway rather than sitting bright in
     /// the fovea.
@@ -150,6 +150,36 @@ final class TargetOverlay {
         return (r, min(8, h / 4))
     }
 
+    /// The shape a fresh highlight lifts out of — the element's own
+    /// shape a few points smaller, so it appears on the control (the
+    /// visionOS hover lift) rather than growing from a cursor dot.
+    nonisolated static func ringLift(_ g: (rect: CGRect, corner: CGFloat))
+        -> (rect: CGRect, corner: CGFloat) {
+        let inset = min(ringLiftInset, g.rect.width / 4, g.rect.height / 4)
+        return (g.rect.insetBy(dx: inset, dy: inset), max(0, g.corner - inset))
+    }
+
+    /// Ease-out cubic — springish feel while staying a pure t-map,
+    /// which is what makes mid-morph reversal computable.
+    nonisolated static func ringEase(_ t: Double) -> Double {
+        let t = min(1, max(0, t))
+        return 1 - pow(1 - t, 3)
+    }
+
+    /// Geometry interpolation — every ring shape is a rounded-rect
+    /// (circles/capsules are corner-radius extremes), so (rect, corner)
+    /// pairs always lerp cleanly and CA path morphs stay interpolable.
+    nonisolated static func lerpRing(from a: (rect: CGRect, corner: CGFloat),
+                                     to b: (rect: CGRect, corner: CGFloat),
+                                     t: Double) -> (rect: CGRect, corner: CGFloat) {
+        let t = CGFloat(t)
+        return (CGRect(x: a.rect.minX + (b.rect.minX - a.rect.minX) * t,
+                       y: a.rect.minY + (b.rect.minY - a.rect.minY) * t,
+                       width: a.rect.width + (b.rect.width - a.rect.width) * t,
+                       height: a.rect.height + (b.rect.height - a.rect.height) * t),
+                a.corner + (b.corner - a.corner) * t)
+    }
+
     /// Dwell countdown → ring alpha: full through the halfway point,
     /// then fades toward the floor per Meta's sustained-dwell guidance.
     /// A plain look-highlight (dwell off) has no countdown and stays put.
@@ -158,9 +188,10 @@ final class TargetOverlay {
         return 1 - (1 - ringDwellFloor) * min(1, (progress - 0.5) * 2)
     }
 
-    /// Canvas-relative rounded-rect path — top-left canvas offsets are
-    /// path coordinates in a flipped view. The deictic flash draws its
-    /// ring with it.
+    /// Canvas-relative rounded-rect path — the ring view is flipped, so
+    /// top-left canvas offsets are path coordinates. Emitting the same
+    /// rounded-rect structure for every shape is what keeps CA path
+    /// interpolation valid across dot→circle→capsule→rect morphs.
     nonisolated static func ringPath(_ g: (rect: CGRect, corner: CGFloat),
                                      in canvas: CGRect) -> CGPath {
         CGPath(roundedRect: g.rect.offsetBy(dx: -canvas.minX, dy: -canvas.minY),
@@ -194,6 +225,36 @@ final class TargetOverlay {
             guard let enteredAt, now - enteredAt >= threshold - 1e-9 else { return nil }
             self.enteredAt = nil
             return hit
+        }
+    }
+
+    /// Interruptible morph bookkeeping for the conforming ring — the
+    /// rendered layers chase this model with CA path animations.
+    /// `retarget` captures wherever the morph currently is, so
+    /// acquire→release→acquire never jumps; a pure value type keeps the
+    /// reversal math testable without panels.
+    struct RingMorph {
+        var from: (rect: CGRect, corner: CGFloat) = (.zero, 0)
+        var to: (rect: CGRect, corner: CGFloat) = (.zero, 0)
+        var startedAt: TimeInterval = 0
+        var duration: TimeInterval = 0
+        var active = false
+
+        /// Where the morph is right now — eased interpolation from→to.
+        func current(at now: TimeInterval) -> (rect: CGRect, corner: CGFloat) {
+            guard active, duration > 0 else { return to }
+            return TargetOverlay.lerpRing(from: from, to: to,
+                t: TargetOverlay.ringEase((now - startedAt) / duration))
+        }
+
+        /// Aim the morph at `target`, starting from wherever it is now.
+        mutating func retarget(to target: (rect: CGRect, corner: CGFloat),
+                               at now: TimeInterval, duration: TimeInterval) {
+            from = current(at: now)
+            to = target
+            startedAt = now
+            self.duration = duration
+            active = true
         }
     }
 
@@ -241,32 +302,35 @@ final class TargetOverlay {
     /// so a re-arm during the same outage keeps the dim.
     private var gazeDimmed = false
     private var cheatPanel: NSPanel?
-    /// The Magnet — the one gaze highlight. Tests read its state.
-    let magnet = GazeMagnetModel()
-    private var magnetPanel: NSPanel?
-    /// Bumped on every lock change and teardown — a stale press-glow
-    /// release or panel retire can never undo a newer lock.
-    private var magnetGeneration = 0
-    private var lastGazeAt: TimeInterval = -.greatestFiniteMagnitude
-    private var lastGazePoint: CGPoint?
-    private var orbWatchdog: Task<Void, Never>?
-    /// The rect the glow claims — the element frame plus outset, never
-    /// the gaze point. nil while only the orb shows: a glow shrinking
-    /// back into the orb no longer asserts a target.
-    var ringRect: CGRect? { magnet.state.lock?.rect }
-    /// The glow is on an element — mirrors `haloArmed`. Read surface for
-    /// the coordinator and tests; nothing renders off it.
+    private var ringPanel: NSPanel?
+    private var ringView: IntentRingView?
+    /// The rect the ring claims — the element frame plus outset, never
+    /// the gaze point. nil while idle or once a release starts: a
+    /// fading ring no longer asserts a target.
+    private(set) var ringRect: CGRect?
+    /// A ring is painted on an element — mirrors `haloArmed`. Read
+    /// surface for the coordinator/tests asserting ring lifecycle —
+    /// nothing renders off it.
     var ringArmed: Bool { ringRect != nil }
-    /// Dwell fill 0→1 — `hold` events stream it onto the sweep stroke.
-    var ringProgress: Double { magnet.state.progress }
-    /// The gaze orb is showing.
-    var orbShown: Bool { magnet.state.orb != nil }
-    /// The dwell countdown sweeps around the glow only while dwell can
-    /// actually click; otherwise the glow is a plain look-highlight.
+    /// Dwell fill 0→1 — `hold` events stream it onto the fill stroke.
+    /// Read surface for tests; the rendered value lives on the view.
+    private(set) var ringProgress: Double = 0
+    /// Interruptibility bookkeeping — see RingMorph.
+    private(set) var ringMorph = RingMorph()
+    /// A morph or fade is in flight — release keeps this true until the
+    /// fade retires the panel, so a re-acquire continues the morph
+    /// instead of restarting it.
+    private var ringLive = false
+    /// Bumped on every acquire/hide — a stale retire task can never
+    /// order out a live ring's panel.
+    private var ringGeneration = 0
+    /// The dwell countdown sweeps around the highlight only while dwell
+    /// can actually click; otherwise the highlight is a plain look-glow.
     var showsDwellProgress = false {
         didSet {
             guard showsDwellProgress != oldValue else { return }
-            updateMagnet(nil) { $0.showsProgress = showsDwellProgress }
+            ringView?.showsProgress = showsDwellProgress
+            ringView?.setProgress(ringProgress)
         }
     }
     /// The scorer's gaze error band in points. `GazeService` writes it on
@@ -282,9 +346,9 @@ final class TargetOverlay {
     /// just move the one panel — cheap enough for 10Hz retargeting, and
     /// visible panels are never reordered.
     func showHalo(frame: CGRect) {
-        // One highlight at a time: the gaze glow gathers back into the
-        // orb and stays there while the halo is up.
-        releaseLock()
+        // One highlight at a time: the gaze ring stands down while the
+        // halo is up.
+        releaseRing()
         let rect = frame.insetBy(dx: -Self.haloOutset, dy: -Self.haloOutset)
         if haloPanel == nil {
             let panel = Self.makePanel()
@@ -328,13 +392,12 @@ final class TargetOverlay {
     /// see what was pressed, then faded. A gaze acquire in the meantime
     /// takes the ring over, and Reduce Motion is honoured the same way.
     func glowPress(frame: CGRect) {
-        lock(key: "press:\(frame)", target: Self.ringTarget(frame: frame), progress: 0)
-        magnetGeneration += 1
-        let generation = magnetGeneration
+        acquireRing(target: Self.ringTarget(frame: frame))
+        let generation = ringGeneration
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.pressGlowSeconds * 1e9))
-            guard let self, self.magnetGeneration == generation else { return }
-            self.releaseLock()
+            guard let self, self.ringGeneration == generation else { return }
+            self.releaseRing()
         }
     }
 
@@ -351,21 +414,17 @@ final class TargetOverlay {
         applyRingAlpha()
     }
 
-    /// Same stand-down as the halo — the glow dims rather than fighting
+    /// Same stand-down as the halo — the ring dims rather than fighting
     /// an agent cursor acting on the same element.
     private func applyRingAlpha() {
-        updateMagnet(nil) { $0.dimmed = self.dimmed($0.lock?.rect) }
-    }
-
-    private func dimmed(_ rect: CGRect?) -> Bool {
-        rect.map { r in agentDemoteFrames.contains { $0.intersects(r) } } ?? false
+        let dimmed = ringRect.map { r in agentDemoteFrames.contains { $0.intersects(r) } } ?? false
+        ringPanel?.alphaValue = dimmed ? Self.haloDimmedAlpha : 1
     }
 
     /// The gaze feed went stale (or recovered) while chips are armed —
     /// dim the set so a dead tracker can't pass for a live dwell pick.
     /// Voice picks still resolve; only the "tracker is healthy" read dims.
     func gazeLost(_ lost: Bool) {
-        if lost { hideOrb() }
         guard lost != gazeDimmed else { return }
         gazeDimmed = lost
         applyChipAlpha()
@@ -521,50 +580,51 @@ final class TargetOverlay {
     /// scorer's ring survives.
     func hideAll() {
         clearChips()
-        retireMagnet()
+        retireRing()
         hideHalo()
         guideCallout.hide()
         cheatPanel?.orderOut(nil)
         cheatPanel = nil
     }
 
-    /// Live gaze feed (top-left points): moves the gaze orb and dwells
-    /// the chip set toward a pick — 500ms inside one chip fires its
-    /// index. A pick retires the set unless it armed as persistent, in
-    /// which case the chips stay up for the next pick.
+    /// Live gaze feed (top-left points): dwells the chip set toward a
+    /// pick — 500ms inside one chip fires its index. A pick retires the
+    /// set unless it armed as persistent, in which case the chips stay
+    /// up for the next pick.
     func ingestGaze(_ point: CGPoint) {
-        moveOrb(to: point)
         guard let hit = dwell.advance(point: point, now: now()) else { return }
         let pick = onPick
         if dismissOnPick { clearChips() }
         pick?(hit)
     }
 
-    // MARK: Gaze highlight (Magnet)
+    // MARK: Gaze highlight
 
     /// Gaze-intent event feed — the scorer's acquire/hold/release
-    /// transitions lock the Magnet onto the element's own frame (the
-    /// visionOS "feedback lives on the element" pattern) or gather it
-    /// back into the orb. A tie releases the glow, and `ambiguous` bubbles
-    /// up through `onAmbiguous`; the coordinator owns the radial itself.
+    /// transitions drive the highlight on the element's own frame (the
+    /// visionOS "feedback lives on the element" pattern: no cursor, the
+    /// looked-at control glows). A tie releases the ring, and `ambiguous`
+    /// bubbles up through `onAmbiguous`; the coordinator owns the radial.
     var onAmbiguous: (([IntentCandidate]) -> Void)?
 
     func intentEvent(_ event: IntentEvent) {
         switch event {
         case .none, .release:
-            releaseLock()
+            releaseRing()
         case .acquire(let c):
-            lockOnGaze(c, progress: 0)
+            guard ringMayLock(on: c) else { return releaseRing() }
+            acquireRing(on: c)
         case .hold(let c, let progress):
-            lockOnGaze(c, progress: progress)
+            guard ringMayLock(on: c) else { return releaseRing() }
+            holdRing(on: c, progress: progress)
         case .ambiguous(let candidates):
-            releaseLock()
+            releaseRing()
             onAmbiguous?(candidates)
         }
     }
 
-    /// Whether the glow may lock onto a candidate the gaze scorer chose:
-    /// a leaf the person can act on, no bigger than a control, and big
+    /// Whether the ring may take a candidate the gaze scorer chose: a
+    /// leaf the person can act on, no bigger than a control, and big
     /// enough that the current error band can single it out.
     nonisolated static func canLock(_ c: IntentCandidate, sigmaPt: Double) -> Bool {
         guard c.kind != .window, !IntentCandidate.isContainer(role: c.role) else { return false }
@@ -573,133 +633,210 @@ final class TargetOverlay {
         return sigmaPt <= lockSigmaFactor * Double(max(r.width, r.height))
     }
 
-    private func lockOnGaze(_ c: IntentCandidate, progress: Double) {
-        guard !haloArmed, Self.canLock(c, sigmaPt: gazeSigmaPt) else {
-            releaseLock()
-            return
-        }
-        lock(key: c.id, target: Self.ringTarget(for: c), progress: progress)
+    private func ringMayLock(on c: IntentCandidate) -> Bool {
+        !haloArmed && Self.canLock(c, sigmaPt: gazeSigmaPt)
     }
 
-    /// Stretch the Magnet onto a control. A new control grows its glow
-    /// out of the orb; the same control streams its dwell progress, and
-    /// glides if a refreshed feed moved it.
-    private func lock(key: String, target: (rect: CGRect, corner: CGFloat), progress: Double) {
-        let current = magnet.state.lock
-        let changed = current?.key != key || current?.rect != target.rect
-        if current?.key != key { magnetGeneration += 1 }
-        updateMagnet(changed ? morphAnimation : nil) { state in
-            state.lock = GazeMagnetState.Lock(key: key, rect: target.rect, corner: target.corner)
-            state.progress = progress
-            state.dimmed = self.dimmed(target.rect)
+    /// The highlight itself: a soft accent-tinted fill with a hairline
+    /// edge and a faint outer glow on the element's shape, plus a brighter
+    /// stroke that sweeps 0→1 with dwell progress when dwell is on. A
+    /// container layer's opacity carries the dwell-fade, the appear and
+    /// the release. `isFlipped` puts the backing layer in top-left
+    /// coordinates so paths are canvas-relative without a second flip.
+    final class IntentRingView: NSView {
+        let container = CALayer()
+        let base = CAShapeLayer()
+        let fill = CAShapeLayer()
+        var showsProgress = false {
+            didSet { fill.isHidden = !showsProgress }
         }
-    }
 
-    /// Gather the glow back into the orb. One-shot: repeated `.none`
-    /// ticks find nothing to release.
-    private func releaseLock() {
-        guard magnet.state.lock != nil else { return }
-        magnetGeneration += 1
-        updateMagnet(morphAnimation) { state in
-            state.lock = nil
-            state.progress = 0
-            state.dimmed = false
+        override var isFlipped: Bool { true }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            let accent = NSColor.controlAccentColor
+            base.fillColor = accent.withAlphaComponent(0.14).cgColor
+            base.strokeColor = accent.withAlphaComponent(0.55).cgColor
+            base.lineWidth = TargetOverlay.ringLineWidth
+            base.shadowColor = accent.cgColor
+            base.shadowOpacity = 0.45
+            base.shadowRadius = 6
+            base.shadowOffset = .zero
+            fill.strokeColor = accent.cgColor
+            fill.fillColor = NSColor.clear.cgColor
+            fill.lineWidth = TargetOverlay.ringLineWidth + 1
+            fill.lineCap = .round
+            fill.strokeEnd = 0
+            fill.isHidden = true
+            container.opacity = 0
+            container.addSublayer(base)
+            container.addSublayer(fill)
+            layer?.addSublayer(container)
         }
-    }
+        @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
-    private var morphAnimation: Animation {
-        reduceMotion() ? Self.magnetCrossfade : Self.magnetMorph
-    }
-
-    /// The orb follows every fresh gaze point and fades once samples stop
-    /// for the freshness window, so it never sits on a dead feed. The
-    /// service replays its last sample until that sample is stale, and a
-    /// replay doesn't count as a new sample.
-    private func moveOrb(to point: CGPoint) {
-        guard point.x.isFinite, point.y.isFinite else { return }
-        if point != lastGazePoint {
-            lastGazePoint = point
-            lastGazeAt = now()
-        } else if now() - lastGazeAt > GazeSample.freshnessWindow {
-            hideOrb()
-            return
-        }
-        updateMagnet(reduceMotion() ? nil : Self.orbFollow) { $0.orb = point }
-        guard orbWatchdog == nil else { return }
-        orbWatchdog = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
-                guard let self else { return }
-                if self.now() - self.lastGazeAt > GazeSample.freshnessWindow {
-                    self.orbWatchdog = nil
-                    self.hideOrb()
-                    return
-                }
+        /// Model paths land on `to`; one keyed animation covers the
+        /// transit. Re-morphing replaces the same key, and because
+        /// `from` is the morph model's *current* geometry a glide
+        /// starts exactly where the highlight visually is — no jump. A
+        /// zero duration places the shape outright (Reduce Motion).
+        func morph(from: (rect: CGRect, corner: CGFloat),
+                   to: (rect: CGRect, corner: CGFloat),
+                   in canvas: CGRect, duration: CFTimeInterval) {
+            let fromPath = TargetOverlay.ringPath(from, in: canvas)
+            let toPath = TargetOverlay.ringPath(to, in: canvas)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            container.frame = CGRect(origin: .zero, size: canvas.size)
+            for l in [base, fill] {
+                l.frame = container.bounds
+                l.path = toPath
+                l.removeAnimation(forKey: "morph")
+                guard duration > 0 else { continue }
+                let anim = CABasicAnimation(keyPath: "path")
+                anim.fromValue = fromPath
+                anim.toValue = toPath
+                anim.duration = duration
+                anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.215, 0.61, 0.355, 1.0)
+                l.add(anim, forKey: "morph")
             }
+            base.shadowPath = toPath
+            CATransaction.commit()
+        }
+
+        /// Dwell countdown — the fill stroke sweeps 0→1 while the whole
+        /// highlight fades toward the floor once progress passes halfway.
+        /// Without dwell the highlight holds steady.
+        func setProgress(_ progress: Double) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            fill.strokeEnd = CGFloat(min(1, max(0, progress)))
+            container.opacity = Float(TargetOverlay.ringAlpha(progress: progress,
+                                                              dwell: showsProgress))
+            CATransaction.commit()
+        }
+
+        /// Fade the whole highlight — release fades to 0, a re-acquire
+        /// from mid-fade animates back up from wherever the presentation is.
+        func fade(to alpha: Float, duration: CFTimeInterval) {
+            let current = container.presentation()?.opacity ?? container.opacity
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            container.opacity = alpha
+            CATransaction.commit()
+            guard duration > 0 else { return }
+            let anim = CABasicAnimation(keyPath: "opacity")
+            anim.fromValue = NSNumber(value: current)
+            anim.toValue = NSNumber(value: alpha)
+            anim.duration = duration
+            container.add(anim, forKey: "fade")
         }
     }
 
-    private func hideOrb() {
-        guard magnet.state.orb != nil else { return }
-        updateMagnet(morphAnimation) { $0.orb = nil }
+    /// A fresh acquire lifts the highlight out of the element's own
+    /// shape; a live highlight glides to the next element. Reduce Motion
+    /// keeps only the opacity change — no lift, no glide.
+    private func acquireRing(on c: IntentCandidate) {
+        acquireRing(target: Self.ringTarget(for: c))
     }
 
-    /// Every Magnet change goes through here: the new state lands inside
-    /// one animation transaction (nil places it outright), on the panel of
-    /// the display it sits on.
-    private func updateMagnet(_ animation: Animation?, _ change: (inout GazeMagnetState) -> Void) {
-        var next = magnet.state
-        change(&next)
-        next.reduceMotion = reduceMotion()
-        let anchor = next.lock.map { CGPoint(x: $0.rect.midX, y: $0.rect.midY) } ?? next.orb
-        if let anchor, !next.canvas.contains(anchor),
-           let screen = ScreenGeometry.display(containing: anchor) {
-            next.canvas = ScreenGeometry.topLeftFrame(of: screen)
+    private func acquireRing(target: (rect: CGRect, corner: CGFloat)) {
+        ensureRing()
+        let still = reduceMotion()
+        let t = now()
+        if ringLive || ringReleasing {
+            // Glide from wherever the shape is now — a re-acquire mid
+            // -release continues, never teleports.
+            ringMorph.retarget(to: target, at: t,
+                               duration: still ? 0 : Self.ringRetargetSeconds)
+        } else {
+            ringMorph = RingMorph(from: still ? target : Self.ringLift(target), to: target,
+                                  startedAt: t, duration: still ? 0 : Self.ringAppearSeconds,
+                                  active: true)
         }
-        guard next != magnet.state else { return }
-        withAnimation(animation) { magnet.state = next }
-        presentMagnet()
+        ringLive = true
+        ringReleasing = false
+        // Invalidate any pending retire from the release we're cancelling —
+        // otherwise it fires mid-acquire and orders the panel out.
+        ringGeneration += 1
+        ringRect = target.rect
+        ringProgress = 0
+        presentRing(duration: ringMorph.duration)
+        ringView?.setProgress(0)
+        ringView?.fade(to: 1, duration: Self.ringAppearSeconds)
+        applyRingAlpha()
+        if Self.drawsOnScreen, ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
     }
 
-    /// One full-display panel carries the Magnet, so the orb can travel
-    /// without the window moving under it. It leaves the screen once both
-    /// the orb and the glow are gone and their exit has played.
-    private func presentMagnet() {
-        let state = magnet.state
-        guard state.orb != nil || state.lock != nil else {
-            let generation = magnetGeneration
-            Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(600))
-                guard let self, self.magnetGeneration == generation,
-                      self.magnet.state.orb == nil, self.magnet.state.lock == nil else { return }
-                self.magnetPanel?.orderOut(nil)
-            }
-            return
+    /// Streams the dwell countdown and re-targets the shape when a
+    /// refreshed feed moved the element.
+    private func holdRing(on c: IntentCandidate, progress: Double) {
+        if !ringLive || ringReleasing { acquireRing(on: c) }
+        let target = Self.ringTarget(for: c)
+        if target != ringMorph.to {
+            ringMorph.retarget(to: target, at: now(),
+                               duration: reduceMotion() ? 0 : Self.ringRetargetSeconds)
+            presentRing(duration: ringMorph.duration)
         }
-        guard Self.drawsOnScreen, !state.canvas.isEmpty else { return }
-        if magnetPanel == nil {
-            let panel = Self.makePanel()
-            let host = NSHostingView(rootView: GazeMagnetHost(model: magnet))
-            host.sizingOptions = []
-            panel.contentView = host
-            magnetPanel = panel
-        }
-        let frame = Self.appKitFrame(for: state.canvas)
-        if magnetPanel?.frame != frame { magnetPanel?.setFrame(frame, display: false) }
-        if magnetPanel?.isVisible == false { magnetPanel?.orderFrontRegardless() }
+        ringRect = target.rect
+        ringProgress = progress
+        ringView?.setProgress(progress)
+        applyRingAlpha()
     }
 
-    private func retireMagnet() {
-        magnetGeneration += 1
-        orbWatchdog?.cancel()
-        orbWatchdog = nil
-        var cleared = magnet.state
-        cleared.orb = nil
-        cleared.lock = nil
-        cleared.progress = 0
-        cleared.dimmed = false
-        withAnimation(nil) { magnet.state = cleared }
-        magnetPanel?.orderOut(nil)
+    /// Fades out in place on the element — the eyes have left, there is
+    /// nothing to shrink back into. The panel retires itself,
+    /// generation-guarded so a re-acquire mid-fade can never lose its
+    /// panel. `ringReleasing` makes the release one-shot — repeated
+    /// `.none`/`.release` ticks must not restart the fade.
+    private var ringReleasing = false
+    private func releaseRing() {
+        guard ringLive, !ringReleasing else { return }
+        ringReleasing = true
+        ringRect = nil
+        ringView?.fade(to: 0, duration: Self.ringReleaseSeconds)
+        let generation = ringGeneration
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.ringReleaseSeconds * 1e9) + 80_000_000)
+            guard let self, self.ringGeneration == generation else { return }
+            self.ringPanel?.orderOut(nil)
+            self.ringLive = false
+            self.ringReleasing = false
+            self.ringMorph.active = false
+        }
+    }
+
+    private func ensureRing() {
+        guard ringPanel == nil else { return }
+        let panel = Self.makePanel()
+        let view = IntentRingView(frame: .zero)
+        view.showsProgress = showsDwellProgress
+        panel.contentView = view
+        ringPanel = panel
+        ringView = view
+    }
+
+    /// The panel covers the union of the morph's endpoints, padded past
+    /// the stroke and glow. Paths draw canvas-relative, so panel moves
+    /// never distort the geometry.
+    private func presentRing(duration: CFTimeInterval) {
+        let canvas = ringMorph.from.rect.union(ringMorph.to.rect)
+            .insetBy(dx: -Self.ringPanelPad, dy: -Self.ringPanelPad)
+        ringPanel?.setFrame(Self.appKitFrame(for: canvas), display: true)
+        ringView?.morph(from: ringMorph.from, to: ringMorph.to,
+                        in: canvas, duration: reduceMotion() ? 0 : duration)
+    }
+
+    private func retireRing() {
+        ringGeneration += 1
+        ringPanel?.orderOut(nil)
+        ringLive = false
+        ringReleasing = false
+        ringMorph.active = false
+        ringRect = nil
+        ringProgress = 0
     }
 
     // MARK: Flash

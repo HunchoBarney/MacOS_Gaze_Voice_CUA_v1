@@ -370,7 +370,7 @@ final class GazeService {
         }
         switch dwell.advance(event, share: share, policy: dwellPolicy) {
         case .fire(let candidate):
-            // The glow refused this target, so the user never saw it
+            // The ring refused this target, so the user never saw it
             // or its countdown: a click there would come unannounced.
             guard TargetOverlay.canLock(candidate, sigmaPt: sigmaPt) else { return }
             // A suppressed fire is an aborted intent — feed it into the

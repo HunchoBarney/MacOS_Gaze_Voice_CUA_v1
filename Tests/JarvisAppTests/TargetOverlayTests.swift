@@ -337,119 +337,174 @@ final class TargetOverlayTests: XCTestCase {
         overlay.hideAll()
     }
 
-    /// Dwell off: the glow is a plain look-highlight — no sweep and no
-    /// dwell-fade however long the look lasts; the sweep shows only while
-    /// dwell can click.
-    func testLookHighlightWithoutDwellHoldsSteady() {
+    /// The view maps progress straight onto the fill stroke's strokeEnd
+    /// and the dwell-fade onto the container opacity.
+    func testRingViewProgressMapsStrokeEndAndOpacity() {
+        let view = TargetOverlay.IntentRingView(
+            frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        view.showsProgress = true
+        view.setProgress(0.4)
+        XCTAssertEqual(view.fill.strokeEnd, 0.4, accuracy: 0.001)
+        XCTAssertEqual(view.container.opacity, 1, accuracy: 0.001)
+        view.setProgress(1)
+        XCTAssertEqual(view.fill.strokeEnd, 1, accuracy: 0.001)
+        XCTAssertEqual(view.container.opacity,
+                       Float(TargetOverlay.ringDwellFloor), accuracy: 0.01)
+    }
+
+    /// Dwell off: the highlight is a plain look-glow — no sweep stroke,
+    /// no dwell-fade however long the look lasts.
+    func testLookHighlightWithoutDwellHidesSweepAndHoldsSteady() {
         XCTAssertEqual(TargetOverlay.ringAlpha(progress: 1, dwell: false), 1, accuracy: 0.001)
-        let overlay = TargetOverlay()
-        overlay.intentEvent(.acquire(intentCandidate(x: 100, y: 100, w: 120, h: 28)))
-        XCTAssertFalse(overlay.magnet.state.showsProgress)
-        overlay.showsDwellProgress = true
-        XCTAssertTrue(overlay.magnet.state.showsProgress)
-        overlay.hideAll()
+        let view = TargetOverlay.IntentRingView(
+            frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        XCTAssertTrue(view.fill.isHidden)
+        view.setProgress(1)
+        XCTAssertEqual(view.container.opacity, 1, accuracy: 0.001)
+        view.showsProgress = true
+        XCTAssertFalse(view.fill.isHidden)
     }
 
-    // MARK: - Magnet: one object
-
-    /// The orb follows every fresh gaze point; a lock hugs the control's
-    /// own shape; a release gathers the glow back into the orb, which
-    /// never left — nothing blinks off.
-    func testOrbFollowsGazeAndTheLockHugsTheControl() {
-        let overlay = TargetOverlay()
-        overlay.ingestGaze(CGPoint(x: 400, y: 300))
-        XCTAssertEqual(overlay.magnet.state.orb, CGPoint(x: 400, y: 300))
-        XCTAssertNil(overlay.magnet.state.lock)
-        let a = intentCandidate(x: 380, y: 290, w: 120, h: 28, id: "a")
-        overlay.intentEvent(.acquire(a))
-        let target = TargetOverlay.ringTarget(for: a)
-        XCTAssertEqual(overlay.magnet.state.lock?.rect, target.rect)
-        XCTAssertEqual(overlay.magnet.state.lock?.corner, target.corner)
-        XCTAssertEqual(overlay.ringRect, target.rect)
-        overlay.ingestGaze(CGPoint(x: 410, y: 302))
-        XCTAssertEqual(overlay.magnet.state.orb, CGPoint(x: 410, y: 302))
-        overlay.intentEvent(.release(a))
-        XCTAssertNil(overlay.magnet.state.lock)
-        XCTAssertTrue(overlay.orbShown, "the glow shrinks back into the orb")
-        overlay.hideAll()
-        XCTAssertFalse(overlay.orbShown)
+    /// Paths land canvas-relative — the panel covers a union rect in
+    /// top-left space, the ring draws inside it.
+    func testRingMorphWritesCanvasRelativePaths() {
+        let view = TargetOverlay.IntentRingView(
+            frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let canvas = CGRect(x: 100, y: 100, width: 200, height: 200)
+        let to = (rect: CGRect(x: 110, y: 120, width: 60, height: 40),
+                  corner: CGFloat(8))
+        view.morph(from: TargetOverlay.ringLift(to),
+                   to: to, in: canvas, duration: 0.08)
+        XCTAssertEqual(view.base.path?.boundingBox,
+                       CGRect(x: 10, y: 20, width: 60, height: 40))
     }
 
-    /// A lost feed fades the orb — it never sits on a dead tracker.
-    func testGazeLostHidesTheOrb() {
-        let overlay = TargetOverlay()
-        overlay.ingestGaze(CGPoint(x: 200, y: 200))
-        XCTAssertTrue(overlay.orbShown)
-        overlay.gazeLost(true)
-        XCTAssertFalse(overlay.orbShown)
-        overlay.gazeLost(false)
-        XCTAssertFalse(overlay.orbShown, "only a fresh point brings it back")
-        overlay.hideAll()
+    // MARK: - Conforming ring: interruptibility
+
+    /// A retarget mid-morph starts from wherever the morph had reached —
+    /// the model-side proof that reversals can't jump.
+    func testMorphRetargetContinuesFromCurrentPosition() {
+        var m = TargetOverlay.RingMorph(
+            from: (CGRect(x: 0, y: 0, width: 8, height: 8), 4),
+            to: (CGRect(x: 100, y: 100, width: 60, height: 40), 8),
+            startedAt: 0, duration: 0.16, active: true)
+        let mid = m.current(at: 0.08)
+        XCTAssertNotEqual(mid.rect, m.to.rect)
+        m.retarget(to: (CGRect(x: 0, y: 0, width: 30, height: 20), 6),
+                   at: 0.08, duration: 0.16)
+        XCTAssertEqual(m.from.rect, mid.rect)
+        XCTAssertEqual(m.from.corner, mid.corner, accuracy: 0.001)
+        // A second retarget mid-release continues again from the new leg.
+        let rel = m.current(at: 0.12)
+        m.retarget(to: (CGRect(x: 200, y: 0, width: 50, height: 30), 8),
+                   at: 0.12, duration: 0.16)
+        XCTAssertEqual(m.from.rect, rel.rect)
     }
 
-    /// The service replays its last sample while it is fresh; a replay
-    /// isn't new gaze, so the orb goes one freshness window after the
-    /// last real sample, not one window after the last replay.
-    func testAReplayedGazePointDoesNotKeepTheOrbAlive() {
+    /// A fresh acquire appears ON the element — lifting out of its own
+    /// shape, never blooming from a cursor dot at the gaze point.
+    func testAcquireLiftsFromTheElementNotADot() {
         let overlay = TargetOverlay()
-        var t: TimeInterval = 100
-        overlay.now = { t }
-        let p = CGPoint(x: 200, y: 200)
-        overlay.ingestGaze(p)
-        t += 1.0
-        overlay.ingestGaze(p)
-        XCTAssertTrue(overlay.orbShown)
-        t += 0.6
-        overlay.ingestGaze(p)
-        XCTAssertFalse(overlay.orbShown)
-        overlay.ingestGaze(CGPoint(x: 201, y: 200))
-        XCTAssertTrue(overlay.orbShown, "a new sample brings it back")
-        overlay.hideAll()
-    }
-
-    /// A hold carrying a moved frame keeps the same glow and moves it; a
-    /// different control is a new glow, grown out of the orb.
-    func testSameControlGlidesAndANewControlIsANewGlow() {
-        let overlay = TargetOverlay()
+        overlay.now = { 0 }
+        overlay.reduceMotion = { false }
         let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
         overlay.intentEvent(.acquire(a))
-        let moved = intentCandidate(x: 104, y: 100, w: 120, h: 28, id: "a")
-        overlay.intentEvent(.hold(moved, progress: 0.5))
-        XCTAssertEqual(overlay.magnet.state.lock?.key, "a")
-        XCTAssertEqual(overlay.magnet.state.lock?.rect, TargetOverlay.ringTarget(for: moved).rect)
-        let b = intentCandidate(x: 300, y: 100, w: 40, h: 40, id: "b")
-        overlay.intentEvent(.acquire(b))
-        XCTAssertEqual(overlay.magnet.state.lock?.key, "b")
-        XCTAssertEqual(overlay.ringProgress, 0, accuracy: 0.001)
+        let target = TargetOverlay.ringTarget(for: a)
+        XCTAssertEqual(overlay.ringMorph.from.rect, TargetOverlay.ringLift(target).rect)
+        XCTAssertTrue(target.rect.contains(overlay.ringMorph.from.rect))
+        XCTAssertEqual(overlay.ringMorph.to.rect, target.rect)
+        XCTAssertEqual(overlay.ringMorph.duration, TargetOverlay.ringAppearSeconds, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(TargetOverlay.ringAppearSeconds, 0.1)
         overlay.hideAll()
     }
 
-    /// Reduce Motion reaches the state the view draws from, where the
-    /// stretch becomes a crossfade and the orb stops travelling.
-    func testReduceMotionReachesTheMagnet() {
+    /// Reduce Motion: no lift, no glide — the shape is placed outright
+    /// and only opacity changes.
+    func testReduceMotionPlacesTheHighlightWithoutMovement() {
         let overlay = TargetOverlay()
+        var t: TimeInterval = 0
+        overlay.now = { t }
         overlay.reduceMotion = { true }
-        overlay.ingestGaze(CGPoint(x: 200, y: 200))
-        XCTAssertTrue(overlay.magnet.state.reduceMotion)
+        let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
+        overlay.intentEvent(.acquire(a))
+        XCTAssertEqual(overlay.ringMorph.from.rect, overlay.ringMorph.to.rect)
+        XCTAssertEqual(overlay.ringMorph.duration, 0, accuracy: 0.001)
+        t = 0.5
+        let b = intentCandidate(x: 260, y: 100, w: 80, h: 28, id: "b")
+        overlay.intentEvent(.acquire(b))
+        XCTAssertEqual(overlay.ringMorph.duration, 0, accuracy: 0.001)
+        XCTAssertEqual(overlay.ringMorph.current(at: t).rect,
+                       TargetOverlay.ringTarget(for: b).rect)
+        overlay.hideAll()
+    }
+
+    /// acquire → release mid-appear → acquire elsewhere: release fades in
+    /// place (no shrink toward a dot), and the next acquire glides from
+    /// exactly where the shape had reached — no jump.
+    func testAcquireReleaseAcquireLeavesMorphConsistent() {
+        let overlay = TargetOverlay()
+        var t: TimeInterval = 0
+        overlay.now = { t }
         overlay.reduceMotion = { false }
-        overlay.ingestGaze(CGPoint(x: 210, y: 200))
-        XCTAssertFalse(overlay.magnet.state.reduceMotion)
+        let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
+        overlay.intentEvent(.acquire(a))
+        let target = TargetOverlay.ringTarget(for: a)
+        let lift = TargetOverlay.ringLift(target)
+        XCTAssertTrue(overlay.ringArmed)
+
+        t = 0.04                                       // mid appear
+        overlay.intentEvent(.release(a))
+        XCTAssertFalse(overlay.ringArmed)              // fade = no claim
+        XCTAssertEqual(overlay.ringMorph.to.rect, target.rect)
+
+        t = 0.06                                       // mid release-fade
+        let b = intentCandidate(x: 300, y: 100, w: 40, h: 40, id: "b")
+        overlay.intentEvent(.acquire(b))
+        let reached = TargetOverlay.lerpRing(
+            from: lift, to: target, t: TargetOverlay.ringEase(0.06 / TargetOverlay.ringAppearSeconds))
+        XCTAssertEqual(overlay.ringMorph.from.rect, reached.rect)
+        XCTAssertEqual(overlay.ringMorph.to.rect,
+                       TargetOverlay.ringTarget(for: b).rect)
+        XCTAssertEqual(overlay.ringMorph.duration,
+                       TargetOverlay.ringRetargetSeconds, accuracy: 0.001)
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.hideAll()
+    }
+
+    /// A hold carrying a moved frame retargets the morph at the faster
+    /// retarget duration instead of snapping.
+    func testHoldRetargetsWhenTheElementMoved() {
+        let overlay = TargetOverlay()
+        var t: TimeInterval = 0
+        overlay.now = { t }
+        overlay.reduceMotion = { false }
+        let a = intentCandidate(x: 100, y: 100, w: 120, h: 28, id: "a")
+        overlay.intentEvent(.acquire(a))
+        t = 0.5
+        let moved = IntentCandidate(id: "a", kind: .axElement,
+                                    frame: CGRect(x: 104, y: 100, width: 120, height: 28),
+                                    motorRect: CGRect(x: 104, y: 100, width: 120, height: 28),
+                                    role: "AXButton", label: "a")
+        overlay.intentEvent(.hold(moved, progress: 0.5))
+        XCTAssertEqual(overlay.ringMorph.to.rect,
+                       TargetOverlay.ringTarget(for: moved).rect)
+        XCTAssertEqual(overlay.ringMorph.duration,
+                       TargetOverlay.ringRetargetSeconds, accuracy: 0.001)
         overlay.hideAll()
     }
 
     // MARK: - Lock gate: error band, size, role (JARA-55)
 
     /// With the error band wider than 1.5× the control, the tracker can't
-    /// single it out: only the orb shows, and a band that widens while
-    /// locked lets go of the control.
-    func testWideErrorBandShowsOnlyTheOrb() {
+    /// single it out: nothing highlights, and a band that widens while
+    /// the ring is up lets go of the control.
+    func testWideErrorBandShowsNoHighlight() {
         let overlay = TargetOverlay()
         overlay.gazeSigmaPt = 384
-        overlay.ingestGaze(CGPoint(x: 114, y: 114))
         let button = intentCandidate(x: 100, y: 100, w: 28, h: 28)
         overlay.intentEvent(.acquire(button))
         XCTAssertFalse(overlay.ringArmed)
-        XCTAssertTrue(overlay.orbShown)
+        XCTAssertNil(overlay.ringRect)
         overlay.gazeSigmaPt = 30
         overlay.intentEvent(.hold(button, progress: 0.3))
         XCTAssertTrue(overlay.ringArmed)
@@ -492,7 +547,7 @@ final class TargetOverlayTests: XCTestCase {
 
     /// A tie lets go of the highlight — the old element no longer stays
     /// lit while the scorer says it can't tell.
-    func testAmbiguityReleasesTheGlow() {
+    func testAmbiguityReleasesTheRing() {
         let overlay = TargetOverlay()
         var got: [IntentCandidate] = []
         overlay.onAmbiguous = { got = $0 }
@@ -506,9 +561,9 @@ final class TargetOverlayTests: XCTestCase {
         overlay.hideAll()
     }
 
-    /// Exactly one highlight: while a halo marks a control, the gaze glow
-    /// stays gathered in the orb, and it comes back once the halo goes.
-    func testHaloAndGazeGlowNeverShowTogether() {
+    /// Exactly one highlight: while a halo marks a control, the gaze ring
+    /// stands down, and it comes back once the halo goes.
+    func testHaloAndGazeRingNeverShowTogether() {
         let overlay = TargetOverlay()
         let a = intentCandidate(x: 0, y: 0, w: 40, h: 40, id: "a")
         overlay.intentEvent(.acquire(a))
@@ -525,7 +580,7 @@ final class TargetOverlayTests: XCTestCase {
     }
 
     /// A press glow marks the control Jarvis presses by name — it is not a
-    /// gaze guess, so the error band doesn't gate it.
+    /// gaze guess, so the error band doesn't gate the ring it draws.
     func testPressGlowIgnoresTheErrorBand() {
         let overlay = TargetOverlay()
         overlay.gazeSigmaPt = 384

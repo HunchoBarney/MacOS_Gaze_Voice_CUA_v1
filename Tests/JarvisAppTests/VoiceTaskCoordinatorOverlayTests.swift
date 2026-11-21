@@ -162,9 +162,8 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     }
 
     /// The gaze radial declines the same way — Escape retracts the
-    /// chips but leaves the ring alone. The tie itself already gathered
-    /// the glow back into the orb (JARA-55); after the Escape the next
-    /// lock still lands.
+    /// chips but leaves the ring alone. The tie itself already released
+    /// the ring (JARA-55); after the Escape the next hold still lands.
     func testEscapeOnGazeRadialKeepsRing() async {
         let overlay = TargetOverlay()
         overlay.now = { 0 }

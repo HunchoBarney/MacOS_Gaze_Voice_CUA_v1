@@ -2471,8 +2471,8 @@ final class VoiceTaskCoordinator {
     /// speculative and bounded —
     /// warm the transport, the resolver's roster cache, and the gaze
     /// stream. Nothing may block capture, so every step is try?-quiet.
-    /// The gaze orb already marks where the user looks; the turn adds no
-    /// second highlight of its own.
+    /// The gaze ring already marks the control the user looks at; the
+    /// turn adds no second highlight of its own.
     func beginListeningHint() {
         listenHintTask?.cancel()
         listenHintGeneration += 1

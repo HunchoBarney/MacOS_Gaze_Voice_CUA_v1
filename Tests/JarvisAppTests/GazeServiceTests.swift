@@ -152,7 +152,7 @@ final class GazeServiceTests: XCTestCase {
     }
 
     /// The scorer's σ reaches the highlight before the first event, so
-    /// the glow's lock gate never judges a control by a stale band.
+    /// the ring's lock gate never judges a control by a stale band.
     func testSigmaReachesTheHighlightBeforeTheFirstEvent() async throws {
         let clock = ManualClock()
         let frames = stream(yielding: [gazeFrame(100, 100, at: clock.wall)])
@@ -243,10 +243,10 @@ final class GazeServiceTests: XCTestCase {
         XCTAssertEqual(fired, ["ax:42:7:axel_9"])
     }
 
-    /// Dwell never clicks a target the glow refused to lock onto: at
-    /// σ 384 a 60×30 button shows no glow and no countdown, so a fire
+    /// Dwell never clicks a target the ring refused to lock onto: at
+    /// σ 384 a 60×30 button shows no ring and no countdown, so a fire
     /// there would land without warning.
-    func testDwellNeverFiresWhereTheGlowCannotLock() async throws {
+    func testDwellNeverFiresWhereTheRingCannotLock() async throws {
         let suite = "GazeServiceTests.dwellGate.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
