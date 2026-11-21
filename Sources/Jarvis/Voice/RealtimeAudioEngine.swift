@@ -161,8 +161,13 @@ final class ConvertedAudioFeed: @unchecked Sendable {
 /// the server exactly how much audio actually reached the user's ears.
 final class RealtimePlayer: @unchecked Sendable {
     private static let log = Logger(subsystem: "com.karanvirkang.jarvis.voice", category: "player")
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
+    /// Built on first real playback, so a player that never speaks never
+    /// opens the output device. Touched only on `queue`.
+    private var engine: AVAudioEngine?
+    private var player: AVAudioPlayerNode?
+    /// Under XCTest the speaker is a silent stand-in that plays in real time:
+    /// tests keep drain and barge-in timing without a CoreAudio client.
+    private let testOutput: VoicePlaybackRoute? = MicrophoneTestGuard.blocksRealMicrophone ? SilentPlayback().route : nil
     private let queue = DispatchQueue(label: "voice.realtime.player", qos: .userInitiated)
     private let format: AVAudioFormat
     private let lock = NSLock()
@@ -215,6 +220,16 @@ final class RealtimePlayer: @unchecked Sendable {
     init() {
         format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000,
                                channels: 1, interleaved: true)!
+    }
+
+    private var route: VoicePlaybackRoute? { playbackRoute ?? testOutput }
+
+    /// Whether this player has built its output engine. Internal for tests.
+    var opensOutputDevice: Bool { queue.sync { engine != nil } }
+
+    private func outputEngineLocked() -> (AVAudioEngine, AVAudioPlayerNode) {
+        if let engine, let player { return (engine, player) }
+        let engine = AVAudioEngine(), player = AVAudioPlayerNode()
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: format)
         engine.prepare()
@@ -226,6 +241,8 @@ final class RealtimePlayer: @unchecked Sendable {
         ) { [weak self] _ in
             self?.queue.async { self?.running = false }
         }
+        self.engine = engine; self.player = player
+        return (engine, player)
     }
 
     /// Warms the output engine only — priming owns play(), or a prewarm
@@ -238,7 +255,7 @@ final class RealtimePlayer: @unchecked Sendable {
         _ = interrupt()
         queue.async { [weak self] in
             guard let self else { return }
-            self.engine.stop()
+            self.engine?.stop()
             self.running = false
             self.playbackRoute = route
         }
@@ -264,20 +281,21 @@ final class RealtimePlayer: @unchecked Sendable {
             guard self.ensureRunningLocked() else { self.onPlaybackUnavailable?(); return }
             let frames = AVAudioFrameCount(pcm.count / MemoryLayout<Int16>.size)
             let ms = Double(frames) / 24.0
-            if let route = self.playbackRoute {
+            if let route = self.route {
                 self.lock.lock(); self.scheduledMs += ms; self.lock.unlock()
                 route.schedule(pcm) { [weak self] in self?.completedBuffer(generation: gen, milliseconds: ms) }
                 self.maybeStartPlayback()
                 return
             }
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: frames),
+            guard let player = self.player,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: self.format, frameCapacity: frames),
                   let dst = buffer.int16ChannelData?[0] else { return }
             buffer.frameLength = frames
             dst.withMemoryRebound(to: UInt8.self, capacity: Int(frames) * MemoryLayout<Int16>.size) {
                 pcm.copyBytes(to: $0, count: Int(frames) * MemoryLayout<Int16>.size)
             }
             self.lock.lock(); self.scheduledMs += ms; self.lock.unlock()
-            self.player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                 self?.completedBuffer(generation: gen, milliseconds: ms)
             }
             self.maybeStartPlayback()
@@ -296,7 +314,7 @@ final class RealtimePlayer: @unchecked Sendable {
 
     @discardableResult
     private func ensureRunningLocked() -> Bool {
-        if let route = playbackRoute {
+        if let route {
             guard route.isReady() else { running = false; return false }
             running = true
             lock.lock(); let resume = playing; lock.unlock()
@@ -305,6 +323,7 @@ final class RealtimePlayer: @unchecked Sendable {
         }
         // `running` is our cache — the engine's own state is the truth, so a
         // config change or a device loss still gets a real restart attempt.
+        let (engine, player) = outputEngineLocked()
         if !running || !engine.isRunning {
             do {
                 try engine.start()
@@ -385,8 +404,8 @@ final class RealtimePlayer: @unchecked Sendable {
             self.lock.unlock()
             guard current else { return }
             self.primeWork?.cancel(); self.primeWork = nil
-            self.player.stop()
-            self.playbackRoute?.stop()
+            self.player?.stop()
+            self.route?.stop()
             // interrupt() only halts the node — running stays true, so the
             // next enqueue's ensureRunningLocked must see false or it never
             // calls play() again and every reply goes to a dead node.
@@ -400,12 +419,48 @@ final class RealtimePlayer: @unchecked Sendable {
         _ = interrupt()
         queue.async { [weak self] in
             guard let self else { return }
-            self.engine.stop()
-            self.playbackRoute?.stop()
+            self.engine?.stop()
+            self.route?.stop()
             self.running = false
             self.primeWork?.cancel(); self.primeWork = nil
             self.droppingUntilDone = false
             self.interruptedItemIDs.removeAll()
+        }
+    }
+}
+
+/// The speaker under XCTest: scheduled 24 kHz mono PCM "plays" in real time
+/// on a private queue once `play` is called, and `stop` drops what is
+/// queued, as AVAudioPlayerNode does. No CoreAudio client is ever opened.
+final class SilentPlayback: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "voice.silent.playback")
+    private var pending: [(milliseconds: Double, done: @Sendable () -> Void)] = []
+    private var playing = false
+    private var draining = false
+    private var epoch = 0
+
+    var route: VoicePlaybackRoute {
+        VoicePlaybackRoute(
+            id: UUID(),
+            isReady: { true },
+            schedule: { [self] pcm, done in
+                queue.async { [self] in
+                    pending.append((Double(pcm.count / MemoryLayout<Int16>.size) / 24, done))
+                    drain()
+                }
+            },
+            play: { [self] in queue.async { [self] in playing = true; drain() } },
+            stop: { [self] in queue.async { [self] in playing = false; pending = []; epoch += 1 } })
+    }
+
+    private func drain() {
+        guard playing, !draining, !pending.isEmpty else { return }
+        draining = true
+        let next = pending.removeFirst(), started = epoch
+        queue.asyncAfter(deadline: .now() + .microseconds(Int(next.milliseconds * 1000))) { [self] in
+            draining = false
+            if started == epoch { next.done() }
+            drain()
         }
     }
 }
