@@ -106,6 +106,7 @@ public enum AgentIsland: Direction {
                         .frame(width: 12 * k, height: 12 * k)
                 } else {
                     ThinkingOrb(state: orbState, size: .px20, theme: .dark, paused: c.reduceMotion || !moving, displaySize: orb)
+                        .orbFrozenTime(moving && !c.reduceMotion ? c.t : nil)
                         .frame(width: orb, height: orb)
                 }
             }
