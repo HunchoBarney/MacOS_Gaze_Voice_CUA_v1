@@ -132,7 +132,34 @@ func render(_ options: Options) throws {
             }
         }
     }
+    if options.only == nil || options.only?.contains("scenes") == true { try renderScenes(options) }
     try writeManifest(options)
+}
+
+@MainActor
+func renderScenes(_ options: Options) throws {
+    for scene in Scenes.all {
+        for variant in options.variants {
+            let stage = SceneStage(scene, scheme: variant.scheme, reduceMotion: variant.reduceMotion)
+            let base = options.out.appendingPathComponent("redesign/scenes/\(scene.id).\(variant.key)")
+            let renderer = ImageRenderer(content: stage.view())
+            renderer.scale = options.scale
+            let writer = try ClipWriter(url: base.appendingPathExtension("mp4"), width: Int(Desk.size.width * options.scale),
+                                        height: Int(Desk.size.height * options.scale), fps: options.fps)
+            var poster: CGImage?
+            let count = Int((scene.duration * options.fps).rounded())
+            for i in 0..<count {
+                if i > 0 { stage.advance(1 / options.fps) }
+                renderer.content = stage.view()
+                guard let image = renderer.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
+                try writer.append(image)
+                if abs(stage.time - 9.6) < 0.5 / options.fps { poster = image }
+            }
+            try writer.finish()
+            if let poster { try writeJPEG(poster, to: base.appendingPathExtension("jpg")) }
+            print("rendered scene \(scene.id) \(variant.key)")
+        }
+    }
 }
 
 @MainActor
@@ -176,10 +203,14 @@ func writeManifest(_ options: Options) throws {
         components.append(["id": entry.id, "batch": entry.batch, "title": entry.title, "summary": entry.summary,
                            "current": ["componentIds": entry.currentIDs, "note": entry.currentNote], "directions": directions])
     }
-    let commit = gitHead()
+    let scenes: [[String: Any]] = Scenes.all.compactMap { scene in
+        let media = mediaSet("redesign/scenes/\(scene.id)", crop: Desk.full, duration: scene.duration)
+        guard !media.isEmpty else { return nil }
+        return ["id": scene.id, "title": scene.title, "caption": scene.caption, "picks": scene.picks, "media": media]
+    }
     let manifest: [String: Any] = [
-        "producer": "native", "commit": commit, "generatedAt": ISO8601DateFormatter().string(from: Date()),
-        "components": components, "scenes": [],
+        "producer": "native", "commit": gitHead(), "generatedAt": ISO8601DateFormatter().string(from: Date()),
+        "components": components, "scenes": scenes,
     ]
     let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     try fm.createDirectory(at: options.out, withIntermediateDirectories: true)
