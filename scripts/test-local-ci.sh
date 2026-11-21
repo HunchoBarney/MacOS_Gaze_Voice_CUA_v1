@@ -262,6 +262,19 @@ else
     echo "FAIL poll-starve didn't record a new head"; failures=$((failures + 1))
 fi
 
+# A head whose status can't be read is skipped, not tested again.
+mkdir -p "$dir/poll-nostatus/seen" && git init -q "$dir/poll-nostatus/checkout"
+cat >"$dir/gh-poll-nostatus" <<'EOF'
+#!/bin/bash
+case "$*" in
+    "pr list"*) echo "2026-11-20T01:00:00Z tttt pr#20 false" ;;
+    *"/statuses --jq"*) exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "$dir/gh-poll-nostatus"
+pick_is nostatus ""
+
 poll_setup fresh
 printf '%s\n' \
     "2026-11-20T09:00:00Z dddd pr#3" \

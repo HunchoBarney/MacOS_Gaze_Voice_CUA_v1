@@ -264,7 +264,7 @@ first_seen() {
 poll() {
     take_lock || { say "another local-ci job is running"; return 0; }
     trap release_lock EXIT
-    local list seen ts sha label draft pr newer
+    local list seen ts sha label draft pr newer status
     find "$CI_HOME/seen" "$CI_HOME/requested" -type f -mtime +30 -delete 2>/dev/null
     while read -r ts sha pr; do
         [ -n "$sha" ] || continue
@@ -284,7 +284,7 @@ poll() {
         [ -n "$sha" ] || continue
         [ "$draft" = true ] && continue
         held "$label" && continue
-        [ -z "$(latest_status "$sha")" ] || continue
+        status=$(latest_status "$sha") && [ -z "$status" ] || continue
         say "testing $label $sha"
         run_sha "$sha"
         return
