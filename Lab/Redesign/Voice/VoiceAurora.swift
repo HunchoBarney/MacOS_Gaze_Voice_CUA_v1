@@ -131,16 +131,19 @@ struct AuroraButton: View {
     var key: String?
     var primary: Bool
     var dark: Bool
+    /// The bigger-labels comfort setting (1 to 2); 1 is batch 1's size.
+    var scale: CGFloat = 1
     var body: some View {
         let fill: Color = primary ? (dark ? .white : .black) : (dark ? Color.white.opacity(0.14) : Color.black.opacity(0.07))
         let ink: Color = primary ? (dark ? .black : .white) : (dark ? .white : .black)
-        HStack(spacing: 7) {
-            Text(title).font(.system(size: 14, weight: .semibold))
-            if let key { Text(key).font(.system(size: 11, weight: .semibold, design: .rounded)).opacity(0.5) }
+        HStack(spacing: 7 * scale) {
+            Text(title).font(.system(size: 14 * scale, weight: .semibold))
+            if let key { Text(key).font(.system(size: 11 * scale, weight: .semibold, design: .rounded)).opacity(0.5) }
         }
         .foregroundStyle(ink)
-        .padding(.horizontal, 16)
-        .frame(height: 32)
+        .padding(.horizontal, 16 * scale)
+        .frame(height: 32 * scale)
+        .fixedSize()
         .background(fill, in: Capsule())
     }
 }
