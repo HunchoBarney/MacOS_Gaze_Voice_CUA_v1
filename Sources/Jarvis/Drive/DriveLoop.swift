@@ -1374,9 +1374,9 @@ actor DriveLoop {
         }
         if let covered { spentCoverage.insert(covered) }
         if plan != nil { unaskedPressSpent = true }
-        if plan == nil, press != nil, pendingUndo != nil {
+        if plan == nil, pendingUndo != nil, !CuaPolicy.observationTools.contains(tool) {
             pendingUndo = nil
-            feed("a later consequential press would sit on top of the undo, so nothing is offered")
+            feed("a later action may sit on top of the undo, so nothing is offered")
         }
         if let pressFrame, let press { await glowPress(pressFrame, label: press.label) }
         return plan

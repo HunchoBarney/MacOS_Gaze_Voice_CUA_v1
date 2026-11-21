@@ -274,6 +274,33 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertNil(offers.current)
     }
 
+    func testALaterKeyDeleteEndsTheOffer() async throws {
+        let deleted = Item(menu: "Edit", title: "Undo Delete", enabled: true)
+        let script = Script([copyItem, deleted])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers, bundle: "com.apple.mail")
+        var confirmed = false
+        _ = try await loop.dispatch("click", target, elementText: "Delete", denied: [], confirmed: &confirmed)
+        _ = try await loop.dispatch("get_window_state", target, elementText: nil, denied: [], confirmed: &confirmed)
+        _ = try await loop.dispatch("hotkey", target.merging(["keys": .array([.string("delete")])]) { $1 },
+                                    elementText: nil, denied: [], confirmed: &confirmed)
+        XCTAssertEqual(script.asks.value, 0)
+        let result = await loop.settle(.done, DriveTask(goal: "x"), [], confirmedAny: true)
+        XCTAssertNil(result.spoken, "Undo Delete now takes back the key delete, not the one offered")
+        XCTAssertNil(offers.current)
+    }
+
+    func testAnObservationKeepsTheOffer() async throws {
+        let script = Script([copyItem, trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        var confirmed = false
+        _ = try await loop.dispatch("click", target, elementText: "Move to Trash", denied: [], confirmed: &confirmed)
+        _ = try await loop.dispatch("get_window_state", target, elementText: nil, denied: [], confirmed: &confirmed)
+        let result = await loop.settle(.done, DriveTask(goal: "x"), [], confirmedAny: true)
+        XCTAssertNotNil(result.spoken)
+    }
+
     func testNoNewUndoMeansNoOffer() async throws {
         let script = Script([copyItem])
         let offers = UndoOffers()
