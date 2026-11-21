@@ -66,7 +66,10 @@ Live, with the picker (keys 1–3 or arrows switch, R replays):
   frame) and renderer and GPU process CPU from `SystemInfo.getProcessInfo`,
   then 3 s holding at the invitation as the idle cost. Raw numbers go to
   `<dir>/perf.json`. Headless Chrome on the Mac isn't the Electron app on a
-  display, and the cards say so.
+  display, and the cards say so. Each trace also records the 1-minute load
+  average and the number of Swift build processes running, because the
+  shared build lane is rarely idle; the cards show the load next to every
+  figure and label it as measured while other builds were running.
 
 Files: `src/main.tsx` (picker and stage), `src/stage.tsx` (desktop, notch,
 Stop), `src/pursuit.ts` (point springs and dwell), `src/directions/` (A, B, C),

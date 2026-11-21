@@ -318,6 +318,7 @@ function listenForTraces(chrome) {
 async function trace(chrome, page, ms) {
   const events = (tracing.events = []);
   const done = new Promise((resolve) => (tracing.done = resolve));
+  const loadStart = os.loadavg();
   const before = await processCpu(chrome);
   await page.cdp("Tracing.start", { transferMode: "ReportEvents", traceConfig: { includedCategories: TRACE_CATEGORIES } });
   const t0 = Date.now();
@@ -325,6 +326,9 @@ async function trace(chrome, page, ms) {
   await page.cdp("Tracing.end");
   const wall = (Date.now() - t0) / 1000;
   const after = await processCpu(chrome);
+  const loadEnd = os.loadavg();
+  let buildProcesses = 0;
+  try { buildProcesses = execFileSync("pgrep", ["-x", "swift-build|swift-test|swift-frontend|xcodebuild"]).toString().trim().split("\n").length; } catch {}
   await done;
   const main = events.find((e) => e.name === "thread_name" && e.args?.name === "CrRendererMain");
   const onMain = (e) => main && e.pid === main.pid && e.tid === main.tid;
@@ -352,7 +356,8 @@ async function trace(chrome, page, ms) {
     styleLayoutMs: style / frameCount,
     paintMs: paint / frameCount,
     rasterMs: raster / frameCount,
-    gpuMsPerFrame: ((after.gpu - before.gpu) * 1000) / frameCount
+    gpuMsPerFrame: ((after.gpu - before.gpu) * 1000) / frameCount,
+    load: { start: loadStart, end: loadEnd, buildProcesses }
   };
 }
 
@@ -370,7 +375,7 @@ async function measure(chrome, base, dir) {
     await sleep(800);
     const idle = await trace(chrome, page, 3000);
     const errors = [...page.errors];
-    return { pursuit, idle, errors };
+    return { machine: { cpu: os.cpus()[0].model, cores: os.cpus().length }, pursuit, idle, errors };
   } finally {
     await page.close();
   }

@@ -16,16 +16,22 @@ const lib = (key, role) => ({ ...LIB[key], role });
 
 const pct = (v) => (v < 0.05 ? "<0.1%" : v.toFixed(1) + "%");
 const ms = (v) => (v < 0.05 ? "<0.1" : v.toFixed(1));
+const load = (t) => t.load.end[0].toFixed(1);
+const busy = (t) => " (load avg " + load(t) + ", measured while other builds were running)";
 function perfCard(m) {
   const p = m.pursuit;
   return {
-    cpu: pct(p.rendererCpu) + " renderer",
-    gpu: ms(p.gpuMsPerFrame) + " ms/frame GPU process",
-    idle: pct(m.idle.rendererCpu + m.idle.gpuCpu) + " waiting at the invitation",
+    cpu: pct(p.rendererCpu) + " renderer" + busy(p),
+    gpu: ms(p.gpuMsPerFrame) + " ms/frame GPU process" + busy(p),
+    idle: pct(m.idle.rendererCpu + m.idle.gpuCpu) + " waiting at the invitation" + busy(m.idle),
+    load: { pursuit: Number(load(p)), idle: Number(load(m.idle)), cores: m.machine.cores },
     note:
-      "Headless Chrome on an M1, real time, 3.6 s of the point run: " + Math.round(p.fps) + " fps, main thread per frame " +
-      ms(p.scriptMs) + " ms script, " + ms(p.styleLayoutMs) + " ms style and layout, " + ms(p.paintMs) + " ms paint, " +
-      ms(p.rasterMs) + " ms raster; GPU process " + pct(p.gpuCpu) + " CPU. Not the Electron app on a display."
+      "Measured while other builds were running on the same Mac, so read every figure as noisy and likely higher than on a quiet machine: 1-minute load average " +
+      load(p) + " during the point run and " + load(m.idle) + " while idle, on " + m.machine.cores + " cores, with " +
+      p.load.buildProcesses + " Swift build process" + (p.load.buildProcesses === 1 ? "" : "es") + " running. Headless Chrome on an " + m.machine.cpu + ", real time, 3.6 s of the point run: " +
+      Math.round(p.fps) + " fps, main thread per frame " + ms(p.scriptMs) + " ms script, " + ms(p.styleLayoutMs) +
+      " ms style and layout, " + ms(p.paintMs) + " ms paint, " + ms(p.rasterMs) + " ms raster; GPU process " + pct(p.gpuCpu) +
+      " CPU. Not the Electron app on a display."
   };
 }
 
