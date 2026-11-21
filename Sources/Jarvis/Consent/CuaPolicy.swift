@@ -37,7 +37,10 @@ import os
 ///      Pay, Call, Sign out or Allow, a keyboard send, or a press with no
 ///      name (`consequentialPress`), unless the caller passes
 ///      `consequenceConfirmed`: the person's words named that control, or
-///      they said yes to it.
+///      they said yes to it. A delete or a send the app can take back
+///      (`undo`, from `UndoRegistry`) skips the question: Jarvis presses
+///      and then offers undo. Pay, Call, Allow, account changes and
+///      unnamed presses ask whatever route is passed.
 ///   5. **Everything else needs the standing grant, a scoped
 ///      "Always for this app" grant (`scopedGrant:`), or a per-task
 ///      approval.** A request that is none of the above lands here too —
@@ -53,7 +56,9 @@ enum CuaPolicy {
         case needsConfirm(String)
         /// A consequential press the person's words didn't name: ask the
         /// `Consequence` question for this one control, then decide again
-        /// with `consequenceConfirmed: true`.
+        /// with `consequenceConfirmed: true`. A press with an undo route
+        /// for its consequence never gets here: it falls through to the
+        /// grant like any other press, and the caller offers undo.
         case askFirst(Consequence)
     }
 
@@ -220,7 +225,8 @@ enum CuaPolicy {
     /// first, so no grant rubber-stamps a protected phrase.
     static func decide(tool: String, args: [String: JSONValue],
                        elementText: String?, standingGrant: Bool,
-                       scopedGrant: Bool = false, consequenceConfirmed: Bool = false) -> Decision {
+                       scopedGrant: Bool = false, consequenceConfirmed: Bool = false,
+                       undo: UndoRegistry.Route? = nil) -> Decision {
         if observationTools.contains(tool) { return .allow }
         if deniedTools.contains(tool) {
             return .deny("'\(tool)' changes driver or session state — it is never dispatched through the policy path")
@@ -250,7 +256,8 @@ enum CuaPolicy {
             }
         }
         if !consequenceConfirmed,
-           let press = consequentialPress(tool: tool, args: args, elementText: elementText) {
+           let press = consequentialPress(tool: tool, args: args, elementText: elementText),
+           undo?.covers(press.consequence) != true {
             return .askFirst(press.consequence)
         }
         if standingGrant || scopedGrant { return .allow }

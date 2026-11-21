@@ -145,7 +145,7 @@ final class TrackerControlTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "pause tracking"), session: "t")
         XCTAssertEqual(result.status, .done)
@@ -166,7 +166,7 @@ final class TrackerControlTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "recalibrate"), session: "t")
         XCTAssertEqual(result.status, .done)
@@ -183,7 +183,7 @@ final class TrackerControlTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "pause tracking"), session: "t")
         guard case .blocked(let reason) = result.status else {
@@ -202,7 +202,7 @@ final class TrackerControlTests: XCTestCase {
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "recalibrate"), session: "t")
         guard case .blocked = result.status else {
@@ -217,16 +217,15 @@ final class TrackerControlTests: XCTestCase {
         let old = TrackerControl.transport
         defer { TrackerControl.transport = old }
         TrackerControl.transport = { try transport.send($0) }
-        let oldValue = Config.shared.gazeTracking
-        defer { Config.shared.gazeTracking = oldValue }
+        let (config, _) = await usePrivateTrackerConfig()
 
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "disable eye tracking"), session: "t")
         XCTAssertEqual(result.status, .done)
-        XCTAssertFalse(Config.shared.gazeTracking)
+        XCTAssertFalse(config.gazeTracking)
         XCTAssertTrue(transport.requests.isEmpty, "the feature switch is host-side, not a tracker POST")
     }
 

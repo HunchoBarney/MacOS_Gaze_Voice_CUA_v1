@@ -306,7 +306,7 @@ final class FlowBenchTests: XCTestCase {
         let lane = RealtimeVoiceLane(apiKey: { "" }, client: RealtimeVoiceClient(wireFactory: { _ in
             preconditionFailure("the flow bench never opens a Realtime connection")
         }))
-        let controller = VoiceController(config: config, speech: lane, authorize: { true },
+        let controller = VoiceController.inert(config: config, speech: lane, authorize: { true },
                                          frontmost: { "Mail" },
                                          focusedWindow: { (Desk.mailPID, "com.apple.mail", 11) },
                                          cuaRuntime: coordinator)

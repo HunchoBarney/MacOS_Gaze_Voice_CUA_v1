@@ -10,7 +10,7 @@ final class ConsequenceTests: XCTestCase {
 
     private func makeLoop(ask: DriveLoop.AskFn? = nil, grant: Bool = false,
                           overlay: ((FastAction.OverlayVerb, [(frame: CGRect, label: String)], CGPoint?) async -> DriveResult?)? = nil) -> DriveLoop {
-        DriveLoop(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
+        DriveLoop.inert(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
                   ask: ask, granted: { grant }, overlayDispatch: overlay)
     }
 

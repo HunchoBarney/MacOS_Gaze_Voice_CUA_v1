@@ -393,7 +393,9 @@ struct GuideMachine: Sendable {
             detourOpen = false
             return pulse + [.say("That's it. Now \(step.name).")]
         case .undo:
-            guard changed else { return [.say("I pressed Undo, but I couldn't see anything change.")] }
+            guard changed, before != nil, after != nil else {
+                return [.say("I pressed Undo, but I couldn't see anything change.")]
+            }
             return pulse + [.say("I undid it. Now, \(StepPhrasing.lowercasedFirst(step.instruction))")]
         }
     }

@@ -1941,6 +1941,13 @@ final class VoiceTaskCoordinator {
     /// "Done." — flattening it would lie about what was confirmed.
     static func describe(_ result: DriveResult,
                                  request: String) -> (Work.Outcome, String) {
+        let (outcome, say) = describeStatus(result)
+        guard let spoken = result.spoken else { return (outcome, say) }
+        if case .done = result.status { return (.done, spoken) }
+        return (outcome, say + " " + spoken)
+    }
+
+    private static func describeStatus(_ result: DriveResult) -> (Work.Outcome, String) {
         switch result.status {
         case .done:
             guard result.dispatchedEffect else {

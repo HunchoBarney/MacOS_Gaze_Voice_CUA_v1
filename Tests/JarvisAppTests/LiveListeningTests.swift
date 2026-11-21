@@ -162,6 +162,16 @@ final class LiveInputRelayTests: XCTestCase {
         XCTAssertEqual(read(relay, 50), [Float](repeating: 0.2, count: 50))
     }
 
+    func testReadSaysWhetherItPlayedCapturedAudio() {
+        let relay = relay()
+        relay.capture(since: 0)
+        write(relay, [Float](repeating: 0.2, count: 100), endingAt: 1)
+        var out = [Float](repeating: 0, count: 50)
+        XCTAssertFalse(out.withUnsafeMutableBufferPointer { relay.read(into: $0) }, "Not sending yet")
+        relay.startSending()
+        XCTAssertTrue(out.withUnsafeMutableBufferPointer { relay.read(into: $0) })
+    }
+
     func testFallingTooFarBehindAbandonsTheCaptureAndSaysSo() {
         let relay = relay(maxBehind: 0.5)
         relay.capture(since: 0)

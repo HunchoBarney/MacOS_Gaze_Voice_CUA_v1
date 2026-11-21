@@ -142,8 +142,10 @@ final class LiveInputRelay: @unchecked Sendable {
 
     /// Fills `out` with what the session's input should hear next. Short of
     /// a whole buffer it plays silence and waits, so the microphone's own
-    /// timing jitter never cuts a word apart.
-    func read(into out: UnsafeMutableBufferPointer<Float>) {
+    /// timing jitter never cuts a word apart. Returns whether `out` holds
+    /// captured audio rather than that silence.
+    @discardableResult
+    func read(into out: UnsafeMutableBufferPointer<Float>) -> Bool {
         lock.withLock { state in
             var written = 0
             if state.sending {
@@ -165,6 +167,7 @@ final class LiveInputRelay: @unchecked Sendable {
                 }
             }
             for index in written..<out.count { out[index] = 0 }
+            return written > 0
         }
     }
 
