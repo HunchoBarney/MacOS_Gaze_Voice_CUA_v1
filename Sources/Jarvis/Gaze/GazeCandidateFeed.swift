@@ -218,7 +218,7 @@ struct GazeCandidateFeed: Sendable {
 
     /// `get_window_state` → `.axElement` candidates. Native AX frames
     /// are already global top-left points. Non-actionable roles never enter the
-    /// feed — a label-less group can't be a referent worth a ring.
+    /// feed — a group can't be a referent worth a ring.
     static func elementCandidates(_ snap: JSONValue, row: WindowRow) -> [IntentCandidate] {
         let content = snap["structuredContent"] ?? snap
         let windowArea = max(1, row.bounds.width * row.bounds.height)
@@ -238,14 +238,15 @@ struct GazeCandidateFeed: Sendable {
         }
     }
 
-    /// The roles a gaze referent can act on — the feed's actionable set,
-    /// mirroring the overlay's own gate: buttons, links, fields, menus,
-    /// tabs, anything carrying a label.
+    /// The roles a gaze referent can act on — the feed's actionable set:
+    /// buttons, links, fields, menus, tabs, and labelled leaves such as
+    /// text. Containers never enter, labelled or not: a group, table or
+    /// scroll area holds the controls rather than being one, and drawn
+    /// as a target it lights a whole pane.
     static func actionable(_ e: DriveLoop.Element) -> Bool {
+        if IntentCandidate.isContainer(role: e.role) { return false }
+        if IntentCandidate.isControl(role: e.role) { return true }
         let r = e.role.lowercased()
-        if r.contains("button") || r.contains("link") || r.contains("menu")
-            || r.contains("checkbox") || r.contains("radio") || r.contains("tab")
-            || r.contains("cell") || r.contains("combo") { return true }
         if r.contains("textfield") || r.contains("textarea")
             || r.contains("search") || r.contains("field") { return true }
         return !e.label.isEmpty

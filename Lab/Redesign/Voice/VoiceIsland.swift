@@ -99,7 +99,7 @@ public enum VoiceIsland: Direction {
                             .opacity(m["check"])
                     }
                 } else {
-                    VoiceRing(.ring, state: f.phase == .idle ? .idle : .listening, source: .level({ m["level"] }), size: 22)
+                    VoiceRing(.ring, state: f.phase == .idle ? .idle : .listening, source: .level({ m["level"] }), style: .ring(paused: c.reduceMotion), size: 22)
                         .frame(width: 22, height: 22)
                 }
             }

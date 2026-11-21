@@ -122,7 +122,7 @@ final class CuaDriveSessionTests: XCTestCase {
                                                  label: "Session ready", actions: [])
             ])
         }
-        return DriveLoop(call: { tool, args in try daemon.call(transport, tool, args) },
+        return DriveLoop.inert(call: { tool, args in try daemon.call(transport, tool, args) },
                   choose: { _, _ in
                       DriveLoop.JevChoice(id: "done", confidence: nil, doneVote: nil)
                   },

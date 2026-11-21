@@ -177,6 +177,32 @@ final class HostedCredentialsTests: XCTestCase {
         XCTAssertEqual(seen, [.init(path: "/base/v1/realtime/client_secret", authorization: "Bearer jv1_stored")])
     }
 
+    /// A secret without the model it was minted for is unusable: the socket
+    /// would open on the client's default model, not the one the service
+    /// pays for.
+    func testASecretWithoutItsModelIsMalformed() async {
+        let service = FakeService()
+        await service.setRealtimeReplies([(200, #"{"value":"ek_fixture","expiresAt":1900000000,"model":""}"#)])
+        do {
+            _ = try await hosted(service, tokens: TokenBox("jv1_stored")).realtimeCredential()
+            XCTFail("a secret with an empty model must not be used")
+        } catch {
+            XCTAssertEqual(error as? HostedCredentials.Failure, .malformed)
+        }
+    }
+
+    /// A pasted developer key keeps its stray whitespace out of the bearer.
+    func testADeveloperKeyIsTrimmedBeforeUse() async throws {
+        let developer = config(hosted: nil, environment: ["OPENAI_API_KEY": "  sk-developer\n",
+                                                          "TYPESAFE_API_KEY": " ts-developer "])
+        let realtime = try await developer.realtimeCredential()
+        XCTAssertEqual(realtime, RealtimeCredential(key: "sk-developer", model: nil))
+        let responses = try await developer.responsesRoute()
+        XCTAssertEqual(responses?.bearer, "sk-developer")
+        let jev = try await developer.jevRoute()
+        XCTAssertEqual(jev?.bearer, "ts-developer")
+    }
+
     func testAForgottenInstallRegistersAgainOnce() async throws {
         let service = FakeService(), tokens = TokenBox("jv1_forgotten")
         await service.setRealtimeReplies([(401, #"{"error":{"code":"unknown_install","message":"This install isn't registered."}}"#)])

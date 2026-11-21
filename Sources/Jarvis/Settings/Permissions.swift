@@ -170,6 +170,10 @@ final class PermissionStatusMonitor {
 /// granted the app that launched the tests. A live test opts in with
 /// JARVIS_LIVE_MIC=1.
 enum MicrophoneTestGuard {
-    static let blocksRealMicrophone = NSClassFromString("XCTestCase") != nil
-        && ProcessInfo.processInfo.environment["JARVIS_LIVE_MIC"] != "1"
+    static let blocksRealMicrophone = runningTests(hasXCTest: NSClassFromString("XCTestCase") != nil,
+                                                   environment: ProcessInfo.processInfo.environment)
+
+    static func runningTests(hasXCTest: Bool, environment: [String: String]) -> Bool {
+        hasXCTest && environment["JARVIS_LIVE_MIC"] != "1"
+    }
 }

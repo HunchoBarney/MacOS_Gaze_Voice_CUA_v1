@@ -13,7 +13,7 @@ final class FocusedTextTargetTests: XCTestCase {
                       hasTarget: Bool = true, lease: AsyncLease? = nil,
                       currentProbe: (@Sendable () async -> Bool)? = nil) -> DriveLoop {
         let text = payload
-        return DriveLoop(call: { tool, args in
+        return DriveLoop.inert(call: { tool, args in
             if tool == "list_windows" {
                 return .object(["windows": .array([.object([
                     "window_id": .number(7), "pid": .number(42), "is_on_screen": .bool(true),
@@ -35,7 +35,7 @@ final class FocusedTextTargetTests: XCTestCase {
             }
             return .object([:])
         }, choose: { _, _ in nil }, ask: nil, granted: { true },
-        resolver: AppResolver(listApps: {
+        resolver: AppResolver.fixture(listApps: {
             [.init(name: "Chrome", bundle: "com.google.Chrome", pid: 42)]
         }), focusLease: lease, focusedTextTarget: { pid, window in
             XCTAssertEqual(pid, 42); XCTAssertEqual(window, 7)
@@ -62,7 +62,7 @@ final class FocusedTextTargetTests: XCTestCase {
                                   receipts: LockedBox<[FocusedTextBinding.Insertion]>? = nil,
                                   reply: JSONValue? = nil) -> DriveLoop {
         let text = payload
-        return DriveLoop(call: { tool, args in
+        return DriveLoop.inert(call: { tool, args in
             calls.set(calls.value + [tool])
             if tool == "list_windows" {
                 return .object(["windows": .array([.object([
@@ -85,7 +85,7 @@ final class FocusedTextTargetTests: XCTestCase {
             calls.set(calls.value + ["model"])
             return nil
         }, ask: nil, granted: { true }, explicitConsent: true, directSession: "voice-direct",
-        resolver: AppResolver(listApps: {
+        resolver: AppResolver.fixture(listApps: {
             [.init(name: "TextEdit", bundle: "com.apple.TextEdit", pid: 42)]
         }), focusedTextTarget: { pid, window in
             focusCalls.set(focusCalls.value + 1)

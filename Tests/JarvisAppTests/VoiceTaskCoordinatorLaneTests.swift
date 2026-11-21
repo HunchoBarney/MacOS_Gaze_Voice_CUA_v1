@@ -257,17 +257,6 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
         XCTAssertEqual(tools, ["list_windows"])
     }
 
-    func testHaloUsesNativeScreenPointsWithoutScreenshotMetadata() {
-        let snap: JSONValue = .object(["elements": .array([
-            .object(["element_index": .number(1), "role": .string("AXTextArea"),
-                     "frame": .object(["x": .number(634), "y": .number(192),
-                                       "w": .number(656), "h": .number(384)])])
-        ])])
-        XCTAssertEqual(VoiceTaskCoordinator.haloFrame(at: CGPoint(x: 700, y: 220), in: snap),
-                       CGRect(x: 634, y: 192, width: 656, height: 384))
-        XCTAssertNil(VoiceTaskCoordinator.haloFrame(at: CGPoint(x: 10, y: 10), in: snap))
-    }
-
     func testProductionNativeSelectionAndControlledDriverSuppression() {
         let production = coordinator()
         XCTAssertTrue(production.hasForegroundAppLauncher)

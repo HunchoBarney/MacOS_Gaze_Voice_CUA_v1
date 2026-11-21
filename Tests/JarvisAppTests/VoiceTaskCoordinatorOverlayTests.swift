@@ -59,20 +59,17 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
 
     // MARK: - halo ownership
 
-    /// The answer glow shares the gaze halo, but a tracker outage or a
-    /// look away only retires gaze hints: the answer stays until its own
-    /// timer ends.
+    /// A tracker outage or a look away never retires the answer glow:
+    /// the answer stays until its own timer ends.
     func testStaleGazeLeavesTheAnswerGlowAlone() async {
         let overlay = TargetOverlay()
         let coordinator = coordinator(overlay: overlay)
+        coordinator.configureGazeService()
         coordinator.glowAnswer(frame: CGRect(x: 40, y: 60, width: 80, height: 28), for: .milliseconds(200))
-        coordinator.retireStaleGazeHalo(stale: 30)
+        coordinator.gazeService.staleSink(30)
         XCTAssertTrue(overlay.haloArmed, "stale gaze must not wipe the answer glow")
         let retired = await waitFor { !coordinator.answerGlowing && !overlay.haloArmed }
         XCTAssertTrue(retired, "the answer glow retires on its own timer")
-        overlay.showHalo(frame: CGRect(x: 0, y: 0, width: 20, height: 20))
-        coordinator.retireStaleGazeHalo(stale: 30)
-        XCTAssertFalse(overlay.haloArmed, "a gaze hint still goes once gaze is stale")
         overlay.hideAll()
     }
 
@@ -165,7 +162,8 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
     }
 
     /// The gaze radial declines the same way — Escape retracts the
-    /// chips but leaves the ring alone.
+    /// chips but leaves the ring alone. The tie itself already released
+    /// the ring (JARA-55); after the Escape the next hold still lands.
     func testEscapeOnGazeRadialKeepsRing() async {
         let overlay = TargetOverlay()
         overlay.now = { 0 }
@@ -173,8 +171,10 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
         let a = candidate("a", x: 0), b = candidate("b", x: 200)
         c.gazeService.eventSink(.acquire(a))
         c.gazeService.eventSink(.ambiguous([a, b]))
+        XCTAssertFalse(overlay.ringArmed)
         XCTAssertTrue(c.declineTopmostChoiceAsk())
         XCTAssertEqual(overlay.pendingCount, 0)
+        overlay.intentEvent(.hold(a, progress: 0.2))
         XCTAssertTrue(overlay.ringArmed)
         overlay.hideAll()
     }
@@ -361,8 +361,9 @@ final class VoiceTaskCoordinatorOverlayTests: XCTestCase {
         let a = candidate("a", x: 0), b = candidate("b", x: 200)
         c.gazeService.eventSink(.acquire(a))
         c.gazeService.eventSink(.ambiguous([a, b]))
-        XCTAssertTrue(overlay.ringArmed)
         XCTAssertEqual(overlay.pendingCount, 2)
+        overlay.glowPress(frame: a.frame)
+        XCTAssertTrue(overlay.ringArmed)
         c.gazeService.overlayTeardown?()
         XCTAssertEqual(overlay.pendingCount, 0)
         XCTAssertFalse(overlay.ringArmed)

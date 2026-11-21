@@ -172,6 +172,17 @@ actor DriveLoop {
     /// Control phrases the words already pressed once this task: "click
     /// Send" covers one Send, and a second one asks.
     private var spentCoverage: Set<String> = []
+    /// The press this task made without asking because the app can take
+    /// it back. One per task: a later consequential press asks again.
+    private var pendingUndo: PendingUndo?
+    /// Set once this task presses without asking, whether or not the app
+    /// then showed an undo to offer, so a press that left no offer can't
+    /// open the door to another unasked one.
+    private var unaskedPressSpent = false
+    let undo: UndoSupport
+    /// The task's words may not be the person's (`DriveTask.speakerVerified`
+    /// off): even a press they name asks first.
+    private(set) var speakerUnverified = false
     var consentAppBundleID: String?
     let ask: AskFn?
     let granted: () -> Bool
@@ -344,6 +355,7 @@ actor DriveLoop {
          windowControlPressInWindow: ((WindowControls.Kind, pid_t, Int) -> Bool)? = nil,
          windowAttributes: WindowControls.Attributes = .live,
          desktopSpaces: DesktopSpaceSwitch.System = .live,
+         undo: UndoSupport = .live,
          overlayDispatch: ((FastAction.OverlayVerb,
                             [(frame: CGRect, label: String)],
                             CGPoint?) async -> DriveResult?)? = nil,
@@ -498,6 +510,7 @@ actor DriveLoop {
         self.windowAttributes = windowAttributes
         self.desktopSpaces = desktopSpaces
         self.overlayDispatch = overlayDispatch
+        self.undo = undo
         self.frontmostBundleID = frontmostBundleID
         self.frontmostPID = frontmostPID
         self.frontmostWindowID = frontmostWindowID
@@ -645,8 +658,11 @@ actor DriveLoop {
         /// A per-task approval granted this run — one `ask` covers every
         /// later consent prompt, including the bind-phase launch gate.
         var confirmedTask = false
-        bindSpokenGoal(explicitConsent ? task.goal : nil)
+        bindSpokenGoal(explicitConsent ? task.goal : nil, speakerVerified: task.speakerVerified)
         func step(_ s: String) { feed(s); history.append(s) }
+        if let pending = claimOffer(for: task.goal) {
+            return await runOfferedUndo(pending, task: task, session: directSession ?? session)
+        }
 
         do {
             if config.windowOnly, task.windowID == nil {
@@ -1217,14 +1233,14 @@ actor DriveLoop {
     /// Whether the fast-lane resolution for this goal could ever consult
     /// the app roster. The app-free bodies — gaze referents, tracker
     /// control, media/system chords, overlay verbs, repeat/locate,
-    /// dictation, and the URL/web-search lanes — dispatch without it, so
+    /// dictation, comfort preferences, and the URL/web-search lanes — dispatch without it, so
     /// a spoken "click" never waits on `list_apps`. Everything else
     /// (qualifier resolution, `parseOpen`, the appHint merge) reads it.
     static func fastLaneNeedsInventory(goal: String, appHint: String? = nil) -> Bool {
         if let parsed = FastAction.parse(goal) {
             switch parsed.action.body {
             case .gaze, .tracker, .mediaKey, .systemHotkey, .overlay,
-                 .repeatLast, .locate, .locatePointer, .dictation, .webSearch, .navigateURL, .desktop:
+                 .repeatLast, .locate, .locatePointer, .dictation, .webSearch, .navigateURL, .desktop, .comfort:
                 return false
             case .hotkey, .type, .scroll, .appControl, .appSearch,
                  .menu, .windowFrame, .clickNamed, .showNamed, .exitFullScreen:
@@ -1298,9 +1314,10 @@ actor DriveLoop {
     /// `CuaPolicy.decide` plus the one `ask`. Factored out so mutations
     /// that never ride the driver tool call (the HID media-key post, the
     /// host-side AXPress) run the identical gate instead of a hand copy.
+    @discardableResult
     func consentGate(tool: String, args: [String: JSONValue],
                      elementText: String?, denied: [String],
-                     confirmed: inout Bool, pressFrame: CGRect? = nil) async throws {
+                     confirmed: inout Bool, pressFrame: CGRect? = nil) async throws -> UndoPlan? {
         if let elementText,
            let hit = denied.first(where: { elementText.lowercased().contains($0.lowercased()) }) {
             feed("denied by task rule: \(hit)")
@@ -1308,11 +1325,13 @@ actor DriveLoop {
         }
         let press = CuaPolicy.consequentialPress(tool: tool, args: args, elementText: elementText)
         let covered = spokenCoverage(press)
+        var plan = covered == nil ? await undoPlan(tool: tool, args: args, label: elementText ?? "") : nil
         var decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
                                         standingGrant: granted() || confirmed,
                                         scopedGrant: consentScopedGrant(for: tool),
-                                        consequenceConfirmed: covered != nil)
+                                        consequenceConfirmed: covered != nil, undo: plan?.route)
         if case .askFirst(let consequence) = decision {
+            plan = nil
             if let pressFrame { await glowPress(pressFrame, label: press?.label ?? "") }
             try await confirmConsequence(consequence, label: press?.label)
             decision = CuaPolicy.decide(tool: tool, args: args, elementText: elementText,
@@ -1357,14 +1376,73 @@ actor DriveLoop {
             break
         }
         if let covered { spentCoverage.insert(covered) }
+        if plan != nil { unaskedPressSpent = true }
+        if plan == nil, pendingUndo != nil, !CuaPolicy.observationTools.contains(tool) {
+            pendingUndo = nil
+            feed("a later action may sit on top of the undo, so nothing is offered")
+        }
         if let pressFrame, let press { await glowPress(pressFrame, label: press.label) }
+        return plan
+    }
+
+    /// A press Jarvis is about to make without asking, and the app's ⌘Z
+    /// item just before it.
+    struct UndoPlan: Sendable {
+        let route: UndoRegistry.Route
+        let pid: Int
+        let windowID: Int
+        let bundleID: String
+        let label: String
+        let before: UndoRegistry.MenuItem
+    }
+
+    /// The undo route for a press Jarvis chose itself, or nil. It needs
+    /// someone to hear the offer, words that are surely the person's (D3),
+    /// no earlier unasked press this task, a known
+    /// app and window, a registry route, and an app that has an undo
+    /// command at all. Archive offers undo only when the person's words
+    /// didn't ask for it.
+    private func undoPlan(tool: String, args: [String: JSONValue], label: String) async -> UndoPlan? {
+        guard ask != nil, !unaskedPressSpent, !speakerUnverified,
+              let pid = args["pid"]?.integer, let windowID = args["window_id"]?.integer,
+              let bundleID = consentAppBundleID,
+              let route = UndoRegistry.route(tool: tool, args: args, label: label, bundleID: bundleID,
+                                             mailUndoSendDelay: undo.mailUndoSendDelay) else { return nil }
+        if route.kind == .archive,
+           (" " + CuaPolicy.normalize((spokenGoal ?? "").lowercased()) + " ").contains(" archive ") { return nil }
+        guard let before = await undo.undoItem(pid) else {
+            feed("no undo command in \(bundleID) — asking instead")
+            return nil
+        }
+        return UndoPlan(route: route, pid: pid, windowID: windowID, bundleID: bundleID,
+                        label: label, before: before)
+    }
+
+    /// After the press: keep the offer only when the app's ⌘Z item changed
+    /// to a live one, which is the app saying it can take this press back.
+    private func recordUndo(_ plan: UndoPlan, pressedAt: Date) async {
+        var after = await undo.undoItem(plan.pid)
+        for _ in 0..<3 where after == plan.before {
+            await undo.settle()
+            after = await undo.undoItem(plan.pid)
+        }
+        guard let after, after.enabled, after != plan.before else {
+            feed("pressed \(plan.label) without asking, but \(plan.bundleID) shows no new undo — nothing to offer")
+            return
+        }
+        pendingUndo = PendingUndo(route: plan.route, pid: plan.pid, windowID: plan.windowID,
+                                  bundleID: plan.bundleID, item: after, pressedAt: pressedAt)
+        feed("pressed \(plan.label) without asking; undo stands as \(after.menu) → \(after.title)")
     }
 
     /// Binds the person's words for a new task. Internal so tests can
     /// stand in for `run`.
-    func bindSpokenGoal(_ goal: String?) {
-        spokenGoal = goal
+    func bindSpokenGoal(_ goal: String?, speakerVerified: Bool = true) {
+        spokenGoal = speakerVerified ? goal : nil
+        speakerUnverified = !speakerVerified
         spentCoverage = []
+        pendingUndo = nil
+        unaskedPressSpent = false
     }
 
     /// The control phrase when the person's words name this press and
@@ -1414,9 +1492,11 @@ actor DriveLoop {
     /// `explicitConsent` off — an agent's `drive_until`, where the goal
     /// is model-authored — the identical dispatch is an autonomous
     /// mutation and rides the standing grant / per-task confirm like
-    /// every other effect.
+    /// every other effect. `press` is the label of the control a click
+    /// lands on, empty when it has none: when the words may not be the
+    /// person's (D3), a consequential or unnamed one asks first.
     func gateExplicit(_ tool: String, corpus: String, denied: [String],
-                      confirmed: inout Bool) async throws {
+                      confirmed: inout Bool, press: String? = nil) async throws {
         if explicitConsent {
             if let hit = denied.first(where: {
                 corpus.lowercased().contains($0.lowercased())
@@ -1428,6 +1508,11 @@ actor DriveLoop {
                 feed("denied: \(why)")
                 throw Abort.denied(why)
             }
+            if speakerUnverified, let press,
+               let consequence = press.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                   ? Consequence.unnamed : Consequence.of(control: press) {
+                try await confirmConsequence(consequence, label: press)
+            }
             return
         }
         try await consentGate(tool: tool, args: [:], elementText: corpus,
@@ -1436,16 +1521,18 @@ actor DriveLoop {
 
     /// Policy gate → driver call → `effect`. The task's own deny strings
     /// join the code deny list for this call only.
-    private func dispatch(_ tool: String, _ args: [String: JSONValue],
+    func dispatch(_ tool: String, _ args: [String: JSONValue],
                           elementText: String?, denied: [String],
                           confirmed: inout Bool, pressFrame: CGRect? = nil) async throws -> (effect: String, escalation: String?, confirmed: Bool) {
-        try await consentGate(tool: tool, args: args, elementText: elementText,
-                              denied: denied, confirmed: &confirmed, pressFrame: pressFrame)
+        let plan = try await consentGate(tool: tool, args: args, elementText: elementText,
+                                         denied: denied, confirmed: &confirmed, pressFrame: pressFrame)
         do {
+            let pressedAt = undo.now()
             let result = try await call(tool, args)
             let effect = result["effect"]?.string ?? "unverifiable"
             let escalation = result["escalation"]?["recommended"]?.string
             feed("\(tool) → \(effect)")
+            if let plan, effect != "suspected_noop" { await recordUndo(plan, pressedAt: pressedAt) }
             return (effect, escalation, effect == "confirmed")
         } catch let error as DriverConnectionError {
             if case .toolRefused(_, let code, let detail) = error {
@@ -1618,10 +1705,23 @@ actor DriveLoop {
                 blockedReason: String? = nil,
                 consentBlock: DriveStatus.ConsentBlock? = nil) -> DriveResult {
         Self.log.notice("settle \(String(describing: status), privacy: .public) goal=\(task.goal, privacy: .public) pid=\(pid ?? -1) wid=\(windowID ?? -1) effect=\(confirmedAny) reason=\(blockedReason ?? "-", privacy: .public)")
-        return DriveResult(status: status, history: history, pid: pid,
-                           windowID: windowID, bundleID: bundleID,
-                           dispatchedEffect: confirmedAny, blockedReason: blockedReason,
-                           consentBlock: consentBlock)
+        var result = DriveResult(status: status, history: history, pid: pid,
+                                 windowID: windowID, bundleID: bundleID,
+                                 dispatchedEffect: confirmedAny, blockedReason: blockedReason,
+                                 consentBlock: consentBlock)
+        // A press made without asking is offered back as the task ends,
+        // whatever else happened after it.
+        if let pending = pendingUndo {
+            pendingUndo = nil
+            let now = undo.now()
+            let offered = pending.offered(at: now)
+            if now < offered.expiresAt {
+                undo.offers.offer(offered)
+                result.spoken = pending.route.offer
+                result.history.append(pending.route.offer)
+            }
+        }
+        return result
     }
 }
 

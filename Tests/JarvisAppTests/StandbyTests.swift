@@ -49,7 +49,7 @@ final class StandbyTests: XCTestCase {
         config.listeningMode = .standby
         var timings = VoiceTimings()
         timings.wakeSessionQuiet = 0.5
-        let controller = VoiceController(config: config, speech: RealtimeVoiceLane(apiKey: { "test-key" }),
+        let controller = VoiceController.inert(config: config, speech: RealtimeVoiceLane(apiKey: { "test-key" }),
                                          authorize: { true }, timings: timings, cuaRuntime: testCoordinator(config),
                                          otherAppUsesMicrophone: { microphoneUsers.otherApp })
         addTeardownBlock { await controller.shutdown() }
