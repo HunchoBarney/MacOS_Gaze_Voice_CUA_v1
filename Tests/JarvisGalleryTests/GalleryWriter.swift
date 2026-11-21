@@ -31,6 +31,7 @@ struct GalleryState: Codable {
     var title: String
     var note: String?
     var kind: String?
+    var superseded: String?
     var variants: [GalleryVariant] = []
     var clips: [GalleryClip]?
 }
@@ -55,6 +56,7 @@ struct GalleryScene: Codable {
     var height: Int
     var clip: GalleryClip?
     var kind: String?
+    var superseded: String?
 }
 
 struct GalleryFragment: Codable {
@@ -85,6 +87,9 @@ struct ClipFrame {
 /// Writes PNGs, MP4s and the manifest fragment under the output folder.
 @MainActor
 final class GalleryWriter {
+    /// Every "proposed" mockup this harness draws is from the JARA-56 audit,
+    /// which the owner rejected; they stay on the site for the record.
+    static let supersededProposals = "Superseded. The owner rejected these proposed directions on 2026-11-21, and JARA-57 owns the redesign. Kept for the record only."
     let out: URL
     let scale: CGFloat = 2
     private(set) var components: [GalleryComponent] = []
@@ -108,7 +113,8 @@ final class GalleryWriter {
             throw GalleryError("undeclared component \(component)")
         }
         if let s = components[c].states.firstIndex(where: { $0.id == state }) { return (c, s) }
-        components[c].states.append(GalleryState(id: state, title: title, note: note, kind: kind))
+        components[c].states.append(GalleryState(id: state, title: title, note: note, kind: kind,
+                                                 superseded: kind == "proposed" ? Self.supersededProposals : nil))
         return (c, components[c].states.count - 1)
     }
 
@@ -140,7 +146,8 @@ final class GalleryWriter {
             try encode($0, base: "scenes/\(id)", scheme: scheme, reduceMotion: false, caption: nil)
         }
         scenes.append(GalleryScene(id: id, title: title, summary: summary, components: ids, image: name,
-                                   width: image.width, height: image.height, clip: encoded, kind: kind))
+                                   width: image.width, height: image.height, clip: encoded, kind: kind,
+                                   superseded: kind == "proposed" ? Self.supersededProposals : nil))
     }
 
     private func encode(_ frames: [ClipFrame], base: String, scheme: Scheme, reduceMotion: Bool,

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "collect": "node scripts/collect.mjs",
-    "sample": "node scripts/make-sample.mjs && node scripts/collect.mjs --renders sample/renders --findings sample/findings.json"
+    "sample": "node scripts/make-sample.mjs && node scripts/make-redesign-sample.mjs && node scripts/collect.mjs --renders sample/renders --findings sample/findings.json"
   },
   "dependencies": {
     "@number-flow/react": "0.6.2",
@@ -19,7 +19,8 @@
     "motion": "14.14.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "sonner": "2.0.8"
+    "sonner": "2.0.8",
+    "vaul": "1.1.2"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

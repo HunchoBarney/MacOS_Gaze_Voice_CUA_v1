@@ -31,8 +31,9 @@ if (!existsSync(rendersDir)) {
   process.exit(1);
 }
 
+const isRedesign = (name) => /^manifest\.redesign\.[^.]+\.json$/.test(name);
 const fragments = readdirSync(rendersDir)
-  .filter((name) => /^manifest\..+\.json$/.test(name))
+  .filter((name) => /^manifest\..+\.json$/.test(name) && !isRedesign(name))
   .sort()
   .map((name) => ({ name, ...JSON.parse(readFileSync(join(rendersDir, name), "utf8")) }));
 if (fragments.length === 0) warn("no manifest.*.json fragments in " + rendersDir);
@@ -88,6 +89,7 @@ for (const [id, light] of [...scenes]) {
   if (!dark) continue;
   dark.variants = [sceneVariant(dark, "dark"), sceneVariant(light, "light")];
   dark.components = [...new Set([...(dark.components ?? []), ...(light.components ?? [])])];
+  dark.superseded ??= light.superseded;
   scenes.delete(id);
   mergedPairs += 1;
 }
@@ -108,6 +110,56 @@ for (const finding of findings.findings) {
 }
 for (const scene of scenes.values())
   for (const id of scene.components ?? []) if (!components.has(id)) warn("scene " + scene.id + ": unknown component " + id);
+
+// Redesign fragments (manifest.redesign.<producer>.json): components with directions A/B/C and
+// combined scenes. Media paths are relative to the renders directory, like everything else.
+const MEDIA_KEYS = ["dark", "light", "dark-rm", "light-rm"];
+const redesignFragments = readdirSync(rendersDir)
+  .filter(isRedesign)
+  .sort()
+  .map((name) => ({ name, producer: name.split(".")[2], ...JSON.parse(readFileSync(join(rendersDir, name), "utf8")) }));
+const redesignComponents = new Map();
+const redesignScenes = new Map();
+function checkMediaSet(where, set) {
+  if (!set) return;
+  for (const [key, media] of Object.entries(set)) {
+    if (!MEDIA_KEYS.includes(key)) warn(where + ": unknown media key " + key);
+    if (!assetExists(media?.src)) warn(where + ": missing " + (media?.kind ?? "media") + " " + media?.src);
+    if (media?.poster && !assetExists(media.poster)) warn(where + ": missing poster " + media.poster);
+    if (!(media?.width > 0 && media?.height > 0)) warn(where + ": " + key + " has no width and height");
+  }
+}
+for (const fragment of redesignFragments) {
+  for (const component of fragment.components ?? []) {
+    if (![1, 2, 3].includes(component.batch)) warn("redesign " + component.id + ": unknown batch " + component.batch);
+    for (const id of component.current?.componentIds ?? [])
+      if (!components.has(id)) warn("redesign " + component.id + ": current component " + id + " is not in the gallery");
+    for (const direction of component.directions ?? []) {
+      const where = "redesign " + component.id + "/" + direction.id;
+      for (const state of direction.states ?? []) checkMediaSet(where + "/" + state.id, state.media);
+      checkMediaSet(where + "/flow", direction.flow);
+    }
+    const existing = redesignComponents.get(component.id);
+    if (!existing) {
+      redesignComponents.set(component.id, { ...component, directions: [...(component.directions ?? [])] });
+      continue;
+    }
+    const known = new Set(existing.directions.map((d) => d.id));
+    for (const direction of component.directions ?? []) {
+      if (known.has(direction.id)) warn("redesign " + component.id + ": direction " + direction.id + " defined twice; keeping the first");
+      else existing.directions.push(direction);
+    }
+  }
+  for (const scene of fragment.scenes ?? []) {
+    checkMediaSet("redesign scene " + scene.id, scene.media);
+    if (redesignScenes.has(scene.id)) warn("redesign scene " + scene.id + " defined twice; keeping the first");
+    else redesignScenes.set(scene.id, scene);
+  }
+}
+for (const scene of redesignScenes.values())
+  for (const [id, pick] of Object.entries(scene.picks ?? {}))
+    if (!redesignComponents.get(id)?.directions.some((d) => d.id === pick)) warn("redesign scene " + scene.id + ": picks " + id + " " + pick + ", which doesn't exist");
+for (const component of redesignComponents.values()) component.directions.sort((a, b) => a.id.localeCompare(b.id));
 
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
@@ -189,11 +241,19 @@ const gallery = {
   components: [...components.values()].sort((a, b) => AREAS.indexOf(a.area) - AREAS.indexOf(b.area) || a.title.localeCompare(b.title)),
   scenes: [...scenes.values()],
   findings: findings.findings,
+  ...(redesignFragments.length > 0 && {
+    redesign: {
+      generatedAt: redesignFragments.map((f) => f.generatedAt).sort().at(-1),
+      producers: redesignFragments.map(({ producer, commit, generatedAt }) => ({ producer, commit, generatedAt })),
+      components: [...redesignComponents.values()].sort((a, b) => a.batch - b.batch),
+      scenes: [...redesignScenes.values()],
+    },
+  }),
 };
 writeFileSync(join(outDir, "gallery.json"), JSON.stringify(gallery));
 
 for (const message of warnings) console.warn("collect: warning: " + message);
 console.log(
   "collect: " + gallery.components.length + " components, " + gallery.scenes.length + " scenes (" + mergedPairs + " light/dark pairs merged), " +
-    gallery.findings.length + " findings, " + thumbCount + " thumbnails (" + made + " new) from " + fragments.map((f) => f.name).join(", ") + " -> " + outDir,
+    gallery.findings.length + " findings, " + redesignComponents.size + " redesign components, " + redesignScenes.size + " redesign scenes, " + thumbCount + " thumbnails (" + made + " new) from " + [...fragments, ...redesignFragments].map((f) => f.name).join(", ") + " -> " + outDir,
 );

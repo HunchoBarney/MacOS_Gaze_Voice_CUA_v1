@@ -249,9 +249,26 @@
     const controller = {
       pursuitBegin: (mode = "capture") => {
         fx.phase = mode;
+        fx.sampled = 0;
+        fx.targetFrames = 0;
+        fx.targetKey = null;
         fx.calls.push(["pursuitBegin", mode, now]);
       },
-      pursuitTarget: () => {},
+      // The real worker labels about every other display frame once the eye
+      // has settled on a target (about 280 ms) and reports each run's count; the point run (since #615)
+      // parks every target until its share of samples has arrived.
+      pursuitTarget: (x, y) => {
+        if (!fx.phase) return;
+        const key = x + "," + y;
+        if (key !== fx.targetKey) {
+          fx.targetKey = key;
+          fx.targetFrames = 0;
+        }
+        fx.targetFrames += 1;
+        if (fx.targetFrames < 17 || fx.targetFrames % 2 !== 0) return;
+        fx.sampled += 1;
+        onMessage({ type: "calibration", status: "pursuit_sampled", mode: fx.phase, count: fx.sampled });
+      },
       pursuitEnd: () => {
         const phase = fx.phase;
         fx.calls.push(["pursuitEnd", phase, now]);

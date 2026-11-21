@@ -1,5 +1,7 @@
 import NumberFlow from "@number-flow/react";
 import { lazy, Suspense, useState, type CSSProperties } from "react";
+import { ChevronRightIcon } from "../components/Icons";
+import { KindTag } from "../components/KindTag";
 import { Thumb } from "../components/Thumb";
 import { SeverityChip, severityName } from "../components/Severity";
 import { coverVariant, plural, sceneVariant, severityCounts } from "../data";
@@ -78,6 +80,20 @@ export function Home({ gallery }: { gallery: Gallery }) {
       </section>
 
       <div className="page home-body">
+        <Link className="redesign-banner" href="/redesign">
+          <span className="redesign-banner-glow" aria-hidden="true" />
+          <span className="redesign-banner-text">
+            <span className="eyebrow">Redesign</span>
+            <span className="title-3">Pick the next Jarvis</span>
+            <span className="redesign-banner-sub">
+              {gallery.redesign?.components.length
+                ? plural(gallery.redesign.components.length, "component") + " in new directions, side by side with today’s design."
+                : "New directions for every component, side by side with today’s design."}
+            </span>
+          </span>
+          <ChevronRightIcon className="redesign-banner-chevron" />
+        </Link>
+
         {gallery.scenes.length > 0 && (
           <section className="area" aria-labelledby="scenes-heading">
             <div className="area-head">
@@ -96,11 +112,7 @@ export function Home({ gallery }: { gallery: Gallery }) {
                     <span className="card-text">
                       <span className="card-title">
                         {scene.title}
-                        {scene.kind === "proposed" && (
-                          <span className="kind-tag" data-kind="proposed">
-                            Proposed
-                          </span>
-                        )}
+                        <KindTag item={scene} />
                       </span>
                       <span className="card-meta">{plural(scene.components.length, "component")}</span>
                     </span>

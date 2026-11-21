@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import type { State } from "../types";
+import { KindTag } from "./KindTag";
 
 export function StateTabs({
   states,
@@ -44,11 +45,7 @@ export function StateTabs({
               )}
               <span className="tab-label">
                 {state.title}
-                {state.kind && state.kind !== "current" && (
-                  <span className="kind-tag" data-kind={state.kind}>
-                    {state.kind === "proposed" ? "Proposed" : "Reference"}
-                  </span>
-                )}
+                <KindTag item={state} />
               </span>
             </button>
           );
