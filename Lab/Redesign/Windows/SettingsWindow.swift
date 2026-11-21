@@ -165,6 +165,11 @@ struct SettingsLook {
 
 @MainActor
 enum SettingsMotion {
+    /// How long a pane change keeps the scroll on its spring; past it the
+    /// critically damped 0.6 s glide is within a twentieth of a point, and
+    /// layout changes under an unchanged anchor snap so the anchor holds.
+    static let glide = 1.2
+
     static func update(_ f: SettingsFixture, _ c: Ctx, _ m: MotionBank, _ fam: WinFamily) {
         m.set("k", f.labelScale, c.geo(.spring(response: 0.3, damping: 1)), initial: f.labelScale)
         m.set("slider", (f.labelScale - 1), c.geo(.spring(response: 0.22, damping: 1)), initial: f.labelScale - 1)
@@ -195,11 +200,12 @@ enum SettingsMotion {
         m.set("note.cap", f.live == .cap && noted ? 1 : 0, c.fade(.easeOut(f.live == .cap ? 0.26 : 0.12)))
 
         let index = Double(SettingsPane.allCases.firstIndex(of: f.anchor) ?? 0)
-        let same = abs(m.value("anchor", index) - index) < 0.01
+        if abs(m.value("anchor", index) - index) >= 0.01 { m.set("anchorAt", c.t, .snap) }
         m.set("anchor", index, .snap)
+        let gliding = (0..<SettingsMotion.glide).contains(c.t - m.value("anchorAt", -.infinity))
         let look = SettingsLook(f, c, m, fam)
         let target = SettingsPage.scroll(to: f.anchor, f, look)
-        m.set("scroll", target, same ? .snap : c.geo(.spring(response: 0.6, damping: 1)), initial: target)
+        m.set("scroll", target, gliding ? c.geo(.spring(response: 0.6, damping: 1)) : .snap, initial: target)
         m.set("sel", index, c.geo(.spring(response: 0.36, damping: 0.86)), initial: index)
     }
 }
