@@ -198,9 +198,9 @@ struct FirstRunView: View {
             } else {
                 paragraph(config.handsFreeEnabled
                      ? "Say “Open Calculator”."
-                     : "Hold fn and say “Open Calculator”, then let go.")
+                     : "Say “Hey \(config.assistantName), open Calculator”.")
                 if config.handsFreeEnabled {
-                    paragraph("Jarvis is listening now. If you'd rather it waited for fn, change that in Settings.")
+                    paragraph("Jarvis is listening now. If you'd rather it waited for “Hey \(config.assistantName)”, change that in Settings.")
                         .foregroundStyle(.secondary)
                         .padding(.top, 8)
                 }

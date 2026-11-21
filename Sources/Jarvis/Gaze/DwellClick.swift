@@ -44,7 +44,7 @@ struct DwellPolicy: Sendable, Equatable {
         .axElement, .trafficLight, .dom, .menuBar
     ]
 
-    /// The deny list — a label or role hit means voice/Fn only, forever.
+    /// The deny list — a label or role hit means voice only, forever.
     /// Mirrors CuaPolicy's consequential vocabulary plus the pinned
     /// additions (secure fields, close controls, sign-out); separators
     /// are normalized the same way so "force-quit" can't sneak by.
@@ -79,7 +79,7 @@ struct DwellPolicy: Sendable, Equatable {
         if mode == .safe && !Self.safeKinds.contains(c.kind) { return false }
         if let app = c.appName, deniedApps.contains(app.lowercased()) { return false }
         let role = c.role.lowercased()
-        // Secure fields are voice/Fn only — a parked eye on a password
+        // Secure fields are voice only — a parked eye on a password
         // box must never type, click, or submit into it.
         if role.contains("secure") { return false }
         // The close and fullscreen traffic lights are destructive /

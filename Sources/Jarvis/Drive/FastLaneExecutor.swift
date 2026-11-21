@@ -366,12 +366,12 @@ extension DriveLoop {
                                        denied: task.deny, confirmed: &confirmed)
                 guard let onDictationRequest, await onDictationRequest(start) else {
                     return settle(.blocked(start
-                        ? "Dictation isn't available — it's off in Settings or nothing can capture right now."
+                        ? "Dictation isn't available — nothing can capture right now."
                         : "No dictation is running."),
                                   task, history, blockedReason: "dictation unavailable")
                 }
                 return done(start
-                    ? "Dictation is on — speak, then tap Fn or say 'stop dictating' to finish."
+                    ? "Dictation is on — speak, then say 'stop dictating' to finish."
                     : "Stopped dictating.",
                     task, history, effect: true)
             case .tracker(let verb):

@@ -43,7 +43,6 @@ extension VoiceController.Status {
         case .starting: return "Starting…"
         case .listening: return "Listening"
         case .finishing: return "Finishing…"
-        case .awaitingRelease: return "Let go of fn to finish"
         case .reviewTranscript: return "Check what I heard"
         case .thinking: return "Thinking…"
         case .awaitingConfirm: return "Go ahead?"
@@ -61,7 +60,7 @@ extension VoiceController.Status {
     var symbol: String {
         switch self {
         case .idle, .stopped: return "waveform"
-        case .starting, .listening, .finishing, .awaitingRelease, .testingMicrophone: return "mic"
+        case .starting, .listening, .finishing, .testingMicrophone: return "mic"
         case .thinking, .executing, .stopping: return "ellipsis.circle"
         case .reviewTranscript, .awaitingConfirm, .awaitingAnswer: return "questionmark.circle"
         case .done, .replied: return "checkmark.circle"

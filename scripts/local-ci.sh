@@ -1,6 +1,8 @@
 #!/bin/bash
 # Local CI for Jarvis on the owner's Mac. GitHub Actions is off, so this runs
 # the CI test job (make test) and posts the result as a "local-ci" commit status.
+# It tests a head merged into current origin/main, the tree the PR would land
+# as, and the status on the head names that main.
 #
 #   scripts/local-ci.sh <pr-number|sha|branch>   queue one head; poll tests it in first-seen order
 #   scripts/local-ci.sh poll                     test the untested head that has waited longest (launchd)
@@ -104,17 +106,19 @@ stop_group() {
     kill -KILL -- "-$1" 2>/dev/null
 }
 
-test_pid=""
+test_pid="" watchdog=""
 on_signal() {
     [ -n "$test_pid" ] && stop_group "$test_pid" 10
+    [ -n "$watchdog" ] && { pkill -P "$watchdog" sleep; kill "$watchdog"; } 2>/dev/null
     [ -n "${sha:-}" ] && post "$sha" error "cancelled on the Mac"
     exit 130
 }
 
-# Runs make test on one commit. The caller holds the lock.
+# Runs make test on one commit merged into current main, without committing
+# the merge. The caller holds the lock.
 run_sha() {
     sha=$1
-    local log=$LOGS/$sha.log short=${1:0:12}
+    local log=$LOGS/$sha.log short=${1:0:12} main tree rc
     mkdir -p "$LOGS"
     : >"$log"
     post "$sha" pending "checking out" || { say "could not post status for $sha"; return 1; }
@@ -125,17 +129,29 @@ run_sha() {
             post "$sha" error "clone failed · log $short.log"; return 1; }
         git -C "$CHECKOUT" config credential.https://github.com.helper "!$GH auth git-credential"
     fi
-    if ! { git -C "$CHECKOUT" fetch --quiet --no-tags origin "$sha" &&
-           git -C "$CHECKOUT" checkout --quiet --force --detach "$sha" &&
+    if ! { git -C "$CHECKOUT" fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main" "$sha" &&
+           git -C "$CHECKOUT" checkout --quiet --force --detach origin/main &&
            git -C "$CHECKOUT" clean -ffdxq -e .build -e node_modules; } >>"$log" 2>&1; then
         post "$sha" error "checkout failed · log $short.log"; return 1
     fi
+    main=$(git -C "$CHECKOUT" rev-parse --short=7 origin/main)
+    tree=$(git -C "$CHECKOUT" merge-tree --write-tree origin/main "$sha" 2>>"$log"); rc=$?
+    if [ "$rc" -eq 1 ]; then
+        say "$sha conflicts with main $main" | tee -a "$log"
+        git -C "$CHECKOUT" merge-tree --write-tree --name-only origin/main "$sha" 2>&1 | sed '1d' >>"$log"
+        post "$sha" error "conflicts with main $main"
+        return 1
+    fi
+    if [ "$rc" -ne 0 ] || ! git -C "$CHECKOUT" read-tree -u --reset "$tree" >>"$log" 2>&1; then
+        post "$sha" error "could not merge into main $main · log $short.log"; return 1
+    fi
+    say "testing $sha merged into main $main (tree $tree)" | tee -a "$log"
 
-    # Captain gate (2026-11-20): a head without #598's Keychain test guard
+    # Captain gate (2026-11-20): a tree without #598's Keychain test guard
     # would raise Keychain dialogs on the owner's screen. Refuse to test it.
-    if ! git -C "$CHECKOUT" grep -q JARVIS_LIVE_KEYCHAIN HEAD -- Sources; then
-        say "no Keychain test guard at $sha" | tee -a "$log"
-        post "$sha" error "merge main first: head lacks the #598 Keychain test guard"
+    if ! git -C "$CHECKOUT" grep -q JARVIS_LIVE_KEYCHAIN "$tree" -- Sources; then
+        say "no Keychain test guard in $sha merged into main $main" | tee -a "$log"
+        post "$sha" error "the merge with main $main lacks the #598 Keychain test guard"
         return 1
     fi
 
@@ -148,7 +164,7 @@ run_sha() {
     # checkout rather than the lane's mirror.
     post "$sha" pending "queued in the build lane for make test"
     say "make test at $sha" | tee -a "$log"
-    local start=$SECONDS rc
+    local start=$SECONDS
     set -m
     (cd "$CHECKOUT" && LANE_PRIORITY=high LANE_NO_MIRROR=1 JARVIS_LANE_TIMEOUT=$LANE_TIMEOUT \
         exec nice -n 10 "$LANE_SH" make test) >>"$log" 2>&1 &
@@ -156,7 +172,7 @@ run_sha() {
     set +m
     rm -f "$CI_HOME/timed-out"
     (sleep $((LANE_TIMEOUT + TEST_TIMEOUT)) && touch "$CI_HOME/timed-out" && stop_group "$test_pid" 30) >/dev/null 2>&1 &
-    local watchdog=$!
+    watchdog=$!
     wait "$test_pid"; rc=$?
     test_pid=""
     if [ -e "$CI_HOME/timed-out" ]; then
@@ -164,6 +180,7 @@ run_sha() {
     else
         pkill -P "$watchdog" sleep 2>/dev/null; kill "$watchdog" 2>/dev/null
     fi
+    watchdog=""
     local minutes=$(((SECONDS - start + 59) / 60)) counts
     if grep -aq '^lane: gave up after' "$log"; then
         say "the build lane did not free up in $LANE_TIMEOUT s" | tee -a "$log"
@@ -175,13 +192,13 @@ run_sha() {
         say "make test exited 0 but the log has no complete swift and vitest count" | tee -a "$log"
         rc=1 counts="no complete test count in the log"
     fi
-    say "make test exited $rc after $minutes min: $counts" | tee -a "$log"
+    say "make test exited $rc after $minutes min on main $main: $counts" | tee -a "$log"
     if [ "$rc" -eq 0 ]; then
-        post "$sha" success "${counts:-make test passed} · ${minutes} min"
+        post "$sha" success "success on main $main · ${counts:-make test passed} · ${minutes} min"
     elif [ -e "$CI_HOME/timed-out" ]; then
-        post "$sha" failure "timed out after $minutes min · log $short.log"
+        post "$sha" failure "timed out on main $main after $minutes min · log $short.log"
     else
-        post "$sha" failure "make test failed${counts:+ · $counts} · log $short.log"
+        post "$sha" failure "failed on main $main${counts:+ · $counts} · log $short.log"
     fi
     return "$rc"
 }

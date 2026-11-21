@@ -97,7 +97,7 @@ final class MicrophoneAudioGate: @unchecked Sendable {
             }
             return
         }
-        // A tap buffer can straddle Fn down. Exclude its pre-press prefix.
+        // A tap buffer can straddle the capture start. Exclude its earlier prefix.
         let offset = time.hostTime < openedAt
             ? Int(ceil(AVAudioTime.seconds(forHostTime: openedAt - time.hostTime) * buffer.format.sampleRate)) : 0
         guard offset < Int(buffer.frameLength) else { return }
@@ -306,7 +306,7 @@ final class MicrophoneInput: @unchecked Sendable {
                             }
                             if self.currentDevice(input, input: true) != device.hardwareID {
                                 guard let unit = input.audioUnit else {
-                                    throw VoiceError("This microphone can't listen all the time. Hold fn to talk, or pick another microphone in Settings.")
+                                    throw VoiceError("This microphone can't listen all the time. Pick another microphone in Settings.")
                                 }
                                 input.auAudioUnit.deallocateRenderResources()
                                 var selected = device.hardwareID
@@ -332,7 +332,7 @@ final class MicrophoneInput: @unchecked Sendable {
                                     sampleRate: deviceFormat.sampleRate, channels: 1, interleaved: false),
                                   let playbackFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
                                     sampleRate: 24_000, channels: 1, interleaved: true) else {
-                                throw VoiceError("This microphone can't listen all the time. Hold fn to talk, or pick another microphone in Settings.")
+                                throw VoiceError("This microphone can't listen all the time. Pick another microphone in Settings.")
                             }
                             format = mono
                             self.playbackFormat = playbackFormat
