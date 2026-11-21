@@ -278,6 +278,45 @@ final class WritingByInstructionTests: XCTestCase {
         XCTAssertEqual(desk.composed, 0)
     }
 
+    private func referent(_ source: DeicticReferent.Source, role: String, label: String) -> DeicticReferent {
+        DeicticReferent(id: "axref:42:7:1", source: source, role: role, label: label, appName: "Mail",
+                        windowTitle: "Inbox", pid: 42, windowID: 7, confidence: nil, element: nil)
+    }
+
+    func testThisResolvesThroughTheDeicticResolverFirst() async {
+        let fallback = WritingByInstruction.Referent(text: "selected text", appName: nil, windowTitle: nil)
+        var asked: [TimeInterval] = []
+        let gaze = await WritingByInstruction.deicticReferent(
+            wordTime: 12.5,
+            resolve: { asked.append($0); return .resolved(self.referent(.gaze, role: "AXStaticText", label: "Are we still on for 5?")) },
+            read: { _ in nil }, fallback: { fallback })
+        XCTAssertEqual(asked, [12.5])
+        XCTAssertEqual(gaze, .init(text: "Are we still on for 5?", appName: "Mail", windowTitle: "Inbox"))
+
+        let readText = await WritingByInstruction.deicticReferent(
+            wordTime: 1, resolve: { _ in .resolved(self.referent(.pointer, role: "AXGroup", label: "Message")) },
+            read: { _ in "Lunch tomorrow?" }, fallback: { fallback })
+        XCTAssertEqual(readText?.text, "Lunch tomorrow?")
+    }
+
+    func testReplyFieldsAndWhichOneFallBackToTheSelectionOrFocusedText() async {
+        let fallback = WritingByInstruction.Referent(text: "selected text", appName: nil, windowTitle: nil)
+        for resolution: DeicticResolution in [
+            .whichOne,
+            .resolved(referent(.focus, role: "AXTextArea", label: "Message body")),
+            .resolved(referent(.gaze, role: "AXTextField", label: "Reply")),
+            .resolved(referent(.pointer, role: "AXGroup", label: "")),
+        ] {
+            let found = await WritingByInstruction.deicticReferent(
+                wordTime: 1, resolve: { _ in resolution }, read: { _ in nil }, fallback: { fallback })
+            XCTAssertEqual(found, fallback, "\(resolution)")
+        }
+        let selected = await WritingByInstruction.deicticReferent(
+            wordTime: 1, resolve: { _ in .resolved(self.referent(.selection, role: "AXTextArea", label: "")) },
+            read: { _ in "the selected question" }, fallback: { fallback })
+        XCTAssertEqual(selected?.text, "the selected question")
+    }
+
     func testSendItWithoutADraftIsNotOurs() async {
         let payload = await writer(FakeDesk(), local: nil).handle("send it")
         XCTAssertNil(payload)
