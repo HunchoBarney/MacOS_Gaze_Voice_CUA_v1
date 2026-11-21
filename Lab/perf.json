@@ -59,6 +59,26 @@
       "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, asking-question state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
     }
   },
+  "first-run" : {
+    "A" : {
+      "cpu" : "0.4 ms\/frame CPU (2% of a core at 60 fps)",
+      "gpu" : "0.3 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, accessibility-waiting state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    },
+    "B" : {
+      "cpu" : "1.5 ms\/frame CPU (9% of a core at 60 fps)",
+      "gpu" : "1.2 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, accessibility-waiting state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    },
+    "C" : {
+      "cpu" : "1.1 ms\/frame CPU (7% of a core at 60 fps)",
+      "gpu" : "1.0 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, accessibility-waiting state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    }
+  },
   "gaze-highlight" : {
     "A" : {
       "cpu" : "1.8 ms\/frame CPU (11% of a core at 60 fps)",
@@ -91,6 +111,40 @@
       "gpu" : "1.9 ms\/frame offscreen render incl. GPU",
       "idle" : "0: the view is removed when idle",
       "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, consequential state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    }
+  },
+  "menu-bar-item" : {
+    "A" : {
+      "cpu" : "0.2 ms\/frame CPU (1% of a core at 60 fps)",
+      "gpu" : "0.2 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, working state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    },
+    "B" : {
+      "cpu" : "0.3 ms\/frame CPU (2% of a core at 60 fps)",
+      "gpu" : "0.3 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, working state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    },
+    "C" : {
+      "cpu" : "2.0 ms\/frame CPU (12% of a core at 60 fps)",
+      "gpu" : "1.6 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, working state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    }
+  },
+  "menu-bar-menu" : {
+    "A" : {
+      "cpu" : "7.0 ms\/frame CPU (42% of a core at 60 fps)",
+      "gpu" : "6.7 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, task-running state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
+    },
+    "B" : {
+      "cpu" : "11.7 ms\/frame CPU (70% of a core at 60 fps)",
+      "gpu" : "11.1 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, task-running state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor."
     }
   },
   "target-chips" : {
