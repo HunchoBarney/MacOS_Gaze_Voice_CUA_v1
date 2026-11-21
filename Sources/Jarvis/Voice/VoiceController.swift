@@ -445,7 +445,9 @@ final class VoiceController: ObservableObject {
     /// KAR-75 L3: under `voice.live`, LiveKit's engine owns the microphone
     /// and the wake word opens a GPT-Live session instead of this lane.
     @Published private(set) var liveGlow: LiveVoice.Glow = .hidden
-    private lazy var liveVoice: LiveVoice? = makeLiveVoice()
+    lazy var liveVoice: LiveVoice? = makeLiveVoice()
+    /// Releases this lane's microphone, then arms Live: one owner at a time.
+    private var liveArming: Task<Void, Never>?
 
     private func makeLiveVoice() -> LiveVoice? {
         #if canImport(LiveKitWebRTC)
@@ -1002,13 +1004,20 @@ final class VoiceController: ObservableObject {
                 handsFreeState = .unavailable("Live voice needs the hosted voice service.")
                 return
             }
-            do { try liveVoice.arm(name: config.assistantName) } catch {
-                handsFreeState = .unavailable(error.localizedDescription)
-                return
-            }
-            armedName = config.assistantName
+            let name = config.assistantName
             standbyArmed = true
-            handsFreeState = .standby
+            handsFreeState = .preparing
+            liveArming = Task { [weak self] in
+                await self?.speech.suspend()
+                guard let self, !Task.isCancelled, self.standbyArmed else { return }
+                do { try liveVoice.arm(name: name) } catch {
+                    self.standbyArmed = false
+                    self.handsFreeState = .unavailable(error.localizedDescription)
+                    return
+                }
+                self.armedName = name
+                self.handsFreeState = .standby
+            }
             return
         }
         guard standbyChosen, !standbyArmed, wakeSession == nil, !handsFreePaused, !manualOverride,
@@ -1076,6 +1085,7 @@ final class VoiceController: ObservableObject {
     private func disarmStandby() {
         guard standbyArmed else { return }
         standbyArmed = false
+        liveArming?.cancel(); liveArming = nil
         if let liveVoice, liveVoice.armed {
             liveVoice.disarm()
             return
