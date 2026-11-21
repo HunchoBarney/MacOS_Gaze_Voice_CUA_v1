@@ -952,6 +952,12 @@ final class VoiceController: ObservableObject {
         }
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
         lane.conversation.proactiveIntercept = { [weak self] in self?.cua.proactiveIntercept?($0) }
+        let memoryCommands: () -> MemoryCommands? = { [weak self] in
+            guard let self, self.config.voiceLive else { return nil }
+            return self.cua.memoryCommands
+        }
+        lane.memoryCommands = memoryCommands
+        lane.conversation.memoryCommands = memoryCommands
         lane.conversation.interpret = { [weak self] text, context, memory in
             guard let self else { throw VoiceError(OutcomeWording.missingUnderstandingKey) }
             return try await self.config.withRoute(self.config.jevRoute) { route in
