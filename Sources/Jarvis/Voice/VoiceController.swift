@@ -52,6 +52,9 @@ struct VoiceTimings {
     /// Past this a wake session closes at the first quiet time, not the
     /// follow-up window; then the wake word is needed again.
     var wakeSessionCap: TimeInterval = 30 * 60
+    /// How often Standby looks for another app on the microphone. Nil
+    /// leaves the looking to `checkOtherMicrophoneUse()` callers.
+    var otherMicrophoneInterval: TimeInterval? = 2
 }
 
 /// When a wake-word session closes. Until Jarvis has answered, it closes
@@ -567,6 +570,8 @@ final class VoiceController: ObservableObject {
     private var wakeSession: Task<Void, Never>?
     private var otherMicrophoneWatch: Task<Void, Never>?
     private var otherAppListening = false
+    private var otherMicrophoneChecks = 0
+    private var otherMicrophoneApplied = 0
     /// Whether another app is capturing audio: Core Audio in the app, a
     /// fake in tests.
     private let otherAppUsesMicrophone: @Sendable () -> Bool
@@ -1273,25 +1278,34 @@ final class VoiceController: ObservableObject {
     /// A call or another recording app owns the microphone: Standby waits
     /// until it's done.
     private func watchOtherMicrophoneUse() {
-        guard otherMicrophoneWatch == nil else { return }
+        guard otherMicrophoneWatch == nil, let interval = timings.otherMicrophoneInterval else { return }
         otherMicrophoneWatch = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.standbyChosen else {
                     self?.otherMicrophoneWatch = nil
                     return
                 }
-                let probe = self.otherAppUsesMicrophone
-                let busy = await Task.detached { probe() }.value
-                if busy != self.otherAppListening {
-                    self.otherAppListening = busy
-                    if busy, self.standbyArmed || self.wakeSession != nil {
-                        self.stopHandsFree(state: .unavailable("Paused while another app is using the microphone."))
-                    } else if !busy {
-                        self.armStandby()
-                    }
-                }
-                try? await Task.sleep(for: .seconds(2))
+                await self.checkOtherMicrophoneUse()
+                try? await Task.sleep(for: .seconds(interval))
             }
+        }
+    }
+
+    /// One look at who owns the microphone. A look that started before
+    /// the one last applied is stale and changes nothing.
+    func checkOtherMicrophoneUse() async {
+        otherMicrophoneChecks &+= 1
+        let check = otherMicrophoneChecks
+        let probe = otherAppUsesMicrophone
+        let busy = await Task.detached { probe() }.value
+        guard check > otherMicrophoneApplied else { return }
+        otherMicrophoneApplied = check
+        guard busy != otherAppListening else { return }
+        otherAppListening = busy
+        if busy, standbyArmed || wakeSession != nil {
+            stopHandsFree(state: .unavailable("Paused while another app is using the microphone."))
+        } else if !busy {
+            armStandby()
         }
     }
 
