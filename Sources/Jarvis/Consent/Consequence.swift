@@ -11,20 +11,26 @@ import Foundation
 ///   send", "send it later"). A dictated message is not an instruction.
 /// - **Jarvis chose the press itself**: a step it picked mid-task that the
 ///   words didn't name, a keyboard send, a button with no name or a click
-///   at a spot on screen. It asks one short question first, and only a
-///   clear yes within 30 seconds presses that one control.
+///   at a spot on screen. Where the app can take it back (`UndoRegistry`:
+///   Move to Trash in Finder, Delete and Archive in Mail, Send in Mail
+///   inside its Undo Send delay, Delete in a document app) Jarvis presses
+///   and offers undo for 10 seconds, once per task. Otherwise it asks one
+///   short question first, and only a clear yes within 30 seconds presses
+///   that one control. Update Now, Restart and Shut Down (`.restart`)
+///   always ask: nothing takes back a restart.
 /// - **The never list** (`CuaPolicy.neverReason`) refuses either way:
 ///   wiping the Mac, remote-access tools, gift cards, wire transfers, scam
 ///   links and numbers from warning popups.
 enum Consequence: String, CaseIterable, Sendable {
-    case pay, account, send, delete, call, permission, unnamed
+    case pay, account, send, delete, call, permission, restart, unnamed
 
     private static let phrases: [(Consequence, [String])] = [
         (.pay, ["send payment", "pay now", "buy now", "purchase now", "place order", "place your order",
                 "confirm purchase", "checkout", "check out", "purchase", "subscribe", "donate", "pay"]),
         (.account, ["sign out", "log out", "sign in", "log in", "change password", "remove device"]),
+        (.restart, ["update now", "upgrade now", "restart now", "install and restart", "restart", "shut down"]),
         (.send, ["reply all", "send", "reply", "post", "share", "forward", "submit"]),
-        (.delete, ["move to trash", "delete", "remove", "erase", "format", "reset"]),
+        (.delete, ["move to trash", "delete", "remove", "erase", "reset"]),
         (.call, ["facetime", "call", "start video", "join call"]),
         (.permission, ["allow", "install", "open anyway", "grant"]),
     ]
@@ -54,7 +60,7 @@ enum Consequence: String, CaseIterable, Sendable {
     /// "remove the red-eye" don't ask for Checkout, Allow, Erase or
     /// Move to Trash.
     private static let pressVerbOnly: Set<String> = [
-        "check out", "format", "remove", "reset", "erase", "allow", "install", "open anyway", "grant",
+        "check out", "remove", "reset", "erase", "allow", "install", "open anyway", "grant",
     ]
     /// Other names for the same control.
     private static let sameControl: [String: [String]] = [
@@ -87,6 +93,12 @@ enum Consequence: String, CaseIterable, Sendable {
     private static let messageMarkers = ["that says", "which says", "saying", "says", "to say",
                                          "telling him", "telling her", "telling them",
                                          "tell him", "tell her", "tell them"]
+    /// "show me how to send Linda a photo" asks to be taught, so it names
+    /// no press: if Jarvis does a step after all, a consequential one asks.
+    /// They count anywhere in the instructions ("can you show me how…"),
+    /// not inside quoted or dictated text.
+    private static let learningOpeners = ["show me how", "how do i", "how do you", "how can i",
+                                          "walk me through", "teach me"]
     /// "the button that says Send" names a control, not a message.
     private static let controlNouns: Set<String> = ["button", "link", "one", "option", "icon", "box"]
     private static let irregularForms = ["send": ["sent"], "pay": ["paid"]]
@@ -136,8 +148,9 @@ enum Consequence: String, CaseIterable, Sendable {
 
     /// Whether the person's words name this control. Coverage is per
     /// control: "reply to Mom" covers Reply, not Reply All, Forward or
-    /// Submit. Permission buttons need the exact control after a press
-    /// verb ("click Allow"). A refusal attached to the control's own verb
+    /// Submit. Permission and restart buttons need the exact control after
+    /// a press verb ("click Allow", "click Restart"), and a "show me how"
+    /// goal covers nothing. A refusal attached to the control's own verb
     /// ("don't send", "send it later", "without sending") covers nothing;
     /// words elsewhere, or inside a dictated message ("saying I'm not
     /// coming"), don't count against it.
@@ -146,6 +159,8 @@ enum Consequence: String, CaseIterable, Sendable {
         let names = ([phrase] + (sameControl[phrase] ?? [])).map { CuaPolicy.normalize($0) }
         let spoken = CuaPolicy.normalize(goal.lowercased()).split(separator: " ").map(String.init)
         let tokens = instructionWords(goal)
+        let instruction = " " + tokens.joined(separator: " ") + " "
+        if learningOpeners.contains(where: { instruction.contains(" \($0) ") }) { return false }
         let refusal = names.flatMap(forms).contains { form in
             spoken.indices.contains {
                 spoken[$0...].starts(with: form) && !closeRefusals.isDisjoint(with: spoken[max(0, $0 - 2)..<$0])
@@ -159,7 +174,7 @@ enum Consequence: String, CaseIterable, Sendable {
             }
         }
         if pressed { return true }
-        if consequence == .permission || pressVerbOnly.contains(phrase) { return false }
+        if [.permission, .restart].contains(consequence) || pressVerbOnly.contains(phrase) { return false }
         if phrase == "call", words.contains(" call it ") { return false }
         return names.contains { words.contains(" \($0) ") }
     }
@@ -174,6 +189,7 @@ enum Consequence: String, CaseIterable, Sendable {
         case .delete: return "Pressing \(name) deletes or erases something. Do you want me to press it? Say \u{201C}yes\u{201D}, or \u{201C}not yet\u{201D}."
         case .call: return "Pressing \(name) starts a call. Call now? Say \u{201C}yes, call\u{201D}, or \u{201C}not yet\u{201D}."
         case .permission: return "Pressing \(name) gives an app new access to your Mac. Do you want me to press it? Say \u{201C}yes\u{201D}, or \u{201C}not yet\u{201D}."
+        case .restart: return "Pressing \(name) restarts or shuts down your Mac, and anything you haven't saved could be lost. Do you want me to press it? Say \u{201C}yes\u{201D}, or \u{201C}not yet\u{201D}."
         case .unnamed:
             let near = target.isEmpty ? "" : ", near \(name)"
             return "I'm about to press something on screen I can't name for sure\(near). Do you want me to press it? Say \u{201C}yes\u{201D}, or \u{201C}not yet\u{201D}."
@@ -198,7 +214,7 @@ enum Consequence: String, CaseIterable, Sendable {
         case .send: return ["send it", "send", "post it", "share it"]
         case .delete: return ["delete it", "trash it", "remove it"]
         case .call: return ["call"]
-        case .account, .permission, .unnamed: return []
+        case .account, .permission, .restart, .unnamed: return []
         }
     }
 

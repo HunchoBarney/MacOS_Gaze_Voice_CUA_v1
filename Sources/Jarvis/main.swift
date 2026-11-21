@@ -163,6 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.config.$alwaysAllowComputerUse
             .sink { CuaPolicy.publishStateFile(standingGrant: $0) }
             .store(in: &subscriptions)
+        controller.config.$labelScale
+            .sink { TargetOverlay.shared.labelScale = $0 }
+            .store(in: &subscriptions)
         if canPrepareMicrophone { controller.prepareMicrophone() }
         controller.config.$microphoneUID.dropFirst().removeDuplicates().sink { [weak self] _ in
             guard let self, self.canPrepareMicrophone else { return }

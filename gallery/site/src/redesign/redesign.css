@@ -1283,6 +1283,17 @@ li[data-lead] .rd-ref-art {
   }
 }
 
+/* On a phone the picks pill sits in the page under the subnav instead of floating, so it never covers content. */
+@media (max-width: 720px) {
+  .rd-float {
+    position: static;
+    transform: none;
+    display: flex;
+    justify-content: flex-end;
+    margin: 4px 0 12px;
+  }
+}
+
 @media (max-width: 560px) {
   .rd-ref-art,
   li[data-lead] .rd-ref-art {

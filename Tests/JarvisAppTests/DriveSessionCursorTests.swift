@@ -22,11 +22,11 @@ final class DriveSessionCursorTests: XCTestCase {
                          "bundle_id": .string("com.apple.Safari"),
                          "pid": .number(42)])])])
         ]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in XCTFail("An explicit key must not need inference"); return nil }, ask: nil,
                              granted: { true },
                              directSession: "voice-direct",
-                             resolver: AppResolver(listApps: {
+                             resolver: AppResolver.fixture(listApps: {
                                  [AppResolver.App(name: "Safari",
                                                   bundle: "com.apple.Safari", pid: 42)] }),
                              frontmostBundleID: { "com.apple.Safari" })
@@ -52,10 +52,10 @@ final class DriveSessionCursorTests: XCTestCase {
                          "bundle_id": .string("com.apple.Safari"),
                          "pid": .number(42)])])])
         ]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in XCTFail("An explicit key must not need inference"); return nil }, ask: nil,
                              granted: { true },
-                             resolver: AppResolver(listApps: {
+                             resolver: AppResolver.fixture(listApps: {
                                  [AppResolver.App(name: "Safari",
                                                   bundle: "com.apple.Safari", pid: 42)] }),
                              frontmostBundleID: { "com.apple.Safari" })

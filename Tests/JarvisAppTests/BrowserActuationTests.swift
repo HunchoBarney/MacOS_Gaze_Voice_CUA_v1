@@ -113,10 +113,10 @@ final class BrowserActuationTests: XCTestCase {
             if pickQueue.isEmpty { return nil }
             return pickQueue.removeFirst()
         }
-        let resolver = AppResolver(listApps: {
+        let resolver = AppResolver.fixture(listApps: {
             [AppResolver.App(name: "Safari", bundle: "com.apple.safari", pid: 42)]
         })
-        return DriveLoop(call: call, choose: choose, ask: ask,
+        return DriveLoop.inert(call: call, choose: choose, ask: ask,
                          granted: { grant }, explicitConsent: true,
                          resolver: resolver,
                          config: .init(windowOnly: windowOnly),

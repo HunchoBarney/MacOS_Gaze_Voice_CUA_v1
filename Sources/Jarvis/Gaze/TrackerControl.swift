@@ -218,8 +218,14 @@ struct TrackerControl: Sendable {
     /// The host feature switch — the tracker can't enable itself, and
     /// the Config publisher in the app delegate owns the spawn/stop.
     static func setTrackingEnabled(_ enabled: Bool) async {
-        await MainActor.run { Config.shared.gazeTracking = enabled }
+        await MainActor.run { config().gazeTracking = enabled }
     }
+
+    /// The Config the feature switch writes — `Config.shared` in
+    /// production; tests install one on a private `UserDefaults` suite so
+    /// the write never reaches the `.standard` domain every test process
+    /// shares.
+    @MainActor static var config: () -> Config = { Config.shared }
 
     private static func num(_ value: Any?) -> Double? {
         if let n = value as? NSNumber { return n.doubleValue }

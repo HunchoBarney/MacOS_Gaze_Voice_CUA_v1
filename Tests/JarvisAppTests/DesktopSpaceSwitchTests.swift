@@ -326,9 +326,9 @@ private final class FakeSpaces {
     func say(_ goal: String) async -> String { said(await run(goal)) }
 
     func run(_ goal: String) async -> DriveResult {
-        let loop = DriveLoop(call: { t, a in try self.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try self.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
-                             resolver: AppResolver(exactBundleApps: { _ in [] }, listApps: { [] }),
+                             resolver: AppResolver.fixture(exactBundleApps: { _ in [] }, listApps: { [] }),
                              desktopSpaces: system)
         return await loop.run(DriveTask(goal: goal), session: "t")
     }

@@ -252,7 +252,7 @@ final class LocalSpeechTests: XCTestCase {
         let config = Config(defaults: UserDefaults(suiteName: "c1-denied-permission-\(UUID())")!,
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
-        let controller = VoiceController(config: config, speech: capture,
+        let controller = VoiceController.inert(config: config, speech: capture,
             permissionStatusReader: { [.microphone, .camera] })
         controller.missingPermissions = [.microphone]
         let before = capture.cancels
@@ -279,7 +279,7 @@ final class LocalSpeechTests: XCTestCase {
         let config = Config(defaults: UserDefaults(suiteName: "c1-permission-\(UUID())")!,
                             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
-        let controller = VoiceController(config: config, speech: capture,
+        let controller = VoiceController.inert(config: config, speech: capture,
             permissionStatusReader: {
                 reads.withLock { $0 += 1 }
                 return status.withLock { $0 }

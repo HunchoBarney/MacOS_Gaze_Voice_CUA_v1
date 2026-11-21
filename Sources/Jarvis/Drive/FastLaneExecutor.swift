@@ -171,7 +171,7 @@ extension DriveLoop {
         // dictation verbs steer the capture lane. Peeled qualifiers are
         // emphasis, the same as the gaze referents above.
         switch parsed.action.body {
-        case .systemHotkey, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
+        case .systemHotkey, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop, .comfort:
             guard !Self.requiresRiskJudgment(goal: goal, actionDescription: parsed.action.description)
             else { return .vetoed }
             return .resolved(FastResolution(action: parsed.action, openVerb: nil, name: "", bundle: ""))
@@ -374,6 +374,11 @@ extension DriveLoop {
                     ? "Dictation is on — speak, then say 'stop dictating' to finish."
                     : "Stopped dictating.",
                     task, history, effect: true)
+            case .comfort(let change):
+                feed(action.description)
+                try await gateExplicit("comfort preference", corpus: action.description,
+                                       denied: task.deny, confirmed: &confirmed)
+                return done(await Self.applyComfort(change), task, history, effect: true)
             case .tracker(let verb):
                 feed(action.description)
                 try await gateExplicit("tracker control", corpus: action.description,
@@ -704,7 +709,7 @@ extension DriveLoop {
                                                task: task, session: session, history: &history,
                                                confirmed: &confirmed)
         case .mediaKey, .systemHotkey, .navigateURL, .webSearch, .appControl,
-             .gaze, .tracker, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop:
+             .gaze, .tracker, .overlay, .repeatLast, .locate, .locatePointer, .dictation, .desktop, .comfort:
             return nil // handled above
         }
     }
@@ -889,6 +894,15 @@ extension DriveLoop {
         try? await focusLeased { self.activateApp(pid) }
         return done(didLaunch ? "Opened \(name)." : "\(name) was already running; brought it forward.",
                     task, history, pid: pid, bundleID: bundle, effect: true)
+    }
+
+    // MARK: - Comfort preferences
+
+    /// Stores a comfort preference in Config and returns what to say. The
+    /// voice lane and the overlay read Config, so the change applies from
+    /// the next reply or label without a restart. Tests replace it.
+    static var applyComfort: @Sendable (ComfortChange) async -> String = { change in
+        await MainActor.run { change.applyToSharedConfig() }
     }
 
     // MARK: - Tracker self-control
@@ -1542,7 +1556,7 @@ extension DriveLoop {
                 // Deny-scan BEFORE picking the actuation form — a "Buy
                 // now" referent refuses whichever way the click lands.
                 try await gateExplicit("click", corpus: corpus(candidate),
-                                       denied: task.deny, confirmed: &confirmed)
+                                       denied: task.deny, confirmed: &confirmed, press: candidate.label)
                 let name = candidate.label.isEmpty
                     ? Self.speakableRole(candidate.role) : candidate.label
                 switch VoiceTaskCoordinator.actuation(for: candidate, gaze: point) {
@@ -1586,7 +1600,7 @@ extension DriveLoop {
                 let fallback = (try? await windowAtPoint(target, session: session))
                     .map { "\($0.title) \($0.app)" } ?? ""
                 try await gateExplicit("click", corpus: fallback,
-                                       denied: task.deny, confirmed: &confirmed)
+                                       denied: task.deny, confirmed: &confirmed, press: "")
             }
             if let outcome { return outcome }
             let px = Self.desktopPixels(target)
@@ -1607,19 +1621,21 @@ extension DriveLoop {
             // raw gaze is the cold-scorer fallback, not the primary path.
             var postPoint = point
             var corpusText = ""
+            var pressLabel = ""
             if let gazeCommit, let (candidate, _) = await gazeCommit() {
                 if !candidate.motorRect.isEmpty {
                     postPoint = candidate.motorRect.contains(point) ? point
                         : CGPoint(x: candidate.motorRect.midX, y: candidate.motorRect.midY)
                 }
                 corpusText = corpus(candidate)
+                pressLabel = candidate.label
             } else {
                 corpusText = (try? await windowAtPoint(point, session: session))
                     .map { "\($0.title) \($0.app)" } ?? ""
             }
             try await gateExplicit(verb == .rightClick ? "gaze right click" : "gaze double click",
                                    corpus: corpusText, denied: task.deny,
-                                   confirmed: &confirmed)
+                                   confirmed: &confirmed, press: pressLabel)
             guard GazePointer.poster(verb == .rightClick ? .right : .double, postPoint) else {
                 let reason = GazePointer.refusal == .postAccessDenied
                     ? "macOS denied the synthetic click — check Accessibility and Input Monitoring permissions."
@@ -1787,7 +1803,7 @@ extension DriveLoop {
         if clicks, hits.count == 1, let hit = hits.first {
             let (element, frame) = elements[hit]
             try await gateExplicit("click", corpus: "\(label) \(windowTitle)",
-                                   denied: task.deny, confirmed: &confirmed)
+                                   denied: task.deny, confirmed: &confirmed, press: label)
             if Consequence.of(control: label) != nil { await glowPress(frame, label: label) }
             var args: [String: JSONValue] = ["session": .string(session)]
             if let token = element.token, !token.isEmpty {
@@ -2637,7 +2653,7 @@ extension DriveLoop {
 
     /// One `invoke_menu` dispatch behind its focus-borrow consent — shared
     /// by spoken menu paths and the exit-full-screen ladder's menu rung.
-    private func invokeMenu(_ path: [String], pid: Int, windowID: Int, name: String,
+    func invokeMenu(_ path: [String], pid: Int, windowID: Int, name: String,
                             bundle: String, session: String) async throws {
         // `invoke_menu` briefly focuses a background app — ask once per
         // bundle unless the standing grant covers input. `menuFocus`
@@ -3517,6 +3533,7 @@ extension DriveLoop {
         case .desktop: return "desktop switch"
         case .locatePointer: return "highlight pointer"
         case .dictation: return "dictation"
+        case .comfort: return "comfort preference"
         }
     }
 

@@ -33,15 +33,18 @@ final class LiveConnectTests: XCTestCase {
         }
     }
 
-    private func directSession(_ instructions: String) throws -> LiveSession {
-        #if canImport(LiveKitWebRTC)
+    private func directBroker() throws -> DirectLiveSessions {
         guard ProcessInfo.processInfo.environment["JARVIS_LIVE_KEYCHAIN"] == "1" else {
             throw XCTSkip("Also set JARVIS_LIVE_KEYCHAIN=1 so the test can read the OpenAI key from Keychain")
         }
         let store = KeychainAPIKeyStore(service: "com.chriswozniczek.jevvoice", account: "openAIAPIKey",
                                         allowUserInteraction: false)
-        let key = try XCTUnwrap(try store.read(), "no OpenAI key in Keychain")
-        return LiveSession(transport: WebRTCLiveTransport(), broker: DirectLiveSessions(key: key),
+        return DirectLiveSessions(key: try XCTUnwrap(try store.read(), "no OpenAI key in Keychain"))
+    }
+
+    private func directSession(_ instructions: String) throws -> LiveSession {
+        #if canImport(LiveKitWebRTC)
+        return LiveSession(transport: WebRTCLiveTransport(), broker: try directBroker(),
                            config: LiveSessionConfig(instructions: instructions))
         #else
         throw XCTSkip("WebRTC isn't fetched: run python3 -I ThirdParty/WebRTC/fetch.py first")
@@ -142,6 +145,48 @@ final class LiveConnectTests: XCTestCase {
         XCTAssertGreaterThan(counts["spoke", default: 0], 0, "Live should answer aloud")
         XCTAssertGreaterThanOrEqual(wakes, 2, "the wake word should hear both wakes through Live's engine")
         XCTAssertTrue(ending.confirmed)
+        #else
+        throw XCTSkip("WebRTC isn't fetched: run python3 -I ThirdParty/WebRTC/fetch.py first")
+        #endif
+    }
+    /// L3's one-breath request, timed, with the owner at the Mac: the app's
+    /// own microphone, wake word and session code. Say "Hey Jarvis, open
+    /// Mail" in one breath, then "That's all"; then "Hey Jarvis, what's the
+    /// capital of Japan?" in one breath, then "That's all". The second wake
+    /// comes after the first session closed, so it also proves recording
+    /// restarts after a call. Two short paid sessions, about 3 cents. It logs
+    /// timings only, never transcript text.
+    func testOneBreathRequestsReachLive() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["JARVIS_LIVE_ONE_BREATH"] == "1", environment["JARVIS_LIVE_MIC"] == "1" else {
+            throw XCTSkip("Set JARVIS_LIVE_ONE_BREATH=1 and JARVIS_LIVE_MIC=1, with someone at the Mac, for two paid one-breath requests")
+        }
+        #if canImport(LiveKitWebRTC)
+        let broker = try directBroker()
+        let voice = LiveVoice(microphone: LiveMicrophone(), wakeWord: VoskWakeWordDetector()) { name in
+            LiveSession(transport: WebRTCLiveTransport(), broker: broker,
+                        config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
+        }
+        var breaths: [LiveVoice.OneBreath] = []
+        voice.onOneBreath = { breath in
+            breaths.append(breath)
+            print("""
+            live_one_breath wake=\(breaths.count) started_s=\(breath.started) behind_s=\(breath.behind) \
+            first_s=\(breath.first ?? -1) delegation=\(breath.firstWasDelegation) skipped_s=\(breath.skipped)
+            """)
+            fflush(stdout)
+        }
+        try voice.arm(name: "Jarvis")
+        print("live_one_breath armed")
+        fflush(stdout)
+        let deadline = ContinuousClock.now + .seconds(10 * 60)
+        while breaths.count < 2 || voice.listening.sessionOpen, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        voice.disarm()
+        try await Task.sleep(for: .seconds(3))
+        XCTAssertEqual(breaths.count, 2, "both one-breath requests should get a reply or a delegation; a missing second one means the wake word went deaf after the first session closed")
+        XCTAssertTrue(breaths.allSatisfy { $0.first != nil })
         #else
         throw XCTSkip("WebRTC isn't fetched: run python3 -I ThirdParty/WebRTC/fetch.py first")
         #endif

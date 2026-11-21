@@ -46,6 +46,35 @@ final class TargetOverlay {
     static let numberNudge = CGPoint(x: -6, y: -6)
     /// Floored chip side so dwell hit rects never degenerate.
     static let minChipSide: CGFloat = 22
+
+    /// Point sizes of the overlay's labels at the person's label scale
+    /// (`Config.labelScale`), kept inside `LabelScale.range`.
+    struct LabelSizes: Equatable {
+        let number: CGFloat
+        let caption: CGFloat
+        let chipMinimum: CGFloat
+        let chipPadding: CGFloat
+        let chipSide: CGFloat
+        let cheatTitle: CGFloat
+        let cheatLine: CGFloat
+
+        init(scale: Double) {
+            let s = CGFloat(min(max(scale, LabelScale.range.lowerBound), LabelScale.range.upperBound))
+            number = 13 * s
+            caption = 12 * s
+            chipMinimum = 24 * s
+            chipPadding = 9 * s
+            chipSide = TargetOverlay.minChipSide * s
+            cheatTitle = 13 * s
+            cheatLine = 15 * s
+        }
+    }
+
+    /// The person's label scale, mirrored from Config at launch and on every
+    /// change and read each time labels are drawn, so the next set shows it
+    /// without a restart.
+    var labelScale = LabelScale.standard
+    var labelSizes: LabelSizes { LabelSizes(scale: labelScale) }
     static let flashCanvas: CGFloat = 80
     static let flashStart: CGFloat = 8
     static let flashEnd: CGFloat = 36
@@ -63,6 +92,13 @@ final class TargetOverlay {
     static let ringReleaseSeconds: CFTimeInterval = 0.12
     static let ringLineWidth: CGFloat = 1.5
     static let ringPanelPad: CGFloat = 14
+    /// Nothing larger takes the ring — a pane, list or document is not a
+    /// control, and outlining one reads as "the whole screen".
+    nonisolated static let lockMaxSize = CGSize(width: 320, height: 200)
+    /// The ring takes a control only while the gaze error band σ is at
+    /// most this many times the control's larger side; past it the tracker
+    /// can't tell the control from its neighbours, so nothing highlights.
+    nonisolated static let lockSigmaFactor: Double = 1.5
     /// Meta's sustained-dwell fade — the ring settles toward this alpha
     /// once the countdown passes halfway rather than sitting bright in
     /// the fovea.
@@ -326,6 +362,12 @@ final class TargetOverlay {
             ringView?.setProgress(ringProgress)
         }
     }
+    /// The scorer's gaze error band in points. `GazeService` writes it on
+    /// its first tick, before any scorer event reaches the overlay.
+    var gazeSigmaPt: Double = GazeErrorBand.minimumSigmaPt
+    /// Unit tests never order an overlay window onto the screen of the Mac
+    /// running them: every surface here keeps its state and draws nothing.
+    static let drawsOnScreen = NSClassFromString("XCTestCase") == nil
 
     // MARK: Halo
 
@@ -333,6 +375,9 @@ final class TargetOverlay {
     /// just move the one panel — cheap enough for 10Hz retargeting, and
     /// visible panels are never reordered.
     func showHalo(frame: CGRect) {
+        // One highlight at a time: the gaze ring stands down while the
+        // halo is up.
+        releaseRing()
         let rect = frame.insetBy(dx: -Self.haloOutset, dy: -Self.haloOutset)
         if haloPanel == nil {
             let panel = Self.makePanel()
@@ -351,7 +396,7 @@ final class TargetOverlay {
         haloRect = rect
         haloPanel?.setFrame(Self.appKitFrame(for: rect), display: true)
         applyHaloAlpha()
-        if haloPanel?.isVisible == false { haloPanel?.orderFrontRegardless() }
+        if Self.drawsOnScreen, haloPanel?.isVisible == false { haloPanel?.orderFrontRegardless() }
     }
 
     func hideHalo() {
@@ -427,21 +472,22 @@ final class TargetOverlay {
     private struct TargetChip: View {
         let index: Int
         var caption: String? = nil
+        var sizes = LabelSizes(scale: LabelScale.standard)
         var body: some View {
             HStack(spacing: 5) {
                 if index > 0 {
                     Text("\(index)")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.system(size: sizes.number, weight: .bold, design: .rounded))
                 }
                 if let caption, !caption.isEmpty {
                     Text(caption)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: sizes.caption, weight: .medium))
                         .lineLimit(1)
                 }
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, caption?.isEmpty == false ? 9 : 0)
-            .frame(minWidth: 24, minHeight: 24)
+            .padding(.horizontal, caption?.isEmpty == false ? sizes.chipPadding : 0)
+            .frame(minWidth: sizes.chipMinimum, minHeight: sizes.chipMinimum)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
             .colorScheme(.dark)
@@ -469,17 +515,18 @@ final class TargetOverlay {
         self.onPick = onPick
         self.dismissOnPick = dismissOnPick
         var rects: [(index: Int, rect: CGRect)] = []
+        let sizes = labelSizes
         for (i, spec) in specs.enumerated() {
             let (panel, hosting) = chipPanel(at: i)
-            hosting.rootView = TargetChip(index: spec.index, caption: spec.caption)
+            hosting.rootView = TargetChip(index: spec.index, caption: spec.caption, sizes: sizes)
             let fit = hosting.fittingSize
-            let size = CGSize(width: max(fit.width, Self.minChipSide),
-                              height: max(fit.height, Self.minChipSide))
+            let size = CGSize(width: max(fit.width, sizes.chipSide),
+                              height: max(fit.height, sizes.chipSide))
             let rect = CGRect(x: spec.center.x - size.width / 2,
                               y: spec.center.y - size.height / 2,
                               width: size.width, height: size.height)
             panel.setFrame(Self.appKitFrame(for: rect), display: true)
-            panel.orderFrontRegardless()
+            if Self.drawsOnScreen { panel.orderFrontRegardless() }
             rects.append((i, rect))
         }
         // A set armed mid-outage inherits the stale-feed dim.
@@ -535,18 +582,19 @@ final class TargetOverlay {
     @discardableResult
     func showNames(targets: [(frame: CGRect, label: String)]) -> Int {
         clearChips()
+        let sizes = labelSizes
         for (i, target) in targets.prefix(Self.maxNumberChips).enumerated() {
             let (panel, hosting) = chipPanel(at: i)
-            hosting.rootView = TargetChip(index: 0, caption: target.label)
+            hosting.rootView = TargetChip(index: 0, caption: target.label, sizes: sizes)
             let fit = hosting.fittingSize
-            let size = CGSize(width: max(fit.width, Self.minChipSide),
-                              height: max(fit.height, Self.minChipSide))
+            let size = CGSize(width: max(fit.width, sizes.chipSide),
+                              height: max(fit.height, sizes.chipSide))
             let rect = CGRect(x: target.frame.minX + Self.numberNudge.x,
                               y: target.frame.minY + Self.numberNudge.y - size.height / 2,
                               width: size.width, height: size.height)
             panel.alphaValue = 1
             panel.setFrame(Self.appKitFrame(for: rect), display: true)
-            panel.orderFrontRegardless()
+            if Self.drawsOnScreen { panel.orderFrontRegardless() }
         }
         return min(targets.count, Self.maxNumberChips)
     }
@@ -587,8 +635,8 @@ final class TargetOverlay {
     /// Gaze-intent event feed — the scorer's acquire/hold/release
     /// transitions drive the highlight on the element's own frame (the
     /// visionOS "feedback lives on the element" pattern: no cursor, the
-    /// looked-at control glows). `ambiguous` only bubbles up through
-    /// `onAmbiguous`; the coordinator owns the radial itself.
+    /// looked-at control glows). A tie releases the ring, and `ambiguous`
+    /// bubbles up through `onAmbiguous`; the coordinator owns the radial.
     var onAmbiguous: (([IntentCandidate]) -> Void)?
 
     func intentEvent(_ event: IntentEvent) {
@@ -596,12 +644,29 @@ final class TargetOverlay {
         case .none, .release:
             releaseRing()
         case .acquire(let c):
+            guard ringMayLock(on: c) else { return releaseRing() }
             acquireRing(on: c)
         case .hold(let c, let progress):
+            guard ringMayLock(on: c) else { return releaseRing() }
             holdRing(on: c, progress: progress)
         case .ambiguous(let candidates):
+            releaseRing()
             onAmbiguous?(candidates)
         }
+    }
+
+    /// Whether the ring may take a candidate the gaze scorer chose: a
+    /// leaf the person can act on, no bigger than a control, and big
+    /// enough that the current error band can single it out.
+    nonisolated static func canLock(_ c: IntentCandidate, sigmaPt: Double) -> Bool {
+        guard c.kind != .window, !IntentCandidate.isContainer(role: c.role) else { return false }
+        let r = (c.kind == .trafficLight ? c.motorRect : c.frame).standardized
+        guard r.width <= lockMaxSize.width, r.height <= lockMaxSize.height else { return false }
+        return sigmaPt <= lockSigmaFactor * Double(max(r.width, r.height))
+    }
+
+    private func ringMayLock(on c: IntentCandidate) -> Bool {
+        !haloArmed && Self.canLock(c, sigmaPt: gazeSigmaPt)
     }
 
     /// The highlight itself: a soft accent-tinted fill with a hairline
@@ -734,7 +799,7 @@ final class TargetOverlay {
         ringView?.setProgress(0)
         ringView?.fade(to: 1, duration: Self.ringAppearSeconds)
         applyRingAlpha()
-        if ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
+        if Self.drawsOnScreen, ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
     }
 
     /// Streams the dwell countdown and re-targets the shape when a
@@ -855,7 +920,7 @@ final class TargetOverlay {
         let ring = FlashRing(frame: NSRect(origin: .zero, size: rect.size))
         panel.contentView = ring
         panel.setFrame(Self.appKitFrame(for: rect), display: true)
-        panel.orderFrontRegardless()
+        if Self.drawsOnScreen { panel.orderFrontRegardless() }
         ring.fire(duration: Self.flashSeconds, travel: !reduceMotion())
         Task { [weak panel] in
             try? await Task.sleep(nanoseconds: UInt64(Self.flashSeconds * 1e9) + 80_000_000)
@@ -869,12 +934,13 @@ final class TargetOverlay {
     /// Compact "category: phrases" listing for the cheat-sheet panel.
     private struct CheatSheet: View {
         let lines: [String]
+        let sizes: LabelSizes
         var body: some View {
             VStack(alignment: .leading, spacing: 7) {
-                Text("Things you can say").font(.system(size: 13, weight: .semibold))
+                Text("Things you can say").font(.system(size: sizes.cheatTitle, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
                 ForEach(lines.indices, id: \.self) {
-                    Text(lines[$0]).font(.system(size: 15))
+                    Text(lines[$0]).font(.system(size: sizes.cheatLine))
                 }
             }
             .foregroundStyle(.white)
@@ -900,7 +966,7 @@ final class TargetOverlay {
     /// "Type this?" and reply drafts.
     func showSheet(lines: [String]) {
         hideSheet()
-        let hosting = NSHostingView(rootView: CheatSheet(lines: lines))
+        let hosting = NSHostingView(rootView: CheatSheet(lines: lines, sizes: labelSizes))
         let panel = Self.makePanel()
         panel.contentView = hosting
         let size = hosting.fittingSize
@@ -910,7 +976,7 @@ final class TargetOverlay {
         panel.setFrame(NSRect(x: sf.midX - size.width / 2,
                               y: sf.maxY - size.height - Self.cheatSheetDrop,
                               width: size.width, height: size.height), display: true)
-        panel.orderFrontRegardless()
+        if Self.drawsOnScreen { panel.orderFrontRegardless() }
         cheatPanel = panel
     }
 

@@ -27,6 +27,10 @@ final class Config: ObservableObject {
     /// People then never handle a key; the two above are a developer
     /// override.
     let hosted: HostedCredentials?
+    /// Basic voice (KAR-75 L10): this month's Live voice is used up, so the
+    /// service's paid Jev and Responses routes are held until it renews.
+    /// `LiveAllowance` sets it; a developer's own keys aren't affected.
+    var basicVoice = false
     var hostedCredentialsConfigured: Bool { hosted != nil }
     /// A key Jarvis needs is missing and can only be typed into Settings →
     /// Advanced, because this build has no credential service.
@@ -52,7 +56,7 @@ final class Config: ObservableObject {
     func jevRoute() async throws -> ServiceRoute? {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { return ServiceRoute(url: JevClient.systemOneURL, bearer: key) }
-        guard let hosted else { return nil }
+        guard let hosted, !basicVoice else { return nil }
         return ServiceRoute(url: hosted.jevURL, bearer: try await hosted.installToken())
     }
 
@@ -60,7 +64,7 @@ final class Config: ObservableObject {
     func responsesRoute() async throws -> ServiceRoute? {
         let key = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { return ServiceRoute(url: TerraClient.endpoint, bearer: key) }
-        guard let hosted else { return nil }
+        guard let hosted, !basicVoice else { return nil }
         return ServiceRoute(url: hosted.responsesURL, bearer: try await hosted.installToken())
     }
 
@@ -86,7 +90,7 @@ final class Config: ObservableObject {
     /// token already registered.
     var jevEnvironment: [String: String] {
         if !apiKey.isEmpty { return ["TYPESAFE_API_KEY": apiKey] }
-        guard let hosted, let token = hosted.storedToken else { return [:] }
+        guard let hosted, !basicVoice, let token = hosted.storedToken else { return [:] }
         return ["TYPESAFE_API_KEY": token, "TYPESAFE_BASE_URL": hosted.jevURL.absoluteString]
     }
 
@@ -140,6 +144,24 @@ final class Config: ObservableObject {
     /// action that used them.
     @Published var persistentNumbers: Bool {
         didSet { defaults.set(persistentNumbers, forKey: "persistentNumbers") }
+    }
+
+    /// How fast Jarvis talks — the Realtime `audio.output.speed`, kept
+    /// inside `SpeechSpeed.range`. The voice lane sends a change on the
+    /// live session, so it applies from the next reply.
+    @Published var speechSpeed: Double {
+        didSet { defaults.set(speechSpeed, forKey: "speechSpeed") }
+    }
+
+    /// How long spoken answers run; the session instructions carry it.
+    @Published var replyLength: ReplyLength {
+        didSet { defaults.set(replyLength.rawValue, forKey: "replyLength") }
+    }
+
+    /// The size of the overlay labels, a multiple of their designed size
+    /// inside `LabelScale.range`. Labels read it each time they are drawn.
+    @Published var labelScale: Double {
+        didSet { defaults.set(labelScale, forKey: "labelScale") }
     }
 
     /// ChatGPT/codex login state for the planner UI and runtime — mirrors
@@ -243,6 +265,11 @@ final class Config: ObservableObject {
         self.sounds = defaults.bool(forKey: "soundsEnabled")
         self.persistentNumbers = defaults.object(forKey: "persistentNumbers") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
+        let speed = defaults.object(forKey: "speechSpeed") as? Double ?? SpeechSpeed.standard
+        self.speechSpeed = min(max(speed, SpeechSpeed.range.lowerBound), SpeechSpeed.range.upperBound)
+        self.replyLength = defaults.string(forKey: "replyLength").flatMap(ReplyLength.init(rawValue:)) ?? .standard
+        let scale = defaults.object(forKey: "labelScale") as? Double ?? LabelScale.standard
+        self.labelScale = min(max(scale, LabelScale.range.lowerBound), LabelScale.range.upperBound)
         let policy = ListeningPolicy.current
         let storedRaw = defaults.string(forKey: "listeningMode")
         let legacyHandsFree = defaults.object(forKey: "handsFreeEnabled") as? Bool

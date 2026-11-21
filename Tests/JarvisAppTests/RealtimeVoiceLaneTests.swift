@@ -226,7 +226,7 @@ final class RealtimeVoiceLaneTests: XCTestCase {
                 AsyncThrowingStream { _ in }
             })))
         let lane = lane()
-        let controller = VoiceController(config: config, speech: lane,
+        let controller = VoiceController.inert(config: config, speech: lane,
                                          authorize: { true }, cuaRuntime: coordinator)
         XCTAssertFalse(controller.captureActive)
         XCTAssertFalse(controller.operationActive)
@@ -250,7 +250,7 @@ final class RealtimeVoiceLaneTests: XCTestCase {
                 AsyncThrowingStream { _ in }
             })))
         let lane = lane()
-        let controller = VoiceController(config: config, speech: lane,
+        let controller = VoiceController.inert(config: config, speech: lane,
                                          authorize: { true }, cuaRuntime: coordinator)
         XCTAssertTrue(VoiceController.shared === controller)
     }

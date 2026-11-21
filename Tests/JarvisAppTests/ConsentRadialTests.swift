@@ -11,7 +11,7 @@ final class ConsentRadialTests: XCTestCase {
 
     private func makeLoop(ask: DriveLoop.AskFn? = nil,
                           grant: Bool = false) -> DriveLoop {
-        DriveLoop(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
+        DriveLoop.inert(call: { _, _ in .object([:]) }, choose: { _, _ in nil },
                   ask: ask, granted: { grant })
     }
 

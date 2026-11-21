@@ -51,12 +51,12 @@ export default function Redesign({ gallery, path }: { gallery: Gallery; path: st
           References
         </Link>
       </nav>
-      {page}
       {section !== "component" && data.components.length > 0 && (
         <div className="rd-float">
           <PicksButton components={data.components} onOpen={openPicks} />
         </div>
       )}
+      {page}
       <PicksSheet components={data.components} open={open} onOpenChange={setOpen} wide={wide} />
     </div>
   );
