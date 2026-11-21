@@ -38,8 +38,12 @@ export class SyncClock {
     return longest;
   }
 
+  private elapsed() {
+    return this.snapshot.playing ? this.t0 + ((performance.now() - this.wall0) / 1000) * this.rate : this.t0;
+  }
+
   time() {
-    const raw = this.snapshot.playing ? this.t0 + ((performance.now() - this.wall0) / 1000) * this.rate : this.t0;
+    const raw = this.elapsed();
     const duration = this.duration();
     return duration > 0 ? raw % duration : raw;
   }
@@ -57,7 +61,7 @@ export class SyncClock {
     if (fps) this.fps = fps;
     this.entries.add(entry);
     const refresh = () => {
-      this.sync(entry, this.time(), true);
+      this.sync(entry, this.elapsed(), true);
       this.notifyFrame();
     };
     el.addEventListener("loadedmetadata", refresh);
@@ -66,7 +70,7 @@ export class SyncClock {
       setVisible: (visible: boolean) => {
         entry.visible = visible;
         if (!visible && !el.paused) el.pause();
-        if (visible) this.sync(entry, this.time(), true);
+        if (visible) this.sync(entry, this.elapsed(), true);
       },
       dispose: () => {
         el.removeEventListener("loadedmetadata", refresh);
@@ -87,7 +91,7 @@ export class SyncClock {
 
   pause() {
     if (!this.snapshot.playing) return;
-    this.t0 = this.time();
+    this.t0 = this.elapsed();
     this.set({ playing: false });
     cancelAnimationFrame(this.raf);
     this.syncAll(true);
@@ -109,7 +113,9 @@ export class SyncClock {
 
   step(frames: number) {
     this.pause();
-    this.seek((Math.round(this.time() * this.fps) + frames) / this.fps);
+    this.t0 = Math.max(0, (Math.round(this.t0 * this.fps) + frames) / this.fps);
+    this.syncAll(true);
+    this.notifyFrame();
   }
 
   restart() {
@@ -119,7 +125,7 @@ export class SyncClock {
 
   setRate(rate: number) {
     if (rate === this.rate) return;
-    this.t0 = this.time();
+    this.t0 = this.elapsed();
     this.wall0 = performance.now();
     this.rate = rate;
     this.syncAll(false);
@@ -141,7 +147,7 @@ export class SyncClock {
   }
 
   private syncAll(force: boolean) {
-    const time = this.time();
+    const time = this.elapsed();
     for (const entry of this.entries) this.sync(entry, time, force);
   }
 
