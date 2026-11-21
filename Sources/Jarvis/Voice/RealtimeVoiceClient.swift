@@ -463,10 +463,10 @@ final class RealtimeVoiceClient {
         audioDestination.set(.init(connection: identity, wire: injectedWire.value, socket: socket))
     }
 
-    /// The socket has no application-level heartbeat: an idle hold-free
-    /// stretch (the app open, Fn untouched) lets NATs and intermediaries
-    /// drop the wire silently — the next press then commits audio into a
-    /// dead session. A WS ping every 25s keeps the path alive; a pong
+    /// The socket has no application-level heartbeat: an idle stretch
+    /// with no capture lets NATs and intermediaries drop the wire
+    /// silently — the next capture then commits audio into a dead
+    /// session. A WS ping every 25s keeps the path alive; a pong
     /// failure surfaces through the ordinary receive loop's close.
     private var keepalive: Task<Void, Never>?
     private func startKeepalive() {
