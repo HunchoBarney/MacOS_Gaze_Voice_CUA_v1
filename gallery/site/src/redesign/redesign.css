@@ -37,8 +37,15 @@
 }
 
 @media (pointer: coarse) {
-  .rd .segmented-item {
+  .rd .segmented[data-size] .segmented-item,
+  .rd .segmented .segmented-item {
     height: var(--rd-tap);
+  }
+  .rd .rd-chip {
+    min-height: var(--rd-tap);
+  }
+  .rd .rd-libs a {
+    min-width: 44px;
   }
   .rd .rd-libs a {
     min-height: 0;
