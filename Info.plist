@@ -32,7 +32,7 @@
 	<string>Jarvis tells you when a reminder you set comes due and can mark it done. Your reminders stay on this Mac.</string>
 	<!-- Jarvis's credential service (CredentialService/). Empty: people type their own keys in Settings. -->
 	<key>JarvisCredentialsURL</key>
-	<string></string>
+	<string>https://jarvis-keys.gokayakusa.workers.dev</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Jarvis uses the camera for eye tracking, so you can aim at things with your eyes. Video stays on this Mac.</string>
 </dict>

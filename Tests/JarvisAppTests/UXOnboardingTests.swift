@@ -31,13 +31,12 @@ final class UXOnboardingTests: XCTestCase {
         XCTAssertEqual(m.position?.of, 4)
     }
 
-    /// The listening choice comes first and recommends Hold fn; Hands-free
-    /// is the only other choice until the wake word ships.
-    func testListeningChoiceRecommendsHoldFn() {
+    /// The listening choice comes first and recommends the wake word;
+    /// Hands-free is the only other choice.
+    func testListeningChoiceRecommendsTheWakeWord() {
         let m = model(choosing: true)
-        XCTAssertEqual(m.policy.offeredModes, [.pushToTalk, .conversation])
-        XCTAssertEqual(m.policy.defaultMode, .pushToTalk)
-        XCTAssertEqual(ListeningMode.pushToTalk.title, "Hold fn to talk")
+        XCTAssertEqual(m.policy.offeredModes, [.standby, .conversation])
+        XCTAssertEqual(m.policy.defaultMode, .standby)
         XCTAssertEqual(ListeningMode.conversation.title, "Hands-free")
         m.allow()
         XCTAssertEqual(m.step, .microphone)
@@ -51,7 +50,7 @@ final class UXOnboardingTests: XCTestCase {
         let m = model(choosing: true)
         var saved: [ListeningMode] = []
         m.saveListeningMode = { saved.append($0) }
-        XCTAssertEqual(m.listeningMode, .pushToTalk)
+        XCTAssertEqual(m.listeningMode, .standby)
         m.listeningMode = .conversation
         m.allow()
         XCTAssertEqual(m.step, .microphone)
@@ -69,15 +68,14 @@ final class UXOnboardingTests: XCTestCase {
             XCTAssertTrue(mode.disclosure.contains("OpenAI"), "\(mode)")
             XCTAssertTrue(mode.disclosure.contains("TypeSafe"), "\(mode)")
         }
-        XCTAssertTrue(ListeningMode.pushToTalk.disclosure.contains("everything Jarvis hears"))
-        XCTAssertFalse(ListeningMode.pushToTalk.disclosure.contains("room noise"))
+        XCTAssertTrue(ListeningMode.standby.disclosure.contains("Nothing leaves your Mac until"))
         XCTAssertTrue(ListeningMode.conversation.disclosure.contains("room noise stay on your Mac"))
     }
 
     /// Once the wake word ships, it is offered first and preselected.
     func testWakeWordBecomesTheRecommendedChoice() {
         let m = model(engine: true, choosing: true)
-        XCTAssertEqual(m.policy.offeredModes, [.standby, .pushToTalk, .conversation])
+        XCTAssertEqual(m.policy.offeredModes, [.standby, .conversation])
         XCTAssertEqual(m.policy.defaultMode, .standby)
     }
 

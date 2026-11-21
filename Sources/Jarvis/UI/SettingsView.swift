@@ -25,7 +25,6 @@ struct SettingsView: View {
     @ObservedObject var controller: VoiceController
     @ObservedObject var config: Config
     @ObservedObject var microphones: MicrophoneCatalog
-    @ObservedObject var input: FnInputMonitor
     @ObservedObject var navigation: SettingsNavigation
     @StateObject private var accuracyCheck = AccuracyCheck()
     /// Eye-tracker settings — optimistic local copies, read back from the
@@ -146,25 +145,16 @@ struct SettingsView: View {
             if ListeningPolicy.current.wakeWordAvailable {
                 AssistantNameField(config: config, controller: controller)
             }
-            if controller.listensWithoutFn {
-                HStack {
-                    Text(controller.handsFreeLabel).font(.system(size: 14))
-                    Spacer()
-                    Button(controller.listeningWithoutFn ? "Pause listening" : "Start listening") {
-                        if controller.listeningWithoutFn { controller.pauseHandsFree() }
-                        else { controller.resumeHandsFree() }
-                    }
-                }
-                if case .unavailable(let reason) = controller.handsFreeState {
-                    Note(reason, tint: .orange)
+            HStack {
+                Text(controller.handsFreeLabel).font(.system(size: 14))
+                Spacer()
+                Button(controller.listeningHandsFree ? "Pause listening" : "Start listening") {
+                    if controller.listeningHandsFree { controller.pauseHandsFree() }
+                    else { controller.resumeHandsFree() }
                 }
             }
-            if !input.ready {
-                Note(input.message, tint: .orange)
-                HStack {
-                    Button("Open Keyboard Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension")!) }
-                    Button("Check again") { input.refresh(); controller.refreshPermissions() }
-                }
+            if case .unavailable(let reason) = controller.handsFreeState {
+                Note(reason, tint: .orange)
             }
             Divider()
             Picker("Microphone", selection: $config.microphoneUID) {
@@ -274,7 +264,6 @@ struct SettingsView: View {
                     Text("Anything").tag(DwellPolicy.Mode.all.rawValue)
                 }.pickerStyle(.segmented)
                 Note("Keep your eyes on something for a moment and Jarvis clicks it.")
-                Toggle("Tap fn to click what I'm looking at", isOn: $config.tapToGazeClick)
                 HStack {
                     Button("Check eye-tracking accuracy") { accuracyCheck.start() }
                         .disabled(accuracyCheck.running)
@@ -315,7 +304,7 @@ struct SettingsView: View {
                     Spacer()
                     if missing {
                         Button(permission.canPrompt ? "Allow" : "Open System Settings") {
-                            Task { await permission.request(); controller.refreshPermissions(); input.refresh() }
+                            Task { await permission.request(); controller.refreshPermissions() }
                         }
                         .accessibilityLabel((permission.canPrompt ? "Allow " : "Open System Settings for ") + permission.rawValue)
                     }

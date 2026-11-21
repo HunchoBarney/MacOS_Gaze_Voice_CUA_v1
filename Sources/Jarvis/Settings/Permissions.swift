@@ -13,7 +13,7 @@ enum Permission: String, CaseIterable, Identifiable, Sendable {
     // needed. The other three cover the rest of what the app touches:
     // Camera feeds the eye tracker (spawned children inherit this app's
     // TCC identity), Screen Recording covers the tracker's display reads
-    // and computer-use screenshots, Accessibility drives Fn and input.
+    // and computer-use screenshots, Accessibility drives input.
     static let allCases: [Permission] = [.microphone, .camera, .screenRecording, .accessibility]
 
     var id: String { rawValue }

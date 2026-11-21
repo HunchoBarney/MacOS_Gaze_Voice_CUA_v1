@@ -247,6 +247,25 @@ final class HostedCredentialsTests: XCTestCase {
         XCTAssertEqual(none.jevEnvironment, [:])
     }
 
+    func testKeysSavedInTheKeychainStillWinOverTheService() async throws {
+        let service = FakeService()
+        let owner = Config(defaults: UserDefaults(suiteName: "hosted-\(UUID().uuidString)")!,
+                           keyStore: TokenBox("ts-saved"), openAIKeyStore: TokenBox("sk-saved"),
+                           environment: [:], hosted: hosted(service, tokens: TokenBox("jv1_stored")))
+        XCTAssertTrue(owner.hostedCredentialsConfigured)
+        XCTAssertTrue(owner.showsKeyFields, "saved keys stay visible so they can be removed")
+
+        let realtime = try await owner.realtimeCredential()
+        XCTAssertEqual(realtime, RealtimeCredential(key: "sk-saved", model: nil))
+        let jev = try await owner.jevRoute()
+        XCTAssertEqual(jev, ServiceRoute(url: JevClient.systemOneURL, bearer: "ts-saved"))
+        let responses = try await owner.responsesRoute()
+        XCTAssertEqual(responses, ServiceRoute(url: TerraClient.endpoint, bearer: "sk-saved"))
+        XCTAssertEqual(owner.jevEnvironment, ["TYPESAFE_API_KEY": "ts-saved"])
+        let seen = await service.seen.count
+        XCTAssertEqual(seen, 0, "no request reaches the service while saved keys are set")
+    }
+
     func testTerraSendsToTheRouteItIsGiven() async throws {
         let route = ServiceRoute(url: URL(string: "https://keys.example/base/v1/responses")!, bearer: "jv1_stored")
         var client = TerraClient(route: { route })
