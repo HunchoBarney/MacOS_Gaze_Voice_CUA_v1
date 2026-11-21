@@ -83,7 +83,7 @@ function medianError(calibration: Calibration, featureAt: (t: [number, number]) 
 }
 
 // One label of `kind` at `target`; with probability `lookAway` the eyes were
-// somewhere else (a cursor parked while reading), the noise every implicit
+// somewhere else (a click made without looking), the noise every implicit
 // source carries.
 async function label(
   calibration: Calibration,
@@ -126,7 +126,7 @@ async function useFor(
     const target: [number, number] = [0.05 + 0.9 * next(), 0.05 + 0.9 * next()];
     const away = next() < lookAway;
     const lookAt: [number, number] = away ? [0.05 + 0.9 * next(), 0.05 + 0.9 * next()] : target;
-    await label(calibration, monitor, featureAt, target, now, i % 3 === 0 ? "click" : "cursor_rest", lookAt);
+    await label(calibration, monitor, featureAt, target, now, i % 2 === 0 ? "click" : "voice", lookAt);
   }
   return now;
 }
@@ -137,8 +137,79 @@ describe("invisible calibration", () => {
     expect(implicitAcceptGate(null, false)).toBe(0.09);
     expect(implicitAcceptGate(0.02, false)).toBe(0.09);
     expect(implicitAcceptGate(0.06, true)).toBeCloseTo(0.15, 10);
-    expect(implicitAcceptGate(0.2, true)).toBe(0.22);
+    expect(implicitAcceptGate(0.1, true)).toBe(0.22);
   });
+
+  it("lets a badly wrong map accept the labels that would correct it", () => {
+    // The owner's map missed by 0.4 of the screen; a 0.22 gate rejected
+    // every label far enough away to fix it, so the pool only confirmed it.
+    expect(implicitAcceptGate(0.2, true)).toBeCloseTo(0.3, 10);
+    expect(implicitAcceptGate(0.4, false)).toBe(0.5);
+    expect(implicitAcceptGate(0.9, false)).toBe(0.5);
+  });
+
+  it("never learns from a resting cursor", async () => {
+    const { calibration } = makeCalibration();
+    await calibration.load();
+    const monitor = new DriftMonitor();
+    for (let i = 0; i < 40; i += 1) {
+      await label(calibration, monitor, owner, [0.05 + 0.022 * i, 0.9 - 0.02 * i], 20_000 * (i + 1), "cursor_rest");
+    }
+    expect(calibration.implicitSamples).toHaveLength(0);
+    expect(calibration.learnedError).toBeNull();
+    expect(calibration.featureMap === null && calibration.matrix === null).toBe(true);
+  });
+
+  it("scores a refit on labels each fold never saw", async () => {
+    const { calibration } = makeCalibration();
+    await calibration.load();
+    const next = rng(21);
+    const point = (): [number, number] => [0.05 + 0.9 * next(), 0.05 + 0.9 * next()];
+    const clean = Array.from({ length: 60 }, () => {
+      const t = point();
+      return [owner(t), t] as [GazeFeature, [number, number]];
+    });
+    // Each label sits up to ±0.12 from where the eyes were, like a cursor
+    // parked near what was being read: a pool the map can memorise but not
+    // learn from.
+    const wobble = () => (next() - 0.5) * 0.24;
+    const noise = clean.map(([f, t]) => [f, [t[0] + wobble(), t[1] + wobble()]] as [GazeFeature, [number, number]]);
+    const internals = calibration as unknown as {
+      fitOnce(pool: Array<[GazeFeature, [number, number]]>, min?: number): object | string;
+      pendingEstimate(fit: object, feature: GazeFeature): [number, number];
+    };
+    const fit = internals.fitOnce(noise, 40);
+    if (typeof fit === "string") throw new Error(fit);
+    const inSample = noise.map(([f, t]) => {
+      const p = internals.pendingEstimate(fit as object, f);
+      return Math.hypot(p[0] - t[0], p[1] - t[1]);
+    }).sort((a, b) => a - b)[30];
+    const heldOutNoise = calibration.heldOutError(noise);
+    console.info("in-sample vs held-out median", JSON.stringify({ inSample, heldOutNoise, heldOutClean: calibration.heldOutError(clean) }));
+    expect(inSample).toBeLessThan(heldOutNoise * 0.8);
+    expect(calibration.heldOutError(clean)).toBeLessThan(0.05);
+    expect(heldOutNoise).toBeGreaterThan(calibration.heldOutError(clean) * 2);
+  }, SIMULATION_TIMEOUT_MS);
+
+  it("keeps the live map when a refit would only memorise its pool", async () => {
+    const { calibration } = makeCalibration();
+    await calibration.load();
+    let now = await useFor(calibration, owner, BOOTSTRAP_MIN_LABELS + 30, 0, 7, 0);
+    expect(calibration.learnedError).not.toBeNull();
+    const liveMap = calibration.featureMap ?? calibration.matrix;
+    const before = medianError(calibration, owner);
+    // Labels up to ±0.12 from where the eyes were, like a cursor parked near
+    // the text being read: the residual RBF can interpolate them exactly.
+    const next = rng(5);
+    for (let i = 0; i < 30; i += 1) {
+      const eyes: [number, number] = [0.1 + 0.8 * next(), 0.1 + 0.8 * next()];
+      calibration.addImplicitSample(owner(eyes), [eyes[0] + (next() - 0.5) * 0.24, eyes[1] + (next() - 0.5) * 0.24]);
+    }
+    now += 120_000;
+    expect(await calibration.refitWithImplicit(now)).toBe(false);
+    expect(calibration.featureMap ?? calibration.matrix).toBe(liveMap);
+    expect(medianError(calibration, owner)).toBe(before);
+  }, SIMULATION_TIMEOUT_MS);
 
   it("fits a first map from ordinary-use labels without a calibration screen", async () => {
     const { calibration, write } = makeCalibration();

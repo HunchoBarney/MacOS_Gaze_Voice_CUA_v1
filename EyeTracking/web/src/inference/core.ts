@@ -87,16 +87,19 @@ const FIT_POOL_CAP = 400;
 // Invisible calibration: labels from ordinary use (cursor rests, clicks,
 // voice-named picks, the text caret) fit the map instead of a calibration
 // screen. Each kind names how far back the eyes were on the target, whether
-// it may seed a map from nothing, and whether it joins the main fit pool. A
-// commit that gaze itself chose only echoes the map's own guess, so it is
-// low-weight residual evidence, never ground truth.
+// it may seed a map from nothing, whether it joins the main fit pool, and
+// the weight it carries as residual-bias evidence when it doesn't. A commit
+// that gaze itself chose only echoes the map's own guess, so it is low-weight
+// residual evidence, never ground truth. A resting cursor is no evidence at
+// all: people read elsewhere while it sits still, and on the owner's Mac those
+// rests filled the pool with one screen-centre patch the map then memorised.
 export type { ImplicitLabelKind };
-export const IMPLICIT_LABEL_KINDS: Record<ImplicitLabelKind, { lookbackMs: number; bootstrap: boolean; mainPool: boolean }> = {
-  cursor_rest: { lookbackMs: 250, bootstrap: true, mainPool: true },
-  click: { lookbackMs: 120, bootstrap: true, mainPool: true },
-  voice: { lookbackMs: 600, bootstrap: true, mainPool: true },
-  caret: { lookbackMs: 150, bootstrap: false, mainPool: true },
-  gaze_pick: { lookbackMs: 250, bootstrap: false, mainPool: false }
+export const IMPLICIT_LABEL_KINDS: Record<ImplicitLabelKind, { lookbackMs: number; bootstrap: boolean; mainPool: boolean; biasWeight: number }> = {
+  cursor_rest: { lookbackMs: 250, bootstrap: false, mainPool: false, biasWeight: 0 },
+  click: { lookbackMs: 120, bootstrap: true, mainPool: true, biasWeight: 0 },
+  voice: { lookbackMs: 600, bootstrap: true, mainPool: true, biasWeight: 0 },
+  caret: { lookbackMs: 150, bootstrap: false, mainPool: true, biasWeight: 0 },
+  gaze_pick: { lookbackMs: 250, bootstrap: false, mainPool: false, biasWeight: 0.3 }
 };
 export function isImplicitLabelKind(value: unknown): value is ImplicitLabelKind {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(IMPLICIT_LABEL_KINDS, value);
@@ -116,14 +119,19 @@ const LEARNED_ERROR_MIN_LABELS = 10;
 // interpolates noise. Implicit fits stay affine until the pool can carry it.
 const IMPLICIT_FEATURE_MAP_MIN_SAMPLES = 40;
 // Accept gate in normalized screen units: 2.5x the learned median error,
-// never tighter than the settled-map gate nor looser than about a fifth of
-// the screen. Before any error is learned, a settled map keeps the tight
-// gate and a learning one starts wide.
+// never tighter than the settled-map gate. Its ceiling is about a fifth of
+// the screen for a decent map and widens with a bad one (1.5x its median, at
+// most half the screen): a map that misses by 0.4 must not veto the labels
+// that would correct it, or the pool only ever confirms where it already
+// points. Held-out adoption (refitWithImplicit) keeps a wide gate honest.
+// Before any error is learned, a settled map keeps the tight gate and a
+// learning one starts wide.
 export function implicitAcceptGate(learnedMedian: number | null, learning: boolean): number {
   if (learnedMedian === null) {
     return learning ? 0.22 : 0.09;
   }
-  return Math.min(0.22, Math.max(0.09, learnedMedian * 2.5));
+  const ceiling = Math.min(0.5, Math.max(0.22, learnedMedian * 1.5));
+  return Math.min(ceiling, Math.max(0.09, learnedMedian * 2.5));
 }
 
 export interface CameraResolution {
@@ -2520,8 +2528,8 @@ export function applyImplicitLabel(
   const biasBand = Math.max(0.2, gate + 0.08);
   if (!spec.mainPool) {
     // Gaze chose this target, so its centre mostly echoes the map.
-    if (distance <= biasBand) {
-      calibration.addResidualBiasEvidence(best.feature, target, 0.3);
+    if (spec.biasWeight > 0 && distance <= biasBand) {
+      calibration.addResidualBiasEvidence(best.feature, target, spec.biasWeight);
     }
     return { driftSaturated: false, refit: null };
   }
@@ -2801,7 +2809,12 @@ export class Calibration {
         return;
       }
       this.emit({ type: "status", level: "info", message: `Loaded calibration: ${this.path}` });
-      this.emit({ type: "calibration", status: "loaded", path: this.path });
+      this.emit({
+        type: "calibration",
+        status: "loaded",
+        path: this.path,
+        verified: Array.isArray(payload.validation) && payload.validation.length > 0
+      });
       if (this.geometry) {
         this.emit({ type: "calibration", status: "geometry", geometry: this.geometry });
       }
@@ -3141,17 +3154,6 @@ export class Calibration {
     return this.map(raw, fit.matrix, fit.rbf, fit.sourceMin, fit.sourceMax);
   }
 
-  // The candidate fit scored through the SAME live layers the incumbent
-  // carries — residual field + drift offset + clamp — so refitWithImplicit
-  // compares like for like. The correction layers persist across adoption
-  // (the residual field is refit right after, the offset reheals), so the
-  // challenger must be measured with them on, not as a bare map.
-  private pendingLiveEstimate(fit: PendingFit, feature: GazeFeature): [number, number] {
-    const est = this.pendingEstimate(fit, feature);
-    const [rx, ry] = this.residualAt(est);
-    return [clamp01(est[0] + rx + this.outputOffset[0]), clamp01(est[1] + ry + this.outputOffset[1])];
-  }
-
   private fit(): void {
     const first = this.fitOnce(this.samples);
     if (typeof first === "string") {
@@ -3235,6 +3237,10 @@ export class Calibration {
   // Verification sweep: same UX as pursuit — the user keeps following the dot
   // while the pending map's predictions are compared to the target stream.
   // A median over ~100 samples is far more robust than two discrete stares.
+  get verifyCount(): number {
+    return this.verifyErrors.length;
+  }
+
   beginVerify(): void {
     this.validation.length = 0;
     this.verifyErrors.length = 0;
@@ -3377,11 +3383,6 @@ export class Calibration {
     // RBF solve grow without bound. Keep the freshest evidence and fill the
     // rest by max-min target spread so coverage survives the cap.
     const merged = this.fitPool();
-    // Same-stack comparison: both sides are scored through the FULL live
-    // chain — map+rbf plus the residual field and drift offset that keep
-    // applying after adoption — so neither side wins by carrying (or hiding)
-    // corrections the other hasn't been fitted yet.
-    const oldError = merged.reduce((sum, [feature, target]) => sum + pointError(this.applyFeature(feature), target), 0) / merged.length;
     const result = this.fitOnce(merged, IMPLICIT_FEATURE_MAP_MIN_SAMPLES);
     if (typeof result === "string") {
       // A failed refit already paid for the fit attempt — honor the cadence
@@ -3389,15 +3390,44 @@ export class Calibration {
       this.lastImplicitRefit = now;
       return false;
     }
-    const newError = merged.reduce((sum, [feature, target]) => sum + pointError(this.pendingLiveEstimate(result, feature), target), 0) / merged.length;
-    if (!Number.isFinite(newError) || newError > oldError * 1.05) {
-      console.info("Implicit refit kept old map", JSON.stringify({ oldError: Number(oldError.toFixed(4)), newError: Number(newError.toFixed(4)) }));
+    // Both sides are judged on labels they were not fitted to. The residual
+    // RBF interpolates its own pool, so an in-sample comparison adopted
+    // memorising maps every time (logged 0.152 → 0.016 on a map whose
+    // held-out error was no better than guessing the screen centre). The live
+    // map's honest error is the running out-of-sample label error, or its
+    // error on the fresh labels it hasn't absorbed yet; the candidate's is a
+    // k-fold refit of the same pool.
+    const oldError = this.learnedError?.median ?? medianOf(this.implicitSamples.map(([feature, target]) => pointError(this.applyFeature(feature), target))) ?? Infinity;
+    const newError = this.heldOutError(merged);
+    if (!(newError < oldError)) {
+      console.info("Implicit refit kept old map", JSON.stringify({ oldError: Number(oldError.toFixed(4)), heldOutError: Number(newError.toFixed(4)) }));
       this.lastImplicitRefit = now;
       return false;
     }
     this.adopt(result, merged, now, true);
-    console.info("Implicit refit adopted", JSON.stringify({ oldError: Number(oldError.toFixed(4)), newError: Number(newError.toFixed(4)) }));
+    console.info("Implicit refit adopted", JSON.stringify({ oldError: Number(oldError.toFixed(4)), heldOutError: Number(newError.toFixed(4)) }));
     return true;
+  }
+
+  // Median error of the refit procedure on labels each fold never saw. Four
+  // folds keep the cost to four fits per refit; a fold whose training share
+  // can't be fitted contributes nothing, and no scored label is Infinity.
+  heldOutError(pool: Array<[GazeFeature, [number, number]]>): number {
+    const folds = Math.min(4, pool.length);
+    const errors: number[] = [];
+    for (let fold = 0; fold < folds; fold += 1) {
+      const fit = this.fitOnce(
+        pool.filter((_, i) => i % folds !== fold),
+        IMPLICIT_FEATURE_MAP_MIN_SAMPLES
+      );
+      if (typeof fit === "string") {
+        continue;
+      }
+      for (let i = fold; i < pool.length; i += folds) {
+        errors.push(pointError(this.pendingEstimate(fit, pool[i][0]), pool[i][1]));
+      }
+    }
+    return medianOf(errors.filter(Number.isFinite)) ?? Infinity;
   }
 
   // Swap a fit in as the live map: retune geometry, refit the residual field
