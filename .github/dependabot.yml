@@ -1,7 +1,8 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# Dependabot runs only security updates for app manifests; version-update PRs
+# are off (open-pull-requests-limit: 0) except for GitHub Actions.
+# development/** holds vendored upstream source (cua-source), which moves
+# only with its pin, so Dependabot never scans it.
+# https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
 version: 2
 updates:
@@ -9,3 +10,31 @@ updates:
     directory: "/" # GitHub Actions workflows in .github/workflows
     schedule:
       interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directories: ["/**"]
+    exclude-paths: ["development/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "uv"
+    directories: ["/**"]
+    exclude-paths: ["development/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "pip"
+    directories: ["/**"]
+    exclude-paths: ["development/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "cargo"
+    directories: ["/**"]
+    exclude-paths: ["development/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
