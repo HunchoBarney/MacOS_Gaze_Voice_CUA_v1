@@ -3,7 +3,6 @@ import Orb
 import SwiftUI
 import ThinkingOrbsKit
 import VoiceCore
-import VoiceGlowKit
 
 /// One clock for every vendored library, so library motion follows the
 /// stage: slowed in the lab's slow motion, exact in rendered clips, paused
@@ -12,14 +11,12 @@ import VoiceGlowKit
 public final class LibraryClocks {
     public private(set) var time = 0.0
     let voice = VoiceClock()
-    let glow = VoiceGlowClock()
 
     public init() {}
 
     func set(_ t: Double) {
         time = t
         voice.time = t
-        glow.time = t
     }
 }
 
@@ -30,7 +27,6 @@ extension View {
             .orbFrozenTime(clocks.time)
             .environment(\.beamFrozenTime, clocks.time)
             .environment(\.voiceClock, clocks.voice)
-            .environment(\.voiceGlowClock, clocks.glow)
     }
 }
 

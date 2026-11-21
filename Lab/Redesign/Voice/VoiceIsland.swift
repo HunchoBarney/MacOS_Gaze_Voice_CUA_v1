@@ -68,7 +68,7 @@ public enum VoiceIsland: Direction {
                 .fill(Color.black)
                 .frame(width: w + 40, height: h)
                 .shadow(color: .black.opacity(h > 40 ? 0.35 : 0), radius: 18, y: 8)
-            ears(f, c, m, w: w)
+            if m["ears"] > 0.002 { ears(f, c, m, w: w) }
             rows(f, c, m, w: w, h: h)
         }
         .frame(width: w + 40, height: max(h, Desk.menuBar), alignment: .top)

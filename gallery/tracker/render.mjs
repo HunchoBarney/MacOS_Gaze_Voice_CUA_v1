@@ -129,7 +129,7 @@ function launchChrome(chromePath, profileDir, logFile) {
     "--disable-component-update",
     "--disable-domain-reliability",
     "--disable-client-side-phishing-detection",
-    "--disable-features=MediaRouter,DialMediaRouteProvider,Translate,OptimizationHints,AutofillServerCommunication",
+    "--disable-features=MediaRouter,DialMediaRouteProvider,Translate,OptimizationHints,AutofillServerCommunication,MacAppCodeSignClone",
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
@@ -216,7 +216,7 @@ async function main() {
     try {
       await chrome.send("Browser.close");
     } catch {}
-    const timeout = sleep(3000).then(() => chrome.child.kill("SIGKILL"));
+    const timeout = sleep(10000).then(() => chrome.child.kill("SIGTERM"));
     await Promise.race([chrome.exited, timeout]);
     server.close();
     rmSync(profileDir, { recursive: true, force: true });

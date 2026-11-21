@@ -53,6 +53,7 @@ public enum VoiceLumen: Direction {
             NotchSilhouette(width: w, height: Desk.menuBar, ear: 8, bottomRadius: m["r"])
                 .fill(Color.black)
                 .frame(width: w + 40, height: Desk.menuBar)
+            if m["ears"] > 0.002 {
             HStack(spacing: 0) {
                 ZStack {
                     VoiceRing(.ring, state: ringState, source: .level({ m["level"] }), size: 24)
@@ -81,6 +82,7 @@ public enum VoiceLumen: Direction {
             .clipped()
             .opacity(m["ears"])
             .environment(\.colorScheme, .dark)
+            }
             captions(f, c, m)
                 .offset(y: Desk.menuBar + 12)
         }
