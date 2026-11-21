@@ -20,11 +20,21 @@ public final class LibraryClocks {
     }
 }
 
+extension VoiceStyle {
+    /// The default ring style, held still under Reduce Motion: VoiceCanvas
+    /// reads the system setting, which the lab's toggle and -rm renders can't set.
+    static func ring(paused: Bool) -> VoiceStyle {
+        var style = VoiceStyle()
+        style.paused = paused
+        return style
+    }
+}
+
 extension View {
-    func libraryClocks(_ clocks: LibraryClocks) -> some View {
+    func libraryClocks(_ clocks: LibraryClocks, reduceMotion: Bool) -> some View {
         self
             .orbClock(clocks.time)
-            .orbFrozenTime(clocks.time)
+            .orbFrozenTime(reduceMotion ? nil : clocks.time)
             .environment(\.beamFrozenTime, clocks.time)
             .environment(\.voiceClock, clocks.voice)
     }
@@ -57,6 +67,6 @@ public struct StageView: View {
         .frame(width: region.width, height: region.height, alignment: .topLeading)
         .clipped()
         .environment(\.colorScheme, stage.scheme)
-        .libraryClocks(stage.clocks)
+        .libraryClocks(stage.clocks, reduceMotion: stage.reduceMotion)
     }
 }

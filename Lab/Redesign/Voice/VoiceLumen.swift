@@ -56,7 +56,7 @@ public enum VoiceLumen: Direction {
             if m["ears"] > 0.002 {
             HStack(spacing: 0) {
                 ZStack {
-                    VoiceRing(.ring, state: ringState, source: .level({ m["level"] }), size: 24)
+                    VoiceRing(.ring, state: ringState, source: .level({ m["level"] }), style: .ring(paused: c.reduceMotion), size: 24)
                         .frame(width: 24, height: 24)
                         .opacity(1 - m["warm"])
                     Circle().fill(Color(red: 1, green: 0.62, blue: 0.24)).frame(width: 9, height: 9)
