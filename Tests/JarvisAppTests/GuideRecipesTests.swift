@@ -47,7 +47,9 @@ final class GuideRecipesTests: XCTestCase {
                      "fix the printer", "update my apps", "make the text on this page bigger",
                      "reply to an email", "print the photo from this email and save it",
                      "make the text smaller", "reduce the text size", "shrink the font",
-                     "make the pointer smaller", "decrease the pointer size"] {
+                     "make the pointer smaller", "decrease the pointer size",
+                     "lower the text size", "make the font less big", "lower the pointer size",
+                     "make the cursor less big"] {
             XCTAssertNil(Recipe.match(goal), goal)
         }
         XCTAssertTrue(Recipe.printing.matches("print the photo from this email and save it"))
