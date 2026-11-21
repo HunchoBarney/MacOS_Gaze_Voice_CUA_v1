@@ -816,7 +816,8 @@ final class VoiceTaskCoordinator {
             let words = [transcriptHint, trimmed].compactMap { $0 }.first {
                 WritingInstruction.intent($0) != nil || WritingInstruction.confirmation($0) != nil
             } ?? trimmed
-            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput()) {
+            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput(),
+                                                               isCurrent: admissionIsCurrent) {
                 return written
             }
         }

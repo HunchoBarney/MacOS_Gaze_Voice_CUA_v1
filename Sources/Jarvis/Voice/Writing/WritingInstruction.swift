@@ -28,10 +28,12 @@ struct WritingInput: Sendable, Equatable {
 /// The pure half of L7: which writing instruction an utterance is, the
 /// verbatim span it carries, and whether two transcriptions of it agree.
 enum WritingInstruction {
+    /// A verbatim span wins over a reply request, so the words of
+    /// "type this 'write a reply to that'" are typed, not drafted from.
     static func intent(_ utterance: String) -> WritingIntent? {
         if isSend(utterance) { return .sendDraft }
-        if asksForReply(utterance) { return .draftReply }
-        return literal(in: utterance).map { .type(literal: $0) }
+        if let literal = literal(in: utterance) { return .type(literal: literal) }
+        return asksForReply(utterance) ? .draftReply : nil
     }
 
     /// Lead-ins that mark a verbatim span on their own. A bare "type" or
