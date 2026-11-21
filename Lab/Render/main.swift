@@ -348,8 +348,9 @@ func rmcheck(out: String?, control: Bool = false) -> Bool {
                 renderer.scale = 1
                 guard let a = renderer.cgImage else { continue }
                 for _ in 0..<60 { stage.advance(1.0 / 60) }
-                renderer.content = StageView(stage: stage, backdrop: false)
-                guard let b = renderer.cgImage else { continue }
+                let fresh = ImageRenderer(content: StageView(stage: stage, backdrop: false))
+                fresh.scale = 1
+                guard let b = fresh.cgImage else { continue }
                 let pa = pixels(a), pb = pixels(b)
                 var changed = 0
                 for i in stride(from: 0, to: min(pa.count, pb.count), by: 4)
