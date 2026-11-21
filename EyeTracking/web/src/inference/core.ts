@@ -3453,24 +3453,25 @@ export class Calibration {
   // be fitted contributes nothing, and no scored label is Infinity. Folds
   // split by target, not by index: a point run labels several frames at
   // each target, and a sibling frame left in training teaches the fit that
-  // point's own miss, which made the score in-sample again.
+  // point's own miss, which made the score in-sample again. A pool entry
+  // leaves training whenever its target is scored in the fold, so labels
+  // already absorbed at a fresh label's target can't leak it either.
   heldOutError(
     pool: Array<[GazeFeature, [number, number]]>,
     scored: Array<[GazeFeature, [number, number]]> = pool
   ): number {
+    const keyOf = ([, target]: [GazeFeature, [number, number]]) => `${target[0]},${target[1]}`;
     const groups = new Map<string, number>();
-    const foldOf = new Map<[GazeFeature, [number, number]], number>();
     for (const entry of scored) {
-      const key = `${entry[1][0]},${entry[1][1]}`;
+      const key = keyOf(entry);
       if (!groups.has(key)) {
         groups.set(key, groups.size);
       }
-      foldOf.set(entry, groups.get(key) as number);
     }
     const folds = Math.min(4, groups.size);
     const errors: number[] = [];
     for (let fold = 0; fold < folds; fold += 1) {
-      const inFold = (entry: [GazeFeature, [number, number]]) => (foldOf.get(entry) ?? -1) % folds === fold;
+      const inFold = (entry: [GazeFeature, [number, number]]) => (groups.get(keyOf(entry)) ?? -1) % folds === fold;
       const fit = this.fitOnce(
         pool.filter((entry) => !inFold(entry)),
         IMPLICIT_FEATURE_MAP_MIN_SAMPLES
