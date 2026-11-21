@@ -1,0 +1,19 @@
+{
+  "name": "A plain session ending in session.closed",
+  "finalSeconds": 93,
+  "attaches": ["ok"],
+  "timeline": [
+    {"at":0,"event":{"type":"session.resumed","event_id":"evt_1"}},
+    {"at":10000,"event":{"type":"session.usage.updated","event_id":"evt_2","usage":{"seconds":10}}},
+    {"at":20000,"event":{"type":"session.usage.updated","event_id":"evt_3","usage":{"seconds":20}}},
+    {"at":30000,"event":{"type":"session.usage.updated","event_id":"evt_4","usage":{"seconds":30}}},
+    {"at":40000,"event":{"type":"session.usage.updated","event_id":"evt_5","usage":{"seconds":40}}},
+    {"at":50000,"event":{"type":"session.usage.updated","event_id":"evt_6","usage":{"seconds":50}}},
+    {"at":60000,"event":{"type":"session.usage.updated","event_id":"evt_7","usage":{"seconds":60}}},
+    {"at":70000,"event":{"type":"session.usage.updated","event_id":"evt_8","usage":{"seconds":70}}},
+    {"at":80000,"event":{"type":"session.usage.updated","event_id":"evt_9","usage":{"seconds":80}}},
+    {"at":90000,"event":{"type":"session.usage.updated","event_id":"evt_10","usage":{"seconds":90}}},
+    {"at":91000,"event":{"type":"session.paused","event_id":"evt_11"}},
+    {"at":93000,"event":{"type":"session.closed","event_id":"evt_12","reason":"remote_hangup","usage":{"seconds":93}}}
+  ]
+}

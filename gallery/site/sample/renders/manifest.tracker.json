@@ -1,0 +1,68 @@
+{
+  "producer": "tracker",
+  "commit": "sample",
+  "generatedAt": "2026-11-20T00:00:00Z",
+  "components": [
+    {
+      "id": "tracker-calibration",
+      "title": "Calibration",
+      "area": "Eye tracker",
+      "summary": "The nine-point calibration the optional eye tracker runs before gaze is used.",
+      "sources": [
+        "EyeTracking/web/calibration.ts:1"
+      ],
+      "states": [
+        {
+          "id": "calibrating",
+          "title": "Calibrating",
+          "note": "Always dark; ignores the system scheme.",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "tracker-calibration/calibrating.dark.svg",
+              "width": 1280,
+              "height": 800,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "tracker-calibration/calibrating.light.svg",
+              "width": 1280,
+              "height": 800,
+              "scale": 2,
+              "backdrop": "window"
+            }
+          ]
+        },
+        {
+          "id": "complete",
+          "title": "Complete",
+          "note": "Always dark; ignores the system scheme.",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "tracker-calibration/complete.dark.svg",
+              "width": 1280,
+              "height": 800,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "tracker-calibration/complete.light.svg",
+              "width": 1280,
+              "height": 800,
+              "scale": 2,
+              "backdrop": "window"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

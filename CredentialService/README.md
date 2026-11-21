@@ -15,6 +15,25 @@ Limits per install: requests per minute per route, and an estimated dollar
 spend per UTC day. Across all installs there's a daily spend cap, a daily cap
 on new installs (also per network), and a kill switch.
 
+With `LIVE_METERING=1`, GPT-Live time is metered per install against a
+monthly tier (the UTC calendar month). Each created session gets a
+`LiveMeter` Durable Object, one per session id, that attaches to OpenAI's
+sideband (`/v1/live/sessions/{id}/attach`) and reads the cumulative
+`session.usage.updated` and `session.closed` usage. It keeps the largest
+snapshot, so replays and out-of-order events never double-count, and charges
+real cents to the daily spend as usage arrives instead of the flat
+`LIVE_SESSION_CENTS`. A Standby second counts `STANDBY_WEIGHT` of a Live
+second. Once an install is capped the current turn finishes: the meter sends
+`session.close` at the next `session.paused` (at once if Live is already in
+Standby), or after `CAP_GRACE_SECONDS` more session or clock time. New
+sessions then get 429 `live_limit` and the app falls back to basic voice
+until the month ends. The meter reports session totals, and the ledger
+counts only each session's increase, so a report replayed after a restart
+counts once. A dropped sideband is reattached with backoff (1 s doubling to
+30 s) until OpenAI says the session is gone, or a day has passed; then the
+time from the last snapshot to the drop is billed at the active rate. With
+metering off, Live behaves as before.
+
 Built on [Hono](https://hono.dev) 4.13 (MIT) and a SQLite-backed Durable
 Object (`LedgerObject`), which keeps every limit check and charge strongly
 consistent. KV is eventually consistent, so it can't enforce a limit.
@@ -28,15 +47,17 @@ consistent. KV is eventually consistent, so it can't enforce a limit.
 | `POST /v1/live/sessions` | install token | GPT-Live WebRTC session: `{ sdp, instructions?, input?, voice?, idle_timeout_s?, vad_threshold? }` → OpenAI's 201 `{ session: { id }, transport: { type, sdp } }` unchanged. The Worker fixes the model, client delegation with no tools, `store: false`, the speech wake policy (`idle_timeout_s` defaults to 8), a hashed safety identifier and the data-channel client events (`LIVE_CLIENT_EVENTS`); any other field is `field_not_allowed`. A provider 400 passes through |
 | `POST /v1/responses` | install token | Responses API, allowed models only, `store: false`, no tools or streaming |
 | `POST /v1/jev` | install token | TypeSafe System One, allowed models only |
+| `GET /v1/usage` | install token | Not charged: `{ metering, tier, period: "YYYY-MM", periodEnds, liveSeconds, liveSecondsLimit, warnAt, capped, tasksLimit }`. `liveSeconds` is weighted; `liveSecondsLimit` and `tasksLimit` are null when uncapped; `warnAt` is the fraction of the limit to warn at. With metering off, `liveSeconds` is 0, the limit null and `capped` false |
 | `GET /admin/usage` | admin token | Today's spend, installs, top spenders |
 | `POST /admin/pause`, `/admin/resume` | admin token | Kill switch for every install |
 | `POST /admin/installs/:id/revoke`, `/restore` | admin token | Turn one install off or on |
+| `POST /admin/installs/:id/tier` | admin token | `{ tier }`: put one install on a tier from `TIERS` |
 | `GET /health` | none | `{ ok: true }` |
 
 Errors are `{ "error": { "code", "message" } }`, with `Retry-After` on 429
 and 503. Codes: `not_configured`, `paused`, `unknown_install`, `revoked`,
 `rate_limited`, `daily_limit`, `service_daily_limit`, `registration_limited`,
-`model_not_allowed`, `field_not_allowed`, `too_large`, `upstream_busy`,
+`live_limit`, `unknown_tier`, `model_not_allowed`, `field_not_allowed`, `too_large`, `upstream_busy`,
 `upstream_error`.
 
 ## Configuration
@@ -67,6 +88,13 @@ Variables (defaults in [src/config.ts](src/config.ts)):
 | `RESPONSES_MODELS` / `JEV_MODELS` | `gpt-6.1-terra` / `jev-latest,jev-1.14.0` | Allowed models, comma-separated |
 | `REALTIME_SECRET_SECONDS` | 60 | Secret lifetime, 10–600 |
 | `MAX_OUTPUT_TOKENS` | 4000 | Cap on Responses output |
+| `LIVE_METERING` | `0` | `1` meters Live sessions and enforces the monthly tier cap |
+| `TIERS` | `{"jarvis":{"liveMinutes":300,"tasks":100,"priceUSD":30},"pro":{"liveMinutes":1000,"tasks":400,"priceUSD":100}}` | Tiers as JSON; `tasks` is a whole number; `liveMinutes` or `tasks` null is uncapped |
+| `DEFAULT_TIER` | `jarvis` | Tier for an install with none set |
+| `STANDBY_WEIGHT` | 0.4 | Live seconds per Standby second, against the cap |
+| `LIVE_WARN_FRACTION` | 0.8 | Reported as `warnAt` |
+| `LIVE_ACTIVE_CENTS_PER_MINUTE` / `LIVE_PAUSED_CENTS_PER_MINUTE` | 5 / 2 | Metered Live cost, charged to the daily spend |
+| `CAP_GRACE_SECONDS` | 60 | Longest a capped session runs on without a pause |
 
 ## Develop
 
@@ -79,4 +107,5 @@ corepack pnpm dev         # wrangler dev; put fake keys in .dev.vars (git-ignore
 ```
 
 Deploying: see the owner's deploy guide (`handoffs/KAR-38-deploy.md` in the
-Captain's drive).
+Captain's drive). Deploying is a separate go from the Captain; merging this
+code doesn't deploy it, and metering stays off until `LIVE_METERING=1`.

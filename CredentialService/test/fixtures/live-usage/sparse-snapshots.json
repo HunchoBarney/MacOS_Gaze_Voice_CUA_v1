@@ -1,0 +1,11 @@
+{
+  "name": "Two snapshots in five minutes",
+  "finalSeconds": 301,
+  "attaches": ["ok"],
+  "timeline": [
+    {"at":0,"event":{"type":"session.resumed","event_id":"evt_1"}},
+    {"at":120000,"event":{"type":"session.usage.updated","event_id":"evt_2","usage":{"seconds":120}}},
+    {"at":240000,"event":{"type":"session.usage.updated","event_id":"evt_3","usage":{"seconds":240}}},
+    {"at":301000,"event":{"type":"session.closed","event_id":"evt_4","reason":"remote_hangup","usage":{"seconds":301}}}
+  ]
+}

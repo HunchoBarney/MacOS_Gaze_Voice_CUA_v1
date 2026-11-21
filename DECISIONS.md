@@ -2,6 +2,43 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-21 — The gaze ring lights only a control the tracker can resolve (JARA-55)
+
+- Main's ring stays the one gaze highlight, and it takes a control only when
+  the error band can single it out: σ at most 1.5× the control's larger
+  side, no bigger than 320×200 pt, never a window or container (group,
+  table, list, scroll area). Past that, nothing highlights; there is still
+  no permanently drawn gaze pointer (KAR-75). A press glow (Jarvis pressing
+  a named control) is not a gaze guess and skips the gate, and dwell never
+  fires on a target the ring refused.
+- A cursor parked on a control weighs ×2.5 up to σ 40 pt; above that its
+  log-bonus scales by (40/σ)², the rate gaze evidence itself thins out. A
+  tie that includes the highlighted control holds for the 0.2 s consensus
+  window and then releases it. The listening-start halo is gone, and the
+  gaze ring stands down whenever the answer or guide halo shows.
+- New gaze visuals (orb, glow, calibration look) moved to JARA-57's UI Lab.
+  Evaluated during this work and rejected: libraries.dev ThinkingOrbsKit (MIT,
+  14ae9d2; filled fixed-size loader redrawn every frame) and metasidd/Orb
+  0.2 (MIT, a48fc33; filled orb with endless blurs and particles).
+
+## 2026-11-21 — Every visible surface lives in the UI gallery
+
+- The owner asked for one page that shows every visible component on its
+  own and together. `make gallery` renders each surface offscreen from
+  fixture state, in every state, light and dark, with Reduce Motion off and
+  on, plus combined desktop scenes. `make gallery-deploy` publishes the
+  site to Cloudflare Pages (project `jarvis-ui-gallery`). See
+  gallery/README.md.
+- A PR that adds or changes a visible component updates its gallery page
+  in the same PR, redeploys, and links before and after in its body.
+- The native harness hosts the real views through `@testable import`. It
+  copies product code only where the state is private (the menu-bar item
+  and menu), and those replicas cite their lines. No product code changes
+  to make the gallery work.
+- The site's libraries (Motion, cmdk, Lenis, NumberFlow and Sonner, all
+  MIT, plus Paper Shaders under Apache-2.0) are pinned in gallery/site
+  and listed with versions in gallery/site/REUSE.md.
+
 ## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
 
 - The owner: "the chimes and noises it makes are super annoying and not
@@ -343,6 +380,27 @@ Settled choices, newest first. Change one only with a new entry here.
   once, records without a call, and lets Jarvis tap the same engine, which
   kept our tap continuous before, during and after a call
   (`ThirdParty/WebRTC/README.md`).
+
+## 2026-11-21 — Live listening states and the one-breath request (L3, behind voice.live)
+
+- One microphone owner: LiveKit's audio engine records from the moment
+  listening is armed. The Vosk wake word hears its input on the Mac, and
+  nothing else opens an input while `voice.live` is on.
+- "Hey Jarvis" opens a Live session. Jarvis closes it 8 s after a wake
+  that brought no request, 90 s after the last turn, on "that's all", or,
+  after "stay with me", 30 minutes after the last turn. Live's own idle
+  timeout (8 s) moves it to Standby in between. The glow shows hearing and
+  thinking, silently.
+- The request said in the same breath reaches Live as audio. The engine's
+  input runs through `LiveInputRelay`: from just before the wake moment it
+  is held until `session.started`, then played into the input track in
+  real time, skipping quiet 10 ms frames while behind, so the connect lag
+  is gone by the first pause. WebRTC forbids `session.input_audio.append`,
+  and with client delegation GPT-Live has no typed user turn
+  (`response.item.create` is Responses-only), so neither faster-than-real
+  time replay nor a transcribed text turn is available. If the capture
+  falls 8 s behind it is dropped and Live asks the user to say it again.
+
 ## 2026-11-20 — CI runs on the owner's Mac
 
 - GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI

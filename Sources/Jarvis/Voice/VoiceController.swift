@@ -44,8 +44,46 @@ struct VoiceTimings {
     var warning: TimeInterval = 50
     var limit: TimeInterval = 55
     var dismissal: TimeInterval = 1.5
-    /// A wake-word session closes after this long with nothing happening.
+    /// A wake-word session closes after this long with nothing happening,
+    /// until Jarvis has answered something.
     var wakeSessionQuiet: TimeInterval = 8
+    /// After each reply the session stays open this long for a follow-up.
+    var wakeFollowUp: TimeInterval = 90
+    /// Past this a wake session closes at the first quiet time, not the
+    /// follow-up window; then the wake word is needed again.
+    var wakeSessionCap: TimeInterval = 30 * 60
+}
+
+/// When a wake-word session closes. Until Jarvis has answered, it closes
+/// after `wakeSessionQuiet` with nothing happening, so a false wake costs
+/// seconds. Each finished reply opens a `wakeFollowUp` window, and only a
+/// reply refreshes it: speech that gets no answer doesn't. Past
+/// `wakeSessionCap` from the wake it closes after `wakeSessionQuiet` with
+/// nothing happening, so a turn still being transcribed can finish.
+/// `lastReply` is when the latest reply finished, recorded as it happens
+/// rather than sampled, so a reply shorter than one check still counts.
+struct WakeSessionClock {
+    let opened: TimeInterval
+    let timings: VoiceTimings
+    private var lastActive: TimeInterval
+
+    init(opened: TimeInterval, timings: VoiceTimings) {
+        self.opened = opened
+        self.timings = timings
+        lastActive = opened
+    }
+
+    mutating func shouldClose(busy: Bool, lastReply: TimeInterval?, now: TimeInterval) -> Bool {
+        let reply = lastReply.flatMap { $0 >= opened ? $0 : nil }
+        if let reply { lastActive = max(lastActive, reply) }
+        if busy {
+            lastActive = now
+            return false
+        }
+        if now - lastActive < timings.wakeSessionQuiet { return false }
+        guard let reply, now - opened < timings.wakeSessionCap else { return true }
+        return now >= reply + timings.wakeFollowUp
+    }
 }
 
 @MainActor
@@ -102,7 +140,10 @@ final class VoiceController: ObservableObject {
     @Published private(set) var microphoneReadiness = "Preparing microphone…"
     @Published private(set) var handsFreeState: ConversationListeningState = .off
     @Published private(set) var continuousScrolling = false
-    @Published private(set) var handsFreeSpeaking = false
+    @Published private(set) var handsFreeSpeaking = false {
+        didSet { if oldValue, !handsFreeSpeaking { lastReplyFinished = ProcessInfo.processInfo.systemUptime } }
+    }
+    private var lastReplyFinished: TimeInterval?
     /// A hands-free turn is open: the user started speaking and the turn
     /// hasn't sealed. The on-screen indicator shows while this is true.
     @Published private(set) var conversationTurnOpen = false
@@ -442,6 +483,27 @@ final class VoiceController: ObservableObject {
     /// Standby: the wake word hears the prepared microphone's tap, and a
     /// wake opens a hands-free session that closes once it goes quiet.
     private var standbyArmed = false
+    /// KAR-75 L3: under `voice.live`, LiveKit's engine owns the microphone
+    /// and the wake word opens a GPT-Live session instead of this lane.
+    @Published private(set) var liveGlow: LiveVoice.Glow = .hidden
+    lazy var liveVoice: LiveVoice? = makeLiveVoice()
+    /// Releases this lane's microphone, then arms Live: one owner at a time.
+    private var liveArming: Task<Void, Never>?
+
+    private func makeLiveVoice() -> LiveVoice? {
+        #if canImport(LiveKitWebRTC)
+        guard let hosted = config.hosted, let detector = ListeningPolicy.wakeWord else { return nil }
+        let broker = HostedLiveSessions(baseURL: hosted.baseURL, installToken: { try await hosted.installToken() })
+        let live = LiveVoice(microphone: LiveMicrophone(), wakeWord: detector) { name in
+            LiveSession(transport: WebRTCLiveTransport(), broker: broker,
+                        config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
+        }
+        live.onGlow = { [weak self] glow in self?.liveGlow = glow }
+        return live
+        #else
+        return nil
+        #endif
+    }
     private var armedName = ""
     private var wakeSession: Task<Void, Never>?
     private var otherMicrophoneWatch: Task<Void, Never>?
@@ -751,9 +813,11 @@ final class VoiceController: ObservableObject {
                 guard let self, self.config.semanticAppSuggestions else {
                     throw CancellationError()
                 }
-                guard let route = try await self.config.jevRoute() else { throw VoiceSemanticRouter.Failure.unavailable }
-                return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
-                    .interpret(admission, context: context)
+                return try await self.config.withRoute(self.config.jevRoute) { route in
+                    guard let route else { throw VoiceSemanticRouter.Failure.unavailable }
+                    return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
+                        .interpret(admission, context: context)
+                }
             }
             lane.semanticConfirmationHandler = { [weak self] proposal in
                 guard let self, self.config.semanticAppSuggestions else { return false }
@@ -874,11 +938,12 @@ final class VoiceController: ObservableObject {
         lane.memoryCommands = memoryCommands
         lane.conversation.memoryCommands = memoryCommands
         lane.conversation.interpret = { [weak self] text, context, memory in
-            guard let self, let route = try await self.config.jevRoute() else {
-                throw VoiceError(OutcomeWording.missingUnderstandingKey)
+            guard let self else { throw VoiceError(OutcomeWording.missingUnderstandingKey) }
+            return try await self.config.withRoute(self.config.jevRoute) { route in
+                guard let route else { throw VoiceError(OutcomeWording.missingUnderstandingKey) }
+                return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
+                    .interpretConversation(text, context: context, memory: memory)
             }
-            return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
-                .interpretConversation(text, context: context, memory: memory)
         }
         lane.conversation.beforeAction = { [weak self] in
             await self?.deliveryTask?.value
@@ -984,6 +1049,28 @@ final class VoiceController: ObservableObject {
     /// another app is using the microphone.
     func armStandby() {
         watchOtherMicrophoneUse()
+        if config.voiceLive {
+            guard standbyChosen, !standbyArmed, !handsFreePaused, !otherAppListening else { return }
+            guard let liveVoice else {
+                handsFreeState = .unavailable("Live voice needs the hosted voice service.")
+                return
+            }
+            let name = config.assistantName
+            standbyArmed = true
+            handsFreeState = .preparing
+            liveArming = Task { [weak self] in
+                await self?.speech.suspend()
+                guard let self, !Task.isCancelled, self.standbyArmed else { return }
+                do { try liveVoice.arm(name: name) } catch {
+                    self.standbyArmed = false
+                    self.handsFreeState = .unavailable(error.localizedDescription)
+                    return
+                }
+                self.armedName = name
+                self.handsFreeState = .standby
+            }
+            return
+        }
         guard standbyChosen, !standbyArmed, wakeSession == nil, !handsFreePaused, !manualOverride,
               microphoneEnabled, !isMicrophoneTest, !wakeTestRunning, !otherAppListening,
               let lane = speech as? RealtimeVoiceLane, lane.conversation.id == nil else { return }
@@ -1049,6 +1136,11 @@ final class VoiceController: ObservableObject {
     private func disarmStandby() {
         guard standbyArmed else { return }
         standbyArmed = false
+        liveArming?.cancel(); liveArming = nil
+        if let liveVoice, liveVoice.armed {
+            liveVoice.disarm()
+            return
+        }
         (speech as? RealtimeVoiceLane)?.wakeListener = nil
         ListeningPolicy.wakeWord?.stop()
     }
@@ -1059,15 +1151,15 @@ final class VoiceController: ObservableObject {
         guard standbyArmed else { return }
         disarmStandby()
         Self.voiceLog.notice("wake_word heard")
-        let quiet = timings.wakeSessionQuiet
+        let timings = self.timings
         wakeSession = Task { [weak self] in
-            var lastActive = ProcessInfo.processInfo.systemUptime
+            var clock = WakeSessionClock(opened: ProcessInfo.processInfo.systemUptime, timings: timings)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, !Task.isCancelled else { return }
                 let now = ProcessInfo.processInfo.systemUptime
-                if self.wakeSessionBusy { lastActive = now }
-                if now - lastActive >= quiet {
+                if clock.shouldClose(busy: self.wakeSessionBusy, lastReply: self.lastReplyFinished, now: now) {
+                    Self.voiceLog.notice("wake_session closed open_s=\(now - clock.opened, format: .fixed(precision: 1))")
                     self.stopHandsFree(state: .off)
                     self.armStandby()
                     return
@@ -1327,6 +1419,10 @@ final class VoiceController: ObservableObject {
     }
 
     func prepareMicrophone(deviceChanged: Bool = false) {
+        if config.voiceLive {
+            armStandby()
+            return
+        }
         guard !config.handsFreePaused || manualOverride || isMicrophoneTest else {
             handsFreeState = .paused
             return

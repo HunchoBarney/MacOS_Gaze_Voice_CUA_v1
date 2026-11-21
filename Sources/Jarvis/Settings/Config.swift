@@ -27,6 +27,10 @@ final class Config: ObservableObject {
     /// People then never handle a key; the two above are a developer
     /// override.
     let hosted: HostedCredentials?
+    /// Basic voice (KAR-75 L10): this month's Live voice is used up, so the
+    /// service's paid Jev and Responses routes are held until it renews.
+    /// `LiveAllowance` sets it; a developer's own keys aren't affected.
+    var basicVoice = false
     var hostedCredentialsConfigured: Bool { hosted != nil }
     /// A key Jarvis needs is missing and can only be typed into Settings →
     /// Advanced, because this build has no credential service.
@@ -52,7 +56,7 @@ final class Config: ObservableObject {
     func jevRoute() async throws -> ServiceRoute? {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { return ServiceRoute(url: JevClient.systemOneURL, bearer: key) }
-        guard let hosted else { return nil }
+        guard let hosted, !basicVoice else { return nil }
         return ServiceRoute(url: hosted.jevURL, bearer: try await hosted.installToken())
     }
 
@@ -60,8 +64,25 @@ final class Config: ObservableObject {
     func responsesRoute() async throws -> ServiceRoute? {
         let key = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { return ServiceRoute(url: TerraClient.endpoint, bearer: key) }
-        guard let hosted else { return nil }
+        guard let hosted, !basicVoice else { return nil }
         return ServiceRoute(url: hosted.responsesURL, bearer: try await hosted.installToken())
+    }
+
+    /// Runs `call` on the route `resolve` picks (`jevRoute` or
+    /// `responsesRoute`). When that route is the service's and the service
+    /// no longer knows this install, the token is dropped and `call` runs
+    /// once more on a fresh registration, as Realtime does. A revoked install
+    /// and a developer's own key never register again.
+    func withRoute<T>(_ resolve: () async throws -> ServiceRoute?,
+                      _ call: (ServiceRoute?) async throws -> T) async throws -> T {
+        let route = try await resolve()
+        do {
+            return try await call(route)
+        } catch where HostedCredentials.isUnknownInstall(error) {
+            guard let route, let hosted, hosted.serves(route) else { throw error }
+            hosted.forget(route.bearer)
+            return try await call(try await resolve())
+        }
     }
 
     /// The Jev credential an agent's drive server gets in its environment.
@@ -69,7 +90,7 @@ final class Config: ObservableObject {
     /// token already registered.
     var jevEnvironment: [String: String] {
         if !apiKey.isEmpty { return ["TYPESAFE_API_KEY": apiKey] }
-        guard let hosted, let token = hosted.storedToken else { return [:] }
+        guard let hosted, !basicVoice, let token = hosted.storedToken else { return [:] }
         return ["TYPESAFE_API_KEY": token, "TYPESAFE_BASE_URL": hosted.jevURL.absoluteString]
     }
 

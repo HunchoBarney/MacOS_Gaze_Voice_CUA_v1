@@ -619,9 +619,9 @@ final class TrackerCommandFlowTests: XCTestCase {
 
     private func makeLoop(driver: FakeDriver,
                           postedKeys: ((MediaKeys.Key) -> Void)? = nil) -> DriveLoop {
-        DriveLoop(call: { t, a in try driver.call(t, a) },
+        DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                   choose: { _, _ in nil }, ask: nil, granted: { true },
-                  resolver: AppResolver(listApps: { [] }),
+                  resolver: AppResolver.fixture(listApps: { [] }),
                   postMediaKey: { key in postedKeys?(key); return true },
                   frontmostBundleID: { nil })
     }
@@ -671,30 +671,28 @@ final class TrackerCommandFlowTests: XCTestCase {
     /// "enable eye tracking" is the host feature switch — the Config
     /// publisher owns the spawn from there; no /control POST exists.
     func testEnableEyeTrackingFlipsTheSwitch() async {
-        let wasEnabled = Config.shared.gazeTracking
-        defer { Config.shared.gazeTracking = wasEnabled }
+        let (config, _) = await usePrivateTrackerConfig()
         await TrackerControl.setTrackingEnabled(false)
 
         let driver = FakeDriver()
         let result = await makeLoop(driver: driver)
             .run(DriveTask(goal: "enable eye tracking"), session: "t")
         XCTAssertEqual(result.status, .done)
-        XCTAssertTrue(Config.shared.gazeTracking)
+        XCTAssertTrue(config.gazeTracking)
         XCTAssertTrue(stub.requests.isEmpty,
                       "enable is host-side — the tracker can't spawn itself")
     }
 
     /// "disable eye tracking" — the same switch, the other way.
     func testDisableEyeTrackingFlipsTheSwitch() async {
-        let wasEnabled = Config.shared.gazeTracking
-        defer { Config.shared.gazeTracking = wasEnabled }
+        let (config, _) = await usePrivateTrackerConfig()
         await TrackerControl.setTrackingEnabled(true)
 
         let driver = FakeDriver()
         let result = await makeLoop(driver: driver)
             .run(DriveTask(goal: "disable eye tracking"), session: "t")
         XCTAssertEqual(result.status, .done)
-        XCTAssertFalse(Config.shared.gazeTracking)
+        XCTAssertFalse(config.gazeTracking)
         XCTAssertTrue(stub.requests.isEmpty)
     }
 
@@ -859,15 +857,14 @@ final class TrackerEnableFlowTests: XCTestCase {
     /// the Eyes menu item and the voice verb all land on the same key
     /// the next launch reads.
     func testFeatureSwitchPersists() async {
-        let old = Config.shared.gazeTracking
-        defer { Config.shared.gazeTracking = old }
+        let (config, defaults) = await usePrivateTrackerConfig()
         await TrackerControl.setTrackingEnabled(false)
-        XCTAssertFalse(Config.shared.gazeTracking)
-        XCTAssertEqual(UserDefaults.standard.object(forKey: "gazeTracking") as? Bool, false,
+        XCTAssertFalse(config.gazeTracking)
+        XCTAssertEqual(defaults.object(forKey: "gazeTracking") as? Bool, false,
                        "the toggle persists — the next boot reads this key")
         await TrackerControl.setTrackingEnabled(true)
-        XCTAssertTrue(Config.shared.gazeTracking)
-        XCTAssertEqual(UserDefaults.standard.object(forKey: "gazeTracking") as? Bool, true)
+        XCTAssertTrue(config.gazeTracking)
+        XCTAssertEqual(defaults.object(forKey: "gazeTracking") as? Bool, true)
     }
 }
 

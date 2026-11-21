@@ -88,6 +88,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
         -> VoiceSemanticRouter.Outcome)?
     var semanticContextProvider: (@MainActor () async -> VoiceAdmissionContext)?
     var semanticConfirmationHandler: (@MainActor (VoiceSemanticRouter.Proposal) async -> Bool)?
+    /// The caller's wall on one semantic hop, from its start.
+    static let semanticWall: TimeInterval = 4
+    /// Waits out the semantic wall. Internal for tests, which fire it by hand.
+    var semanticDeadline: @Sendable (TimeInterval) async throws -> Void = sleepUntilUptime
     private var semanticTask: Task<(VoiceSemanticRouter.Outcome, VoiceAdmissionContext), Error>?
     private var semanticTurn: VoiceTurnToken?
     private var semanticGeneration: UInt64 = 0
@@ -114,9 +118,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
         onDiagnostic?(.init(turn: id, stage: "semantic.begin", metrics: [:]))
         let began = ProcessInfo.processInfo.systemUptime
         let timings = VoiceSemanticRouter.StageTimings()
+        let expire = semanticDeadline
         let task = VoiceSemanticRouter.$stageTimings.withValue(timings) {
             Task {
-                try await withVoiceDeadline(until: ProcessInfo.processInfo.systemUptime + 4) {
+                try await withVoiceDeadline(until: ProcessInfo.processInfo.systemUptime + Self.semanticWall,
+                                            expire: expire) {
                     let interpretStart = ProcessInfo.processInfo.systemUptime
                     do {
                         let result = try await interpret(admission, captured)
@@ -319,6 +325,17 @@ final class RealtimeVoiceLane: SpeechCapturing {
         didSet { input.gate.listen(wakeListener) }
     }
     private var hardware: MicrophoneInput.Ready?
+    /// Opens the selected microphone for listening and conversations.
+    /// Internal for tests: a fixture input stands in for the hardware, so
+    /// recovery runs without a microphone.
+    lazy var prepareInput: @MainActor (String?, Bool, @escaping @Sendable () -> Void) async throws -> MicrophoneInput.Ready = {
+        [input] uid, voiceProcessing, interrupted in
+        guard Permission.microphone.isGranted else {
+            throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.")
+        }
+        return try await input.prepare(device: MicrophoneCatalog.resolve(uid: uid), voiceProcessing: voiceProcessing,
+                                       interrupted: interrupted)
+    }
     private var duplexRequested = false
     private var desiredInputMode: RealtimeVoiceClient.InputMode = .conversation
     private var conversationFeed: ConvertedAudioFeed?
@@ -345,6 +362,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// How long a turn waits for its commit and then its transcript.
     /// Internal for tests.
     var commitConfirmationTimeout: Duration = .seconds(8)
+    /// Waits out one commit's confirmation timeout. Internal for tests, which
+    /// fire it by hand.
+    var commitConfirmationTimer: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     private var remoteInputDrain: Task<Void, Never>?
     private var remoteReplyTurn: UUID?
     private var remoteReplyContinuation: CheckedContinuation<Void, Error>?
@@ -1052,7 +1072,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private func expiry(_ key: String) -> Task<Void, Never> {
         Task { [weak self] in
-            do { try await Task.sleep(for: self?.commitConfirmationTimeout ?? .seconds(8)) } catch { return }
+            guard let timer = self?.commitConfirmationTimer, let timeout = self?.commitConfirmationTimeout else { return }
+            do { try await timer(timeout) } catch { return }
             self?.expireRemoteInput(key)
         }
     }
@@ -1330,12 +1351,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
             defer { if self.preparationID == token { self.preparation = nil } }
             do {
                 try Task.checkCancellation()
-                guard Permission.microphone.isGranted else { throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.") }
-                let device = try MicrophoneCatalog.resolve(uid: uid)
                 let inputStarted = ProcessInfo.processInfo.systemUptime
                 Self.log.notice("prepare stage=microphone_input begin")
-                let hardware = try await self.input.prepare(device: device, voiceProcessing: self.duplexRequested,
-                                                            interrupted: self.inputInterrupted(token: token))
+                let hardware = try await self.prepareInput(uid, self.duplexRequested, self.inputInterrupted(token: token))
                 Self.log.notice("prepare stage=microphone_input elapsed_ms=\((ProcessInfo.processInfo.systemUptime - inputStarted) * 1000)")
                 try Task.checkCancellation()
                 try await self.ensureConnected(inputMode: self.desiredInputMode)
@@ -1502,9 +1520,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             input.gate.close(ifCurrent: feed)?.finish()
         }
         do {
-            let device = try MicrophoneCatalog.resolve(uid: selectedUID)
-            let hardware = try await input.prepare(device: device, voiceProcessing: duplexRequested,
-                                                   interrupted: inputInterrupted(token: token))
+            let hardware = try await prepareInput(selectedUID, duplexRequested, inputInterrupted(token: token))
             guard conversation.id == session, preparationID == token, conversationGate === speechGate,
                   let outputs = hardware.playback else { throw CancellationError() }
             self.hardware = hardware

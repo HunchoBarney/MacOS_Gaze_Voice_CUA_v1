@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   AppearanceChannel,
   APPEARANCE_INPUT_SIZE,
@@ -2012,14 +2012,7 @@ describe("daily-use robustness", () => {
   });
 });
 
-// The worker tests drive real frames through the inference pipeline, so
-// under a loaded Mac each frame can take far longer than vi.waitFor's 1 s
-// default and the whole test longer than vitest's 5 s (#571: set_paused took
-// 5.1 s). Generous waits keep them event-driven rather than clock-bound.
-const WORKER_WAIT = { timeout: 10_000, interval: 5 };
-const WORKER_TEST_TIMEOUT_MS = 30_000;
-
-describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
+describe("inference worker", () => {
   function workerConfig(accelerator: "auto" | "webgpu" | "wasm" = "wasm"): WebInferenceConfig {
     return {
       runtime: "onnxweb",
@@ -2066,27 +2059,34 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
   }
 
   // Shared self stub: the worker assigns self.onmessage once at import, so
-  // the same object must serve every test in this file.
+  // the same object must serve every test in this file. Each post also
+  // settles any test waiting on that message type, so the tests wait on the
+  // worker's own events instead of polling for them.
   const workerMessages: Array<Record<string, unknown>> = [];
+  const messageWaiters: Array<{ type: string; resolve: () => void }> = [];
   const selfStub: { onmessage: null | ((event: { data: unknown }) => void); postMessage: (message: unknown) => void } = {
     onmessage: null,
-    postMessage: (message) => workerMessages.push(message as Record<string, unknown>)
+    postMessage: (message) => {
+      const posted = message as Record<string, unknown>;
+      workerMessages.push(posted);
+      for (const waiter of messageWaiters.filter((w) => w.type === posted.type)) {
+        messageWaiters.splice(messageWaiters.indexOf(waiter), 1);
+        waiter.resolve();
+      }
+    }
   };
 
-  async function startWorker(accelerator: "auto" | "webgpu" | "wasm" = "wasm") {
-    // Cross-test hygiene: module state persists between tests in this file —
-    // reset the shared control block before every init.
-    workerModelsControl.detectError = null;
-    workerModelsControl.createError = null;
-    workerModelsControl.createErrorFor = {};
-    workerModelsControl.warmupFailures = 0;
-    workerModelsControl.disposeHang = false;
-    workerModelsControl.detectGate = null;
-    workerModelsControl.detectResult = null;
-    workerModelsControl.createCalls = [];
-    workerModelsControl.detectCalls = 0;
-    workerModelsControl.detectInFlight = 0;
-    workerModelsControl.maxDetectInFlight = 0;
+  // Resolves on the next post of `type` from now on.
+  function nextMessage(type: string): Promise<void> {
+    return new Promise((resolve) => messageWaiters.push({ type, resolve }));
+  }
+
+  // Resolves once the worker has posted `type`, now or later.
+  function messageArrives(type: string): Promise<void> {
+    return workerMessages.some((m) => m.type === type) ? Promise.resolve() : nextMessage(type);
+  }
+
+  function stubWorkerGlobals(): void {
     vi.stubGlobal("self", selfStub);
     vi.stubGlobal(
       "ImageData",
@@ -2119,24 +2119,55 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
         }
       }
     );
-    workerMessages.length = 0;
+  }
+
+  // The cold import of the worker and its pipeline is the slowest step in
+  // this block; pay it once here rather than inside the first test.
+  beforeAll(async () => {
+    stubWorkerGlobals();
     await import("./inferenceWorker");
+  });
+
+  // Unstubbing here rather than at the end of each test body means a failed
+  // test can't leave its globals for the next one.
+  afterEach(() => {
+    messageWaiters.length = 0;
+    vi.unstubAllGlobals();
+  });
+
+  async function startWorker(accelerator: "auto" | "webgpu" | "wasm" = "wasm") {
+    // Cross-test hygiene: module state persists between tests in this file —
+    // reset the shared control block before every init.
+    workerModelsControl.detectError = null;
+    workerModelsControl.createError = null;
+    workerModelsControl.createErrorFor = {};
+    workerModelsControl.warmupFailures = 0;
+    workerModelsControl.disposeHang = false;
+    workerModelsControl.detectGate = null;
+    workerModelsControl.detectResult = null;
+    workerModelsControl.createCalls = [];
+    workerModelsControl.detectCalls = 0;
+    workerModelsControl.detectInFlight = 0;
+    workerModelsControl.maxDetectInFlight = 0;
+    stubWorkerGlobals();
+    workerMessages.length = 0;
     const send = (message: unknown) => selfStub.onmessage?.({ data: message });
     send({ type: "init", config: workerConfig(accelerator) });
     // The pump posts camera_geometry the moment getUserMedia answers —
     // init now parks on it (model build overlaps camera acquisition), so
     // the harness must deliver it or init never reaches calibration_read.
     send({ type: "camera_geometry", width: 640, height: 480, resolutionName: "640x480" });
-    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "calibration_read")).toBe(true), WORKER_WAIT);
+    await messageArrives("calibration_read");
     const readRequest = workerMessages.find((m) => m.type === "calibration_read") as { id: number };
     send({ type: "calibration_read_result", id: readRequest.id, response: { ok: true, text: null } });
-    await vi.waitFor(() => expect(workerMessages.some((m) => m.type === "backend")).toBe(true), WORKER_WAIT);
+    // init posts ready after warmup; a frame sent before it is dropped.
+    await messageArrives("ready");
     workerMessages.length = 0;
     return send;
   }
 
   async function sendFrame(send: (message: unknown) => void): Promise<void> {
-    const done = workerMessages.filter((m) => m.type === "frame_done").length;
+    const done = nextMessage("frame_done");
     send({
       type: "frame",
       data: new Uint8ClampedArray(4 * 640 * 480),
@@ -2147,7 +2178,7 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       droppedFrames: 0,
       mainThreadLongTasks: 0
     });
-    await vi.waitFor(() => expect(workerMessages.filter((m) => m.type === "frame_done").length).toBeGreaterThan(done), WORKER_WAIT);
+    await done;
   }
 
   function gazePayloads(): Array<Record<string, unknown>> {
@@ -2164,8 +2195,8 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       .filter((payload) => payload.type === "status");
   }
 
-  // sendFrame() polls with real timers — during a fake-timers recovery the
-  // frame must be sent raw and clock advanced manually.
+  // sendFrame() waits for the frame's ack — during a fake-timers recovery the
+  // frame must be sent raw and the clock advanced manually.
   function sendRawFrame(send: (message: unknown) => void): void {
     send({
       type: "frame",
@@ -2194,7 +2225,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
     send({ type: "set_paused", paused: false });
     await sendFrame(send);
     expect(gazePayloads().length).toBeGreaterThan(0);
-    vi.unstubAllGlobals();
   });
 
   it("no-face frames emit a ~1Hz away heartbeat — liveness, never a sample", async () => {
@@ -2238,7 +2268,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.detectResult = null;
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("filter_options dwellLock toggles anchoring while frames keep flowing", async () => {
@@ -2258,7 +2287,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       locked = gazePayloads().some((p) => p.gaze_state === "dwell");
     }
     expect(locked).toBe(true);
-    vi.unstubAllGlobals();
   });
 
   it("rebuilds a lost wasm session after backoff instead of erroring every frame", async () => {
@@ -2289,7 +2317,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.detectError = null;
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("counts a rebuilt session that fails its probe run as a failed attempt", async () => {
@@ -2316,7 +2343,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.warmupFailures = 0;
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("emits one unrecoverable status after rebuild attempts run out, then goes quiet", async () => {
@@ -2345,7 +2371,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.createError = null;
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("rebuilds webgpu in place on the short ladder before any wasm demotion", async () => {
@@ -2371,7 +2396,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.detectError = null;
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("demotes to wasm only after the webgpu ladder exhausts, then quietly re-promotes", async () => {
@@ -2408,7 +2432,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.createErrorFor = {};
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("stays on wasm silently when the re-promotion probe declines", async () => {
@@ -2440,7 +2463,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.createErrorFor = {};
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("bounds a wedged session dispose so recovery still proceeds", async () => {
@@ -2468,7 +2490,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       workerModelsControl.disposeHang = false;
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 
   it("serializes frame processing — a second frame is dropped+acked, never overlapped", async () => {
@@ -2502,7 +2523,6 @@ describe("inference worker", { timeout: WORKER_TEST_TIMEOUT_MS }, () => {
       // stop left the module stopped; a fresh init in the next test resets it.
       vi.useRealTimers();
     }
-    vi.unstubAllGlobals();
   });
 });
 

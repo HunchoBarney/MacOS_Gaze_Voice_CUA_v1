@@ -16,11 +16,11 @@ final class FastLaneExecutorTests: XCTestCase {
 
     func testVerifiedCapturedOwnerAvoidsResolverButMissingOrChangedOwnerDoesNot() async {
         let resolutions = LockedBox(0)
-        let resolver = AppResolver(listApps: {
+        let resolver = AppResolver.fixture(listApps: {
             resolutions.set(resolutions.value + 1)
             return [AppResolver.App(name: "BoundFixture", bundle: "fixture.bound", pid: 99)]
         })
-        let loop = DriveLoop(call: { _, _ in
+        let loop = DriveLoop.inert(call: { _, _ in
             XCTFail("App identity reads must not dispatch")
             return .null
         }, choose: { _, _ in
@@ -130,7 +130,7 @@ final class FastLaneExecutorTests: XCTestCase {
                 "actions": .array([]),
             ])]),
         ])
-        return DriveLoop(call: { tool, args in
+        return DriveLoop.inert(call: { tool, args in
             let response = try driver.call(tool, args)
             switch tool {
             case "list_apps": return self.apps([self.appRow("AuditFixture", "fixture.audit", pid: 424242)])
@@ -145,7 +145,7 @@ final class FastLaneExecutorTests: XCTestCase {
             driver.modelCalls += 1
             return .init(id: "stuck")
         }, ask: nil, granted: { grant }, explicitConsent: false,
-        resolver: AppResolver(listApps: { [.init(name: "AuditFixture", bundle: "fixture.audit", pid: 424242)] }),
+        resolver: AppResolver.fixture(listApps: { [.init(name: "AuditFixture", bundle: "fixture.audit", pid: 424242)] }),
         config: .init(maxRounds: 2, maxInvalidChoices: 1, maxStaleRounds: 1,
                       windowOnly: true, allowParsedScroll: allowParsedScroll),
         nativeReadOnly: { _, _ in nil }, nativeScrollRead: { _, _, _, _ in
@@ -270,7 +270,7 @@ final class FastLaneExecutorTests: XCTestCase {
 
     func testR7DisablingScrollParserDoesNotDisableOtherFastActions() async {
         let posted = LockedBox(0)
-        let loop = DriveLoop(call: { _, _ in XCTFail("Media needs no driver"); return .null },
+        let loop = DriveLoop.inert(call: { _, _ in XCTFail("Media needs no driver"); return .null },
             choose: { _, _ in XCTFail("Media needs no chooser"); return nil },
             ask: nil, granted: { true }, config: .init(allowParsedScroll: false),
             postMediaKey: { _ in posted.set(posted.value + 1); return true })
@@ -402,7 +402,7 @@ final class FastLaneExecutorTests: XCTestCase {
                 windowRow(id: 7, pid: 424242, app: "AuditFixture", title: "Owned",
                           x: 0, y: 0, w: 400, h: 300),
             ])]
-            let loop = DriveLoop(call: { try driver.call($0, $1) },
+            let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
                 choose: { _, _ in XCTFail("A primitive scroll needs no model"); return nil },
                 ask: nil, granted: { true })
             var history: [String] = [], confirmed = false
@@ -441,7 +441,7 @@ final class FastLaneExecutorTests: XCTestCase {
                                   "w": .number(400), "h": .number(270)]),
             ])]),
         ])]
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("An unbound scroll cannot reach a planner"); return nil },
             ask: nil, granted: { true },
             nativeScrollRead: { _, _, _, _ in
@@ -468,7 +468,7 @@ final class FastLaneExecutorTests: XCTestCase {
             windowRow(id: 8, pid: 424243, app: "Other", title: "Decoy",
                       x: 600, y: 600, w: 400, h: 300),
         ]), count: 4)
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("A scope refusal needs no model"); return nil },
             ask: nil, granted: { true }, gaze: gaze(700, 700))
         var history: [String] = [], confirmed = false
@@ -554,7 +554,7 @@ final class FastLaneExecutorTests: XCTestCase {
             windowRow(id: 7, pid: 424242, app: "AuditFixture", title: "Owned",
                       x: 0, y: 0, w: 400, h: 300),
         ]), count: 4)
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("Changed subject must stop before model choice"); return nil },
             ask: nil, granted: { true }, gaze: {
                 XCTFail("A continuation cannot choose a new gaze region")
@@ -611,14 +611,14 @@ final class FastLaneExecutorTests: XCTestCase {
         }
         driver.responses["get_window_state"] = [state(""), state(expectedText)]
         driver.thrown["list_apps"] = DriverConnectionError.refused("global inventory unavailable")
-        return DriveLoop(call: { tool, args in
+        return DriveLoop.inert(call: { tool, args in
                              if tool == "get_window_state", args["tree_format"] != .string("elements") {
                                  return .object(["tree_markdown": .string("fixture")])
                              }
                              return try driver.call(tool, args)
                          }, choose: { _, _ in driver.modelCalls += 1; return nil },
                          ask: nil, granted: { true }, explicitConsent: false,
-                         resolver: AppResolver(listApps: { available ? [app] : [] }),
+                         resolver: AppResolver.fixture(listApps: { available ? [app] : [] }),
                          activateApp: { _ in }, activateRestoredApp: { _, _ in },
                          frontmostBundleID: { frontmost })
     }
@@ -751,7 +751,7 @@ final class FastLaneExecutorTests: XCTestCase {
         ]), count: 8)
         driver.responses["bring_to_front"] = [
             .object(["activated": .bool(true), "exact_window_effect": .object(["verified": .bool(true)])])]
-        return DriveLoop(call: { try driver.call($0, $1) }, choose: { _, _ in
+        return DriveLoop.inert(call: { try driver.call($0, $1) }, choose: { _, _ in
             XCTFail("app focus must not invoke a model"); return nil
         }, ask: { _ in XCTFail("instruction supplies consent"); return nil }, granted: { false }, focusLease: lease,
         nativeFocusedWindowID: { _ in
@@ -855,7 +855,7 @@ final class FastLaneExecutorTests: XCTestCase {
     @MainActor
     func testUnobservedBackgroundLaunchIsUnconfirmedNotFailed() async throws {
         let driver = FakeDriver(), observations = LockedBox(0)
-        let loop = DriveLoop(call: { tool, args in
+        let loop = DriveLoop.inert(call: { tool, args in
             if tool == "launch_app" {
                 _ = try driver.call(tool, args)
                 throw CuaUncertainOutcome(tool: tool, result: .object(["effect": .string("unknown")]))
@@ -882,9 +882,9 @@ final class FastLaneExecutorTests: XCTestCase {
 
     func testNativeSemanticFocusKeepsTraceScopedToTheRun() async {
         let stages = LockedBox([String]())
-        let loop = DriveLoop(call: { _, _ in XCTFail("Exact native focus needs no SDK read"); return .object([:]) },
+        let loop = DriveLoop.inert(call: { _, _ in XCTFail("Exact native focus needs no SDK read"); return .object([:]) },
             choose: { _, _ in XCTFail("No model"); return nil }, ask: nil, granted: { true },
-            resolver: AppResolver(listApps: {
+            resolver: AppResolver.fixture(listApps: {
                 [.init(name: "Owned fixture", bundle: "fixture.target", pid: 424242)]
             }), nativeForegroundWindow: { _ in 7 }, activateRestoredApp: { _, _ in })
         let task = DriveTask(goal: "Focus confirmed application", application: "fixture.target",
@@ -913,7 +913,7 @@ final class FastLaneExecutorTests: XCTestCase {
                 "frame": .object(["x": .number(10), "y": .number(10), "w": .number(120), "h": .number(30)]),
             ])]),
         ])]
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in XCTFail("a named click needs no model"); return nil },
             ask: nil, granted: { true },
             frontmostBundleID: { "fixture.front" }, frontmostPID: { 4242 }, frontmostWindowID: { 9 })
@@ -944,7 +944,7 @@ final class FastLaneExecutorTests: XCTestCase {
                 "frame": .object(["x": .number(10), "y": .number(10), "w": .number(240), "h": .number(20)]),
             ])]),
         ])]
-        let loop = DriveLoop(call: { try driver.call($0, $1) },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) },
             choose: { _, _ in nil }, ask: nil, granted: { true },
             frontmostBundleID: { "fixture.front" }, frontmostPID: { 4242 }, frontmostWindowID: { 9 })
         var history: [String] = [], confirmed = false
@@ -1362,7 +1362,7 @@ final class FastLaneExecutorTests: XCTestCase {
     func testSystemHotkeyPostsDesktopScope() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "lock screen"), session: "t")
         XCTAssertEqual(result.status, .done)
@@ -1384,7 +1384,7 @@ final class FastLaneExecutorTests: XCTestCase {
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                       x: 0, y: 0, w: 800, h: 600)])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              frontmostBundleID: { "com.apple.Notes" })
         let result = await loop.run(DriveTask(goal: "file menu save as"), session: "t")
@@ -1406,7 +1406,7 @@ final class FastLaneExecutorTests: XCTestCase {
                       x: 0, y: 0, w: 800, h: 600)])]
         driver.thrown["invoke_menu"] = DriverConnectionError.toolRefused(
             tool: "invoke_menu", code: "menu_not_found", detail: "")
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              frontmostBundleID: { "com.apple.Notes" })
         let result = await loop.run(DriveTask(goal: "file menu save as"), session: "t")
@@ -1435,7 +1435,7 @@ final class FastLaneExecutorTests: XCTestCase {
             windows([windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                                x: 0, y: 0, w: 720, h: 900)]),
         ]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              frontmostBundleID: { "com.apple.Notes" })
         let result = await loop.run(DriveTask(goal: "snap left"), session: "t")
@@ -1468,7 +1468,7 @@ final class FastLaneExecutorTests: XCTestCase {
                                x: 0, y: 0, w: 800, h: 600, onScreen: true)]),
         ]
         var activated: [Int] = []
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              activateApp: { activated.append($0) },
                              appIsHidden: { _ in false },
@@ -1493,7 +1493,7 @@ final class FastLaneExecutorTests: XCTestCase {
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                       x: 0, y: 0, w: 800, h: 600)])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "where did floober go"),
                                     session: "t")
@@ -1514,7 +1514,7 @@ final class FastLaneExecutorTests: XCTestCase {
                       x: 0, y: 0, w: 800, h: 600),
             windowRow(id: 8, pid: 9, app: "Noteshelf", title: "Noteshelf",
                       x: 900, y: 0, w: 800, h: 600)])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "where did my notes go"),
                                     session: "t")
@@ -1532,7 +1532,7 @@ final class FastLaneExecutorTests: XCTestCase {
     func testRepeatLastBlocksHonestly() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true })
         let result = await loop.run(DriveTask(goal: "do that again"), session: "t")
         guard case .blocked(let reason) = result.status else {
@@ -1576,7 +1576,7 @@ final class FastLaneExecutorTests: XCTestCase {
                                x: 100, y: 100, w: 800, h: 600, z: 1,
                                onScreen: false)]),
         ]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200))
         let result = await loop.run(
@@ -1614,7 +1614,7 @@ final class FastLaneExecutorTests: XCTestCase {
         var gotVerb: FastAction.OverlayVerb?
         var gotTargets: [(frame: CGRect, label: String)] = []
         var gotPoint: CGPoint?
-        let loop = DriveLoop(
+        let loop = DriveLoop.inert(
             call: { t, a in try driver.call(t, a) },
             choose: { _, _ in nil }, ask: nil, granted: { true },
             gaze: gaze(200, 200),
@@ -1638,7 +1638,7 @@ final class FastLaneExecutorTests: XCTestCase {
     func testOverlayWithoutSeamBlocksHonestly() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200))
         let result = await loop.run(DriveTask(goal: "show names"), session: "t")
@@ -1664,7 +1664,7 @@ final class FastLaneExecutorTests: XCTestCase {
                 role: "AXWindow", children: [ScreenNode(role: "AXTextField", value: "Your order ships Friday",
                                                         frame: CGRect(x: 100, y: 100, width: 600, height: 200))]))
         }
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200)) // window-local (100,100)pt → (200,200)px, inside the field
         let result = await loop.run(DriveTask(goal: "what is this"), session: "t")
@@ -1688,7 +1688,7 @@ final class FastLaneExecutorTests: XCTestCase {
                 role: "AXWindow", children: [ScreenNode(role: "AXTextField", value: "Coordinate fixture",
                                                         frame: CGRect(x: 634, y: 192, width: 656, height: 384))]))
         }
-        let loop = DriveLoop(call: { try driver.call($0, $1) }, choose: { _, _ in nil },
+        let loop = DriveLoop.inert(call: { try driver.call($0, $1) }, choose: { _, _ in nil },
                              ask: nil, granted: { true }, gaze: gaze(700, 220))
         let result = await loop.run(DriveTask(goal: "what is this"), session: "native-frame")
         XCTAssertEqual(result.status, .done)
@@ -1710,7 +1710,7 @@ final class FastLaneExecutorTests: XCTestCase {
         }
         let driver = FakeDriver()
         driver.responses["list_apps"] = [apps([])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -1731,7 +1731,7 @@ final class FastLaneExecutorTests: XCTestCase {
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Store", title: "Wire Transfer",
                       x: 0, y: 0, w: 800, h: 600)])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              frontmostBundleID: { "com.example.store" })
         let result = await loop.run(DriveTask(goal: "file menu save as"), session: "t")
@@ -1761,7 +1761,7 @@ final class FastLaneExecutorTests: XCTestCase {
                                            "w": .number(600), "h": .number(40)]),
                          "actions": .array([.string("AXSetValue")])]),
             ])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              frontmostBundleID: { "com.example.store" })
         let result = await loop.run(DriveTask(goal: "type hello"), session: "t")
@@ -1779,7 +1779,7 @@ final class FastLaneExecutorTests: XCTestCase {
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Store", title: "Wire Transfer",
                       x: 0, y: 0, w: 800, h: 600)])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200),
                              frontmostBundleID: { "com.example.store" })
@@ -1800,7 +1800,7 @@ final class FastLaneExecutorTests: XCTestCase {
         driver.responses["list_windows"] = [windows([
             windowRow(id: 7, pid: 42, app: "Store", title: "Wire Transfer",
                       x: 0, y: 0, w: 800, h: 600)])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200))
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -1852,7 +1852,7 @@ final class FastLaneExecutorTests: XCTestCase {
         defer { DriveLoop.gazeEnabled = saved }
         let driver = namedFixture([("Save", 100), ("Cancel", 200)])
         var overlayCalls = 0
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              overlayDispatch: { _, _, _ in overlayCalls += 1; return nil },
                              frontmostBundleID: { "com.apple.mail" })
@@ -1874,7 +1874,7 @@ final class FastLaneExecutorTests: XCTestCase {
         let driver = namedFixture([("Save", 100), ("Save", 400), ("Cancel", 200)])
         var gotVerb: FastAction.OverlayVerb?
         var gotTargets: [(frame: CGRect, label: String)] = []
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              overlayDispatch: { verb, targets, _ in
                                  gotVerb = verb; gotTargets = targets
@@ -1898,7 +1898,7 @@ final class FastLaneExecutorTests: XCTestCase {
         defer { DriveLoop.gazeEnabled = saved }
         let driver = namedFixture([("Save", 100)])
         var gotVerb: FastAction.OverlayVerb?
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              overlayDispatch: { verb, _, _ in
                                  gotVerb = verb
@@ -1919,7 +1919,7 @@ final class FastLaneExecutorTests: XCTestCase {
         defer { DriveLoop.gazeEnabled = saved }
         let driver = FakeDriver()
         var gazeReads = 0
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { gazeReads += 1
                                      return GazeSample(x: 1, y: 1, confidence: 0.9, state: "dwell", updatedAt: Date()) })
