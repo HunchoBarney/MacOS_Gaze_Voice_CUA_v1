@@ -45,6 +45,10 @@ private actor FakeService {
             registrations += 1
             try await Task.sleep(for: .milliseconds(20))
             (status, body) = (201, #"{"installID":"install-\#(registrations)","token":"jv1_token\#(registrations)"}"#)
+        case "/base/v1/responses" where forgotten.contains(bearer ?? ""):
+            (status, body) = (401, #"{"error":{"code":"unknown_install","message":"This install isn't registered."}}"#)
+        case "/base/v1/responses":
+            (status, body) = (200, #"{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"ok\":true}"}]}]}"#)
         case "/base/v1/realtime/client_secret" where !realtimeReplies.isEmpty:
             (status, body) = realtimeReplies.removeFirst()
         case "/base/v1/realtime/client_secret":
@@ -62,6 +66,29 @@ private final class TokenBox: APIKeyStore, @unchecked Sendable {
     private var value: String?
     init(_ value: String? = nil) { self.value = value }
     func read() throws -> String? { lock.withLock { value } }
+    func save(_ apiKey: String) throws { lock.withLock { value = apiKey } }
+    func delete() throws { lock.withLock { value = nil } }
+}
+
+/// Its first read stalls after taking the value, until `release` or 500 ms,
+/// so another caller can act between a stale caller's read and its delete.
+private final class StallingTokenBox: APIKeyStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+    private var stalls = true
+    let reading = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+    init(_ value: String) { self.value = value }
+    func read() throws -> String? {
+        let (current, stall) = lock.withLock { () -> (String?, Bool) in
+            defer { stalls = false }
+            return (value, stalls)
+        }
+        if stall {
+            reading.signal()
+            _ = release.wait(timeout: .now() + .milliseconds(500))
+        }
+        return current
+    }
     func save(_ apiKey: String) throws { lock.withLock { value = apiKey } }
     func delete() throws { lock.withLock { value = nil } }
 }
@@ -158,6 +185,89 @@ final class HostedCredentialsTests: XCTestCase {
         XCTAssertEqual(try tokens.read(), "jv1_token1")
         let paths = await service.seen.map(\.path)
         XCTAssertEqual(paths, ["/base/v1/realtime/client_secret", "/base/v1/installs", "/base/v1/realtime/client_secret"])
+    }
+
+    func testAForgottenInstallRegistersAgainOnceForJev() async throws {
+        let service = FakeService(), tokens = TokenBox("jv1_forgotten")
+        let hosted = config(hosted: hosted(service, tokens: tokens))
+        var bearers: [String?] = []
+        let url = try await hosted.withRoute(hosted.jevRoute) { route in
+            bearers.append(route?.bearer)
+            if route?.bearer == "jv1_forgotten" {
+                throw JevError.http(status: 401, body: #"{"error":{"code":"unknown_install"}}"#)
+            }
+            return route?.url
+        }
+        XCTAssertEqual(url, URL(string: "https://keys.example/base/v1/jev"))
+        XCTAssertEqual(bearers, ["jv1_forgotten", "jv1_token1"])
+        XCTAssertEqual(try tokens.read(), "jv1_token1")
+        let paths = await service.seen.map(\.path)
+        XCTAssertEqual(paths, ["/base/v1/installs"])
+    }
+
+    func testAForgottenInstallRegistersAgainOnceForResponses() async throws {
+        let service = FakeService(), tokens = TokenBox("jv1_forgotten")
+        await service.forget("jv1_forgotten")
+        let hosted = config(hosted: hosted(service, tokens: tokens))
+        let answer = try await hosted.withRoute(hosted.responsesRoute) { route in
+            var client = TerraClient(route: { route })
+            client.transport = { try await service.handle($0) }
+            return try await client.respond(.init(instructions: "i", text: "t", schemaName: "s", schema: .object([:])))
+        }
+        XCTAssertEqual(answer, .object(["ok": .bool(true)]))
+        XCTAssertEqual(try tokens.read(), "jv1_token1")
+        let seen = await service.seen
+        XCTAssertEqual(seen.map(\.path), ["/base/v1/responses", "/base/v1/installs", "/base/v1/responses"])
+        XCTAssertEqual(seen.last?.authorization, "Bearer jv1_token1")
+    }
+
+    func testOnlyAForgottenHostedInstallRegistersAgain() async throws {
+        let service = FakeService(), tokens = TokenBox("jv1_revoked")
+        var calls = 0
+        let developer = config(hosted: hosted(service, tokens: TokenBox("jv1_stored")),
+                               environment: ["TYPESAFE_API_KEY": "ts-developer"])
+        do {
+            _ = try await developer.withRoute(developer.jevRoute) { _ -> Int in
+                calls += 1
+                throw JevError.http(status: 401, body: "bad key")
+            }
+            XCTFail("expected the developer key's 401")
+        } catch JevError.http(status: 401, _) {}
+        let revoked = config(hosted: hosted(service, tokens: tokens))
+        do {
+            _ = try await revoked.withRoute(revoked.responsesRoute) { _ -> Int in
+                calls += 1
+                throw TerraClient.Failure.http(status: 403, message: "This Mac's access to Jarvis's service was turned off.")
+            }
+            XCTFail("expected revoked")
+        } catch TerraClient.Failure.http(status: 403, _) {}
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(try tokens.read(), "jv1_revoked")
+        let seen = await service.seen.count
+        XCTAssertEqual(seen, 0)
+    }
+
+    func testAStaleForgetKeepsARegistrationThatLandsWhileItReads() async throws {
+        let service = FakeService(), tokens = StallingTokenBox("jv1_forgotten")
+        let credentials = HostedCredentials(baseURL: base, tokenStore: tokens,
+                                            transport: { try await service.handle($0) })
+        let late = DispatchSemaphore(value: 0)
+        Thread { credentials.forget("jv1_forgotten"); late.signal() }.start()
+        await withCheckedContinuation { done in
+            DispatchQueue.global().async { tokens.reading.wait(); done.resume() }
+        }
+        let fresher = Task {
+            credentials.forget("jv1_forgotten")
+            return try await credentials.installToken()
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        tokens.release.signal()
+        await withCheckedContinuation { done in
+            DispatchQueue.global().async { late.wait(); done.resume() }
+        }
+        let token = try await fresher.value
+        XCTAssertEqual(token, "jv1_token1")
+        XCTAssertEqual(try tokens.read(), "jv1_token1", "a stale forget must not delete a registration made while it read")
     }
 
     func testAStaleFailureKeepsAFresherRegistration() async throws {

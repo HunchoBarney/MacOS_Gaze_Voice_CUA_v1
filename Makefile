@@ -22,6 +22,7 @@ LOCAL_CI_JOB = gui/$(shell id -u)/$(LOCAL_CI_LABEL)
 .PHONY: setup build test tracker release install local run clean bench-flows
 .PHONY: local-ci-install local-ci-pause local-ci-resume local-ci-uninstall
 .PHONY: e2e e2e-install e2e-uninstall
+.PHONY: gallery gallery-site gallery-deploy
 
 setup:
 	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
@@ -34,7 +35,8 @@ build:
 test:
 	scripts/test-local-ci.sh
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
-	swift test --parallel
+	python3 -I ThirdParty/WebRTC/fetch.py "$(VENDOR)/WebRTC"
+	swift test --parallel --manifest-cache none
 	cd EyeTracking && corepack pnpm install --frozen-lockfile --ignore-scripts
 	cd EyeTracking && corepack pnpm run typecheck
 	cd EyeTracking && corepack pnpm test
@@ -60,7 +62,8 @@ else
 # stage, sign, zip and checksum. build/Jarvis.app is overwritten every
 # time and only the newest $(KEEP_ZIPS) zips are kept.
 release: setup tracker
-	swift build -c release
+	python3 -I ThirdParty/WebRTC/fetch.py "$(VENDOR)/WebRTC"
+	swift build -c release --manifest-cache none
 	ThirdParty/Cua/fetch-embedded-binaries.sh "$(VENDOR)"
 	ThirdParty/Vosk/fetch.sh "$(VENDOR)/Vosk"
 	rm -rf "$(APP)"
@@ -76,7 +79,14 @@ release: setup tracker
 	cp "$(VENDOR)/Vosk/libvosk.dylib" "$(APP)/Contents/Resources/Vosk/libvosk.dylib"
 	ditto "$(VENDOR)/Vosk/model" "$(APP)/Contents/Resources/Vosk/model"
 	cp ThirdParty/Vosk/LICENSE ThirdParty/Vosk/README.md "$(APP)/Contents/Resources/ThirdParty/Vosk/"
+	mkdir -p "$(APP)/Contents/Frameworks" "$(APP)/Contents/Resources/ThirdParty/WebRTC"
+	ditto "$(VENDOR)/WebRTC/LiveKitWebRTC.xcframework/macos-arm64_x86_64/LiveKitWebRTC.framework" "$(APP)/Contents/Frameworks/LiveKitWebRTC.framework"
+	install_name_tool -add_rpath @executable_path/../Frameworks "$(APP)/Contents/MacOS/Jarvis"
+	cp "$(VENDOR)/WebRTC/LiveKitWebRTC.xcframework/LICENSE" "$(APP)/Contents/Resources/ThirdParty/WebRTC/LICENSE"
+	cp ThirdParty/WebRTC/README.md "$(APP)/Contents/Resources/ThirdParty/WebRTC/"
 	cp ThirdParty/jev-voice-control/LICENSE "$(APP)/Contents/Resources/ThirdParty/jev-voice-control/"
+	mkdir -p "$(APP)/Contents/Resources/ThirdParty/GRDB"
+	cp ThirdParty/GRDB/LICENSE ThirdParty/GRDB/README.md "$(APP)/Contents/Resources/ThirdParty/GRDB/"
 	scripts/bundle-tracker.sh "$(APP)"
 	python3 scripts/check-packaged-tracker.py "$(APP)"
 	scripts/sign-app.sh "$(APP)"
@@ -167,3 +177,18 @@ e2e-install:
 
 e2e-uninstall:
 	e2e/scripts/uninstall.sh
+
+# The UI gallery (gallery/README.md): render every visible surface from
+# fixture state, build the site, publish it to Cloudflare Pages.
+GALLERY_RENDERS = build/gallery/renders
+
+gallery:
+	scripts/gallery.sh
+
+gallery-site:
+	cd gallery/site && corepack pnpm install --frozen-lockfile
+	cd gallery/site && node scripts/collect.mjs --renders ../../$(GALLERY_RENDERS) --findings ../audit/findings.json
+	cd gallery/site && corepack pnpm build
+
+gallery-deploy: gallery-site
+	cd gallery/site && corepack pnpm dlx wrangler@4.165.0 pages deploy dist --project-name jarvis-ui-gallery --branch main --commit-dirty=true

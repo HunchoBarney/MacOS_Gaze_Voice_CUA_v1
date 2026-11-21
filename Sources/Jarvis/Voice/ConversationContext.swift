@@ -263,6 +263,11 @@ final class ConversationSession {
     var onEvent: ((ConversationPresentation) -> Void)?
     var onEnded: ((UUID, String) -> Void)?
     var onDiagnostic: (@Sendable (VoiceSpeechDiagnostic) -> Void)?
+    /// Proactivity hears the person's own words before admission. It speaks
+    /// its answers on the Mac, so an answered turn ends here and nothing
+    /// about it reaches the model. A request an alert offered ("close this
+    /// tab") is admitted in place of the reply.
+    var proactiveIntercept: ((String) -> ProactiveIntercept?)?
     private(set) var id: UUID?
     private var epoch = UUID()
     private var finals: [Final] = []
@@ -316,7 +321,10 @@ final class ConversationSession {
         guard id == record.session, epoch == record.epoch,
               record.owner.gate.state == .finishing else { return }
         record.owner.context = readContext?() ?? VoiceAdmissionContext()
-        guard let admission = await record.owner.finishRemoteCapture(text, turn: record.turn,
+        let intercept = proactiveIntercept?(text)
+        var heard = text
+        if case .request(let request) = intercept { heard = request }
+        guard let admission = await record.owner.finishRemoteCapture(heard, turn: record.turn,
             input: record.input, now: now) else {
             discardExternal(record)
             return
@@ -328,6 +336,11 @@ final class ConversationSession {
         if let localControl, record.owner.consumeAdmission(record.turn) != nil {
             owners.removeValue(forKey: record.turn.id)
             control(localControl, turn: record.turn.id)
+            return
+        }
+        if case .say = intercept, record.owner.consumeAdmission(record.turn) != nil {
+            owners.removeValue(forKey: record.turn.id)
+            onEvent?(.ignored(record.turn.id))
             return
         }
         finals.append(.init(context: record.context, owner: record.owner,

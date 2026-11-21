@@ -25,7 +25,7 @@ enum BannerRules {
         banners.map { banner in
             let sender = banner.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let app = banner.app.trimmingCharacters(in: .whitespacesAndNewlines)
-            let key = "banner.\(app).\(sender).\(banner.body.prefix(60))"
+            let key = "banner.\(app).\(sender).\(banner.body)"
             let messaging = messagingApps.contains(app.lowercased())
             let from = app.isEmpty ? "" : " in \(app)"
             let read: ProactiveAction? = banner.body.isEmpty ? nil : .read("\(sender) says: \(banner.body)")

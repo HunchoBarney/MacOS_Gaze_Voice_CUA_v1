@@ -493,6 +493,115 @@ final class TargetOverlayTests: XCTestCase {
         overlay.hideAll()
     }
 
+    // MARK: - Lock gate: error band, size, role (JARA-55)
+
+    /// With the error band wider than 1.5× the control, the tracker can't
+    /// single it out: nothing highlights, and a band that widens while
+    /// the ring is up lets go of the control.
+    func testWideErrorBandShowsNoHighlight() {
+        let overlay = TargetOverlay()
+        overlay.gazeSigmaPt = 384
+        let button = intentCandidate(x: 100, y: 100, w: 28, h: 28)
+        overlay.intentEvent(.acquire(button))
+        XCTAssertFalse(overlay.ringArmed)
+        XCTAssertNil(overlay.ringRect)
+        overlay.gazeSigmaPt = 30
+        overlay.intentEvent(.hold(button, progress: 0.3))
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.gazeSigmaPt = 384
+        overlay.intentEvent(.hold(button, progress: 0.5))
+        XCTAssertFalse(overlay.ringArmed)
+        overlay.hideAll()
+    }
+
+    func testLockRuleWeighsErrorBandSizeAndRole() {
+        let button = intentCandidate(x: 0, y: 0, w: 28, h: 28)
+        XCTAssertTrue(TargetOverlay.canLock(button, sigmaPt: 42))
+        XCTAssertFalse(TargetOverlay.canLock(button, sigmaPt: 43))
+        XCTAssertTrue(TargetOverlay.canLock(intentCandidate(x: 0, y: 0, w: 320, h: 200), sigmaPt: 40))
+        XCTAssertFalse(TargetOverlay.canLock(intentCandidate(x: 0, y: 0, w: 321, h: 30), sigmaPt: 20))
+        XCTAssertFalse(TargetOverlay.canLock(intentCandidate(x: 0, y: 0, w: 200, h: 201), sigmaPt: 20))
+        XCTAssertFalse(TargetOverlay.canLock(intentCandidate(.window, x: 0, y: 0, w: 200, h: 100,
+                                                             role: "window"), sigmaPt: 20))
+        for role in ["AXGroup", "AXTable", "AXScrollArea"] {
+            XCTAssertFalse(TargetOverlay.canLock(intentCandidate(x: 0, y: 0, w: 100, h: 40, role: role),
+                                                 sigmaPt: 20), role)
+        }
+        let light = intentCandidate(.trafficLight, x: 0, y: 0, w: 800, h: 600,
+                                    motor: CGRect(x: 8, y: 8, width: 14, height: 14))
+        XCTAssertTrue(TargetOverlay.canLock(light, sigmaPt: 20))
+        XCTAssertFalse(TargetOverlay.canLock(light, sigmaPt: 22))
+    }
+
+    /// Panes, tables and windows never light up, whatever the scorer says.
+    func testOversizeAndContainerCandidatesNeverLock() {
+        let overlay = TargetOverlay()
+        for c in [intentCandidate(x: 0, y: 0, w: 900, h: 600, id: "pane"),
+                  intentCandidate(x: 0, y: 0, w: 200, h: 120, role: "AXTable", id: "table"),
+                  intentCandidate(.window, x: 0, y: 0, w: 300, h: 150, role: "window", id: "win")] {
+            overlay.intentEvent(.acquire(c))
+            XCTAssertFalse(overlay.ringArmed, c.id)
+        }
+        overlay.hideAll()
+    }
+
+    /// A tie lets go of the highlight — the old element no longer stays
+    /// lit while the scorer says it can't tell.
+    func testAmbiguityReleasesTheRing() {
+        let overlay = TargetOverlay()
+        var got: [IntentCandidate] = []
+        overlay.onAmbiguous = { got = $0 }
+        let a = intentCandidate(x: 0, y: 0, w: 40, h: 40, id: "a")
+        let b = intentCandidate(x: 50, y: 0, w: 40, h: 40, id: "b")
+        overlay.intentEvent(.acquire(a))
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.intentEvent(.ambiguous([a, b]))
+        XCTAssertFalse(overlay.ringArmed)
+        XCTAssertEqual(got, [a, b])
+        overlay.hideAll()
+    }
+
+    /// Exactly one highlight: while a halo marks a control, the gaze ring
+    /// stands down, and it comes back once the halo goes.
+    func testHaloAndGazeRingNeverShowTogether() {
+        let overlay = TargetOverlay()
+        let a = intentCandidate(x: 0, y: 0, w: 40, h: 40, id: "a")
+        overlay.intentEvent(.acquire(a))
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.showHalo(frame: CGRect(x: 200, y: 200, width: 80, height: 28))
+        XCTAssertTrue(overlay.haloArmed)
+        XCTAssertFalse(overlay.ringArmed)
+        overlay.intentEvent(.hold(a, progress: 0.4))
+        XCTAssertFalse(overlay.ringArmed)
+        overlay.hideHalo()
+        overlay.intentEvent(.hold(a, progress: 0.5))
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.hideAll()
+    }
+
+    /// A press glow marks the control Jarvis presses by name — it is not a
+    /// gaze guess, so the error band doesn't gate the ring it draws.
+    func testPressGlowIgnoresTheErrorBand() {
+        let overlay = TargetOverlay()
+        overlay.gazeSigmaPt = 384
+        overlay.glowPress(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.hideAll()
+    }
+
+    /// A second press on the same control restarts its timeout, so the
+    /// first press's timeout can't cut the second glow short.
+    func testARepeatedPressGlowRestartsItsTimeout() async throws {
+        let overlay = TargetOverlay()
+        let frame = CGRect(x: 0, y: 0, width: 28, height: 28)
+        overlay.glowPress(frame: frame)
+        try await Task.sleep(for: .milliseconds(800))
+        overlay.glowPress(frame: frame)
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.hideAll()
+    }
+
     // MARK: - Conforming ring: lifecycle + ambiguity
 
     /// `.none` on a fresh overlay is a no-op; after an acquire it drops
