@@ -97,7 +97,7 @@ public enum MenuScript {
         StateEntry("asks-parked", "Questions waiting", caption: "Two questions are parked: the menu is where you answer them, now the item carries no count text (MB-1).", duration: 2.4) { _ in
             MenuFixture(open: true, asks: 2)
         },
-        StateEntry("large", "Largest labels (2\u{00D7})", caption: "Bigger labels at 2\u{00D7}: every row, header and shortcut doubles and the menu widens to fit, with the failure reason wrapping instead of clipping.", duration: 2.6) { _ in
+        StateEntry("large", "Largest labels (2\u{00D7})", caption: "Bigger labels at 2\u{00D7}: every row, header and shortcut doubles and the menu widens to fit, so the failure reason reads in full instead of clipping.", duration: 2.6) { _ in
             MenuFixture(open: true, eyes: .failed, task: true, labelScale: 2)
         },
     ]
