@@ -866,6 +866,7 @@ final class VoiceController: ObservableObject {
             if abs(self.audioLevel - level) >= 0.01 { self.audioLevel = level }
         }
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
+        lane.conversation.proactiveIntercept = { [weak self] in self?.cua.proactiveIntercept?($0) }
         lane.conversation.interpret = { [weak self] text, context, memory in
             guard let self, let route = try await self.config.jevRoute() else {
                 throw VoiceError(OutcomeWording.missingUnderstandingKey)

@@ -25,6 +25,7 @@ final class ProactiveCommandsTests: XCTestCase {
     private var engine: ProactiveEngine!
     private var opened: [URL] = []
     private var completed: [String] = []
+    private var spoken: [String] = []
 
     override func setUp() {
         super.setUp()
@@ -42,6 +43,7 @@ final class ProactiveCommandsTests: XCTestCase {
 
     private var commands: ProactiveCommands {
         ProactiveCommands(engine: engine, settings: settings,
+                          speak: { [unowned self] in self.spoken.append($0) },
                           openURL: { [unowned self] in self.opened.append($0) },
                           completeReminder: { [unowned self] in self.completed.append($0); return true })
     }
@@ -104,8 +106,69 @@ final class ProactiveCommandsTests: XCTestCase {
         coordinator.proactiveIntercept = { heard.append($0); return .say("Opening it.") }
         let result = await coordinator.beginVoiceTask("open the meeting link", transcriptHint: "Yes.")
         XCTAssertEqual(heard, ["Yes."])
-        XCTAssertTrue(result.contains("Opening it."))
+        XCTAssertFalse(result.contains("Opening it."), "the answer was spoken on the Mac, not handed to the model")
+        XCTAssertTrue(result.contains("answered this aloud on the Mac"))
         XCTAssertTrue(coordinator.tasks.isEmpty)
+    }
+
+    func testAMessageIsReadAloudOnTheMac() {
+        engine.submit([alert(.urgentMessage, "Urgent from Mom", action: .read("Mom says: call me asap"))])
+        XCTAssertEqual(commands.intercept("yes"), .say("Mom says: call me asap"))
+        XCTAssertEqual(spoken, ["Mom says: call me asap"])
+        XCTAssertEqual(commands.intercept("open Calculator"), nil)
+        XCTAssertEqual(spoken, ["Mom says: call me asap"], "nothing is spoken for a request proactivity leaves alone")
+    }
+
+    func testLiveRepliesAreAnsweredBeforeAdmissionAndNeverReachTheModel() async throws {
+        let conversation = ConversationSession()
+        var context = VoiceAdmissionContext()
+        context.targetAppID = "fixture.editor"; context.windowID = 42
+        context.targetID = "fixture.editor.42"
+        conversation.makeSpeechSession = { captured in
+            let owner = LocalSpeechSession { _ in XCTFail("queue owns execution") }
+            owner.context = captured
+            return owner
+        }
+        conversation.readContext = { context }
+        conversation.interpret = { _, _, _ in
+            XCTFail("a proactive answer or a native scroll must not call a model")
+            return .init(kind: .clarify)
+        }
+        conversation.remote = { _, _, _ in XCTFail("a proactive answer must not reach the Live model") }
+        var executed: [String] = []
+        let effect = expectation(description: "the offered request runs")
+        conversation.execute = { command in
+            executed.append(command.text)
+            effect.fulfill()
+            return .init(verified: true, waitingForAnswer: false, message: "Scrolled.")
+        }
+        conversation.onControl = { _ in }
+        var ignored: [UUID] = []
+        conversation.onEvent = { if case .ignored(let turn) = $0 { ignored.append(turn) } }
+        var heard: [String] = []
+        conversation.proactiveIntercept = { text in
+            heard.append(text)
+            switch text {
+            case "What's up?": return .say("One thing: Message from Sam.")
+            case "Yes.": return .request("scroll down")
+            default: return nil
+            }
+        }
+        let session = UUID(), connection = UUID()
+        try conversation.startExternal(session: session)
+        defer { conversation.stop() }
+
+        let whatsUp = try conversation.beginExternal(input: .init(connectionID: connection, itemID: "up"), at: 1)
+        XCTAssertTrue(conversation.commitExternal(whatsUp, at: 2))
+        await conversation.finishExternal(whatsUp, text: "What's up?", at: 2.1)
+        XCTAssertEqual(ignored, [whatsUp.turn.id], "an answered turn ends on the Mac")
+
+        let reply = try conversation.beginExternal(input: .init(connectionID: connection, itemID: "yes"), at: 3)
+        XCTAssertTrue(conversation.commitExternal(reply, at: 4))
+        await conversation.finishExternal(reply, text: "Yes.", at: 4.1)
+        await fulfillment(of: [effect], timeout: 2)
+        XCTAssertEqual(heard, ["What's up?", "Yes."])
+        XCTAssertEqual(executed, ["scroll down"], "the offered request is admitted in place of the reply")
     }
 
     func testNoAndNotNowAreAnsweredAndOtherRepliesFallThrough() {

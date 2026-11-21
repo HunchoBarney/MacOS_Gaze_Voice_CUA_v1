@@ -7,7 +7,8 @@ extension ProactiveSettings {
 }
 
 /// What a spoken request becomes when proactivity answers it instead of
-/// the task loop: a line to say, or a request to run as if it was spoken.
+/// the task loop: a line already spoken with the on-device voice, which
+/// never goes to the model, or a request to run as if it was spoken.
 enum ProactiveIntercept: Equatable {
     case say(String)
     case request(String)
@@ -25,6 +26,7 @@ final class ProactiveService {
 
     let settings: ProactiveSettings
     let engine: ProactiveEngine
+    private let voice: OnDeviceAlertVoice
     private let eventKit = EventKitSource()
     private let card: ProactiveCardPanel
     private var timers: [Timer] = []
@@ -38,7 +40,9 @@ final class ProactiveService {
     init(speech: any SpeechSynthesizing, settings: ProactiveSettings = .shared) {
         self.settings = settings
         let probe = ProactiveContextBox()
-        engine = ProactiveEngine(settings: settings, voice: OnDeviceAlertVoice(output: speech),
+        let voice = OnDeviceAlertVoice(output: speech)
+        self.voice = voice
+        engine = ProactiveEngine(settings: settings, voice: voice,
                                  context: { probe.read() })
         card = ProactiveCardPanel(engine: engine)
         probe.service = self
@@ -125,8 +129,8 @@ final class ProactiveService {
     /// nil leaves the utterance to the task loop.
     func intercept(_ utterance: String) -> ProactiveIntercept? {
         guard running else { return nil }
-        let eventKit = self.eventKit
-        return ProactiveCommands(engine: engine, settings: settings,
+        let eventKit = self.eventKit, voice = self.voice
+        return ProactiveCommands(engine: engine, settings: settings, speak: { voice.speak($0) },
                                  completeReminder: { eventKit.complete(reminder: $0) }).intercept(utterance)
     }
 }
@@ -137,6 +141,9 @@ final class ProactiveService {
 struct ProactiveCommands {
     let engine: ProactiveEngine
     let settings: ProactiveSettings
+    /// The on-device voice. Answers can carry a banner's text, which stays
+    /// on the Mac (D4).
+    var speak: @MainActor (String) -> Void
     var openURL: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
     var completeReminder: @MainActor (String) -> Bool
 
@@ -148,8 +155,15 @@ struct ProactiveCommands {
     private static let watchPattern = try! NSRegularExpression(
         pattern: #"^(?:tell|let) me (?:know )?when (.+?) (?:replies|writes back|messages me|texts me|answers|gets back to me)$"#)
 
-    /// nil leaves the utterance to the task loop.
+    /// nil leaves the utterance to the task loop. A `.say` line is spoken
+    /// here, before it is returned.
     func intercept(_ utterance: String) -> ProactiveIntercept? {
+        let answer = self.answer(utterance)
+        if case .say(let line) = answer { speak(line) }
+        return answer
+    }
+
+    private func answer(_ utterance: String) -> ProactiveIntercept? {
         var spoken = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
         if let lead = Self.wakeLeads.first(where: { spoken.lowercased().hasPrefix($0) }) {
             spoken = String(spoken.dropFirst(lead.count)).trimmingCharacters(in: CharacterSet(charactersIn: " ,.!?"))

@@ -849,8 +849,9 @@ final class VoiceTaskCoordinator {
         let phrase = Self.normalizedPhrase(trimmed)
         if windowScroll == nil, let intercept = proactiveIntercept?(transcriptHint ?? trimmed) {
             switch intercept {
-            case .say(let line):
-                return VoiceToolResult(status: VoiceToolResult.Status.ok, say: line).encoded()
+            case .say:
+                return VoiceToolResult(status: VoiceToolResult.Status.ok,
+                                       say: "Jarvis already answered this aloud on the Mac. Say nothing more.").encoded()
             case .request(let request):
                 return await beginVoiceTask(request, app: app, frontmostHint: frontmostHint, captureID: captureID,
                                             admissionIsCurrent: admissionIsCurrent)
