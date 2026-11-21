@@ -85,15 +85,24 @@ final class LiveVoiceTests: XCTestCase {
 
     private let renews = Date(timeIntervalSince1970: 1_796_083_200)
 
+    /// What the fake Worker's `GET /v1/usage` answers now.
+    private var worker: LiveAllowanceStatus?
+
+    private func usage(_ used: Double, capped: Bool = false) -> LiveAllowanceStatus {
+        LiveAllowanceStatus(metering: true, tier: "jarvis", period: "2026-11", periodEnds: renews,
+                            liveSeconds: used, liveSecondsLimit: 18_000, warnAt: 0.8, capped: capped,
+                            tasksLimit: 100)
+    }
+
     /// This month's Live voice, read from a fake Worker that answers `used`
     /// seconds of 5 h. Nothing leaves the Mac.
     private func allowance(used: Double, capped: Bool = false) -> LiveAllowance {
         let name = "live-voice-\(UUID().uuidString)"
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: name) }
-        let status = LiveAllowanceStatus(metering: true, tier: "jarvis", period: "2026-11", periodEnds: renews,
-                                         liveSeconds: used, liveSecondsLimit: 18_000, warnAt: 0.8, capped: capped,
-                                         tasksLimit: 100)
-        let allowance = LiveAllowance(fetch: { status }, defaults: UserDefaults(suiteName: name)!)
+        let status = usage(used, capped: capped)
+        worker = status
+        let allowance = LiveAllowance(fetch: { @MainActor [unowned self] in self.worker ?? status },
+                                      defaults: UserDefaults(suiteName: name)!)
         allowance.apply(status)
         return allowance
     }
@@ -349,6 +358,7 @@ final class LiveVoiceTests: XCTestCase {
             voice.onBasicRequest = { samples, _ in requests.append(samples) }
         }
         wakeWord.heard?(0)
+        worker = usage(18_000, capped: true)
         say(0.3, thenQuiet: 0.1)
         try await waitUntil { requests.count == 1 }
         XCTAssertEqual(transports.count, 1, "Live was tried once")
@@ -360,6 +370,26 @@ final class LiveVoiceTests: XCTestCase {
         say(0.2, thenQuiet: 0.1, at: 2)
         try await waitUntil { requests.count == 2 }
         XCTAssertEqual(transports.count, 1, "Once refused, the next wake goes straight to basic voice")
+    }
+
+    func testBasicVoiceEndsOnceTheWorkerSaysLiveVoiceIsBack() async throws {
+        var requests = 0
+        let voice = try voice(LiveListening.Timings(settle: 0.05)) { voice in
+            voice.allowance = self.allowance(used: 18_000, capped: true)
+            voice.onBasicRequest = { _, _ in
+                requests += 1
+                self.worker = self.usage(0)
+            }
+        }
+        wakeWord.heard?(0)
+        say(0.3, thenQuiet: 0.1)
+        try await waitUntil { requests == 1 }
+        try await waitUntil { voice.allowance?.mode == .live }
+        try await waitUntil { voice.listening.state == .asleep }
+        XCTAssertTrue(transports.isEmpty)
+        wakeWord.heard?(1)
+        try await waitUntil { transports.count == 1 }
+        XCTAssertEqual(requests, 1, "The month renewed, so the next wake opens Live")
     }
 
     func testAnUncappedWakeOpensLiveAndTheWarningShowsOnceThenLiveSaysItAtTheNextWake() async throws {

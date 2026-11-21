@@ -29,8 +29,9 @@ extension LiveMicrophone: LiveMicrophoneDriving {}
 /// KAR-75 L10: once this month's Live voice is used up (`allowance` is in
 /// basic voice, or the broker refuses with `live_limit`), a wake opens no
 /// session. The request is recorded on the Mac until the user pauses and
-/// handed to `onBasicRequest`. After each session the allowance is read
-/// again; crossing the warning share shows one line on the glow and, when
+/// handed to `onBasicRequest`. After each wake, Live or basic, the allowance
+/// is read again, so basic voice ends once the Worker says the month
+/// renewed; crossing the warning share shows one line on the glow and, when
 /// replies are spoken, Live says it once the next time the user talks.
 @MainActor
 final class LiveVoice {
@@ -326,7 +327,6 @@ final class LiveVoice {
     /// closed, recording starts again for the wake word. Basic voice never
     /// opened a call, so its recording carries on (`restart` false).
     private func ended(closing: LiveSession? = nil, restart: Bool = true) {
-        let wasLive = session != nil || closing != nil
         session = nil
         wokeAt = nil
         basicTurn?.cancel()
@@ -336,7 +336,7 @@ final class LiveVoice {
         _ = listening.handle(.ended, at: now())
         if armed, listening.state == .asleep { try? listenForWake() }
         refresh()
-        if wasLive { readAllowance() }
+        readAllowance()
         guard restart else { return }
         Task { [weak self] in
             _ = await closing?.close()
