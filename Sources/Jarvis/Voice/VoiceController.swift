@@ -1015,7 +1015,8 @@ final class VoiceController: ObservableObject {
     func armStandby() {
         watchOtherMicrophoneUse()
         if config.voiceLive {
-            guard standbyChosen, !standbyArmed, !handsFreePaused, !otherAppListening else { return }
+            guard standbyChosen, !standbyArmed, !handsFreePaused, !otherAppListening, !manualOverride,
+                  !isMicrophoneTest else { return }
             guard let liveVoice else {
                 handsFreeState = .unavailable("Live voice needs the hosted voice service.")
                 return
