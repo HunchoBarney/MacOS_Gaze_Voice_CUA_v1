@@ -754,7 +754,7 @@ final class VoiceSemanticTests: XCTestCase {
         let config = Config(defaults: UserDefaults(suiteName: "composition-\(UUID())")!,
             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
-        let resolver = AppResolver(listApps: {
+        let resolver = AppResolver.fixture(listApps: {
             [.init(name: "Google Chrome", bundle: "fixture.chrome", pid: 42)]
         })
         let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { ServiceRoute(url: JevClient.systemOneURL, bearer: "SensitiveSentinelValue") },
@@ -772,7 +772,7 @@ final class VoiceSemanticTests: XCTestCase {
             })
         coordinator.gazeContextProvider = { nil }
         let speech = lane(context())
-        let controller = VoiceController(config: config, speech: speech, authorize: { false },
+        let controller = VoiceController.inert(config: config, speech: speech, authorize: { false },
             frontmost: { nil }, cuaRuntime: coordinator)
         speech.admissionContextProvider = {
             var c = self.context()
@@ -1187,7 +1187,7 @@ final class VoiceSemanticTests: XCTestCase {
 
     func testAuditScopedCancelPreservesUnrelatedWorkAndGlobalHook() async {
         let (c, config) = coordinator()
-        let controller = VoiceController(config: config, authorize: { false }, cuaRuntime: c)
+        let controller = VoiceController.inert(config: config, authorize: { false }, cuaRuntime: c)
         let unrelated = VoiceTaskCoordinator.Work(label: "Other task", request: "Other task",
             spec: DriveTask(goal: "Other task"))
         c.tasks.append(unrelated)
@@ -1276,7 +1276,7 @@ final class VoiceSemanticTests: XCTestCase {
 
     func testTypedFocusNeverParsesDisplayNameAsCommand() async {
         var tools: [String] = []
-        let loop = DriveLoop(call: { tool, _ in
+        let loop = DriveLoop.inert(call: { tool, _ in
             tools.append(tool)
             if tool == "bring_to_front" {
                 return .object(["activated": .bool(true), "exact_window_effect": .object(["verified": .bool(true)])])
@@ -1285,7 +1285,7 @@ final class VoiceSemanticTests: XCTestCase {
                 "window_id": .number(7), "is_on_screen": .bool(true), "title": .string("Fixture")
             ])])])
         }, choose: { _, _ in XCTFail("semantic focus never invokes another model"); return nil },
-        ask: nil, granted: { true }, resolver: AppResolver(listApps: {
+        ask: nil, granted: { true }, resolver: AppResolver.fixture(listApps: {
             [.init(name: "open a new tab", bundle: "fixture.target", pid: 42)]
         }), appIsHidden: { _ in false }, activateRestoredApp: { _, _ in })
         let task = DriveTask(goal: "Focus confirmed application", application: "fixture.target",
@@ -1299,7 +1299,7 @@ final class VoiceSemanticTests: XCTestCase {
     func testInstructionDispatchSelectsTypedExecutorOnceWithoutApproval() async throws {
         let (c, _) = coordinator()
         var mutations = 0
-        let loop = DriveLoop(call: { tool, args in
+        let loop = DriveLoop.inert(call: { tool, args in
             if tool == "bring_to_front" {
                 mutations += 1
                 XCTAssertEqual(args["pid"], .number(42))
@@ -1309,7 +1309,7 @@ final class VoiceSemanticTests: XCTestCase {
                 "window_id": .number(7), "is_on_screen": .bool(true), "title": .string("Fixture")
             ])])])
         }, choose: { _, _ in XCTFail("generic chooser must not run"); return nil },
-        ask: nil, granted: { true }, resolver: AppResolver(listApps: {
+        ask: nil, granted: { true }, resolver: AppResolver.fixture(listApps: {
             [.init(name: "open a new tab", bundle: "fixture.target", pid: 42)]
         }), appIsHidden: { _ in false }, activateRestoredApp: { _, _ in })
         let input = try await admission()

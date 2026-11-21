@@ -392,7 +392,7 @@ final class GuideModeTests: XCTestCase {
 
     private func showLoop(_ driver: Driver, session: GuideSession) -> DriveLoop {
         var picks = ["e3", "done", "done"]
-        return DriveLoop(call: { tool, args in driver.call(tool, args) },
+        return DriveLoop.inert(call: { tool, args in driver.call(tool, args) },
                          choose: { _, _ in picks.isEmpty ? nil : DriveLoop.JevChoice(id: picks.removeFirst()) },
                          ask: nil, granted: { true },
                          windowControlButtons: { _ in [] }, windowControlPress: { _, _ in false },

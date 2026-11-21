@@ -179,7 +179,7 @@ final class GazeLaneTests: XCTestCase {
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
         let point = CGPoint(x: 500, y: 400)
         let expected = DriveLoop.desktopPixels(point)
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(500, 400))
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -197,7 +197,7 @@ final class GazeLaneTests: XCTestCase {
     func testClickTrackerDownBlocksHonestly() async {
         let driver = FakeDriver()
         driver.responses["list_apps"] = [.object(["apps": .array([])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { throw GazeError.unreachable })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -219,7 +219,7 @@ final class GazeLaneTests: XCTestCase {
         }
         // The loop re-checks freshness — the seam contract is "freshest",
         // and a click on where the user was is worse than no click.
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: { try await stale() })
         let result = await loop.run(DriveTask(goal: "click"), session: "t")
@@ -242,7 +242,7 @@ final class GazeLaneTests: XCTestCase {
                                         pid: 42, windowID: 7,
                                         appName: "Store",
                                         windowTitle: "Checkout")
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(200, 200),
                              gazeCommit: { (candidate, 0.9) })
@@ -264,7 +264,7 @@ final class GazeLaneTests: XCTestCase {
         for goal in ["right click", "double click"] {
             let driver = FakeDriver()
             driver.responses["list_apps"] = [.object(["apps": .array([])])]
-            let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+            let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                                  choose: { _, _ in nil }, ask: nil,
                                  granted: { true }, gaze: gaze(200, 100))
             let result = await loop.run(DriveTask(goal: goal), session: "t")
@@ -284,7 +284,7 @@ final class GazeLaneTests: XCTestCase {
                 windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                           x: 0, y: 0, w: 800, h: 600)])])
             driver.responses["list_windows"] = hasFreshWindow ? [windows, windows] : [windows]
-            let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+            let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                                  choose: { _, _ in nil }, ask: nil, granted: { true },
                                  gaze: gaze(300, 250),
                                  frontmostBundleID: { "com.apple.Notes" })
@@ -302,7 +302,7 @@ final class GazeLaneTests: XCTestCase {
         driver.responses["list_windows"] = [.object(["windows": .array([
             windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                       x: 0, y: 0, w: 800, h: 600)])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              frontmostBundleID: { "com.apple.Notes" })
         let result = await loop.run(DriveTask(goal: "scroll down"), session: "t")
@@ -325,7 +325,7 @@ final class GazeLaneTests: XCTestCase {
             .object(["windows": .array([
                 windowRow(id: 7, pid: 42, app: "Notes", title: "Notes",
                           x: 0, y: 0, w: 800, h: 600)])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(300, 250),
                              frontmostBundleID: { "com.apple.Notes" })
@@ -356,7 +356,7 @@ final class GazeLaneTests: XCTestCase {
                 role: "AXWindow", frame: CGRect(x: 100, y: 100, width: 800, height: 600), children: [
                     ScreenNode(role: "AXButton", title: "Save", frame: CGRect(x: 380, y: 330, width: 60, height: 30))]))
         }
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(400, 340)) // native screen points, inside the same physical button
         let result = await loop.run(DriveTask(goal: "what is this"), session: "t")
@@ -374,7 +374,7 @@ final class GazeLaneTests: XCTestCase {
         driver.responses["list_windows"] = [.object(["windows": .array([
             windowRow(id: 7, pid: 42, app: "Safari", title: "Example",
                       x: 100, y: 100, w: 100, h: 100)])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(900, 900))
         let result = await loop.run(DriveTask(goal: "what is this"), session: "t")
@@ -497,7 +497,7 @@ final class GazeLaneTests: XCTestCase {
                           x: 0, y: 0, w: 800, h: 600, z: 3),
                 windowRow(id: 8, pid: 9, app: "Safari", title: "Safari",
                           x: 100, y: 100, w: 800, h: 600, z: 9)])])]
-        let loop = DriveLoop(call: { t, a in try driver.call(t, a) },
+        let loop = DriveLoop.inert(call: { t, a in try driver.call(t, a) },
                              choose: { _, _ in nil }, ask: nil, granted: { true },
                              gaze: gaze(400, 400),
                              frontmostBundleID: { "com.apple.Notes" })
