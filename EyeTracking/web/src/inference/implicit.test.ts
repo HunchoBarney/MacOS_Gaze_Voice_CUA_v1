@@ -61,6 +61,12 @@ function makeCalibration() {
   return { calibration, write };
 }
 
+// The label-replay tests are CPU-bound simulations with no timers to fake.
+// Unloaded they take 0.2–0.4 s; under a loaded local-ci run (#569) the prior
+// test took 5.3 s and tripped vitest's 5 s default. 20 s keeps ~4x headroom
+// over that worst case without changing what they measure.
+const SIMULATION_TIMEOUT_MS = 20_000;
+
 const HELD_OUT: [number, number][] = [];
 for (let i = 0; i < 5; i += 1) {
   for (let j = 0; j < 5; j += 1) {
@@ -187,7 +193,7 @@ describe("invisible calibration", () => {
     expect(medianError(calibration, owner)).toBeLessThan(fromPrior);
     expect(medianError(calibration, owner)).toBeLessThan(0.04);
     expect(calibration.samples.length).toBeLessThanOrEqual(80);
-  });
+  }, SIMULATION_TIMEOUT_MS);
 
   it("keeps the drift monitor out while the map is still learning", async () => {
     const { calibration } = makeCalibration();
@@ -216,5 +222,5 @@ describe("invisible calibration", () => {
     console.info("synthetic held-out median by 15-label block", JSON.stringify(curve.map((e) => Number(e.toFixed(4)))));
     expect(curve[curve.length - 1]).toBeLessThan(curve[0]);
     expect(calibration.learnedError).not.toBeNull();
-  });
+  }, SIMULATION_TIMEOUT_MS);
 });
