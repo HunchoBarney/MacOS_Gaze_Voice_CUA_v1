@@ -12,10 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var windows: AppWindows!
     private let speechOutput = SpeechOutput()
     private lazy var controller = VoiceController(config: Config.shared, speaker: speechOutput)
+    private lazy var proactive = ProactiveService(speech: speechOutput)
     private let diagnostics = DiagnosticsReporter()
     private var agentRuntime: AgentRuntime?
     private let microphones = MicrophoneCatalog()
-    private let input = FnInputMonitor()
     private var subscriptions: Set<AnyCancellable> = []
     private var terminating = false
     private var sessionActive = true
@@ -37,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var eyesPause: NSMenuItem?
     private var eyesRecalibrate: NSMenuItem?
     private var pauseListening: NSMenuItem?
+    private var stopItem: NSMenuItem?
+    private lazy var escapeStop = EscapeStop(
+        isActive: { [weak self] in self?.controller.stoppable ?? false },
+        stop: { [weak self] in self?.controller.cancel() })
     private var statusSymbol = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -57,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Config and can block on a keychain prompt.
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jarvis")
-        windows = AppWindows(controller: controller, microphones: microphones, input: input)
+        windows = AppWindows(controller: controller, microphones: microphones)
         let menu = NSMenu()
         let settings = menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
@@ -67,6 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         agents.target = self
         pauseListening = menu.addItem(withTitle: "Pause Listening", action: #selector(togglePauseListening), keyEquivalent: "")
         pauseListening?.target = self
+        stopItem = menu.addItem(withTitle: "Stop", action: #selector(stopEverything), keyEquivalent: "")
+        stopItem?.target = self
         menu.addItem(.separator())
         // The host owns the one menu-bar icon — the tracker's own tray is
         // suppressed at spawn (--no-tray), so its controls live here.
@@ -94,7 +100,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshAskBadge()
         refreshStatusIcon()
         controller.objectWillChange.sink { [weak self] in
-            DispatchQueue.main.async { self?.refreshStatusIcon() }
+            DispatchQueue.main.async {
+                self?.refreshStatusIcon()
+                self?.escapeStop.refresh()
+            }
         }.store(in: &subscriptions)
 
         if let session = CGSessionCopyCurrentDictionary() as? [String: Any] {
@@ -102,41 +111,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             screenLocked = session["CGSSessionScreenIsLocked"] as? Bool ?? false
         }
 
-        input.canBegin = { [weak self] in self?.controller.canBegin ?? false }
-        input.operationActive = { [weak self] in self?.controller.operationActive ?? false }
-        input.onAction = { [weak self] action in
-            guard let self else { return }
-            switch action {
-            case .begin: self.controller.begin(inputHandlingMs: self.input.beginHandlingMs)
-            case .finish: self.controller.finish()
-            case .cancel: self.controller.cancel()
-            case .cancelCapture: self.controller.cancelCaptureAttempt()
-            case .none: break
-            }
-        }
-        input.onPhysicalFnChanged = { [weak self] down in self?.controller.physicalFnChanged(down) }
-        input.onInterruption = { [weak self] reason in self?.controller.interruptCapture(reason) }
-        input.onReleaseRecovery = { [weak self] observed, confirmed, latch in
-            self?.controller.recordRecoveredFnRelease(observed: observed, confirmed: confirmed, latch: latch)
-        }
-        input.dictationChordEnabled = controller.config.dictationHotkey
-        input.latchMode = controller.config.latchMode
         speechOutput.enabled = controller.config.ttsEnabled
-        input.onDictationBegin = { [weak self] in self?.controller.beginDictation() }
-        input.onDictationConvert = { [weak self] in self?.controller.dictate() }
-        input.onLatch = { [weak self] in self?.controller.latchHold() }
-        controller.config.$dictationHotkey.sink { [weak self] in self?.input.dictationChordEnabled = $0 }
-            .store(in: &subscriptions)
-        controller.config.$latchMode.sink { [weak self] in self?.input.latchMode = $0 }
-            .store(in: &subscriptions)
         controller.config.$ttsEnabled.sink { [weak self] in self?.speechOutput.enabled = $0 }
             .store(in: &subscriptions)
 
         // Telemetry taps — read-only subscriptions over streams the app
         // already publishes; they observe, never feed back.
         wireTelemetry()
-        // Composition seams: gaze-tap commit and the universal stop.
+        // Composition seam: the universal stop.
         wireLocalIntelligence()
+        wireProactivity()
 
         // Register with Jarvis's credential service on first launch, so the
         // first command doesn't wait on it and agents find a token.
@@ -179,12 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.config.$alwaysAllowComputerUse
             .sink { CuaPolicy.publishStateFile(standingGrant: $0) }
             .store(in: &subscriptions)
-        input.$ready.removeDuplicates().sink { [weak self] ready in
-            guard let self, self.canPrepareMicrophone else { return }
-            if ready || self.controller.listensWithoutFn { self.controller.prepareMicrophone() }
-            else { self.controller.suspendMicrophone("Fn input is unavailable.") }
-        }.store(in: &subscriptions)
-        input.start()
+        if canPrepareMicrophone { controller.prepareMicrophone() }
         controller.config.$microphoneUID.dropFirst().removeDuplicates().sink { [weak self] _ in
             guard let self, self.canPrepareMicrophone else { return }
             // @Published emits before storage changes; read the selection on the next main turn.
@@ -252,8 +231,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } else if !controller.missingPermissions.isEmpty {
             controller.showSetup("Jarvis needs a permission before it can help. Open Settings to fix it.")
-        } else if !input.ready {
-            controller.showSetup(input.message)
         }
     }
 
@@ -262,20 +239,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             controller.suspendMicrophone("Microphone paused while the session is inactive.", resumeHandsFreeOnRecovery: true)
             return
         }
-        input.refresh(); microphones.refresh()
-        if input.ready || controller.listensWithoutFn { controller.prepareMicrophone() }
+        microphones.refresh()
+        controller.prepareMicrophone()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        controller.refreshPermissions(); input.refresh(); microphones.refresh()
-        if canPrepareMicrophone, input.ready || controller.listensWithoutFn { controller.prepareMicrophone() }
+        controller.refreshPermissions(); microphones.refresh()
+        if canPrepareMicrophone { controller.prepareMicrophone() }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateLater }
         terminating = true
         permissionTimer?.invalidate()
-        input.stop()
         // Teardown is bounded: a wedged CoreAudio teardown, a stuck agent
         // daemon or a tracker that won't die must not hold the process —
         // and the instance lock, which only a process death releases —
@@ -326,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        input.stop(); microphones.stop()
+        microphones.stop()
         Task { await agentRuntime?.stopAll() }
     }
 
@@ -456,12 +432,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Telemetry
 
     /// Read-only subscriptions over the streams the app already publishes —
-    /// the latency ledger taps Fn edges, capture-state transitions, the
-    /// decision feed and the gaze event sink. Nothing in the voice/drive
+    /// the latency ledger taps capture-state transitions, the decision feed
+    /// and the gaze event sink. Nothing in the voice/drive
     /// lanes knows it exists, which is the point of wiring it here.
     private func wireTelemetry() {
-        LatencyLedger.shared.attach(controller: controller, input: input,
-                                    gaze: GazeService.shared)
+        LatencyLedger.shared.attach(controller: controller, gaze: GazeService.shared)
     }
 
     /// Writes recent app logs, crash and hang reports, and the latency
@@ -483,28 +458,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Composition-seam wiring.
     ///
-    ///   - `controller.gazeTapHandler` → `GazeService.commitTarget` +
-    ///     `cua.actuateCommitted`: a speechless Fn tap (sub-100ms of
-    ///     audio) commits the referent under the eyes instead of the
-    ///     silent dismiss. The voice lane fires it only for a tap that
-    ///     sent audio upstream; `config.tapToGazeClick` is read inside
-    ///     the handler so the Settings toggle needs no restart.
     ///   - `controller.cancelAllTasks` → `cua.cancelAllRunning()`: the
-    ///     universal stop — Escape settles every voice task, parked ask,
+    ///     universal stop — a cancel settles every voice task, parked ask,
     ///     and in-flight agent turn, not just the capture.
     ///   - Local capture/final admission belongs to RealtimeVoiceLane;
     ///     composition never wires a second transcript/action authority.
-    private func wireLocalIntelligence() {
-        controller.gazeTapHandler = { [weak self] in
-            guard !Task.isCancelled else { return false }
-            guard let self, await self.controller.config.tapToGazeClick
-            else { return false }
-            guard let (candidate, _) = await GazeService.shared.commitTarget()
-            else { return false }
-            guard !Task.isCancelled else { return false }
-            return await self.controller.cua.actuateCommitted(candidate)
+    /// Proactive alerts run only while `voice.live` is on. The glow count
+    /// shows beside the menu-bar icon until "what's up" reads it out.
+    private func wireProactivity() {
+        proactive.userTalking = { [weak self] in
+            guard let controller = self?.controller else { return false }
+            return controller.captureState != .idle || controller.conversationTurnOpen
         }
-        // Universal stop — Escape lands on every lane: running tasks,
+        proactive.jarvisSpeaking = { [weak self] in
+            guard let self else { return false }
+            return self.speechOutput.speaking || self.controller.handsFreeSpeaking
+        }
+        controller.cua.proactiveIntercept = { [weak self] in self?.proactive.intercept($0) }
+        controller.config.$voiceLive
+            .prepend(controller.config.voiceLive)
+            .removeDuplicates()
+            .sink { [weak self] on in on ? self?.proactive.start() : self?.proactive.stop() }
+            .store(in: &subscriptions)
+        proactive.engine.$glow
+            .map(\.count)
+            .removeDuplicates()
+            .sink { [weak self] count in
+                self?.statusItem.button?.imagePosition = .imageLeading
+                self?.statusItem.button?.title = count > 0 ? " \(count)" : ""
+                self?.statusItem.button?.setAccessibilityValue(count > 0 ? "\(count) updates" : nil)
+            }
+            .store(in: &subscriptions)
+    }
+
+    private func wireLocalIntelligence() {
+        // Universal stop — a cancel lands on every lane: running tasks,
         // parked asks (a cancel resolves their continuation like the
         // deadline does), and agent turns in flight.
         controller.cancelAllTasks = { [weak self] in
@@ -594,13 +582,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The menu-bar icon carries every resting state: listening, paused,
-    /// waiting for fn, or can't hear. The on-screen tab covers the rest.
+    /// waiting for the wake word, or can't hear. The on-screen tab covers the rest.
     private func refreshStatusIcon() {
         let (symbol, description): (String, String)
         if controller.missingPermissions.contains(.microphone) {
             (symbol, description) = ("mic.slash", "Jarvis can't hear you. Microphone access is off.")
-        } else if !controller.listensWithoutFn {
-            (symbol, description) = ("waveform", "Jarvis. Hold fn to talk.")
         } else if controller.handsFreeState == .standby {
             (symbol, description) = ("ear", "Jarvis is waiting for “Hey \(controller.config.assistantName)”")
         } else if controller.handsFreeListening || controller.handsFreeState == .preparing {
@@ -617,8 +603,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.toolTip = description
     }
 
+    /// The menu-bar emergency stop: the same universal cancel as Escape.
+    @objc private func stopEverything() { controller.cancel() }
+
     @objc private func togglePauseListening() {
-        if controller.listeningWithoutFn { controller.pauseHandsFree() } else { controller.resumeHandsFree() }
+        if controller.listeningHandsFree { controller.pauseHandsFree() } else { controller.resumeHandsFree() }
     }
 
     /// One snapshot read, then repaint — cancelled reads can't paint over
@@ -637,8 +626,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Polling stays cheap: one read on open, then a slow timer only
     /// while the menu is actually tracking — never a hot loop.
     func menuWillOpen(_ menu: NSMenu) {
-        pauseListening?.isHidden = !controller.listensWithoutFn
-        pauseListening?.title = controller.listeningWithoutFn ? "Pause Listening" : "Resume Listening"
+        stopItem?.isHidden = !controller.stoppable
+        pauseListening?.title = controller.listeningHandsFree ? "Pause Listening" : "Resume Listening"
         applyEyesState()
         refreshEyes()
         refreshAskBadge()
@@ -693,8 +682,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Locks the shared instance marker in the app support directory.
     /// Returns true when this process acquired the lock; false if another
     /// instance is running. Every path that can't even evaluate the lock
-    /// fails CLOSED — proceeding unlocked risks two instances
-    /// double-binding the Fn tap, so those exits are honest process
+    /// fails CLOSED — proceeding unlocked risks two instances sharing
+    /// one microphone and one Cua daemon, so those exits are honest process
     /// deaths, not returns.
     private func acquireInstanceLock() -> Bool {
         guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {

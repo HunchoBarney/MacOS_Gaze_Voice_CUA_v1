@@ -28,9 +28,18 @@ final class ProactiveSourceRulesTests: XCTestCase {
         XCTAssertEqual(alerts.count, 1)
         let alert = try XCTUnwrap(alerts.first)
         XCTAssertEqual(alert.category, .meetingNow)
-        XCTAssertEqual(alert.spoken, "Standup starts in 2 minutes. Want me to open the meeting link?")
+        XCTAssertTrue(alert.spoken.hasPrefix("Standup starts at 8:02"), alert.spoken)
+        XCTAssertTrue(alert.spoken.hasSuffix("M. Want me to open the meeting link?"), alert.spoken)
         XCTAssertEqual(alert.action, .openURL(link))
-        XCTAssertEqual(alert.expires, now.addingTimeInterval(420))
+        XCTAssertEqual(alert.expires, now.addingTimeInterval(240))
+    }
+
+    func testAMeetingHeadlineStaysTrueWhileTheAlertIsHeld() throws {
+        let alert = try XCTUnwrap(CalendarRules.alerts([event("a", "Standup", in: 1.5)], now: now, calendar: calendar).first)
+        XCTAssertFalse(alert.headline.contains("minute"), "a countdown goes stale while the engine holds or bundles it")
+        XCTAssertTrue(alert.headline.hasPrefix("Standup starts at 8:01"), alert.headline)
+        let soon = try XCTUnwrap(CalendarRules.alerts([event("b", "Sync", in: 0.75)], now: now, calendar: calendar).first)
+        XCTAssertEqual(soon.headline, "Sync starts now")
     }
 
     func testAllDayDeclinedAndPastMeetingsAreSkipped() {
@@ -183,6 +192,14 @@ final class ProactiveSourceRulesTests: XCTestCase {
         XCTAssertEqual(alerts[1].action, .read("Mom says: Call me ASAP"))
         XCTAssertEqual(alerts[1].sender, "Mom")
         XCTAssertNil(alerts[4].offer)
+    }
+
+    func testTwoMessagesWithTheSameOpeningAreBothKept() {
+        let opening = String(repeating: "Running late, sorry about that, ", count: 3)
+        let banners = [BannerSnapshot(app: "Messages", title: "Mom", body: opening + "see you at 6"),
+                       BannerSnapshot(app: "Messages", title: "Mom", body: opening + "actually make it 7")]
+        let alerts = BannerRules.alerts(banners, important: ["Mom"], watches: [], now: now)
+        XCTAssertEqual(Set(alerts.map(\.key)).count, 2)
     }
 
     func testBannersAreReadFromTheNotificationCenterTree() {

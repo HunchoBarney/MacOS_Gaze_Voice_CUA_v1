@@ -1,5 +1,15 @@
 // swift-tools-version:5.9
+import Foundation
 import PackageDescription
+
+// GPT-Live's WebRTC transport links LiveKit's build of libwebrtc once
+// ThirdParty/WebRTC/fetch.py has put its macOS slice in build/vendor/WebRTC
+// (`make test` and `make release` run it). Without it the app builds
+// without that transport, so a focused `swift test` never needs the download.
+// SwiftPM caches this manifest's result regardless of the file, so the make
+// targets that fetch it build with --manifest-cache none.
+let webRTC = "build/vendor/WebRTC/LiveKitWebRTC.xcframework"
+let hasWebRTC = FileManager.default.fileExists(atPath: Context.packageDirectory + "/" + webRTC)
 
 let package = Package(
     name: "Jarvis",
@@ -14,7 +24,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Jarvis",
-            dependencies: ["JarvisCore", .product(name: "GRDB", package: "GRDB.swift")],
+            dependencies: ["JarvisCore", .product(name: "GRDB", package: "GRDB.swift")] + (hasWebRTC ? ["LiveKitWebRTC"] : []),
             path: "Sources/Jarvis"
         ),
         .testTarget(
@@ -27,5 +37,5 @@ let package = Package(
             dependencies: ["Jarvis", "JarvisCore"],
             path: "Tests/JarvisAppTests"
         ),
-    ]
+    ] + (hasWebRTC ? [.binaryTarget(name: "LiveKitWebRTC", path: webRTC)] : [])
 )

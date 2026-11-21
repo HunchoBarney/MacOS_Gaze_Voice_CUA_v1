@@ -53,7 +53,7 @@ Variables (defaults in [src/config.ts](src/config.ts)):
 | --- | --- | --- |
 | `PAUSED` | `0` | `1` refuses every `/v1` request |
 | `INSTALL_DAILY_CENTS` | 100 | Estimated spend per install per UTC day ($1) |
-| `GLOBAL_DAILY_CENTS` | 2000 | Estimated spend across all installs per day ($20) |
+| `GLOBAL_DAILY_CENTS` | 500 | Estimated spend across all installs per day ($5) |
 | `REALTIME_PER_MINUTE` / `LIVE_PER_MINUTE` / `RESPONSES_PER_MINUTE` / `JEV_PER_MINUTE` | 6 / 6 / 20 / 120 | Requests per install per minute |
 | `REGISTRATIONS_PER_IP_PER_DAY` / `REGISTRATIONS_PER_DAY` | 5 / 500 | New installs |
 | `REALTIME_SESSION_CENTS` | 5 | Charged per Realtime secret (the socket goes straight to OpenAI, so this is an estimate) |

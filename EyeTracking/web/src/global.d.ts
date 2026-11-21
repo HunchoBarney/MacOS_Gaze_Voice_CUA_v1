@@ -254,6 +254,11 @@ export type BackendMessage =
       type: "calibration";
       status: string;
       count?: number;
+      // status "pursuit_sampled": which run the count belongs to.
+      mode?: "capture" | "verify";
+      // status "loaded": false when no verify run ever checked the map (it was
+      // only learned in the background), so first use still invites a run.
+      verified?: boolean;
       path?: string;
       message?: string;
       verdict?: VerifyVerdict;
