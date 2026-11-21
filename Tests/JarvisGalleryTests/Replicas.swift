@@ -24,6 +24,7 @@ struct IndicatorFixture {
     var problem = ""
     var detail = ""
     var canOpenSettings = false
+    var notice = ""
 }
 
 struct IndicatorReplica: View {
@@ -44,6 +45,8 @@ struct IndicatorReplica: View {
             return "Which one?"
         case .problem:
             return "Something went wrong"
+        case .notice:
+            return fixture.notice
         case .hidden:
             return ""
         }
@@ -70,14 +73,17 @@ struct IndicatorReplica: View {
                 Image(systemName: "questionmark.circle").foregroundStyle(Color(red: 0.73, green: 0.61, blue: 1))
             case .problem:
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.orange)
+            case .notice:
+                Image(systemName: "info.circle").foregroundStyle(.white.opacity(0.75))
             case .hidden:
                 EmptyView()
             }
             Text(line)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white.opacity(fixture.partialLive ? 0.75 : 1))
-                .lineLimit(1)
-                .truncationMode(.head)
+                .lineLimit(phase == .notice ? 3 : 1)
+                .truncationMode(phase == .notice ? .tail : .head)
+                .frame(width: phase == .notice ? 420 : nil, alignment: .leading)
                 .frame(maxWidth: 440, alignment: .leading)
             if fixture.gazeTracking {
                 Image(systemName: "eye").font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
@@ -106,6 +112,7 @@ struct IndicatorReplica: View {
             }
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, phase == .notice ? 8 : 0)
         .frame(minWidth: 150, minHeight: 34)
         .background(Color.black, in: UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14))
     }

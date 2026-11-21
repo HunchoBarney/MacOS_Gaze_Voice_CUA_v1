@@ -80,6 +80,21 @@ final class VoiceLiveStandbyTests: XCTestCase {
         XCTAssertEqual(controller.handsFreeState, .standby)
     }
 
+    func testALiveNoticeShowsOnTheTabWhenNothingElseDoesThenClears() async throws {
+        let config = Config(defaults: UserDefaults(suiteName: "voice-live-notice-\(UUID().uuidString)")!,
+                            keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.voiceLive = true
+        let controller = VoiceController(config: config, speech: StubCapture(), authorize: { true },
+                                         timings: VoiceTimings(), cuaRuntime: testCoordinator(config),
+                                         otherAppUsesMicrophone: { false })
+        addTeardownBlock { await controller.shutdown() }
+        XCTAssertEqual(IndicatorPhase.current(controller), .hidden)
+        controller.showLiveNotice("You've used 82% of this month's Live voice. It renews on December 1.", for: 0.1)
+        XCTAssertEqual(IndicatorPhase.current(controller), .notice)
+        try await waitUntil { controller.liveNotice == nil }
+        XCTAssertEqual(IndicatorPhase.current(controller), .hidden)
+    }
+
     private func testCoordinator(_ config: Config) -> VoiceTaskCoordinator {
         VoiceTaskCoordinator(config: config, jevRoute: { nil },
             gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })))

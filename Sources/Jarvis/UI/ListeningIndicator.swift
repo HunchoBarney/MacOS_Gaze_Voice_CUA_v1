@@ -3,9 +3,11 @@ import SwiftUI
 /// What the on-screen indicator shows. It drops from the menu bar only
 /// while you're talking, while Jarvis is working, when it needs an answer,
 /// or when something went wrong that you have to read. Every other state
-/// lives in the menu-bar icon and in what Jarvis says.
+/// lives in the menu-bar icon and in what Jarvis says. Under `voice.live`,
+/// a notice (the Live voice warning, or a basic-voice reply that isn't
+/// spoken) shows for a few seconds when nothing else does.
 enum IndicatorPhase: Equatable {
-    case hidden, hearing, working, asking, problem
+    case hidden, hearing, working, asking, problem, notice
 
     static func resolve(capture: VoiceController.CaptureState,
                         status: VoiceController.Status,
@@ -38,11 +40,12 @@ enum IndicatorPhase: Equatable {
         case .thinking: return .working
         case .hidden: break
         }
-        return resolve(capture: controller.captureState, status: controller.status,
-                       conversationTurnOpen: controller.conversationTurnOpen,
-                       activeWork: controller.cuaTasks.contains(where: \.active),
-                       pendingAsks: !controller.pendingTaskApprovals.isEmpty
-                           || !controller.pendingQuestions.isEmpty)
+        let phase = resolve(capture: controller.captureState, status: controller.status,
+                            conversationTurnOpen: controller.conversationTurnOpen,
+                            activeWork: controller.cuaTasks.contains(where: \.active),
+                            pendingAsks: !controller.pendingTaskApprovals.isEmpty
+                                || !controller.pendingQuestions.isEmpty)
+        return phase == .hidden && controller.liveNotice != nil ? .notice : phase
     }
 }
 
@@ -94,6 +97,8 @@ struct ListeningIndicatorView: View {
             return controller.status == .reviewTranscript ? "Is this right?" : "Which one?"
         case .problem:
             return "Something went wrong"
+        case .notice:
+            return controller.liveNotice ?? ""
         case .hidden:
             return ""
         }
@@ -120,14 +125,17 @@ struct ListeningIndicatorView: View {
                 Image(systemName: "questionmark.circle").foregroundStyle(Color(red: 0.73, green: 0.61, blue: 1))
             case .problem:
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.orange)
+            case .notice:
+                Image(systemName: "info.circle").foregroundStyle(.white.opacity(0.75))
             case .hidden:
                 EmptyView()
             }
             Text(line)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white.opacity(controller.partialLive ? 0.75 : 1))
-                .lineLimit(1)
-                .truncationMode(.head)
+                .lineLimit(phase == .notice ? 3 : 1)
+                .truncationMode(phase == .notice ? .tail : .head)
+                .frame(width: phase == .notice ? 420 : nil, alignment: .leading)
                 .frame(maxWidth: 440, alignment: .leading)
             if controller.config.gazeTracking {
                 Image(systemName: "eye").font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
@@ -147,6 +155,7 @@ struct ListeningIndicatorView: View {
             }
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, phase == .notice ? 8 : 0)
         .frame(minWidth: 150, minHeight: 34)
         .background(Color.black, in: UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14))
         .accessibilityElement(children: guideStep == nil ? .combine : .contain)
