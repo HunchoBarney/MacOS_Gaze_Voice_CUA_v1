@@ -3451,20 +3451,33 @@ export class Calibration {
   // Median error of the refit procedure on labels each fold never saw. Four
   // folds keep the cost to four fits per refit; a fold whose training share
   // can't be fitted contributes nothing, and no scored label is Infinity.
+  // Folds split by target, not by index: a point run labels several frames
+  // at each target, and a sibling frame left in training teaches the fit
+  // that point's own miss, which made the score in-sample again.
   heldOutError(pool: Array<[GazeFeature, [number, number]]>): number {
-    const folds = Math.min(4, pool.length);
+    const groups = new Map<string, number>();
+    const foldOf = pool.map(([, target]) => {
+      const key = `${target[0]},${target[1]}`;
+      if (!groups.has(key)) {
+        groups.set(key, groups.size);
+      }
+      return groups.get(key) as number;
+    });
+    const folds = Math.min(4, groups.size);
     const errors: number[] = [];
     for (let fold = 0; fold < folds; fold += 1) {
       const fit = this.fitOnce(
-        pool.filter((_, i) => i % folds !== fold),
+        pool.filter((_, i) => foldOf[i] % folds !== fold),
         IMPLICIT_FEATURE_MAP_MIN_SAMPLES
       );
       if (typeof fit === "string") {
         continue;
       }
-      for (let i = fold; i < pool.length; i += folds) {
-        errors.push(pointError(this.pendingEstimate(fit, pool[i][0]), pool[i][1]));
-      }
+      pool.forEach(([feature, target], i) => {
+        if (foldOf[i] % folds === fold) {
+          errors.push(pointError(this.pendingEstimate(fit, feature), target));
+        }
+      });
     }
     return medianOf(errors.filter(Number.isFinite)) ?? Infinity;
   }

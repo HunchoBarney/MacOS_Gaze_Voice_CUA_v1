@@ -191,6 +191,29 @@ describe("invisible calibration", () => {
     expect(heldOutNoise).toBeGreaterThan(calibration.heldOutError(clean) * 2);
   }, SIMULATION_TIMEOUT_MS);
 
+  it("keeps every frame of a calibration point in one fold", () => {
+    // A point run labels ~6 frames per target. If those frames sit in both
+    // the training and the scored fold, the RBF learns each point's own miss
+    // from its siblings and the "held-out" error is really in-sample.
+    const { calibration } = makeCalibration();
+    const next = rng(9);
+    const pool: Array<[GazeFeature, [number, number]]> = [];
+    const misses: number[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      for (let j = 0; j < 4; j += 1) {
+        const target: [number, number] = [0.1 + 0.8 * (i / 3), 0.1 + 0.8 * (j / 3)];
+        const miss: [number, number] = [(next() - 0.5) * 0.2, (next() - 0.5) * 0.2];
+        misses.push(Math.hypot(miss[0], miss[1]));
+        for (let frame = 0; frame < 6; frame += 1) {
+          const eyes: [number, number] = [target[0] + miss[0] + (next() - 0.5) * 0.004, target[1] + miss[1] + (next() - 0.5) * 0.004];
+          pool.push([owner(eyes), target]);
+        }
+      }
+    }
+    const typicalMiss = misses.sort((a, b) => a - b)[Math.floor(misses.length / 2)];
+    expect(calibration.heldOutError(pool)).toBeGreaterThan(typicalMiss * 0.5);
+  }, SIMULATION_TIMEOUT_MS);
+
   it("keeps the live map when a refit would only memorise its pool", async () => {
     const { calibration } = makeCalibration();
     await calibration.load();
