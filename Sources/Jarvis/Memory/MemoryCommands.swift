@@ -13,9 +13,11 @@ enum MemoryIntent: Equatable {
     static func parse(_ utterance: String) -> MemoryIntent? {
         var text = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
         while let last = text.last, ".?!,".contains(last) { text.removeLast() }
-        let lead = ["hey jarvis, ", "hey jarvis ", "please ", "can you ", "could you ", "would you ", "jarvis, ", "jarvis "]
-        while let polite = lead.first(where: { text.lowercased().hasPrefix($0) }) {
-            text = String(text.dropFirst(polite.count))
+        let lead = ["hey, jarvis", "hey jarvis", "please", "can you", "could you", "would you", "jarvis"]
+        while let polite = lead.first(where: {
+            text.lowercased().hasPrefix($0) && text.dropFirst($0.count).first.map { " ,.!".contains($0) } == true
+        }) {
+            text = String(text.dropFirst(polite.count)).trimmingCharacters(in: CharacterSet(charactersIn: " ,.!"))
         }
         let lower = text.lowercased()
         if ["forget that", "forget it", "forget this", "forget what i just said",

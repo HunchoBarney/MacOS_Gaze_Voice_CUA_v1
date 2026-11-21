@@ -185,6 +185,14 @@ final class MemoryCommandsTests: MemoryTestCase {
         }
     }
 
+    @MainActor func testStripsTheWakePhraseHoweverTheTranscriptPunctuatesIt() {
+        for heard in ["Hey Jarvis, who's Dana?", "Hey, Jarvis, who's Dana?", "Hey Jarvis. Who's Dana?",
+                      "hey jarvis who's Dana", "Jarvis, please, who's Dana?"] {
+            XCTAssertEqual(MemoryIntent.parse(heard), .recall("Dana", explicit: false), heard)
+        }
+        XCTAssertNil(MemoryIntent.parse("Jarvisville, who's Dana?"))
+    }
+
     @MainActor func testReadsMemoriesBackInSecondPerson() {
         XCTAssertEqual(MemoryCommands.spoken("Dana is my manager"), "Dana is your manager.")
         XCTAssertEqual(MemoryCommands.spoken("I am allergic to peanuts"), "You are allergic to peanuts.")
