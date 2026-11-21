@@ -24,6 +24,10 @@ final class LiveInputRelay: @unchecked Sendable {
         var skipped: Double
         /// Whether a capture was abandoned because it fell too far behind.
         var overflowed: Bool
+        /// Seconds of speech written since the capture began.
+        var spoken: Double = 0
+        /// Seconds of quiet written since the last speech.
+        var quiet: Double = 0
     }
 
     let sampleRate: Double
@@ -42,6 +46,8 @@ final class LiveInputRelay: @unchecked Sendable {
         var sending = false
         var skipped = 0
         var overflowed = false
+        var spoken = 0
+        var quiet = 0
         var floor: Float = 0.001
     }
 
@@ -59,8 +65,15 @@ final class LiveInputRelay: @unchecked Sendable {
 
     /// Microphone samples whose last one was heard at `end` (systemUptime).
     func write(_ samples: UnsafeBufferPointer<Float>, endingAt end: TimeInterval) {
+        let level = Self.rms(samples)
         lock.withLock { state in
             if state.capturing {
+                if level >= Self.speechThreshold(state.floor) {
+                    state.spoken += samples.count
+                    state.quiet = 0
+                } else {
+                    state.quiet += samples.count
+                }
                 state.queue.append(contentsOf: samples)
                 if Double(state.queue.count - state.head) / sampleRate > maxBehind {
                     state.overflowed = true
@@ -71,7 +84,6 @@ final class LiveInputRelay: @unchecked Sendable {
             state.ring.append(contentsOf: samples)
             if state.ring.count > ringLength { state.ring.removeFirst(state.ring.count - ringLength) }
             state.ringEnd = end
-            let level = Self.rms(samples)
             state.floor = level < state.floor ? level : state.floor * 1.002 + 0.000_001
         }
     }
@@ -87,12 +99,27 @@ final class LiveInputRelay: @unchecked Sendable {
             state.sending = false
             state.skipped = 0
             state.overflowed = false
+            state.spoken = 0
+            state.quiet = 0
         }
     }
 
     /// The session started: play the capture into its input from now on.
     func startSending() {
         lock.withLock { $0.sending = true }
+    }
+
+    /// Basic voice (KAR-75 L10): stops capturing and returns the capture,
+    /// for transcription on the Mac instead of a session.
+    func take() -> [Float] {
+        lock.withLock { state in
+            let captured = Array(state.queue[state.head...])
+            state.capturing = false
+            state.sending = false
+            state.queue = []
+            state.head = 0
+            return captured
+        }
     }
 
     /// Stops capturing and sending; the input track hears silence again.
@@ -108,7 +135,8 @@ final class LiveInputRelay: @unchecked Sendable {
     var stats: Stats {
         lock.withLock { state in
             Stats(behind: Double(state.queue.count - state.head) / sampleRate,
-                  skipped: Double(state.skipped) / sampleRate, overflowed: state.overflowed)
+                  skipped: Double(state.skipped) / sampleRate, overflowed: state.overflowed,
+                  spoken: Double(state.spoken) / sampleRate, quiet: Double(state.quiet) / sampleRate)
         }
     }
 
@@ -121,7 +149,7 @@ final class LiveInputRelay: @unchecked Sendable {
         lock.withLock { state in
             var written = 0
             if state.sending {
-                let threshold = max(state.floor * 3, 0.003)
+                let threshold = Self.speechThreshold(state.floor)
                 while state.queue.count - state.head > out.count + frame {
                     let chunk = state.queue[state.head..<(state.head + frame)]
                     guard Self.rms(chunk) < threshold else { break }
@@ -142,6 +170,8 @@ final class LiveInputRelay: @unchecked Sendable {
             return written > 0
         }
     }
+
+    private static func speechThreshold(_ floor: Float) -> Float { max(floor * 3, 0.003) }
 
     private static func rms<C: Collection>(_ samples: C) -> Float where C.Element == Float {
         guard !samples.isEmpty else { return 0 }
