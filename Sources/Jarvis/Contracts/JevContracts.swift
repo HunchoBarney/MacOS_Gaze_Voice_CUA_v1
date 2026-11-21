@@ -281,7 +281,7 @@ public protocol SpeechSynthesizing: Sendable {
     func stop()
 }
 
-/// Dictation delivery seam — Fn+Ctrl path delivers literal text to the
+/// Dictation delivery seam — the dictation path delivers literal text to the
 /// focused field; never passes through the planner.
 public protocol DictationDelivering: Sendable {
     func deliver(_ text: String) async throws

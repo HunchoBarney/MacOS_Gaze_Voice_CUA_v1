@@ -17,7 +17,7 @@ enum IndicatorPhase: Equatable {
         default: break
         }
         switch capture {
-        case .starting, .listening, .finishing, .awaitingRelease: return .hearing
+        case .starting, .listening, .finishing: return .hearing
         case .idle, .testingMicrophone, .stopping: break
         }
         if case .error = status { return .problem }

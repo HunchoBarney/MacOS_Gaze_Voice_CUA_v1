@@ -55,14 +55,14 @@ final class VoiceController: ObservableObject {
     /// Weak so test instances never pin each other — last writer wins.
     static weak var shared: VoiceController?
     enum Status: Equatable {
-        case idle, starting, listening, finishing, awaitingRelease, reviewTranscript
+        case idle, starting, listening, finishing, reviewTranscript
         case thinking, awaitingConfirm, executing, stopping, testingMicrophone, done, replied, stopped
         /// A pending clarification: an ordinary dialogue state carrying the
         /// question prompt, never an Open-settings style error.
         case awaitingAnswer(String)
         case error(String)
     }
-    enum CaptureState { case idle, starting, listening, finishing, awaitingRelease, testingMicrophone, stopping }
+    enum CaptureState { case idle, starting, listening, finishing, testingMicrophone, stopping }
     @Published private(set) var captureState: CaptureState = .idle
     @Published private var presentation: Status = .idle
     // Task progress lives in the coordinator. It never replaces an active capture's state.
@@ -73,7 +73,6 @@ final class VoiceController: ObservableObject {
             case .starting: return .starting
             case .listening: return .listening
             case .finishing: return .finishing
-            case .awaitingRelease: return .awaitingRelease
             case .testingMicrophone: return .testingMicrophone
             case .stopping: return .stopping
             }
@@ -83,7 +82,6 @@ final class VoiceController: ObservableObject {
             case .starting: captureState = .starting
             case .listening: captureState = .listening
             case .finishing: captureState = .finishing
-            case .awaitingRelease: captureState = .awaitingRelease
             case .testingMicrophone: captureState = .testingMicrophone
             case .stopping: captureState = .stopping
             default: presentation = newValue; captureState = .idle
@@ -110,12 +108,10 @@ final class VoiceController: ObservableObject {
     @Published private(set) var conversationTurnOpen = false
     var handsFreeEnabled: Bool { config.handsFreeEnabled }
     var handsFreeListening: Bool { handsFreeState == .listening }
-    /// Standby is the chosen mode and the build has a wake-word engine.
-    var standbyChosen: Bool { ListeningPolicy.current.effective(config.listeningMode) == .standby }
-    /// The microphone stays open between turns: hands-free or Standby.
-    var listensWithoutFn: Bool { config.handsFreeEnabled || standbyChosen }
-    /// Listening without Fn right now, for a pause or resume control.
-    var listeningWithoutFn: Bool { handsFreeListening || handsFreeState == .standby || wakeSession != nil }
+    /// Standby is the chosen mode.
+    var standbyChosen: Bool { config.listeningMode == .standby }
+    /// Hands-free or Standby is listening right now, for a pause or resume control.
+    var listeningHandsFree: Bool { handsFreeListening || handsFreeState == .standby || wakeSession != nil }
     var handsFreeLabel: String {
         switch handsFreeState {
         case .off: return "Not listening"
@@ -143,7 +139,7 @@ final class VoiceController: ObservableObject {
         let id = sessionID?.uuidString ?? "none"
         let elapsed = max(0, ProcessInfo.processInfo.systemUptime - beganAt) * 1000
         let words = transcript.split(whereSeparator: \.isWhitespace).count
-        Self.voiceLog.notice("capture=\(id, privacy: .private) event=\(event, privacy: .public) held=\(self.held) words=\(words) elapsed_ms=\(elapsed) status=\(self.status.title, privacy: .public)")
+        Self.voiceLog.notice("capture=\(id, privacy: .private) event=\(event, privacy: .public) latched=\(self.latched) words=\(words) elapsed_ms=\(elapsed) status=\(self.status.title, privacy: .public)")
     }
 
     let config: Config
@@ -252,7 +248,7 @@ final class VoiceController: ObservableObject {
         return true
     }
 
-    /// Escape/current-interaction cancel stops only this session's active
+    /// The current-interaction cancel stops only this session's active
     /// work — never the diagnostically selected task and never unrelated
     /// background work.
     private func cancelInteractionWork() {
@@ -290,16 +286,8 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// Instant gaze click seam — the coordinator lane wires
-    /// `GazeService.commitTarget` + `actuateCommitted` here; a speechless
-    /// Fn tap fires it instead of the silent dismiss. nil = today's
-    /// silent dismiss.
-    var gazeTapHandler: (@Sendable () async -> Bool)? {
-        get { (speech as? RealtimeVoiceLane)?.gazeTapHandler }
-        set { (speech as? RealtimeVoiceLane)?.gazeTapHandler = newValue }
-    }
     /// Universal stop seam — wired by composition to the coordinator's
-    /// `cancelAllRunning()` once it exists; Escape/stop calls it
+    /// `cancelAllRunning()` once it exists; a cancel calls it
     /// fire-and-forget. nil = interaction-scoped cancel only.
     var cancelAllTasks: (() async -> Void)?
 
@@ -481,7 +469,6 @@ final class VoiceController: ObservableObject {
     /// fake in tests.
     private let otherAppUsesMicrophone: @Sendable () -> Bool
     private var manualOverride = false
-    private var physicalFnDown = false
     private var manualResumeWanted = false
     private var repeatingCapture: UUID?
     private var repeatingWork: UUID?
@@ -500,18 +487,12 @@ final class VoiceController: ObservableObject {
     private var lastExternalApp: String?
     private var commandFrontmostApp: String?
     private var sessionID: UUID?
-    private var held = false
     private var dictating = false
-    private var latchRelease = false
-    /// A latch tap landed while startup was still resolving: `held` is already
-    /// released but the capture continues, so the startup guards must treat
-    /// the hold as logically alive instead of wedging at `.starting`.
+    /// A capture is open with no turn boundary of its own: the startup
+    /// guards treat it as alive until `finish()` or `cancel()` closes it.
     private var latched = false
-    /// A dictation capture started by voice ("start dictating") has no
-    /// finger on Fn — it latches open like a tap-latch and the next Fn
-    /// press means stop. The input state can't see the voice latch (only
-    /// a physical latch arms its own), so `canBegin` lets the tap through
-    /// and `begin()` converts it to finish().
+    /// A dictation capture started by voice ("start dictating"). It stays
+    /// open until "stop dictating", a cancel, or the recording limit.
     private var voiceLatched = false
     private var automatic = true
     private var microphoneTask: Task<Void, Never>?
@@ -584,11 +565,8 @@ final class VoiceController: ObservableObject {
     var isListening: Bool { status == .listening }
     var canBegin: Bool {
         guard microphoneEnabled else { return false }
-        if handsFreeListening, !held, startupTask == nil, cleanupTask == nil { return true }
-        // A voice-latched dictation means stop-on-tap — let the press
-        // through so begin() can convert it to finish().
-        if voiceLatched { return true }
-        if !held, cleanupTask == nil, startupTask == nil,
+        if handsFreeListening, startupTask == nil, cleanupTask == nil { return true }
+        if cleanupTask == nil, startupTask == nil,
            [.executing, .thinking].contains(status) { return true }
         if isMicrophoneTest && status != .stopping { return true }
         switch status {
@@ -599,8 +577,8 @@ final class VoiceController: ObservableObject {
     /// Same gates as `canBegin` minus microphone availability — a typed
     /// command never touches the mic.
     var canSubmitCommand: Bool {
-        if handsFreeListening, !held, startupTask == nil, cleanupTask == nil { return true }
-        if !held, cleanupTask == nil, startupTask == nil,
+        if handsFreeListening, startupTask == nil, cleanupTask == nil { return true }
+        if cleanupTask == nil, startupTask == nil,
            [.executing, .thinking].contains(status) { return true }
         if isMicrophoneTest && status != .stopping { return true }
         switch status {
@@ -609,13 +587,10 @@ final class VoiceController: ObservableObject {
         }
     }
     var operationActive: Bool {
-        // Gates the Escape consume — the key is ours only while a real
-        // interaction sits on the card: a live capture OR committed turn
-        // (cancelling an in-flight turn is a valid Escape meaning), a
-        // review/confirm prompt, or a parked question/approval/consent ask.
-        // Bare background work (executing/thinking with no live turn and
-        // nothing asked) must not eat the frontmost app's Escape — the
-        // user's key press belongs to them.
+        // True while a real interaction sits on the card: a live capture
+        // or committed turn, a review/confirm prompt, or a parked
+        // question/approval/consent ask. Bare background work
+        // (executing/thinking with no live turn and nothing asked) isn't.
         if captureActive { return true }
         switch status {
         case .awaitingConfirm, .reviewTranscript, .awaitingAnswer: return true
@@ -623,21 +598,23 @@ final class VoiceController: ObservableObject {
         }
         return interactionQuestion != nil || pendingTaskApproval != nil || hasActiveChoiceAsk
     }
+    /// Escape and the menu bar's Stop act only while Jarvis is busy: an
+    /// interaction on the card, a running task, or Jarvis speaking.
+    var stoppable: Bool { operationActive || cua.tasks.contains(where: \.active) || handsFreeSpeaking }
     /// A parked `.choice` ask anywhere in the dialogue — a numbered ask
-    /// needs Escape to reach it the same way a question/confirm does.
+    /// counts as an operation the same way a question/confirm does.
     /// Delegates to the coordinator's `hasActiveChoiceAsk` (parked-ask
     /// store: `work.ask` `.choice` + `awaitingAnswer`, i.e. an armed
-    /// choice radial — the missing arm of this Escape gate).
+    /// choice radial).
     private var hasActiveChoiceAsk: Bool { cua.hasActiveChoiceAsk }
-    /// Dwell-suppression + Escape seam: true while a capture turn is live —
-    /// Fn held through its commit, or a typed turn still in flight. Status
+    /// Dwell-suppression seam: true while a capture turn is live —
+    /// a capture through its commit, or a typed turn still in flight. Status
     /// alone can't see a committed turn: after .finishing the card shows
     /// .executing while the lane's turnID stays bound until .turnEnded,
-    /// .final, or cancel. The lane's bound turn is the authority there —
-    /// it's also what lets Escape reach a bare .executing turn.
+    /// .final, or cancel. The lane's bound turn is the authority there.
     var captureActive: Bool {
         switch status {
-        case .starting, .listening, .finishing, .awaitingRelease, .testingMicrophone:
+        case .starting, .listening, .finishing, .testingMicrophone:
             return true
         default:
             return (speech as? RealtimeVoiceLane)?.turnID != nil
@@ -965,7 +942,7 @@ final class VoiceController: ObservableObject {
         config.handsFreePaused = true
         microphoneTask?.cancel()
         stopHandsFree(state: .paused)
-        if !held, deliveryOwner == nil {
+        if deliveryOwner == nil {
             Task { [weak self] in await self?.speech.suspend() }
         }
     }
@@ -986,7 +963,7 @@ final class VoiceController: ObservableObject {
 
     private func startHandsFree(since: TimeInterval? = nil) {
         guard config.handsFreeEnabled || wakeSession != nil, !handsFreePaused, !manualOverride, microphoneEnabled,
-              !held, !physicalFnDown, !isMicrophoneTest, !wakeTestRunning,
+              !isMicrophoneTest, !wakeTestRunning,
               handsFreeTask == nil, let lane = speech as? RealtimeVoiceLane,
               lane.conversation.id == nil else { return }
         // Without its key Jarvis can't hear anything: say so on the card,
@@ -1015,8 +992,8 @@ final class VoiceController: ObservableObject {
     }
 
     /// Standby listens for the wake word on the prepared microphone. It
-    /// stands down for Fn, a pause, a session, and while another app is
-    /// using the microphone.
+    /// stands down for a manual capture, a pause, a session, and while
+    /// another app is using the microphone.
     func armStandby() {
         watchOtherMicrophoneUse()
         if config.voiceLive {
@@ -1035,9 +1012,12 @@ final class VoiceController: ObservableObject {
             return
         }
         guard standbyChosen, !standbyArmed, wakeSession == nil, !handsFreePaused, !manualOverride,
-              microphoneEnabled, !held, !physicalFnDown, !isMicrophoneTest, !wakeTestRunning, !otherAppListening,
-              let lane = speech as? RealtimeVoiceLane, lane.conversation.id == nil,
-              let detector = ListeningPolicy.wakeWord else { return }
+              microphoneEnabled, !isMicrophoneTest, !wakeTestRunning, !otherAppListening,
+              let lane = speech as? RealtimeVoiceLane, lane.conversation.id == nil else { return }
+        guard let detector = ListeningPolicy.wakeWord else {
+            handsFreeState = .unavailable("The wake word isn't available in this build. Choose Hands-free in Settings.")
+            return
+        }
         guard !config.openAIAPIKey.isEmpty || config.hostedCredentialsConfigured else {
             handsFreeState = .unavailable(OutcomeWording.missingVoiceKey)
             return
@@ -1178,7 +1158,6 @@ final class VoiceController: ObservableObject {
     }
 
     private func overrideConversationForManualInput() {
-        guard listensWithoutFn else { return }
         if !manualOverride {
             if case .unavailable = handsFreeState { manualResumeWanted = false }
             else { manualResumeWanted = !handsFreePaused }
@@ -1188,20 +1167,15 @@ final class VoiceController: ObservableObject {
     }
 
     private func resumeAfterManualInput() {
-        guard manualOverride, !held, !physicalFnDown, !latched, !isMicrophoneTest,
+        guard manualOverride, !latched, !isMicrophoneTest,
               startupTask == nil, cleanupTask == nil else { return }
         manualOverride = false
         guard manualResumeWanted else { return }
         if standbyChosen { armStandby() } else { startHandsFree(since: ProcessInfo.processInfo.systemUptime) }
     }
 
-    func physicalFnChanged(_ down: Bool) {
-        physicalFnDown = down
-        if !down { resumeAfterManualInput() }
-    }
-
     private func adoptAutomaticTurn(_ id: UUID) {
-        guard latestAutomaticTurn == id, !held, !latched, startupTask == nil, deliveryOwner == nil,
+        guard latestAutomaticTurn == id, !latched, startupTask == nil, deliveryOwner == nil,
               captureState == .idle else { return }
         if sessionID != id {
             presentation = .idle
@@ -1251,7 +1225,7 @@ final class VoiceController: ObservableObject {
             if !presentOwnedWork() { presentation = .idle }
         case .ignored(let id), .waiting(let id):
             automaticTimes.removeValue(forKey: id)
-            if latestAutomaticTurn == id, sessionID == id, !held {
+            if latestAutomaticTurn == id, sessionID == id {
                 detail = "Listening…"
                 if !interactionWorks.contains(where: \.active) { presentation = .idle }
             }
@@ -1266,7 +1240,7 @@ final class VoiceController: ObservableObject {
     private func executeConversation(_ command: ConversationCommand) async throws -> ConversationEffect {
         guard let lane = speech as? RealtimeVoiceLane, lane.conversation.isCurrent(command),
               lane.conversationAudioReady,
-              !held, !manualOverride, deliveryOwner == nil, !Task.isCancelled else {
+              !manualOverride, deliveryOwner == nil, !Task.isCancelled else {
             throw CancellationError()
         }
         let capture = command.admission.turn.id
@@ -1308,7 +1282,7 @@ final class VoiceController: ObservableObject {
                     lane?.conversation.recordScroll(witness, for: command)
                 },
                 admissionIsCurrent: { [weak self, weak lane] in
-                    guard let self, let lane, !self.held, !self.manualOverride else { return false }
+                    guard let self, let lane, !self.manualOverride else { return false }
                     return lane.conversationAudioReady && lane.conversation.isCurrent(command)
                         && scope.matches(self.voiceAdmissionContext())
                 })
@@ -1388,14 +1362,14 @@ final class VoiceController: ObservableObject {
             armStandby()
             return
         }
-        guard !config.handsFreePaused || manualOverride || held || isMicrophoneTest else {
+        guard !config.handsFreePaused || manualOverride || isMicrophoneTest else {
             handsFreeState = .paused
             return
         }
         let device = try? MicrophoneCatalog.resolve(uid: config.microphoneUID)
         let changed = deviceChanged && device != configuredDevice
         if deviceChanged && !changed { return }
-        if changed, captureActive { interruptCapture("The selected microphone changed. Hold Fn again.") }
+        if changed, captureActive { interruptCapture("The selected microphone changed. Try again.") }
         configuredDevice = device
         microphoneEnabled = true
         let prior = microphoneTask
@@ -1412,7 +1386,7 @@ final class VoiceController: ObservableObject {
             let started = ProcessInfo.processInfo.systemUptime
             do {
                 _ = try await self.speech.prepare(inputUID: uid)
-                if self.config.handsFreePaused, !self.manualOverride, !self.held, !self.isMicrophoneTest {
+                if self.config.handsFreePaused, !self.manualOverride, !self.isMicrophoneTest {
                     await self.speech.suspend()
                     return
                 }
@@ -1462,32 +1436,22 @@ final class VoiceController: ObservableObject {
         guard !operationActive else { return }
         fail(message)
     }
-    func begin(inputHandlingMs: Double? = nil) { begin(inputHandlingMs: inputHandlingMs, dictating: false) }
+    /// A manual command capture on the Realtime push-to-talk transport. No
+    /// product surface starts one now that Fn is gone; it leaves with that
+    /// transport in L11.
+    func beginCapture() { begin(dictating: false) }
 
-    /// Fn+Ctrl dictation: the same capture pipeline, but the transcript is
-    /// delivered as literal text — no planner call ever sees it.
-    func beginDictation() {
-        guard config.dictationHotkey else { return }
-        begin(dictating: true)
-    }
-
-    /// The drive lane's "start dictation" verb — the Fn+Ctrl capture path
-    /// without the physical chord; the dictationHotkey feature gate still
-    /// applies. No finger holds Fn, so the capture latches open: an Fn
-    /// tap (routed through begin() below), a finish() call from the
-    /// "stop dictating" verb, Escape, or the recording limit ends it.
+    /// The drive lane's "start dictation" verb: a capture whose transcript
+    /// is delivered as literal text — no planner call ever sees it. It
+    /// stays open until a finish() from the "stop dictating" verb, a
+    /// cancel, or the recording limit ends it.
     func startDictation() {
-        guard config.dictationHotkey else { return }
         // Idempotent — a repeated "start dictation" verb while a voice
         // dictation is already latched does nothing, never toggles it off.
         guard !voiceLatched else { return }
         begin(dictating: true)
         guard dictating, status == .starting || status == .listening else { return }
         voiceLatched = true
-        // `held || latched` keeps the startup checkpoints alive without a
-        // physical hold; latchRelease stays clear so finish() isn't eaten.
-        latched = true
-        held = false
     }
 
     /// The drive lane's dictation verbs land here — `onDictationRequest`
@@ -1498,7 +1462,6 @@ final class VoiceController: ObservableObject {
     /// their own truthful answers instead of a claimed toggle.
     func dictationRequest(_ start: Bool) -> Bool {
         if start {
-            guard config.dictationHotkey else { return false }
             // Idempotent like `startDictation` — a second "start
             // dictating" while one runs reports the live state, not a
             // toggle-off.
@@ -1506,45 +1469,14 @@ final class VoiceController: ObservableObject {
             startDictation()
             return dictating && (status == .starting || status == .listening)
         }
-        // Only a voice-latched dictation ends here — a physical Fn+Ctrl
-        // capture transcribes "stop dictating" as literal text and never
-        // reaches this lane; a tap on Fn is its documented stop anyway.
+        // Only a voice-latched dictation ends here.
         guard voiceLatched else { return false }
         voiceLatched = false
         finish()
         return true
     }
 
-    /// Ctrl joined an armed Fn hold — the rest of this capture is dictation.
-    func dictate() {
-        guard config.dictationHotkey, !dictating else { return }
-        guard status == .starting || status == .listening else { return }
-        dictating = true
-        (speech as? RealtimeVoiceLane)?.respondOnCommit = false
-        // Partials already handed to the planner may have dispatched work —
-        // conversion withdraws this interaction's intents and attempts along
-        // with the pending decision.
-        cancelInteractionWork()
-        trace("dictation_mid_hold")
-    }
-
-    /// A tap-short Fn release with latch mode on: keep the capture listening;
-    /// the monitor's `.finish` that follows is consumed here.
-    func latchHold() {
-        guard config.latchMode, status == .starting || status == .listening else { return }
-        latchRelease = true
-        // During startup the latch is deferred: `held` ends now but the
-        // in-flight startup keeps going and resolves to `.listening`.
-        latched = status == .starting
-        held = false
-        trace("latch_hold")
-    }
-
-    private func begin(inputHandlingMs: Double? = nil, dictating: Bool) {
-        // A voice-latched dictation capture means Fn now — the input
-        // state couldn't see the voice latch and dispatched `.begin`;
-        // convert the tap into the release that ends dictation.
-        if voiceLatched { voiceLatched = false; finish(); return }
+    private func begin(dictating: Bool) {
         guard canBegin else { return }
         overrideConversationForManualInput()
         let priorStart = startupTask
@@ -1554,24 +1486,14 @@ final class VoiceController: ObservableObject {
         self.dictating = dictating
         // Dictation commits audio for transcript only — no spoken reply.
         (speech as? RealtimeVoiceLane)?.respondOnCommit = !dictating
-        held = true
         let id = newSession()
-        if let inputHandlingMs { measurements["Fn handler"] = inputHandlingMs }
+        latched = true
         commandFrontmostApp = lastExternalApp
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
             commandFrontmostApp = frontmost() ?? lastExternalApp
         }
         status = .starting
-        trace("fn_down")
-        // The gate's pre-roll cut — audio spoken during `.starting` is
-        // replayed from this moment, never from before it.
-        (speech as? RealtimeVoiceLane)?.holdStartedAt = beganAt
-        // Pre-observe: the coordinator warms transport + gaze and arms the
-        // target halo while the user is still talking — "click this" lands
-        // as a lookup instead of a cold scan.
-        cua.beginListeningHint()
-        // The local transcriber's turn opens with the capture — dictation
-        // holds skip it (their literal text never reaches a command lane).
+        trace("capture_begin")
         let selectedUID = config.microphoneUID
         startupTask = Task { [weak self] in
             await Self.awaitUnlessCancelled(priorStart)
@@ -1581,12 +1503,12 @@ final class VoiceController: ObservableObject {
             let permissionStart = ProcessInfo.processInfo.systemUptime
             let granted = await self.authorizeUnlessCancelled()
             self.refreshPermissions()
-            guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
+            guard self.sessionID == id, self.latched, !Task.isCancelled else { return }
             self.measurements["Permission check"] = (ProcessInfo.processInfo.systemUptime - permissionStart) * 1000
             guard granted else { self.fail("Microphone access is needed. It's under Privacy & Security, then Microphone."); return }
             do {
                 let name = try await self.speech.start(session: id, inputUID: selectedUID, transcribe: true)
-                guard self.sessionID == id, self.held || self.latched, !Task.isCancelled else { return }
+                guard self.sessionID == id, self.latched, !Task.isCancelled else { return }
                 self.inputName = name
                 self.trace("capture_started")
                 self.measurements["Microphone ready"] = (ProcessInfo.processInfo.systemUptime - self.beganAt) * 1000
@@ -1599,12 +1521,7 @@ final class VoiceController: ObservableObject {
     }
 
     func finish() {
-        trace("fn_up")
-        cua.endListeningHint()
-        held = false
-        // A latch release keeps the capture listening; the next Fn tap
-        // arrives as a plain `.finish` and ends it below.
-        guard !latchRelease else { latchRelease = false; return }
+        trace("capture_finish")
         defer { resumeAfterManualInput() }
         if let id = sessionID {
             releasedAt = ProcessInfo.processInfo.systemUptime
@@ -1613,7 +1530,6 @@ final class VoiceController: ObservableObject {
         durationTask?.cancel(); durationTask = nil
         switch status {
         case .starting: cancel()
-        case .awaitingRelease: showTranscriptReview()
         case .listening:
             status = .finishing
             audioLevel = 0
@@ -1631,7 +1547,7 @@ final class VoiceController: ObservableObject {
                 if self.speech is RealtimeVoiceLane {
                     // The model already heard the audio — there is no local
                     // transcript artifact to review.
-                    self.fail("No response arrived. Hold Fn and try again.")
+                    self.fail("No response arrived. Try again.")
                 } else {
                     self.detail = "Speech didn't finish in time. Review the captured text before continuing."
                     self.showTranscriptReview()
@@ -1657,7 +1573,6 @@ final class VoiceController: ObservableObject {
         speech.cancel()
         isMicrophoneTest = false
         dictating = false
-        held = false
         let id = newSession()
         commandFrontmostApp = lastExternalApp
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
@@ -1688,13 +1603,13 @@ final class VoiceController: ObservableObject {
         }
         if cancelTask {
             cancelInteractionWork()
-            // Escape with no capture running still owes the card's newest
+            // A cancel with no capture running still owes the card's newest
             // numbered ask a settle — the coordinator's decline resumes it
             // like the ask deadline firing. The !captureActive guard keeps
-            // the Fn-release-during-startup cancel from touching asks.
-            // PAIRING: if the .cancel dispatch grows an explicit
+            // a cancel during capture startup from touching asks.
+            // PAIRING: if a cancel caller grows an explicit
             // declineTopmostChoiceAsk call, drop this routing — it must
-            // not settle two asks on one keypress.
+            // not settle two asks on one cancel.
             if !captureActive { _ = cua.declineTopmostChoiceAsk() }
             // Universal stop seam — composition wires this to the
             // coordinator's cancelAllRunning(); nil keeps the cancel
@@ -1702,7 +1617,7 @@ final class VoiceController: ObservableObject {
             if let cancelAllTasks { Task { await cancelAllTasks() } }
         }
         guard status != .stopping else { return }
-        held = false; dictating = false; latched = false; voiceLatched = false
+        dictating = false; latched = false; voiceLatched = false
         trace("capture_cancelled")
         sessionID = nil
         deadlineTask?.cancel(); deadlineTask = nil
@@ -1715,8 +1630,8 @@ final class VoiceController: ObservableObject {
         // Same for a typed turn still sending — its response.create
         // belongs to the dead interaction.
         routeTask?.cancel(); routeTask = nil
-        // The Fn-down pre-observe's gaze pump lives on the coordinator —
-        // a cancelled hold must end it, not wait out its 30s watchdog.
+        // The speech-start pre-observe's gaze pump lives on the
+        // coordinator — a cancel must end it, not wait out its 30s watchdog.
         cua.endListeningHint()
         speech.cancel()
         audioLevel = 0
@@ -1727,7 +1642,7 @@ final class VoiceController: ObservableObject {
         if startup == nil { status = terminalStatus; return }
         // The cancelled startup's own checkpoints make it inert — the card
         // returns to its terminal state immediately instead of waiting out
-        // an in-flight socket connect, and Fn stays responsive.
+        // an in-flight socket connect.
         cleanupTask = Task { [weak self] in
             await startup?.value
             self?.cleanupTask = nil
@@ -1760,7 +1675,7 @@ final class VoiceController: ObservableObject {
         guard canBegin, !isMicrophoneTest else { return }
         overrideConversationForManualInput()
         let id = newSession()
-        held = false; isMicrophoneTest = true; dictating = false; status = .starting
+        isMicrophoneTest = true; dictating = false; status = .starting
         let selectedUID = config.microphoneUID
         startupTask = Task { [weak self] in
             guard let self else { return }
@@ -1785,17 +1700,12 @@ final class VoiceController: ObservableObject {
         measurements["Overlay shown"] = (ProcessInfo.processInfo.systemUptime - beganAt) * 1000
     }
 
-    func recordRecoveredFnRelease(observed: TimeInterval, confirmed: TimeInterval, latch: Bool) {
-        guard sessionID != nil else { return }
-        measurements["Fn release recovery"] = max(0, (confirmed - observed) * 1000)
-    }
-
     private func newSession() -> UUID {
         deadlineTask?.cancel(); durationTask?.cancel(); hideTask?.cancel()
         deliveryTask?.cancel(); deliveryTask = nil
         deliveryOwner = nil
         routeTask?.cancel(); routeTask = nil
-        latchRelease = false; latched = false; voiceLatched = false
+        latched = false; voiceLatched = false
         // A new capture barges in on any spoken reply.
         interruptSpeechPlayback()
         let id = UUID(); sessionID = id
@@ -1811,7 +1721,7 @@ final class VoiceController: ObservableObject {
     private func receive(_ event: SpeechEvent, session id: UUID) {
         guard sessionID == id else { return }
         // Assistant-side events outlive the capture: the turn keeps streaming
-        // after Fn released and the status moved on to .executing.
+        // after the capture closed and the status moved on to .executing.
         switch event {
         case .assistantDelta(let delta):
             endFiller(turn: id)
@@ -1890,8 +1800,7 @@ final class VoiceController: ObservableObject {
                 // The realtime lane holds no reviewable transcript artifact —
                 // the model already heard the audio.
                 fail(detail)
-            } else if held { status = .awaitingRelease }
-            else { showTranscriptReview() }
+            } else { showTranscriptReview() }
             return
         default: break
         }
@@ -1915,15 +1824,8 @@ final class VoiceController: ObservableObject {
             trace("capture_final")
             speech.cancel(); audioLevel = 0
             deadlineTask?.cancel(); durationTask?.cancel()
-            if held {
-                        detail = dictating
-                    ? "Recognition ended before you released Fn. Release to insert what was captured."
-                    : "Recognition ended before you released Fn. Release the key, then review the text."
-                status = .awaitingRelease
-            } else {
-                measurements["Transcript finalized"] = (ProcessInfo.processInfo.systemUptime - releasedAt) * 1000
-                submit(text, session: id)
-            }
+            measurements["Transcript finalized"] = (ProcessInfo.processInfo.systemUptime - releasedAt) * 1000
+            submit(text, session: id)
         }
     }
 
@@ -1936,12 +1838,12 @@ final class VoiceController: ObservableObject {
             } else {
                 // The user dictated into a void — a silent dismissal reads
                 // as a lost paste, so say so.
-                fail("No speech was captured — hold Fn and dictate again.")
+                fail("No speech was captured. Say “start dictating” and try again.")
             }
             return
         }
         if transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            fail("No usable speech remains. Hold Fn and try again.")
+            fail("No usable speech remains. Try again.")
         } else { status = .reviewTranscript }
     }
 
@@ -1952,7 +1854,7 @@ final class VoiceController: ObservableObject {
             // An empty dictation is a lost outcome — say so instead of
             // vanishing. The non-dictation tap stays a silent dismiss:
             // committing no audio was never a turn (lane's own contract).
-            if dictating { fail("No speech was captured — hold Fn and dictate again.") }
+            if dictating { fail("No speech was captured. Say “start dictating” and try again.") }
             else { cancelCaptureAttempt() }
             return
         }
@@ -2043,19 +1945,6 @@ final class VoiceController: ObservableObject {
     private func cuaChanged() {
         objectWillChange.send()
         guard !isMicrophoneTest else { return }
-        if held {
-            // Capture owns the status while held; the detail line keeps this
-            // interaction's progress — or an independent task's — visible
-            // without letting any of it own the interaction's state.
-            if let work = interactionWorks.last(where: \.active) ?? interactionWorks.last {
-                detail = work.message
-            } else if let question = interactionQuestion {
-                detail = question.prompt
-            } else {
-                detail = cua.tasks.last(where: \.active)?.message ?? ""
-            }
-            return
-        }
         // Dictation's executing/done projection belongs to the delivery path —
         // unrelated task state must not complete it early.
         guard !dictating else { return }
@@ -2115,7 +2004,7 @@ final class VoiceController: ObservableObject {
     private func fail(_ message: String) {
         trace("capture_failed \(message)")
         speech.cancel()
-        audioLevel = 0; held = false; dictating = false; latched = false
+        audioLevel = 0; dictating = false; latched = false
         voiceLatched = false; isMicrophoneTest = false
         deadlineTask?.cancel(); durationTask?.cancel()
         // A pending dictation delivery dies with its session — a failed
@@ -2202,13 +2091,12 @@ final class VoiceController: ObservableObject {
             do {
                 try await Task.sleep(nanoseconds: UInt64(self.timings.warning * 1e9))
                 guard self.sessionID == id, self.status == .listening else { return }
-                self.detail = "Recording limit approaching — release Fn to finish."
+                self.detail = "Recording limit approaching — say “stop dictating” to finish."
                 try await Task.sleep(nanoseconds: UInt64(max(0, self.timings.limit - self.timings.warning) * 1e9))
                 guard self.sessionID == id, self.status == .listening else { return }
                 self.trace("capture_limit")
-                self.speech.cancel(); self.audioLevel = 0
-                self.detail = "Recording reached its limit. Release Fn, then review the captured text."
-                self.status = .awaitingRelease
+                self.voiceLatched = false
+                self.finish()
             } catch { }
         }
     }

@@ -181,7 +181,6 @@ export async function startWebRuntime(
     return t - first;
   };
   const PURSUIT_SETTLE_MS = 280;
-  let lastPursuitCountEmit = 0;
   const longTasks = createLongTaskCounter();
 
   // On a dropped frame the marker should hold at the last stable pose rather
@@ -1125,11 +1124,15 @@ export async function startWebRuntime(
               calibration.captureVerifyError(feature, label);
             } else {
               calibration.capturePursuit(feature, label);
-              if (sampleAt - lastPursuitCountEmit > 500) {
-                emit({ type: "calibration", status: "pursuit_sampled", count: calibration.samples.length });
-                lastPursuitCountEmit = sampleAt;
-              }
             }
+            // Every labelled frame reports: the point run parks each target until
+            // its share of frames has arrived, so it paces itself on this count.
+            emit({
+              type: "calibration",
+              status: "pursuit_sampled",
+              mode: pursuitMode,
+              count: pursuitMode === "verify" ? calibration.verifyCount : calibration.samples.length
+            });
           }
         }
         const corrected = calibration.applyFeature(feature);
@@ -1281,7 +1284,6 @@ export async function startWebRuntime(
       pursuitActive = true;
       pursuitTargetHistory.length = 0;
       pursuitLastMsgAt = 0;
-      lastPursuitCountEmit = 0;
     },
     pursuitTarget: (x, y) => {
       const at = performance.now();
@@ -1301,7 +1303,6 @@ export async function startWebRuntime(
       pursuitMode = "capture";
       pursuitTargetHistory.length = 0;
       pursuitLastMsgAt = 0;
-      lastPursuitCountEmit = 0;
       calibration.abortPursuit();
     },
     implicitSample: (xNorm, yNorm, kind = "cursor_rest") => {
