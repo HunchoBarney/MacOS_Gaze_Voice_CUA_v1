@@ -115,7 +115,7 @@ func render(_ options: Options) throws {
                         renderer.content = StageView(stage: stageRef)
                         guard let image = renderer.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
                         try writer.append(image)
-                        last = image
+                        if i == Int(((lead + state.duration * 0.6) * options.fps).rounded()) { last = image }
                     }
                     try writer.finish()
                     if let last { try writeJPEG(last, to: base.appendingPathExtension("jpg")) }
@@ -153,7 +153,7 @@ func renderScenes(_ options: Options) throws {
                 renderer.content = stage.view()
                 guard let image = renderer.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
                 try writer.append(image)
-                if abs(stage.time - 9.6) < 0.5 / options.fps { poster = image }
+                if abs(stage.time - 9.0) < 0.5 / options.fps { poster = image }
             }
             try writer.finish()
             if let poster { try writeJPEG(poster, to: base.appendingPathExtension("jpg")) }
@@ -244,12 +244,12 @@ func perf(frames: Int = 240) throws {
         }
         return ((cpuSeconds() - c0) / Double(frames) * 1000, Date().timeIntervalSince(w0) / Double(frames) * 1000)
     }
-    let busiest = ["voice-island": "hearing", "gaze-highlight": "locked", "flashes": "this"]
+    let busiest = ["voice-island": "hearing", "gaze-highlight": "locked"]
     var out: [String: [String: [String: String]]] = [:]
     for entry in Redesign.components {
         guard let busy = busiest[entry.id], let index = entry.index(of: busy),
               let idle = entry.flow.first.flatMap({ entry.index(of: $0) }) else { continue }
-        for (d, direction) in entry.directions.enumerated() {
+        for (d, direction) in entry.directions.enumerated() where direction.info.alwaysOn {
             let idleStage = Stage(entry, direction: d)
             idleStage.settle(at: idle)
             let base = measure(idleStage)
@@ -262,13 +262,58 @@ func perf(frames: Int = 240) throws {
                 "cpu": String(format: "%.1f ms/frame CPU (%.0f%% of a core at 60 fps)", cpu, cpu * 6),
                 "gpu": String(format: "%.1f ms/frame offscreen render incl. GPU", wall),
                 "idle": "0: the view is removed when idle",
-                "note": "Offscreen ImageRenderer at 2x on an M1, \(busy) state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor.",
+                "note": "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), \(busy) state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor.",
             ]
             print(String(format: "%@ %@ %@: cpu %.2f ms, wall %.2f ms (idle cpu %.2f, wall %.2f)", entry.id, id, busy, cpu, wall, base.cpu, base.wall))
         }
     }
     let data = try JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
     try data.write(to: URL(fileURLWithPath: "Lab/perf.json"))
+}
+
+/// Re-renders every poster without encoding clips: steps the same stage to
+/// the poster's instant (60% into the state, or the middle of the flow) and
+/// renders that one frame.
+@MainActor
+func posters(_ options: Options) throws {
+    let lead = 0.35
+    func shoot(_ stage: Stage, until seconds: Double, to url: URL) throws {
+        var t = 0.0
+        while t + 1e-9 < seconds { stage.advance(1 / options.fps); t += 1 / options.fps }
+        let renderer = ImageRenderer(content: StageView(stage: stage))
+        renderer.scale = options.scale
+        guard let image = renderer.cgImage else { throw RenderError("no poster for \(url.lastPathComponent)") }
+        try writeJPEG(image, to: url)
+    }
+    for entry in Redesign.components where options.only?.contains(entry.id) ?? true {
+        for d in entry.directions.indices {
+            let dir = entry.directions[d].info.id
+            for variant in options.variants {
+                for (index, state) in entry.states.enumerated() {
+                    let stage = Stage(entry, direction: d)
+                    stage.scheme = variant.scheme
+                    stage.reduceMotion = variant.reduceMotion
+                    stage.settle(at: predecessor(of: state.id, in: entry).flatMap { entry.index(of: $0) } ?? index)
+                    var t = 0.0
+                    while t + 1e-9 < lead { stage.advance(1 / options.fps); t += 1 / options.fps }
+                    stage.go(to: index)
+                    stage.advance(0)
+                    try shoot(stage, until: state.duration * 0.6,
+                              to: options.out.appendingPathComponent("redesign/\(entry.id)/\(dir)/\(state.id).\(variant.key).jpg"))
+                }
+                let stage = Stage(entry, direction: d)
+                stage.scheme = variant.scheme
+                stage.reduceMotion = variant.reduceMotion
+                if let first = entry.flow.first.flatMap({ entry.index(of: $0) }) { stage.settle(at: first) }
+                stage.playFlow()
+                let flowPoster = entry.flow.prefix(entry.flow.count / 2 + 1).compactMap { entry.index(of: $0) }
+                    .reduce(0) { $0 + entry.states[$1].duration } - 0.5
+                try shoot(stage, until: max(0, flowPoster),
+                          to: options.out.appendingPathComponent("redesign/\(entry.id)/\(dir)/flow.\(variant.key).jpg"))
+            }
+            print("posters \(entry.id) \(dir)")
+        }
+    }
 }
 
 func gitHead() -> String {
@@ -314,6 +359,7 @@ MainActor.assumeIsolated {
         case "render": try render(parse(args.dropFirst(2)))
         case "manifest": try writeManifest(parse(args.dropFirst(2)))
         case "perf": try perf()
+        case "posters": try posters(parse(args.dropFirst(2)))
         default: print("usage: JarvisRedesignRender probe <dir> [component] | render <renders-dir> [--only ids] [--variants keys] [--scale s] [--fps n]")
         }
     } catch {

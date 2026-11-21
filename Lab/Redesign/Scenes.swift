@@ -36,10 +36,10 @@ public enum Scenes {
                 .init(at: 5.4, component: "gaze-highlight", state: "seeking"),
                 .init(at: 7.0, component: "gaze-highlight", state: "locked"),
                 .init(at: 7.6, component: "voice-island", state: "asking"),
-                .init(at: 8.6, component: "gaze-highlight", state: "off"),
-                .init(at: 8.6, component: "flashes", state: "confirm"),
+                .init(at: 10.0, component: "gaze-highlight", state: "off"),
+                .init(at: 10.0, component: "flashes", state: "confirm"),
                 .init(at: 11.0, component: "flashes", state: "press"),
-                .init(at: 11.2, component: "voice-island", state: "done"),
+                .init(at: 11.4, component: "voice-island", state: "done"),
                 .init(at: 12.0, component: "flashes", state: "done"),
                 .init(at: 13.2, component: "voice-island", state: "idle"),
             ])

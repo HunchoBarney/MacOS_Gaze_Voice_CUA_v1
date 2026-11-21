@@ -1,0 +1,62 @@
+{
+  "flashes" : {
+    "A" : {
+      "cpu" : "0.0 ms\/frame CPU (0% of a core at 60 fps)",
+      "gpu" : "0.0 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, this state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    },
+    "B" : {
+      "cpu" : "0.0 ms\/frame CPU (0% of a core at 60 fps)",
+      "gpu" : "0.0 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, this state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    },
+    "C" : {
+      "cpu" : "0.0 ms\/frame CPU (0% of a core at 60 fps)",
+      "gpu" : "0.0 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, this state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    }
+  },
+  "gaze-highlight" : {
+    "A" : {
+      "cpu" : "0.4 ms\/frame CPU (3% of a core at 60 fps)",
+      "gpu" : "0.4 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, locked state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    },
+    "B" : {
+      "cpu" : "0.3 ms\/frame CPU (2% of a core at 60 fps)",
+      "gpu" : "0.4 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, locked state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    },
+    "C" : {
+      "cpu" : "0.3 ms\/frame CPU (2% of a core at 60 fps)",
+      "gpu" : "0.3 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, locked state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    }
+  },
+  "voice-island" : {
+    "A" : {
+      "cpu" : "1.0 ms\/frame CPU (6% of a core at 60 fps)",
+      "gpu" : "0.7 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, hearing state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    },
+    "B" : {
+      "cpu" : "1.0 ms\/frame CPU (6% of a core at 60 fps)",
+      "gpu" : "0.7 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, hearing state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    },
+    "C" : {
+      "cpu" : "0.5 ms\/frame CPU (3% of a core at 60 fps)",
+      "gpu" : "0.4 ms\/frame offscreen render incl. GPU",
+      "idle" : "0: the view is removed when idle",
+      "note" : "Offscreen ImageRenderer at 2x on an M1, hearing state, minus the idle stage. A proxy, not on-screen compositor cost; the owner's on-device check is the lab with Activity Monitor."
+    }
+  }
+}
