@@ -87,6 +87,7 @@ struct SheetLine: View {
         var out = Text("")
         for (i, phrase) in row.phrases.enumerated() {
             if i > 0 { out = Text("\(out)\(Text("  \u{00B7}  ").foregroundStyle(faint))") }
+            let phrase = phrase.replacingOccurrences(of: " ", with: "\u{00A0}")
             for (j, part) in phrase.split(separator: "<", omittingEmptySubsequences: false).enumerated() {
                 if j == 0 {
                     out = Text("\(out)\(Text(String(part)).foregroundStyle(ink))")

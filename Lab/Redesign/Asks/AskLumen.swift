@@ -50,6 +50,12 @@ public enum AskLumen: Direction {
                 caption(c, m, f.labelScale)
                 pills(f, c, m)
             }
+            .padding(f.labelScale > 1 ? 12 * f.labelScale : 0)
+            .background(
+                RoundedRectangle(cornerRadius: 28 * f.labelScale, style: .continuous)
+                    .fill((c.dark ? Color.black : Color.white).opacity(c.reduceTransparency ? 0.92 : 0.001))
+                    .shadow(color: (c.dark ? Color.black : Color.white).opacity(f.labelScale > 1 && !c.reduceTransparency ? 0.7 : 0), radius: 30)
+            )
             .offset(y: Desk.menuBar + 12)
         }
         .frame(width: Desk.size.width, height: Desk.size.height, alignment: .top)

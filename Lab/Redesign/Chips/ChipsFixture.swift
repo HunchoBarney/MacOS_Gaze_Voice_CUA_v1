@@ -81,7 +81,7 @@ public enum ChipsScript {
             return targets.map { t in
                 let w = names ? nameWidth(t.name, k) : h
                 let x0 = t.isField ? t.frame.minX - (names ? 14 : 2 + h / 2) : t.frame.minX - nudge - (names ? 0 : h / 2)
-                let y0 = t.isField ? t.frame.midY - h / 2 : t.frame.minY - nudge - h / 2
+                let y0 = t.isField ? t.frame.midY - h / 2 : t.frame.minY + nudge - h
                 var rect = CGRect(x: x0, y: y0, width: w, height: h)
                 func clashes(_ r: CGRect) -> CGRect? { placed.first { $0.insetBy(dx: -3, dy: -3).intersects(r) } }
                 if !t.isField, clashes(rect) != nil { rect.origin.y = t.frame.maxY + 4 }

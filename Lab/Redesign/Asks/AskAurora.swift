@@ -39,7 +39,9 @@ public enum AskAurora: Direction {
         let level = m["level"]
         let k = f.labelScale
         return ZStack(alignment: .topLeading) {
-            LinearGradient(colors: [(c.dark ? Color.black : Color.white).opacity(c.reduceTransparency ? 0.94 : 0.6), .clear],
+            let veil = (c.dark ? Color.black : Color.white).opacity(c.reduceTransparency ? 0.94 : 0.6)
+            LinearGradient(stops: [.init(color: veil, location: 0), .init(color: veil, location: (k - 1) * 0.5),
+                                   .init(color: veil.opacity(0), location: 1)],
                            startPoint: .top, endPoint: .bottom)
                 .frame(width: Desk.size.width, height: 300 * (0.5 + 0.5 * k))
                 .opacity(m["scrim"])
