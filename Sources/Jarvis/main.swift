@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var windows: AppWindows!
     private let speechOutput = SpeechOutput()
     private lazy var controller = VoiceController(config: Config.shared, speaker: speechOutput)
+    private lazy var proactive = ProactiveService(speech: speechOutput)
     private let diagnostics = DiagnosticsReporter()
     private var agentRuntime: AgentRuntime?
     private let microphones = MicrophoneCatalog()
@@ -119,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         wireTelemetry()
         // Composition seam: the universal stop.
         wireLocalIntelligence()
+        wireProactivity()
 
         // Register with Jarvis's credential service on first launch, so the
         // first command doesn't wait on it and agents find a token.
@@ -461,6 +463,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///     and in-flight agent turn, not just the capture.
     ///   - Local capture/final admission belongs to RealtimeVoiceLane;
     ///     composition never wires a second transcript/action authority.
+    /// Proactive alerts run only while `voice.live` is on. The glow count
+    /// shows beside the menu-bar icon until "what's up" reads it out.
+    private func wireProactivity() {
+        proactive.userTalking = { [weak self] in
+            guard let controller = self?.controller else { return false }
+            return controller.captureState != .idle || controller.conversationTurnOpen
+        }
+        proactive.jarvisSpeaking = { [weak self] in
+            guard let self else { return false }
+            return self.speechOutput.speaking || self.controller.handsFreeSpeaking
+        }
+        controller.cua.proactiveIntercept = { [weak self] in self?.proactive.intercept($0) }
+        controller.config.$voiceLive
+            .prepend(controller.config.voiceLive)
+            .removeDuplicates()
+            .sink { [weak self] on in on ? self?.proactive.start() : self?.proactive.stop() }
+            .store(in: &subscriptions)
+        proactive.engine.$glow
+            .map(\.count)
+            .removeDuplicates()
+            .sink { [weak self] count in
+                self?.statusItem.button?.imagePosition = .imageLeading
+                self?.statusItem.button?.title = count > 0 ? " \(count)" : ""
+                self?.statusItem.button?.setAccessibilityValue(count > 0 ? "\(count) updates" : nil)
+            }
+            .store(in: &subscriptions)
+    }
+
     private func wireLocalIntelligence() {
         // Universal stop — a cancel lands on every lane: running tasks,
         // parked asks (a cancel resolves their continuation like the

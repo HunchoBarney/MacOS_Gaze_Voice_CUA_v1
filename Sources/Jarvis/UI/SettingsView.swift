@@ -110,6 +110,11 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             listening
             replies
+            if config.voiceLive {
+                SettingsSection(title: "Alerts", symbol: "bell") {
+                    ProactiveSettingsSection(settings: .shared)
+                }
+            }
             doingThings
             eyeTracking.id(SettingsNavigation.Anchor.eyeTracking.rawValue)
             permissions.id(SettingsNavigation.Anchor.permissions.rawValue)

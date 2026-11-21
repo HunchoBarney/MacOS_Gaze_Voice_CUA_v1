@@ -398,4 +398,17 @@ final class ProactiveEngineTests: XCTestCase {
         XCTAssertEqual(engine.whatDidIMiss(), "While you were busy: Backup finished; Message from Sam.")
         XCTAssertEqual(engine.whatDidIMiss(), "You haven't missed anything.")
     }
+
+    func testOnlyTheItemsReadAreCleared() {
+        engine.submit((1...7).map { alert(.message, "Message \($0)") })
+        XCTAssertEqual(engine.whatsUp(),
+                       "Seven things: Message 1; Message 2; Message 3; Message 4; Message 5. 2 more. Ask again to hear them.")
+        XCTAssertEqual(engine.glow.count, 2)
+        XCTAssertEqual(engine.whatsUp(), "Two things: Message 6; Message 7.")
+
+        engine.submit((1...4).map { alert(.other, "Saved \($0)") } + (1...3).map { alert(.message, "New \($0)") })
+        XCTAssertEqual(engine.whatDidIMiss(),
+                       "While you were busy: Saved 1; Saved 2; Saved 3; Saved 4; New 1. 2 more. Ask again to hear them.")
+        XCTAssertEqual(engine.whatDidIMiss(), "While you were busy: New 2; New 3.")
+    }
 }
