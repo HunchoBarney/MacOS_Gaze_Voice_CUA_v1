@@ -41,20 +41,21 @@ public enum AskLumen: Direction {
 
     public static func body(_ f: AskFixture, _ c: Ctx, _ m: MotionBank) -> some View {
         let w = m["w"]
+        let shown = AskMotion.phases.map { m["c." + $0.rawValue] }.max()!.clamped(0, 1)
         return ZStack(alignment: .top) {
             NotchSilhouette(width: w, height: Desk.menuBar, ear: 8, bottomRadius: m["r"])
                 .fill(Color.black)
                 .frame(width: w + 40, height: Desk.menuBar)
             if m["ears"] > 0.002 { ears(f, c, m, w: w) }
             VStack(spacing: 10 * f.labelScale) {
-                caption(c, m, f.labelScale)
+                caption(c, m, f.labelScale, shown: shown)
                 pills(f, c, m)
             }
             .padding(f.labelScale > 1 ? 12 * f.labelScale : 0)
             .background(
                 RoundedRectangle(cornerRadius: 28 * f.labelScale, style: .continuous)
-                    .fill((c.dark ? Color.black : Color.white).opacity(c.reduceTransparency ? 0.92 : 0.001))
-                    .shadow(color: (c.dark ? Color.black : Color.white).opacity(f.labelScale > 1 && !c.reduceTransparency ? 0.7 : 0), radius: 30)
+                    .fill((c.dark ? Color.black : Color.white).opacity((c.reduceTransparency ? 0.92 : 0.001) * shown))
+                    .shadow(color: (c.dark ? Color.black : Color.white).opacity(f.labelScale > 1 && !c.reduceTransparency ? 0.7 * shown : 0), radius: 30)
             )
             .offset(y: Desk.menuBar + 12)
         }
@@ -85,7 +86,7 @@ public enum AskLumen: Direction {
         .environment(\.colorScheme, .dark)
     }
 
-    static func caption(_ c: Ctx, _ m: MotionBank, _ k: Double) -> some View {
+    static func caption(_ c: Ctx, _ m: MotionBank, _ k: Double, shown: Double) -> some View {
         let ink: Color = c.dark ? .white : Color.black.opacity(0.9)
         let sub: Color = c.dark ? .white.opacity(0.66) : Color.black.opacity(0.58)
         let backing: Color = c.dark ? Color.black : Color.white
@@ -129,8 +130,8 @@ public enum AskLumen: Direction {
         .padding(.horizontal, 14 * k)
         .padding(.vertical, 6 * k)
         .background(
-            Capsule().fill(backing.opacity(c.reduceTransparency ? 0.92 : 0.001))
-                .shadow(color: backing.opacity(c.reduceTransparency ? 0 : 0.6), radius: 22)
+            Capsule().fill(backing.opacity((c.reduceTransparency ? 0.92 : 0.001) * shown))
+                .shadow(color: backing.opacity(c.reduceTransparency ? 0 : 0.6 * shown), radius: 22)
         )
         .environment(\.reduceMotionForAsks, c.reduceMotion)
     }
