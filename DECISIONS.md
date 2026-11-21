@@ -2,6 +2,39 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-20 — Ask rarely, offer undo (KAR-69)
+
+- A consequential press Jarvis chose itself no longer asks first when the
+  app can take it back: Move to Trash in Finder, Delete and Archive in
+  Mail, Delete in Notes, TextEdit, Pages, Numbers and Keynote, and Send in
+  Mail inside its Undo Send delay. Jarvis presses, then says what it did
+  and "Say undo to bring it back"; the offer stands for 10 s from when it
+  is spoken (Mail: never past its delay, less 3 s), once per task.
+- Undo is the app's own ⌘Z menu item, read over Accessibility by its key
+  equivalent before and after the press (Apple platform API, no new
+  dependency). An offer stands only when the press changed that item, and
+  a spoken "undo" invokes that exact item in that app, and refuses if the
+  app shows anything else since.
+- Mail's delay is read from `UndoSendDelayTime` in the `com.apple.mail`
+  domain, a name taken from Mail's binary. It fails closed: a send asks
+  unless Mail has written that key with at least 7 s (4 s of offer after
+  3 s to say it). Mail's shipped default, with no key written, still asks.
+- Update Now, Upgrade Now, Restart Now, Install and Restart, Restart and
+  Shut Down are a `.restart` consequence. Nothing takes a restart back,
+  so Jarvis always asks when it chose the press, and the person's words
+  cover it only as "click Restart". "Format" is no longer a delete phrase
+  (Format Disk stays on the never list), and a "show me how" or "how do I"
+  goal covers no press.
+- Known limit: Mail's undo item reads only "Undo Delete". If the person
+  deletes another message inside the window, a spoken "undo" reverses
+  their newer delete; Accessibility can't tell the two apart.
+- Still asking: Pay, Call, Allow and other permission prompts, account
+  changes, unnamed presses, permanent or wholesale deletes, sends outside
+  Mail, and any press with nobody to hear the offer. The never list and the
+  password refusal run before any of this and are unchanged.
+- Not physically verified yet: the AX titles each app shows, and invoking
+  Undo by menu path in a background app.
+
 ## 2026-11-21 — The gaze ring lights only a control the tracker can resolve (JARA-55)
 
 - Main's ring stays the one gaze highlight, and it takes a control only when
