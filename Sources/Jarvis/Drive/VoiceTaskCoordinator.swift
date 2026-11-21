@@ -911,6 +911,10 @@ final class VoiceTaskCoordinator {
         if config.voiceLive, let say = memoryCommands.handle(trimmed) {
             return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
         }
+        if windowScroll == nil, pendingAskCount == 0, DriveLoop.repairsOffer(trimmed),
+           !UndoOffers.shared.standing() {
+            return VoiceToolResult(status: VoiceToolResult.Status.ok, say: "").encoded()
+        }
         if tasks.contains(where: { $0.active && $0.request.lowercased() == normalized }) {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
                                    say: "I'm already working on that.").encoded()
@@ -990,6 +994,7 @@ final class VoiceTaskCoordinator {
             previousContext: previousContext.isEmpty ? nil : previousContext,
             values: values, windowID: pinnedWindowID)
         spec.speakerVerified = speakerVerified
+        spec.questionPending = pendingAskCount > 0
 
         let label = guideGoal.map { "Showing how to \($0)" } ?? Self.gerundPhrase(for: trimmed) ?? trimmed
         guard !Task.isCancelled, admissionIsCurrent() else {
@@ -1679,6 +1684,10 @@ final class VoiceTaskCoordinator {
         guard work.active else { return }
         if let guide = work.guide {
             await finishGuide(guide, result: result, on: work)
+            return
+        }
+        if result.blockedReason == DriveLoop.noLiveOfferReason {
+            finish(work, .cancelled, say: "")
             return
         }
         work.elapsedMs = (ProcessInfo.processInfo.systemUptime - (work.continuousStartedAt ?? started)) * 1000

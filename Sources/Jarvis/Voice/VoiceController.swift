@@ -667,6 +667,7 @@ final class VoiceController: ObservableObject {
             }
         }
         context.currentAsks = context.capturedAsks
+        context.undoOffered = UndoOffers.shared.standing()
         return context
     }
     var isListening: Bool { status == .listening }
@@ -1447,7 +1448,9 @@ final class VoiceController: ObservableObject {
             let added = cua.tasks.filter { !prior.contains($0.id) && $0.captureID == capture }
             guard added.count == 1, let created = added.first else {
                 return .init(verified: false, waitingForAnswer: false,
-                             message: RealtimeVoiceLane.deterministicSay(result) ?? "No action was started.")
+                             message: RealtimeVoiceLane.deterministicSay(result)
+                                 ?? (VoiceToolResult(jsonString: result)?.status == VoiceToolResult.Status.ok
+                                     ? "" : "No action was started."))
             }
             work = created
         }
