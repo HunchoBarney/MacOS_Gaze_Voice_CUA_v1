@@ -64,8 +64,9 @@ final class ConsentAskWatchTests: XCTestCase {
         }
         XCTAssertEqual(pending.count, 1)
         AgentAskChannel.answer(pending[0].id, "yes")
-        let answer = await within(30) { await request.value } ?? nil
-        request.cancel()
+        let answer = await within(30) {
+            await withTaskCancellationHandler { await request.value } onCancel: { request.cancel() }
+        } ?? nil
         XCTAssertEqual(answer, "yes", "only the directory watch can deliver the answer before the heartbeat")
         XCTAssertTrue(AgentAskChannel.pending().isEmpty)
     }
