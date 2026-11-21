@@ -1,0 +1,50 @@
+.con { position: absolute; inset: 0; --ink: #fff; --ink-soft: rgba(255, 255, 255, 0.7); }
+.con:not([data-dark]) { --ink: #1d1d1f; --ink-soft: rgba(29, 29, 31, 0.66); }
+.con-veil { position: absolute; inset: 0; background: rgba(6, 8, 14, 0.64); -webkit-backdrop-filter: blur(8px) saturate(1.1); backdrop-filter: blur(8px) saturate(1.1); }
+.con:not([data-dark]) .con-veil { background: rgba(244, 245, 249, 0.7); }
+@media (prefers-reduced-transparency: reduce) {
+  .con-veil { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(6, 8, 14, 0.9); }
+  .con:not([data-dark]) .con-veil { background: rgba(244, 245, 249, 0.94); }
+}
+.con-sky { position: absolute; inset: 0; }
+.con-svg { position: absolute; inset: 0; overflow: visible; }
+.con-line { stroke: var(--ink); stroke-opacity: 0.42; stroke-width: 1.25; stroke-linecap: round; }
+.con-line[data-weak] { stroke-dasharray: 3 5; stroke-opacity: 0.3; }
+.con-star { fill: var(--ink); }
+.con-star[data-weak] { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 2.5 3; }
+.con-halo { fill: var(--ink); fill-opacity: 0.12; }
+.con-test { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+
+.con-guide { position: absolute; inset: 0; pointer-events: none; }
+.con-spark { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 8px 1px rgba(160, 200, 255, 0.7); }
+.con-reticle { position: absolute; z-index: 55; width: 40px; height: 40px; margin: -20px 0 0 -20px; }
+.con-reticle svg { display: block; transform: rotate(-90deg); overflow: visible; }
+.con-reticle-arcs { fill: none; stroke: #fff; stroke-opacity: 0.55; stroke-width: 1.5; stroke-dasharray: 18 7.13; }
+.con-reticle-fill { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(160, 200, 255, 0.9)); }
+
+.con-marker { position: absolute; z-index: 20; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+.con-marker-glow { position: absolute; left: -26px; top: -26px; width: 52px; height: 52px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 255, 255, 0.32), transparent); }
+.con:not([data-dark]) .con-marker-glow { background: radial-gradient(closest-side, rgba(10, 132, 255, 0.28), transparent); }
+.con-marker-core { position: absolute; left: -5.5px; top: -5.5px; width: 11px; height: 11px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 10px 2px rgba(190, 215, 255, 0.75); }
+.con:not([data-dark]) .con-marker-core { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9); }
+.con-ticks { position: absolute; left: 0; top: 0; }
+.con-tick { position: absolute; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--ink); }
+.con:not([data-dark]) .con-tick { background: #0a6cff; }
+
+.con-centre { position: absolute; z-index: 25; width: 0; height: 0; display: flex; align-items: center; justify-content: center; }
+.con-centre > * { flex: none; }
+.con-check-disc { fill: var(--ink); }
+.con-check { fill: none; stroke: #000; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.con:not([data-dark]) .con-check { stroke: #fff; }
+
+.con-words { position: absolute; z-index: 30; left: 50%; top: calc(50% + 40px); width: 560px; margin-left: -280px; text-align: center; color: var(--ink); }
+.con-words h1 { margin: 0; font-size: 26px; line-height: 32px; font-weight: 650; letter-spacing: -0.02em; }
+.con-words p { margin: 8px auto 0; max-width: 420px; font-size: 15px; line-height: 21px; color: var(--ink-soft); letter-spacing: -0.008em; text-wrap: pretty; }
+.con-words-look { top: 78px; }
+.con-words .con-look { margin: 0 auto; font-size: 15px; font-weight: 600; color: var(--ink); }
+.con-actions { margin-top: 20px; display: flex; justify-content: center; gap: 10px; }
+.con-quiet { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.con-primary { background: #fff; color: #000; }
+.con:not([data-dark]) .con-quiet { background: rgba(0, 0, 0, 0.07); color: #1d1d1f; }
+.con:not([data-dark]) .con-primary { background: #1d1d1f; color: #fff; }
+.con-timer { display: block; width: 180px; height: 2px; margin: 18px auto 0; border-radius: 1px; background: currentColor; opacity: 0.25; transform-origin: 0 50%; }
