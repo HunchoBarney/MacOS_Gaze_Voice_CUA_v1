@@ -14,8 +14,6 @@ func probe(_ out: String, component: String) throws {
     for d in entry.directions.indices {
         let stage = Stage(entry, direction: d)
         stage.playFlow()
-        let renderer = ImageRenderer(content: StageView(stage: stage))
-        renderer.scale = 2
         var t = 0.0
         var shot = 0
         let total = stage.flowDuration
@@ -24,7 +22,8 @@ func probe(_ out: String, component: String) throws {
             stage.advance(1.0 / 60)
             t += 1.0 / 60
             if t >= marks[shot] {
-                renderer.content = StageView(stage: stage)
+                let renderer = ImageRenderer(content: StageView(stage: stage))
+                renderer.scale = 2
                 if let image = renderer.cgImage {
                     try writePNG(image, to: URL(fileURLWithPath: out + "/\(component)-\(entry.directions[d].info.id)-\(shot)-\(stage.state.id).png"))
                 }
@@ -52,18 +51,20 @@ struct Options {
 }
 
 /// Renders `seconds` of the stage into one MP4 and its poster (the last frame).
+/// Every frame gets its own ImageRenderer: a reused renderer whose content is
+/// reassigned can return the previous image (seen under Reduce Motion, where
+/// the guide callout kept the last step's words).
 @MainActor
 func clip(_ stage: Stage, seconds: Double, options: Options, mp4: URL, poster: URL) throws {
-    let renderer = ImageRenderer(content: StageView(stage: stage))
-    renderer.scale = options.scale
     let size = stage.component.crop.size
     let writer = try ClipWriter(url: mp4, width: Int(size.width * options.scale), height: Int(size.height * options.scale), fps: options.fps)
     let count = Int((seconds * options.fps).rounded())
     var last: CGImage?
     for i in 0..<count {
         if i > 0 { stage.advance(1 / options.fps) }
-        renderer.content = StageView(stage: stage)
-        guard let image = renderer.cgImage else { throw RenderError("no frame \(i) for \(mp4.lastPathComponent)") }
+        let frame = ImageRenderer(content: StageView(stage: stage))
+        frame.scale = options.scale
+        guard let image = frame.cgImage else { throw RenderError("no frame \(i) for \(mp4.lastPathComponent)") }
         try writer.append(image)
         last = image
     }
@@ -98,8 +99,6 @@ func render(_ options: Options) throws {
                     let switchAt = lead
                     // Hold the previous state briefly, then change state live so the clip shows the transition.
                     var switched = false
-                    let renderer = ImageRenderer(content: StageView(stage: stage))
-                    renderer.scale = options.scale
                     let size = entry.crop.size
                     let writer = try ClipWriter(url: base.appendingPathExtension("mp4"), width: Int(size.width * options.scale),
                                                 height: Int(size.height * options.scale), fps: options.fps)
@@ -112,8 +111,9 @@ func render(_ options: Options) throws {
                             stageRef.advance(0)
                             switched = true
                         }
-                        renderer.content = StageView(stage: stageRef)
-                        guard let image = renderer.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
+                        let frame = ImageRenderer(content: StageView(stage: stageRef))
+                        frame.scale = options.scale
+                        guard let image = frame.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
                         try writer.append(image)
                         if i == Int(((lead + state.duration * 0.6) * options.fps).rounded()) { last = image }
                     }
@@ -142,16 +142,15 @@ func renderScenes(_ options: Options) throws {
         for variant in options.variants {
             let stage = SceneStage(scene, scheme: variant.scheme, reduceMotion: variant.reduceMotion)
             let base = options.out.appendingPathComponent("redesign/scenes/\(scene.id).\(variant.key)")
-            let renderer = ImageRenderer(content: stage.view())
-            renderer.scale = options.scale
             let writer = try ClipWriter(url: base.appendingPathExtension("mp4"), width: Int(Desk.size.width * options.scale),
                                         height: Int(Desk.size.height * options.scale), fps: options.fps)
             var poster: CGImage?
             let count = Int((scene.duration * options.fps).rounded())
             for i in 0..<count {
                 if i > 0 { stage.advance(1 / options.fps) }
-                renderer.content = stage.view()
-                guard let image = renderer.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
+                let frame = ImageRenderer(content: stage.view())
+                frame.scale = options.scale
+                guard let image = frame.cgImage else { throw RenderError("no frame for \(base.lastPathComponent)") }
                 try writer.append(image)
                 if abs(stage.time - 9.0) < 0.5 / options.fps { poster = image }
             }
@@ -222,31 +221,51 @@ func writeManifest(_ options: Options) throws {
 /// without the backdrop, minus the cost of rendering the same stage idle.
 /// A proxy for the overlay's cost, not on-screen compositor numbers.
 @MainActor
-func perf(frames: Int = 240) throws {
+func perf(_ args: ArraySlice<String>, frames: Int = 240) throws {
+    var only: Set<String>?
+    var busiest = ["voice-island": "hearing", "gaze-highlight": "locked", "agent-presence": "shelf", "guide-callout": "consequential"]
+    var rest = Array(args)
+    while rest.count >= 2 {
+        let value = rest[1]
+        switch rest[0] {
+        case "--only": only = Set(value.split(separator: ",").map(String.init))
+        case "--busy":
+            for pair in value.split(separator: ",") {
+                let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+                if parts.count == 2 { busiest[parts[0]] = parts[1] }
+            }
+        default: break
+        }
+        rest.removeFirst(2)
+    }
     func cpuSeconds() -> Double {
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)
         return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6
     }
-    func measure(_ stage: Stage) -> (cpu: Double, wall: Double) {
+    /// One ImageRenderer per frame, as the clip renderer does: a reused one can
+    /// return the previous image without rendering, which undercounts. The
+    /// creation cost is the same in the idle and busy loops, so it cancels out.
+    func frame(_ stage: Stage) {
         let renderer = ImageRenderer(content: StageView(stage: stage, backdrop: false))
         renderer.scale = 2
+        _ = renderer.cgImage
+    }
+    func measure(_ stage: Stage) -> (cpu: Double, wall: Double) {
         for _ in 0..<20 {
             stage.advance(1.0 / 60)
-            renderer.content = StageView(stage: stage, backdrop: false)
-            _ = renderer.cgImage
+            frame(stage)
         }
         let c0 = cpuSeconds(), w0 = Date()
         for _ in 0..<frames {
             stage.advance(1.0 / 60)
-            renderer.content = StageView(stage: stage, backdrop: false)
-            _ = renderer.cgImage
+            frame(stage)
         }
         return ((cpuSeconds() - c0) / Double(frames) * 1000, Date().timeIntervalSince(w0) / Double(frames) * 1000)
     }
-    let busiest = ["voice-island": "hearing", "gaze-highlight": "locked"]
-    var out: [String: [String: [String: String]]] = [:]
-    for entry in Redesign.components {
+    let url = URL(fileURLWithPath: "Lab/perf.json")
+    var out = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: [String: [String: String]]]) ?? [:]
+    for entry in Redesign.components where only?.contains(entry.id) ?? true {
         guard let busy = busiest[entry.id], let index = entry.index(of: busy),
               let idle = entry.flow.first.flatMap({ entry.index(of: $0) }) else { continue }
         for (d, direction) in entry.directions.enumerated() where direction.info.alwaysOn {
@@ -262,13 +281,13 @@ func perf(frames: Int = 240) throws {
                 "cpu": String(format: "%.1f ms/frame CPU (%.0f%% of a core at 60 fps)", cpu, cpu * 6),
                 "gpu": String(format: "%.1f ms/frame offscreen render incl. GPU", wall),
                 "idle": "0: the view is removed when idle",
-                "note": "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), \(busy) state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor.",
+                "note": "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, \(busy) state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor.",
             ]
             print(String(format: "%@ %@ %@: cpu %.2f ms, wall %.2f ms (idle cpu %.2f, wall %.2f)", entry.id, id, busy, cpu, wall, base.cpu, base.wall))
         }
     }
     let data = try JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
-    try data.write(to: URL(fileURLWithPath: "Lab/perf.json"))
+    try data.write(to: url)
 }
 
 /// Re-renders every poster without encoding clips: steps the same stage to
@@ -316,6 +335,72 @@ func posters(_ options: Options) throws {
     }
 }
 
+/// Reduce Motion check: each direction, one state per component, every
+/// channel settled, rendered under Reduce Motion 0.37 s into the state (inside
+/// the guide's arrival window), then at two instants 1 s apart.
+/// Anything still moving (a beam travelling its border, an orb turning) makes
+/// the frames differ and the check fail. Writes both frames of a failure to
+/// `out` when given. `rmcheck-control` runs the same frames with motion on, to
+/// show the check catches a moving beam or orb.
+@MainActor
+func rmcheck(out: String?, control: Bool = false) -> Bool {
+    let states = [("gaze-highlight", "locked"), ("flashes", "confirm"), ("agent-presence", "shelf"),
+                  ("agent-presence", "large"), ("guide-callout", "consequential"), ("guide-callout", "large")]
+    func pixels(_ image: CGImage) -> [UInt8] {
+        let w = image.width, h = image.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        let context = CGContext(data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        context?.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return data
+    }
+    var ok = true
+    for (id, stateID) in states {
+        guard let entry = Redesign.components.first(where: { $0.id == id }), let index = entry.index(of: stateID) else { continue }
+        for d in entry.directions.indices {
+            for scheme in [ColorScheme.dark, .light] {
+                let stage = Stage(entry, direction: d)
+                stage.scheme = scheme
+                stage.reduceMotion = !control
+                stage.settle(at: index)
+                func shot() -> CGImage? {
+                    let renderer = ImageRenderer(content: StageView(stage: stage, backdrop: false))
+                    renderer.scale = 1
+                    return renderer.cgImage
+                }
+                for _ in 0..<22 { stage.advance(1.0 / 60) }
+                guard let early = shot() else { continue }
+                for _ in 22..<120 { stage.advance(1.0 / 60) }
+                guard let a = shot() else { continue }
+                for _ in 0..<60 { stage.advance(1.0 / 60) }
+                guard let b = shot() else { continue }
+                func changed(_ x: CGImage, _ y: CGImage) -> Int {
+                    let px = pixels(x), py = pixels(y)
+                    var n = 0
+                    for i in stride(from: 0, to: min(px.count, py.count), by: 4)
+                    where abs(Int(px[i]) - Int(py[i])) + abs(Int(px[i + 1]) - Int(py[i + 1])) + abs(Int(px[i + 2]) - Int(py[i + 2])) + abs(Int(px[i + 3]) - Int(py[i + 3])) > 8 {
+                        n += 1
+                    }
+                    return n
+                }
+                let late = changed(a, b), arrival = changed(early, b)
+                let name = "\(id) \(entry.directions[d].info.id) \(stateID) \(scheme == .dark ? "dark" : "light")"
+                print("\(late + arrival == 0 ? "PASS" : "FAIL") \(name): \(late) pixels changed between t and t+1s, \(arrival) between 0.37 s in and t+1s")
+                if late + arrival > 0 {
+                    ok = false
+                    if let out {
+                        let base = out + "/\(id)-\(entry.directions[d].info.id)-\(stateID)-\(scheme == .dark ? "dark" : "light")"
+                        try? writePNG(early, to: URL(fileURLWithPath: base + "-early.png"))
+                        try? writePNG(a, to: URL(fileURLWithPath: base + "-t0.png"))
+                        try? writePNG(b, to: URL(fileURLWithPath: base + "-t1.png"))
+                    }
+                }
+            }
+        }
+    }
+    return ok
+}
+
 func gitHead() -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
@@ -358,9 +443,11 @@ MainActor.assumeIsolated {
         case "probe": try probe(args[2], component: args.count > 3 ? args[3] : "voice-island")
         case "render": try render(parse(args.dropFirst(2)))
         case "manifest": try writeManifest(parse(args.dropFirst(2)))
-        case "perf": try perf()
+        case "perf": try perf(args.dropFirst(2))
         case "posters": try posters(parse(args.dropFirst(2)))
-        default: print("usage: JarvisRedesignRender probe <dir> [component] | render <renders-dir> [--only ids] [--variants keys] [--scale s] [--fps n]")
+        case "rmcheck": if !rmcheck(out: args.count > 2 ? args[2] : nil) { exit(1) }
+        case "rmcheck-control": _ = rmcheck(out: nil, control: true)
+        default: print("usage: JarvisRedesignRender probe <dir> [component] | render <renders-dir> [--only ids] [--variants keys] [--scale s] [--fps n] | perf [--only ids] [--busy id=state,...] | rmcheck [out-dir] | rmcheck-control")
         }
     } catch {
         print("error: \(error)")

@@ -46,7 +46,6 @@ public struct StageView: View {
     @ObservedObject var stage: Stage
     var crop: CGRect?
     var backdrop: Bool
-
     public init(stage: Stage, crop: CGRect? = nil, backdrop: Bool = true) {
         self.stage = stage
         self.crop = crop

@@ -9,5 +9,6 @@ public enum Lib {
     public static let aurora = LibraryUse("Aurora (tornikegomareli)", "a3f9296", "MIT (stated in README; no LICENSE file upstream)", "https://github.com/tornikegomareli/Aurora", role: "Apple Intelligence edge glow: a Metal port of Siri's IntelligentLight algorithm")
     public static let dynamicNotchKit = LibraryUse("DynamicNotchKit (geometry)", "cd0b3e5", "MIT", "https://github.com/MrKai77/DynamicNotchKit", role: "Notch silhouette; the product host for a notch window")
     public static let swiftUISpring = LibraryUse("SwiftUI Spring (Apple)", "macOS 26 SDK", "Platform", "https://developer.apple.com/documentation/swiftui/spring", role: "Interruptible spring physics with velocity carry")
+    public static let sfSymbols = LibraryUse("SF Symbols (Apple)", "macOS 26 SDK", "Platform", "https://developer.apple.com/sf-symbols/", role: "State glyphs: done and needs-you")
     public static let meshGradient = LibraryUse("SwiftUI MeshGradient (Apple)", "macOS 26 SDK", "Platform", "https://developer.apple.com/documentation/swiftui/meshgradient", role: "GPU mesh gradient")
 }
