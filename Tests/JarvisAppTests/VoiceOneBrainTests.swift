@@ -229,12 +229,18 @@ final class VoiceOneBrainTests: XCTestCase {
         let wire = RecordedVoiceWire()
         await wire.setHoldCommits(true)
         let (lane, client, executed) = try await scriptedConversation(wire)
-        lane.commitConfirmationTimeout = .milliseconds(300)
+        var timers: [CheckedContinuation<Void, Error>] = []
+        lane.commitConfirmationTimer = { _ in try await withCheckedThrowingContinuation { timers.append($0) } }
+        var expired = false
+        lane.conversation.onEvent = { if case .ignored = $0 { expired = true } }
+        defer { timers.forEach { $0.resume(throwing: CancellationError()) } }
         let connection = client.connectionID
 
         lane.localTurnStarted(connection: connection)
         try await lane.localTurnEnded(connection: connection)
-        try await Task.sleep(for: .milliseconds(450))
+        await waitFor { timers.count == 1 }
+        timers.removeFirst().resume()
+        await waitFor { expired }
         lane.localTurnStarted(connection: connection)
         try await lane.localTurnEnded(connection: connection)
         let late = try await wire.confirmHeld()

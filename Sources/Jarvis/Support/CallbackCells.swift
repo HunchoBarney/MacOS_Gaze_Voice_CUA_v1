@@ -58,8 +58,16 @@ private final class VoiceDeadlineCompletion<Value: Sendable>: Sendable {
     }
 }
 
+func sleepUntilUptime(_ deadline: TimeInterval) async throws {
+    let remaining = deadline - ProcessInfo.processInfo.systemUptime
+    if remaining > 0 { try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
+}
+
+/// `expire` returns once `deadline` (system uptime) has passed; tests pass
+/// one they fire by hand.
 func withVoiceDeadline<Value: Sendable>(
     until deadline: TimeInterval,
+    expire: @escaping @Sendable (TimeInterval) async throws -> Void = sleepUntilUptime,
     operation: @escaping @Sendable () async throws -> Value
 ) async throws -> Value {
     let completion = VoiceDeadlineCompletion<Value>()
@@ -71,11 +79,7 @@ func withVoiceDeadline<Value: Sendable>(
                 catch { completion.finish(.failure(error)) }
             }
             let timer = Task {
-                let remaining = deadline - ProcessInfo.processInfo.systemUptime
-                if remaining > 0 {
-                    do { try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
-                    catch { return }
-                }
+                do { try await expire(deadline) } catch { return }
                 completion.finish(.failure(LocalSpeechError.deadline))
             }
             completion.installTasks([worker, timer])
