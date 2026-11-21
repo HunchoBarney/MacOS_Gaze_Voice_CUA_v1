@@ -17,7 +17,7 @@ enum IndicatorPhase: Equatable {
         default: break
         }
         switch capture {
-        case .starting, .listening, .finishing, .awaitingRelease: return .hearing
+        case .starting, .listening, .finishing: return .hearing
         case .idle, .testingMicrophone, .stopping: break
         }
         if case .error = status { return .problem }
@@ -33,11 +33,35 @@ enum IndicatorPhase: Equatable {
     @MainActor
     static func current(_ controller: VoiceController) -> IndicatorPhase {
         guard !controller.isMicrophoneTest else { return .hidden }
+        switch controller.liveGlow {
+        case .hearing: return .hearing
+        case .thinking: return .working
+        case .hidden: break
+        }
         return resolve(capture: controller.captureState, status: controller.status,
                        conversationTurnOpen: controller.conversationTurnOpen,
                        activeWork: controller.cuaTasks.contains(where: \.active),
                        pendingAsks: !controller.pendingTaskApprovals.isEmpty
                            || !controller.pendingQuestions.isEmpty)
+    }
+}
+
+/// A guide step in the tab: where the walkthrough is, and buttons that
+/// do what saying the words does.
+enum GuideTab {
+    struct Button: Equatable {
+        var title: String
+        var control: GuideControl
+    }
+
+    static let buttons = [Button(title: "Do it for me", control: .justDoIt),
+                          Button(title: "Repeat", control: .repeatIt),
+                          Button(title: "Stop", control: .stop)]
+
+    /// "Step 2 of 5", or "Step 2" while the total is unknown.
+    static func counter(_ step: GuideStep) -> String {
+        guard let total = step.total, total >= step.number else { return "Step \(step.number)" }
+        return "Step \(step.number) of \(total)"
     }
 }
 
@@ -53,11 +77,17 @@ struct ListeningIndicatorView: View {
         controller.cuaTasks.last(where: \.active)
     }
 
+    /// The step a walkthrough is pointing at, while it waits for the person.
+    private var guideStep: GuideStep? {
+        phase == .working ? activeWork?.guideStep : nil
+    }
+
     private var line: String {
         switch phase {
         case .hearing:
             return controller.transcript.isEmpty ? "Listening" : controller.transcript
         case .working:
+            if let guideStep { return GuideTab.counter(guideStep) }
             let label = activeWork?.label ?? controller.detail
             return (label.isEmpty ? "Working" : label) + "…"
         case .asking:
@@ -103,7 +133,9 @@ struct ListeningIndicatorView: View {
                 Image(systemName: "eye").font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
                     .accessibilityLabel("Eye tracking on")
             }
-            if phase == .working {
+            if guideStep != nil, let work = activeWork {
+                guideButtons(work: work.id)
+            } else if phase == .working {
                 Button(action: controller.stopAll) {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
                         .frame(width: 22, height: 22)
@@ -117,8 +149,24 @@ struct ListeningIndicatorView: View {
         .padding(.horizontal, 16)
         .frame(minWidth: 150, minHeight: 34)
         .background(Color.black, in: UnevenRoundedRectangle(bottomLeadingRadius: 14, bottomTrailingRadius: 14))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: guideStep == nil ? .combine : .contain)
         .accessibilityLabel("Jarvis: \(line)")
+    }
+
+    private func guideButtons(work: UUID) -> some View {
+        HStack(spacing: 6) {
+            ForEach(GuideTab.buttons, id: \.title) { button in
+                Button(button.title) { controller.guideControl(button.control, task: work) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 26)
+                    .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 7))
+                    .contentShape(RoundedRectangle(cornerRadius: 7))
+                    .fixedSize()
+            }
+        }
     }
 }
 

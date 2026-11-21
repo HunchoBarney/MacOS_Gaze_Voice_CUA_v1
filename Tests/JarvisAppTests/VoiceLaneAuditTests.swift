@@ -2,8 +2,8 @@ import XCTest
 import AVFoundation
 @testable import Jarvis
 
-/// Contract tests for the voice-lane audit fixes: speechless Fn tap →
-/// gaze click dispatch, mid-hold screenshot/context sends, the 200ms
+/// Contract tests for the voice-lane audit fixes: turn-end presentation,
+/// mid-capture screenshot/context sends, the 200ms
 /// transcript settle cap, say-suppression for every contract tool
 /// result, the dictation editing vocabulary, voice-started dictation,
 /// spoken failures, the universal-stop and local-speech seams — all
@@ -17,7 +17,7 @@ final class VoiceLaneAuditTests: XCTestCase {
             config.handsFreePaused = paused
             let speaker = FakeSpeaker()
             let realtime = RealtimeVoiceLane(apiKey: { "" })
-            let controller = VoiceController(config: config, speech: realtime, authorize: { true },
+            let controller = VoiceController.inert(config: config, speech: realtime, authorize: { true },
                 cuaRuntime: testCoordinator(config), speaker: speaker)
             XCTAssertTrue(controller.voiceAgentEvent(
                 #"{"status":"done","say":"The reply is ready."}"#))
@@ -32,7 +32,7 @@ final class VoiceLaneAuditTests: XCTestCase {
         config.handsFreeEnabled = true
         config.handsFreePaused = true
         let capture = StubCapture()
-        let controller = VoiceController(config: config, speech: capture, authorize: { true },
+        let controller = VoiceController.inert(config: config, speech: capture, authorize: { true },
             cuaRuntime: testCoordinator(config))
         addTeardownBlock { await controller.shutdown() }
         controller.prepareMicrophone()
@@ -46,7 +46,7 @@ final class VoiceLaneAuditTests: XCTestCase {
         config.handsFreeEnabled = true
         let capture = StubCapture()
         capture.holdPreparation = true
-        let controller = VoiceController(config: config, speech: capture, authorize: { true },
+        let controller = VoiceController.inert(config: config, speech: capture, authorize: { true },
             cuaRuntime: testCoordinator(config))
         addTeardownBlock { await controller.shutdown() }
         controller.prepareMicrophone()
@@ -150,15 +150,15 @@ final class VoiceLaneAuditTests: XCTestCase {
         }
     }
 
-    // MARK: - Task 1: speechless Fn tap → gaze click vs silent dismiss
+    // MARK: - Task 1: turn-end presentation
 
     func testC1TurnEndWaitsForOwnedWorkAndShowsBlockedOutcome() async throws {
         let config = testConfig(), capture = StubCapture()
         let coordinator = testCoordinator(config)
-        let controller = VoiceController(config: config, speech: capture,
+        let controller = VoiceController.inert(config: config, speech: capture,
             authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker())
         addTeardownBlock { await controller.shutdown() }
-        controller.begin()
+        controller.beginCapture()
         await poll(until: { capture.startedID != nil && controller.isListening })
         let id = try XCTUnwrap(capture.startedID)
         controller.finish()
@@ -184,10 +184,10 @@ final class VoiceLaneAuditTests: XCTestCase {
     func testBlockedReasonCodeShowsASentence() async throws {
         let config = testConfig(), capture = StubCapture()
         let coordinator = testCoordinator(config)
-        let controller = VoiceController(config: config, speech: capture,
+        let controller = VoiceController.inert(config: config, speech: capture,
             authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker())
         addTeardownBlock { await controller.shutdown() }
-        controller.begin()
+        controller.beginCapture()
         await poll(until: { capture.startedID != nil && controller.isListening })
         let id = try XCTUnwrap(capture.startedID)
         controller.finish()
@@ -216,10 +216,10 @@ final class VoiceLaneAuditTests: XCTestCase {
         for outcome in outcomes {
             let config = testConfig(), capture = StubCapture()
             let coordinator = testCoordinator(config)
-            let controller = VoiceController(config: config, speech: capture,
+            let controller = VoiceController.inert(config: config, speech: capture,
                 authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker())
             addTeardownBlock { await controller.shutdown() }
-            controller.begin()
+            controller.beginCapture()
             await poll(until: { capture.startedID != nil && controller.isListening })
             let id = try XCTUnwrap(capture.startedID)
             controller.finish()
@@ -239,10 +239,10 @@ final class VoiceLaneAuditTests: XCTestCase {
     func testC1OldWorkSettlementPreservesNewCapture() async throws {
         let config = testConfig(), capture = StubCapture()
         let coordinator = testCoordinator(config)
-        let controller = VoiceController(config: config, speech: capture,
+        let controller = VoiceController.inert(config: config, speech: capture,
             authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker())
         addTeardownBlock { await controller.shutdown() }
-        controller.begin()
+        controller.beginCapture()
         await poll(until: { capture.startedID != nil && controller.isListening })
         let oldID = try XCTUnwrap(capture.startedID)
         controller.finish()
@@ -253,7 +253,7 @@ final class VoiceLaneAuditTests: XCTestCase {
         coordinator.tasks = [work]
         capture.onEvent?(oldID, .turnEnded)
 
-        controller.begin()
+        controller.beginCapture()
         await poll(until: { capture.startedID != oldID && controller.isListening })
         XCTAssertNotEqual(capture.startedID, oldID)
         let cancellations = capture.cancelCalls
@@ -269,10 +269,10 @@ final class VoiceLaneAuditTests: XCTestCase {
         for hasWork in [true, false] {
             let config = testConfig(), capture = StubCapture()
             let coordinator = testCoordinator(config)
-            let controller = VoiceController(config: config, speech: capture,
+            let controller = VoiceController.inert(config: config, speech: capture,
                 authorize: { true }, cuaRuntime: coordinator, speaker: FakeSpeaker())
             addTeardownBlock { await controller.shutdown() }
-            controller.begin()
+            controller.beginCapture()
             await poll(until: { capture.startedID != nil && controller.isListening })
             let id = try XCTUnwrap(capture.startedID)
             controller.finish()
@@ -298,36 +298,8 @@ final class VoiceLaneAuditTests: XCTestCase {
         }
     }
 
-    /// A tap under the 100ms audio floor fires the wired handler — true
-    /// means the gaze side clicked; either way the turn cleans up and
-    /// emits the silent `.final("")` dismiss.
-    func testSpeechlessTapDispatchesGazeHandler() async throws {
-        for handled in [true, false] {
-            let owner = LocalSpeechSession { _ in XCTFail("a speechless gesture is not a voice command") }
-            let lane = RealtimeVoiceLane(apiKey: { "test-key" }, admissionOwner: owner)
-            var events: [SpeechEvent] = []
-            let flags = Flags()
-            lane.onEvent = { _, event in events.append(event) }
-            lane.gazeTapHandler = { flags.value += 1; return handled }
-            let id = UUID()
-            let session = RealtimeVoiceLane.Session(name: "mic", feed: try makeFeed(), sendsAudio: true)
-            session.localTurn = owner.begin(id: id, mode: .command, ready: true, now: 0)
-            lane.active = (id, session)
-            lane.turnID = id
-            lane.finish()
-            await poll(until: { lane.turnID == nil })
-            XCTAssertEqual(flags.value, 1,
-                           "a speechless tap must consult the gaze handler (handled=\(handled))")
-            XCTAssertNil(lane.turnID)
-            XCTAssertTrue(events.contains {
-                if case .final(let text) = $0 { return text.isEmpty }
-                return false
-            }, "the tap ends in the silent .final dismiss (handled=\(handled))")
-        }
-    }
-
-    /// No handler wired → today's silent dismiss, no dispatch at all.
-    func testSpeechlessTapWithoutHandlerDismisses() async throws {
+    /// A capture that sent almost no audio ends in the silent dismiss.
+    func testSpeechlessCaptureDismisses() async throws {
         let lane = lane()
         var events: [SpeechEvent] = []
         lane.onEvent = { _, event in events.append(event) }
@@ -341,47 +313,6 @@ final class VoiceLaneAuditTests: XCTestCase {
             if case .final(let text) = $0 { return text.isEmpty }
             return false
         })
-    }
-
-    /// A metering session (mic test) never reaches the gaze gesture —
-    /// sendsAudio=false means it was never a turn candidate.
-    func testMeteringFinishNeverFiresGazeHandler() async throws {
-        let lane = lane()
-        let flags = Flags()
-        lane.gazeTapHandler = { flags.value += 1; return true }
-        let id = UUID()
-        lane.active = (id, RealtimeVoiceLane.Session(
-            name: "mic", feed: try makeFeed(), sendsAudio: false))
-        lane.turnID = id
-        lane.finish()
-        await poll(until: { lane.turnID == nil })
-        XCTAssertEqual(flags.value, 0, "a mic-test finish must not click")
-    }
-
-    func testShortDictationFinishNeverClicks() async throws {
-        let lane = lane()
-        let flags = Flags()
-        lane.respondOnCommit = false
-        lane.gazeTapHandler = { flags.value += 1; return true }
-        let id = UUID()
-        lane.active = (id, RealtimeVoiceLane.Session(name: "fixture", feed: try makeFeed(), sendsAudio: true))
-        lane.turnID = id
-        lane.finish()
-        await poll(until: { lane.turnID == nil })
-        XCTAssertEqual(flags.value, 0)
-    }
-
-    func testCancelledShortCaptureNeverClicks() async throws {
-        let lane = lane()
-        let flags = Flags()
-        lane.gazeTapHandler = { flags.value += 1; return true }
-        let id = UUID()
-        lane.active = (id, RealtimeVoiceLane.Session(name: "fixture", feed: try makeFeed(), sendsAudio: true))
-        lane.turnID = id
-        lane.finish()
-        lane.cancel()
-        await Task.yield()
-        XCTAssertEqual(flags.value, 0)
     }
 
     // MARK: - Task 5: say-suppression for every contract tool result
@@ -512,6 +443,22 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertEqual(flags.ints.last, 6, "history kept 'First.' after the sentence cut")
     }
 
+    /// "undo that" takes back the last delivery only, however many came
+    /// before it.
+    func testUndoThatRemovesOnlyTheLastDelivery() async throws {
+        let flags = Flags()
+        let delivery = DictationDelivery(
+            insertText: { flags.strings.append($0); return true },
+            pasteText: { _ in true },
+            deleteBackward: { flags.ints.append($0); return true })
+        try await delivery.deliver("hello")
+        try await delivery.deliver("one new line two")
+        try await delivery.deliver("undo that")
+        XCTAssertEqual(flags.ints, [7], "only 'one', newline, 'two'")
+        try await delivery.deliver("undo that")
+        XCTAssertEqual(flags.ints, [7, 5], "then 'hello' on its own")
+    }
+
     /// A pure-command transcript with empty history is a no-op success,
     /// not a lost paste.
     func testDictationCommandOnEmptyHistoryIsNoOp() async throws {
@@ -539,15 +486,13 @@ final class VoiceLaneAuditTests: XCTestCase {
 
     // MARK: - Task 7: voice-started dictation + universal stop seam
 
-    /// "Start dictation" without Fn+Ctrl: the capture latches open,
-    /// an Fn tap is converted to finish() through begin(), and the
-    /// final transcript still delivers literally.
+    /// "Start dictation": the capture latches open, "stop dictating"
+    /// finishes it, and the final transcript delivers literally.
     func testStartDictationLatchesAndDelivers() async throws {
         let config = testConfig()
-        config.dictationHotkey = true
         let capture = StubCapture()
         let dictation = RecordingDictation()
-        let controller = VoiceController(config: config, speech: capture,
+        let controller = VoiceController.inert(config: config, speech: capture,
                                          authorize: { true },
                                          cuaRuntime: testCoordinator(config),
                                          dictation: dictation, speaker: FakeSpeaker())
@@ -556,10 +501,7 @@ final class VoiceLaneAuditTests: XCTestCase {
         let id = try XCTUnwrap(capture.startedID)
         XCTAssertTrue(controller.captureActive)
 
-        // The voice latch lets a press through canBegin and converts it
-        // to the release that ends dictation — never a second capture.
-        XCTAssertTrue(controller.canBegin)
-        controller.begin()
+        XCTAssertTrue(controller.dictationRequest(false))
         XCTAssertEqual(capture.finishCalls, 1)
 
         capture.onEvent?(id, .final("hello world"))
@@ -567,29 +509,12 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertEqual(dictation.delivered, ["hello world"])
     }
 
-    /// The hotkey gate still applies — a disabled dictation feature
-    /// refuses the verb silently.
-    func testStartDictationRespectsHotkeyGate() async {
-        let config = testConfig()
-        config.dictationHotkey = false
-        let capture = StubCapture()
-        let controller = VoiceController(config: config, speech: capture,
-                                         authorize: { true },
-                                         cuaRuntime: testCoordinator(config),
-                                         dictation: RecordingDictation(),
-                                         speaker: FakeSpeaker())
-        controller.startDictation()
-        try? await Task.sleep(for: .milliseconds(100))
-        XCTAssertNil(capture.startedID)
-        XCTAssertFalse(controller.captureActive)
-    }
-
-    /// Escape routes to the coordinator's universal-cancel entry when
+    /// A cancel routes to the coordinator's universal-cancel entry when
     /// wired; the capture-only dismiss path never fires it.
     func testCancelFiresUniversalStopSeam() async {
         let config = testConfig()
         let flags = Flags()
-        let controller = VoiceController(config: config, speech: StubCapture(),
+        let controller = VoiceController.inert(config: config, speech: StubCapture(),
                                          authorize: { true },
                                          cuaRuntime: testCoordinator(config),
                                          speaker: FakeSpeaker())
@@ -603,6 +528,35 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertEqual(flags.value, 1, "capture dismiss is not a universal stop")
     }
 
+    /// Escape stops an in-flight task through the universal cancel, and
+    /// does nothing while Jarvis is idle or for any other key.
+    func testEscapeStopsAnInFlightTaskAndIgnoresIdle() async {
+        let config = testConfig()
+        let coordinator = testCoordinator(config)
+        let flags = Flags()
+        let controller = VoiceController.inert(config: config, speech: StubCapture(),
+                                         authorize: { true }, cuaRuntime: coordinator,
+                                         speaker: FakeSpeaker())
+        addTeardownBlock { await controller.shutdown() }
+        controller.cancelAllTasks = { flags.value += 1 }
+        let escape = EscapeStop(isActive: { controller.stoppable }, stop: { controller.cancel() })
+
+        XCTAssertFalse(controller.stoppable)
+        XCTAssertFalse(escape.handle(keyCode: EscapeStop.escapeKeyCode), "an idle Escape belongs to the frontmost app")
+        try? await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(flags.value, 0)
+
+        coordinator.tasks = [VoiceTaskCoordinator.Work(label: "Scroll", request: "Scroll down.",
+            spec: DriveTask(goal: "Scroll down.", application: "fixture.editor"))]
+        XCTAssertTrue(controller.stoppable)
+        XCTAssertFalse(escape.handle(keyCode: 0), "only Escape stops")
+        XCTAssertFalse(escape.handle(keyCode: EscapeStop.escapeKeyCode, physical: false),
+                       "an Escape the Cua driver posts inside the task doesn't stop it")
+        XCTAssertTrue(escape.handle(keyCode: EscapeStop.escapeKeyCode))
+        await poll(until: { flags.value == 1 })
+        XCTAssertEqual(flags.value, 1)
+    }
+
     // MARK: - Task 5/6: toolSay presentation + spoken failures
 
     /// A pushed outcome whose payload already carries `say` is voiced
@@ -612,7 +566,7 @@ final class VoiceLaneAuditTests: XCTestCase {
     func testDeterministicPushedOutcomeSpeaksLocally() {
         let config = testConfig()
         let speaker = FakeSpeaker()
-        let controller = VoiceController(config: config, speech: StubCapture(),
+        let controller = VoiceController.inert(config: config, speech: StubCapture(),
                                          authorize: { true },
                                          cuaRuntime: testCoordinator(config),
                                          speaker: speaker)
@@ -628,7 +582,7 @@ final class VoiceLaneAuditTests: XCTestCase {
     func testPlainPushedOutcomeKeepsModelPath() {
         let config = testConfig()
         let speaker = FakeSpeaker()
-        let controller = VoiceController(config: config, speech: StubCapture(),
+        let controller = VoiceController.inert(config: config, speech: StubCapture(),
                                          authorize: { true },
                                          cuaRuntime: testCoordinator(config),
                                          speaker: speaker)
@@ -645,11 +599,11 @@ final class VoiceLaneAuditTests: XCTestCase {
         let config = testConfig()
         let capture = StubCapture()
         let speaker = FakeSpeaker()
-        let controller = VoiceController(config: config, speech: capture,
+        let controller = VoiceController.inert(config: config, speech: capture,
                                          authorize: { true },
                                          cuaRuntime: testCoordinator(config),
                                          speaker: speaker)
-        controller.begin()
+        controller.beginCapture()
         await poll(until: { capture.startedID != nil })
         let id = try XCTUnwrap(capture.startedID)
 
@@ -663,11 +617,11 @@ final class VoiceLaneAuditTests: XCTestCase {
     func testFailureSpeaksBriefPhrase() async {
         let config = testConfig()
         let speaker = FakeSpeaker()
-        let controller = VoiceController(config: config, speech: StubCapture(),
+        let controller = VoiceController.inert(config: config, speech: StubCapture(),
                                          authorize: { false },
                                          cuaRuntime: testCoordinator(config),
                                          speaker: speaker)
-        controller.begin()
+        controller.beginCapture()
         await poll(until: { !speaker.spoken.isEmpty })
         XCTAssertEqual(speaker.spoken, ["I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone."])
         guard case .error = controller.status else {
@@ -688,7 +642,7 @@ final class VoiceLaneAuditTests: XCTestCase {
             "Microphone access is needed. It's under Privacy & Security, then Microphone."),
             "I can't hear you, the mic's switched off for me. It's under Privacy & Security, then Microphone.")
         XCTAssertEqual(OutcomeWording.spokenFailure(
-            "No speech was captured — hold Fn and dictate again."),
+            "No speech was captured. Say “start dictating” and try again."),
             "Sorry, I didn't catch that.")
         XCTAssertEqual(OutcomeWording.spokenFailure(
             "The voice model is unavailable: connection dropped"),
@@ -722,7 +676,8 @@ final class VoiceLaneAuditTests: XCTestCase {
     /// not only in the menu-bar tooltip, and never opens the microphone.
     func testHandsFreeWithoutKeyShowsTheCard() async {
         let config = testConfig()
-        let controller = VoiceController(config: config, speech: RealtimeVoiceLane(apiKey: { "" }),
+        config.listeningMode = .conversation
+        let controller = VoiceController.inert(config: config, speech: RealtimeVoiceLane(apiKey: { "" }),
             authorize: { XCTFail("the microphone must stay closed"); return false },
             cuaRuntime: testCoordinator(config))
         addTeardownBlock { await controller.shutdown() }

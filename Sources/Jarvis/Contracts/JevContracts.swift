@@ -101,6 +101,11 @@ public struct DriveTask: Sendable {
     /// raised once at drive start. Element-scoped and explicitly
     /// background work leaves this false so the user's front app survives.
     public var foreground: Bool
+    /// Whether the goal is surely the person's own words. False for a
+    /// GPT-Live request after a Standby resume or in reply to an alert,
+    /// where anyone in the room could have spoken: the words then name no
+    /// consequential press, so send, delete, buy or post asks first (D3).
+    public var speakerVerified = true
     public init(goal: String, application: String? = nil, pid: Int? = nil,
                 windowID: Int? = nil, windowName: String? = nil,
                 previousContext: String? = nil,
@@ -137,6 +142,9 @@ public struct DriveResult: Sendable {
     /// loop's policy gate, read by `describe` so the remedy it reports is
     /// honest for that refusal class.
     public var consentBlock: DriveStatus.ConsentBlock?
+    /// A line to say for this outcome: it replaces "Done." on success and
+    /// follows the reason otherwise. An undo offer rides here.
+    public var spoken: String?
     public init(status: DriveStatus, history: [String] = [], pid: Int? = nil, windowID: Int? = nil,
                 bundleID: String? = nil, dispatchedEffect: Bool = false,
                 blockedReason: String? = nil,
@@ -281,7 +289,7 @@ public protocol SpeechSynthesizing: Sendable {
     func stop()
 }
 
-/// Dictation delivery seam — Fn+Ctrl path delivers literal text to the
+/// Dictation delivery seam — the dictation path delivers literal text to the
 /// focused field; never passes through the planner.
 public protocol DictationDelivering: Sendable {
     func deliver(_ text: String) async throws

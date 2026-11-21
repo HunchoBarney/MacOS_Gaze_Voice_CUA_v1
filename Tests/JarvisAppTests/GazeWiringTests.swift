@@ -14,6 +14,13 @@ final class AgentShelfOverlayTests: XCTestCase {
               colorHex: AgentCursor.palette(for: slug), state: state)
     }
 
+    @MainActor
+    func testShelfPanelStaysOutOfCapturesAndNeverTakesTheMouse() {
+        let panel = AgentShelfOverlay.makePanel(for: entry("a"))
+        XCTAssertEqual(panel.sharingType, .none)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+    }
+
     /// Chips stack top-right in top-left space — the first entry is the
     /// topmost, each row below the last.
     func testChipFramesStackTopRight() {

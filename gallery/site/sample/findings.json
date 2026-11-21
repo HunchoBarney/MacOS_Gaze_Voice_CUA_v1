@@ -1,0 +1,108 @@
+{
+  "generatedAt": "2026-11-20T00:00:00Z",
+  "skills": [
+    "emil-design-eng",
+    "apple-design",
+    "animate",
+    "choreograph",
+    "gestures",
+    "find-animation-opportunities",
+    "animate-expo",
+    "break-ui"
+  ],
+  "findings": [
+    {
+      "id": "LI-1",
+      "component": "listening-indicator",
+      "severity": "P1",
+      "title": "Label repeats what the orb already says",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:65",
+      "problem": "Sample finding. The word Listening sits beside an orb whose colour and level already carry the state, so the capsule is twice as wide as it needs to be over the person's work.",
+      "fix": "Drop the label from steady states, keep it for Problem, and let the orb and level meter carry the state. VoiceOver keeps the label.",
+      "library": "Orb (metasidd), SwiftUI",
+      "skills": [
+        "emil-design-eng",
+        "apple-design"
+      ],
+      "proposedState": "listening-proposed"
+    },
+    {
+      "id": "LI-2",
+      "component": "listening-indicator",
+      "severity": "P2",
+      "title": "Level bars animate under Reduce Motion",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:146",
+      "problem": "Sample finding. The bars keep bouncing when Reduce Motion is on, which is high-frequency motion the person asked to avoid.",
+      "fix": "Under Reduce Motion, show a static level and crossfade between states in 150 ms.",
+      "skills": [
+        "remove-animations",
+        "apple-design"
+      ]
+    },
+    {
+      "id": "LI-3",
+      "component": "listening-indicator",
+      "severity": "P0",
+      "title": "Problem card can cover the menu bar",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:170",
+      "problem": "Sample finding. On a 13-inch display the card's top edge overlaps the menu bar when the notch is present.",
+      "fix": "Anchor the card below NSScreen.safeAreaInsets.top plus 8 pt.",
+      "library": "native API: NSScreen.safeAreaInsets",
+      "skills": [
+        "break-ui"
+      ]
+    },
+    {
+      "id": "GC-1",
+      "component": "guide-callout",
+      "severity": "P2",
+      "title": "Callout scales in from its centre",
+      "where": "Sources/Jarvis/UI/GuideCallout.swift:121",
+      "problem": "Sample finding. The card grows from its own centre, so it doesn't read as coming from the control it points at.",
+      "fix": "Set the anchor point to the arrow tip and enter from scale 0.96 plus opacity over 200 ms ease-out.",
+      "skills": [
+        "animate",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "AS-1",
+      "component": "agent-shelf",
+      "severity": "P3",
+      "title": "Chips enter all at once",
+      "where": "Sources/Jarvis/UI/AgentShelfOverlay.swift:118",
+      "problem": "Sample finding. When several agents start together the chips pop in on the same frame.",
+      "fix": "One entrance for the shelf; new chips after the first slide in 40 ms apart with the siblings closing the gap.",
+      "skills": [
+        "choreograph"
+      ]
+    },
+    {
+      "id": "MB-1",
+      "component": "menu-bar-item",
+      "severity": "P3",
+      "title": "Pending count uses a middle dot",
+      "where": "Sources/Jarvis/main.swift:593",
+      "problem": "Sample finding. A dot and number in the title is easy to miss and reads as a separator.",
+      "fix": "Use a badge drawn into the template image so it inverts with the menu bar.",
+      "library": "native API: NSImage template",
+      "skills": [
+        "apple-design"
+      ]
+    },
+    {
+      "id": "TC-1",
+      "component": "tracker-calibration",
+      "severity": "P2",
+      "title": "Active dot has no lead-in",
+      "where": "EyeTracking/web/calibration.ts:1",
+      "problem": "Sample finding. The next dot appears instantly, so the eye has to search for it.",
+      "fix": "Travel the dot to the next point over 250 ms with a critically damped spring, then pulse once.",
+      "library": "motion",
+      "skills": [
+        "animate",
+        "gestures"
+      ]
+    }
+  ]
+}

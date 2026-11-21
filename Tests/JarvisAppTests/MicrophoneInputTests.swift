@@ -1,9 +1,28 @@
 import AVFoundation
 import Foundation
 import XCTest
+import os
 @testable import Jarvis
 
 final class MicrophoneInputTests: XCTestCase {
+    func testTheFrameDeadlineStartsAfterASlowEngineStart() {
+        let queue = DispatchQueue(label: "test.microphone")
+        let events = OSAllocatedUnfairLock<[String]>(initialState: [])
+        let fired = expectation(description: "deadline fired")
+        let deadline = DispatchWorkItem {
+            events.withLock { $0.append("deadline") }
+            fired.fulfill()
+        }
+        queue.async {
+            MicrophoneInput.start({
+                Thread.sleep(forTimeInterval: 0.3)
+                queue.async { events.withLock { $0.append("frame") } }
+            }, thenArm: deadline, after: 0.05, on: queue)
+        }
+        wait(for: [fired], timeout: 2)
+        XCTAssertEqual(events.withLock { $0 }, ["frame", "deadline"])
+    }
+
     func testDuplexReceiptExpiresWhenOutputStopsAdvancingDespiteLiveInput() {
         var state = MicrophoneInput.DuplexReadiness()
         XCTAssertFalse(state.observe(inputFrames: 1024, outputSample: 100, healthy: true, now: 10))
@@ -99,5 +118,31 @@ final class MicrophoneInputTests: XCTestCase {
         XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: true, sameFormat: false), .interrupt)
         XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: false, sameFormat: true), .interrupt)
         XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: true, sameFormat: true), .restoreTap)
+    }
+
+    func testVoiceProcessingKeepsItsInputThroughAnOutputVolumeChange() {
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: true, sameFormat: true,
+                                                             voiceProcessing: true), .keep)
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: false, sameDevice: true, sameFormat: true,
+                                                             voiceProcessing: true), .restoreTap)
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: false, sameFormat: true,
+                                                             voiceProcessing: true), .interrupt)
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: true, sameFormat: false,
+                                                             voiceProcessing: true), .interrupt)
+    }
+
+    func testABriefDuplexStallIsToleratedButALongOneIsNot() {
+        XCTAssertFalse(MicrophoneInput.stallExpired(since: nil, now: 100))
+        XCTAssertFalse(MicrophoneInput.stallExpired(since: 100, now: 100.5))
+        XCTAssertFalse(MicrophoneInput.stallExpired(since: 100, now: 102.9))
+        XCTAssertTrue(MicrophoneInput.stallExpired(since: 100, now: 100 + MicrophoneInput.stallTolerance))
+    }
+
+    func testAPlaybackBufferThatCannotBeScheduledStillCompletes() {
+        let input = MicrophoneInput()
+        let route = input.playbackRoute(.realtime, generation: UUID())
+        let completed = expectation(description: "dropped buffer completed")
+        route.schedule(Data(count: 480)) { completed.fulfill() }
+        wait(for: [completed], timeout: 2)
     }
 }

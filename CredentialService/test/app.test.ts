@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { createApp } from "../src/app.ts";
+import { createApp, LIVE_CLIENT_EVENTS } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { Ledger, type LedgerClient, type Sql } from "../src/ledger.ts";
 
@@ -13,13 +13,18 @@ const body = (response: Response): Promise<any> => response.json();
 interface Call { url: string; headers: Record<string, string>; body: any }
 
 function harness(vars: Record<string, string> = {}) {
+  const config = loadConfig({
+    OPENAI_API_KEY: OPENAI_KEY, TYPESAFE_API_KEY: TYPESAFE_KEY, ADMIN_TOKEN: ADMIN, ...vars,
+  });
   const db = new DatabaseSync(":memory:");
   const sql: Sql = { all: (query, ...params) => db.prepare(query).all(...params) as any };
-  const local = new Ledger(sql);
+  const local = new Ledger(sql, config.metering);
   const ledger = Object.fromEntries(
-    (["register", "admit", "charge", "setPaused", "setRevoked", "usage"] as const)
-      .map((name) => [name, async (...args: any[]) => (local[name] as any)(...args)]),
+    ([
+      "register", "admit", "charge", "setPaused", "setRevoked", "usage", "lookup", "setTier", "addLiveUsage", "liveStatus",
+    ] as const).map((name) => [name, async (...args: any[]) => (local[name] as any)(...args)]),
   ) as LedgerClient;
+  const meters: { sessionID: string; installID: string }[] = [];
   const calls: Call[] = [];
   let reply: (call: Call) => Response | Promise<Response> = (call) => {
     if (call.url.endsWith("/v1/realtime/client_secrets")) {
@@ -28,18 +33,19 @@ function harness(vars: Record<string, string> = {}) {
     if (call.url.endsWith("/v1/responses")) {
       return Response.json({ output: [], usage: { input_tokens: 1_000_000, output_tokens: 100_000 } });
     }
+    if (call.url.endsWith("/v1/live/sessions")) {
+      return Response.json({ session: { id: "live_fixture" }, transport: { type: "webrtc", sdp: "v=0 answer" } }, { status: 201 });
+    }
     return Response.json({ answers: {} });
   };
   let clock = Date.UTC(2026, 10, 20, 12, 0, 0);
   let ip = "203.0.113.7";
-  const config = loadConfig({
-    OPENAI_API_KEY: OPENAI_KEY, TYPESAFE_API_KEY: TYPESAFE_KEY, ADMIN_TOKEN: ADMIN, ...vars,
-  });
   const app = createApp({
     config,
     ledger,
     now: () => clock,
     clientIP: () => ip,
+    startMeter: (session) => { meters.push(session); },
     upstream: async (url, init) => {
       const call = { url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) };
       calls.push(call);
@@ -62,9 +68,11 @@ function harness(vars: Record<string, string> = {}) {
     return (await body(response)) as { installID: string; token: string };
   };
   return {
-    db, calls, request, register, config,
+    db, calls, request, register, config, local, meters,
+    now: () => clock,
     setReply: (next: typeof reply) => { reply = next; },
     advance: (ms: number) => { clock += ms; },
+    setClock: (ms: number) => { clock = ms; },
     setIP: (next: string) => { ip = next; },
     admin: (path: string, method = "POST") => request(path, { method, token: ADMIN }),
   };
@@ -72,6 +80,7 @@ function harness(vars: Record<string, string> = {}) {
 
 const terra = { model: "gpt-6.1-terra", input: [], max_output_tokens: 1000 };
 const jev = { model: "jev-1.14.0", state: {}, questions: {} };
+const live = { sdp: "v=0 offer" };
 
 describe("registration", () => {
   it("returns a token the service stores only as a hash", async () => {
@@ -153,6 +162,139 @@ describe("realtime client secrets", () => {
     const text = await response.text();
     expect(text).not.toContain("sk-owner");
     expect(JSON.parse(text).error.code).toBe("upstream_error");
+  });
+});
+
+describe("Live sessions", () => {
+  const fixed = (installHash: string) => ({
+    model: "gpt-live-1.1",
+    delegation: { type: "client" },
+    store: false,
+    idle_timeout_s: 8,
+    wake_policy: { type: "speech" },
+    safety_identifier: installHash,
+    client: { data_channel: { allowed_client_events: LIVE_CLIENT_EVENTS } },
+  });
+  const hash = async (text: string) =>
+    [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))]
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+  it("opens a client-delegated session for the pinned model with the owner's key and returns OpenAI's answer", async () => {
+    const h = harness({ LIVE_SESSION_CENTS: "8" });
+    const { installID, token } = await h.register();
+    const input = [
+      { type: "message", role: "developer", content: [{ type: "input_text", text: "Context" }] },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "Earlier: open Notes" }] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Opened." }] },
+    ];
+    const response = await h.request("/v1/live/sessions", {
+      token,
+      body: { ...live, instructions: "Be brief.", input, voice: "cedar", idle_timeout_s: 20, vad_threshold: 0.6 },
+    });
+    expect(response.status).toBe(201);
+    expect(await body(response)).toEqual({ session: { id: "live_fixture" }, transport: { type: "webrtc", sdp: "v=0 answer" } });
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0].url).toBe("https://api.openai.com/v1/live/sessions");
+    expect(h.calls[0].headers.authorization).toBe(`Bearer ${OPENAI_KEY}`);
+    expect(h.calls[0].body).toEqual({
+      session: {
+        ...fixed(await hash(installID)),
+        idle_timeout_s: 20,
+        wake_policy: { type: "speech", vad_threshold: 0.6 },
+        instructions: "Be brief.",
+        input,
+        audio: { output: { voice: "cedar" } },
+      },
+      transport: { type: "webrtc", sdp: "v=0 offer" },
+    });
+    expect(JSON.stringify(h.calls[0].body)).not.toContain(installID);
+    const usage = await body(await h.admin("/admin/usage", "GET"));
+    expect(usage.top).toEqual([{ installID, cents: 8 }]);
+  });
+
+  it("fixes everything but the offer when the app sets nothing else", async () => {
+    const h = harness();
+    const { installID, token } = await h.register();
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+    expect(h.calls[0].body.session).toEqual(fixed(await hash(installID)));
+    expect(LIVE_CLIENT_EVENTS).toEqual([
+      "session.close", "session.instructions.append", "session.thinking.append", "session.commentary.append",
+      "session.input_audio.mute", "session.input_audio.unmute",
+    ]);
+  });
+
+  it("refuses fields the service decides and malformed ones, without calling upstream or charging", async () => {
+    const h = harness({ LIVE_PER_MINUTE: "100" });
+    const { token } = await h.register();
+    for (const extra of [
+      { model: "gpt-live-1" }, { delegation: { type: "responses" } }, { store: true }, { triggers: [] },
+      { client: { data_channel: { allowed_client_events: "all" } } }, { tools: [] }, { safety_identifier: "x" },
+      { audio: { output: { voice: "cedar" } } }, { wake_policy: { type: "speech" } }, { acknowledgement_delay_ms: 0 },
+      { session: {} }, { transport: {} },
+    ]) {
+      const response = await h.request("/v1/live/sessions", { token, body: { ...live, ...extra } });
+      expect(response.status).toBe(400);
+      expect((await body(response)).error.code).toBe("field_not_allowed");
+    }
+    for (const request of [
+      {}, { sdp: "" }, { sdp: 7 }, { ...live, instructions: 7 }, { ...live, input: "hi" },
+      { ...live, input: Array(129).fill({ type: "message", role: "user", content: [] }) },
+      { ...live, input: [{ type: "message", role: "system", content: [] }] }, { ...live, input: [null] },
+      { ...live, voice: "robot" }, { ...live, voice: { id: "voice_custom" } },
+      { ...live, idle_timeout_s: 4 }, { ...live, idle_timeout_s: 61 }, { ...live, idle_timeout_s: 8.5 },
+      { ...live, vad_threshold: 1.5 }, { ...live, vad_threshold: "0.5" },
+    ]) {
+      const response = await h.request("/v1/live/sessions", { token, body: request });
+      expect(response.status, JSON.stringify(request).slice(0, 80)).toBe(400);
+      expect((await body(response)).error.code).toBe("bad_request");
+    }
+    expect((await h.request("/v1/live/sessions", { token, body: { sdp: "a".repeat(64 * 1024 + 1) } })).status).toBe(413);
+    expect((await h.request("/v1/live/sessions", { token, body: { ...live, instructions: "a".repeat(256 * 1024) } })).status).toBe(413);
+    expect(h.calls).toHaveLength(0);
+    expect((await body(await h.admin("/admin/usage", "GET"))).globalCents).toBe(0);
+  });
+
+  it("passes a provider's 400 through, maps other failures, and refunds them all", async () => {
+    const h = harness();
+    const { token } = await h.register();
+    h.setReply(() => Response.json({ error: { message: "Invalid SDP offer" } }, { status: 400 }));
+    const rejected = await h.request("/v1/live/sessions", { token, body: live });
+    expect(rejected.status).toBe(400);
+    expect((await body(rejected)).error.message).toBe("Invalid SDP offer");
+    h.setReply(() => Response.json({ error: { message: "Incorrect API key provided: sk-owner" } }, { status: 401 }));
+    const unauthorized = await h.request("/v1/live/sessions", { token, body: live });
+    expect(unauthorized.status).toBe(502);
+    expect(await unauthorized.text()).not.toContain("sk-owner");
+    h.setReply(() => new Response("slow down", { status: 429 }));
+    const busy = await h.request("/v1/live/sessions", { token, body: live });
+    expect(busy.status).toBe(503);
+    expect((await body(busy)).error.code).toBe("upstream_busy");
+    h.setReply(() => Response.json({ session: { id: "live_fixture" } }, { status: 201 }));
+    expect((await body(await h.request("/v1/live/sessions", { token, body: live }))).error.code).toBe("upstream_error");
+    expect((await body(await h.admin("/admin/usage", "GET"))).globalCents).toBe(0);
+  });
+
+  it("has its own per-minute limit and shares the install's daily spend", async () => {
+    const h = harness({ LIVE_PER_MINUTE: "1", LIVE_SESSION_CENTS: "30", REALTIME_SESSION_CENTS: "25", INSTALL_DAILY_CENTS: "60" });
+    const { token } = await h.register();
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+    const limited = await h.request("/v1/live/sessions", { token, body: live });
+    expect((await body(limited)).error.code).toBe("rate_limited");
+    expect((await h.request("/v1/realtime/client_secret", { token })).status).toBe(200);
+    h.advance(60_000);
+    const over = await h.request("/v1/live/sessions", { token, body: live });
+    expect(over.status).toBe(429);
+    expect((await body(over)).error.code).toBe("daily_limit");
+    expect(h.calls.filter((call) => call.url.endsWith("/v1/live/sessions"))).toHaveLength(1);
+  });
+
+  it("refuses an unknown install and a paused service", async () => {
+    const h = harness({ PAUSED: "1" });
+    expect((await h.request("/v1/live/sessions", { token: "jv1_" + "A".repeat(43), body: live })).status).toBe(503);
+    const open = harness();
+    const response = await open.request("/v1/live/sessions", { token: "jv1_" + "A".repeat(43), body: live });
+    expect((await body(response)).error.code).toBe("unknown_install");
+    expect(h.calls.length + open.calls.length).toBe(0);
   });
 });
 
@@ -357,6 +499,7 @@ describe("configuration", () => {
       h.request("/v1/realtime/client_secret", { token }),
       h.request("/v1/responses", { token, body: terra }),
       h.request("/v1/jev", { token, body: jev }),
+      h.request("/v1/live/sessions", { token, body: live }),
       h.admin("/admin/usage", "GET"),
       h.request("/health", { method: "GET" }),
     ].map(async (response) => (await response).text()));
@@ -428,3 +571,146 @@ describe("reservations", () => {
   });
 });
 
+describe("Live metering and tiers", () => {
+  const TIERS = JSON.stringify({
+    tiny: { liveMinutes: 1, tasks: 5, priceUSD: 0 }, open: { liveMinutes: null, tasks: null, priceUSD: 100 },
+  });
+  const usage = async (h: ReturnType<typeof harness>, token: string) => {
+    const response = await h.request("/v1/usage", { method: "GET", token });
+    expect(response.status).toBe(200);
+    return body(response);
+  };
+  const spent = async (h: ReturnType<typeof harness>) => (await body(await h.admin("/admin/usage", "GET"))).globalCents;
+
+  it("reads Live usage as zero and uncapped with metering off, and keeps the flat Live charge", async () => {
+    const h = harness();
+    const { installID, token } = await h.register();
+    await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 99_999, cents: 0, now: h.now() });
+    expect(await usage(h, token)).toEqual({
+      metering: false, tier: "jarvis", period: "2026-11", periodEnds: "2026-12-01T00:00:00.000Z",
+      liveSeconds: 0, liveSecondsLimit: null, warnAt: 0.8, capped: false, tasksLimit: 100,
+    });
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+    expect(h.meters).toEqual([]);
+    expect(await spent(h)).toBe(8);
+  });
+
+  it("reports this month's weighted Live usage against the tier, without charging", async () => {
+    const h = harness({ LIVE_METERING: "1" });
+    const { installID, token } = await h.register();
+    expect(await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 600, cents: 50, now: h.now() }))
+      .toEqual({ used: 600, limit: 18_000, capped: false });
+    expect(await usage(h, token)).toEqual({
+      metering: true, tier: "jarvis", period: "2026-11", periodEnds: "2026-12-01T00:00:00.000Z",
+      liveSeconds: 600, liveSecondsLimit: 18_000, warnAt: 0.8, capped: false, tasksLimit: 100,
+    });
+    expect(await spent(h)).toBe(50);
+    expect(h.calls).toHaveLength(0);
+    for (const token of [undefined, "jv1_" + "A".repeat(43)]) {
+      expect((await body(await h.request("/v1/usage", { method: "GET", token }))).error.code).toBe("unknown_install");
+    }
+    await h.admin(`/admin/installs/${installID}/revoke`);
+    expect((await h.request("/v1/usage", { method: "GET", token })).status).toBe(403);
+  });
+
+  it("meters a created session instead of charging its flat price", async () => {
+    const h = harness({ LIVE_METERING: "1", LIVE_SESSION_CENTS: "8" });
+    const { installID, token } = await h.register();
+    const response = await h.request("/v1/live/sessions", { token, body: live });
+    expect(response.status).toBe(201);
+    expect(await body(response)).toEqual({ session: { id: "live_fixture" }, transport: { type: "webrtc", sdp: "v=0 answer" } });
+    expect(h.meters).toEqual([{ sessionID: "live_fixture", installID }]);
+    expect(await spent(h)).toBe(0);
+    h.setReply(() => new Response("down", { status: 500 }));
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(502);
+    expect(h.meters).toHaveLength(1);
+  });
+
+  it("counts a session's replayed or stale totals once", async () => {
+    const h = harness({ LIVE_METERING: "1" });
+    const { installID } = await h.register();
+    const report = (weightedSeconds: number, cents: number, sessionID = "live_a") =>
+      h.local.addLiveUsage({ installID, sessionID, weightedSeconds, cents, now: h.now() });
+    expect(report(30, 2.5).used).toBe(30);
+    expect(report(30, 2.5).used).toBe(30);
+    expect(report(20, 1).used).toBe(30);
+    expect(report(45, 3.75).used).toBe(45);
+    expect(report(10, 1, "live_b").used).toBe(55);
+    expect(await spent(h)).toBeCloseTo(4.75, 6);
+  });
+
+  it("refuses a new Live session once the month is used up, without calling upstream or charging", async () => {
+    const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
+    const { installID, token } = await h.register();
+    expect(await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 60, cents: 0, now: h.now() }))
+      .toEqual({ used: 60, limit: 60, capped: true });
+    const refused = await h.request("/v1/live/sessions", { token, body: live });
+    expect(refused.status).toBe(429);
+    expect(await body(refused)).toEqual({ error: {
+      code: "live_limit",
+      message: "This month's Live voice is used up. Jarvis keeps working in basic voice until December 1.",
+    } });
+    expect(h.calls).toHaveLength(0);
+    expect(h.meters).toHaveLength(0);
+    expect(await spent(h)).toBe(0);
+    expect(await usage(h, token)).toMatchObject({ capped: true, liveSeconds: 60, liveSecondsLimit: 60, tasksLimit: 5 });
+    expect((await h.request("/v1/jev", { token, body: jev })).status).toBe(200);
+  });
+
+  it("starts a new period at the start of the UTC month", async () => {
+    const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
+    const { installID, token } = await h.register();
+    h.setClock(Date.UTC(2026, 10, 30, 23, 59, 59));
+    await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 60, cents: 0, now: h.now() });
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(429);
+    h.advance(1_000);
+    expect(await usage(h, token)).toEqual({
+      metering: true, tier: "tiny", period: "2026-12", periodEnds: "2027-01-01T00:00:00.000Z",
+      liveSeconds: 0, liveSecondsLimit: 60, warnAt: 0.8, capped: false, tasksLimit: 5,
+    });
+    expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(201);
+  });
+
+  it("puts an install on a tier from the admin endpoint", async () => {
+    const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
+    const { installID, token } = await h.register();
+    const set = (id: string, tier: unknown, auth = ADMIN) =>
+      h.request(`/admin/installs/${id}/tier`, { token: auth, body: { tier } });
+    const response = await set(installID, "open");
+    expect(response.status).toBe(200);
+    expect(await body(response)).toEqual({ installID, tier: "open" });
+    expect(await usage(h, token)).toMatchObject({ tier: "open", liveSecondsLimit: null, tasksLimit: null, capped: false });
+    for (const tier of ["platinum", 7, undefined]) {
+      const bad = await set(installID, tier);
+      expect(bad.status).toBe(400);
+      expect((await body(bad)).error.code).toBe("unknown_tier");
+    }
+    expect((await set("nobody", "tiny")).status).toBe(404);
+    expect((await set(installID, "tiny", token)).status).toBe(401);
+    expect(await usage(h, token)).toMatchObject({ tier: "open" });
+  });
+
+  it("validates the metering variables", () => {
+    const secrets = { OPENAI_API_KEY: "a", TYPESAFE_API_KEY: "b", ADMIN_TOKEN: "c" };
+    expect(loadConfig(secrets).metering).toEqual({
+      enabled: false,
+      tiers: {
+        jarvis: { liveMinutes: 300, tasks: 100, priceUSD: 30 },
+        pro: { liveMinutes: 1000, tasks: 400, priceUSD: 100 },
+      },
+      defaultTier: "jarvis",
+      standbyWeight: 0.4,
+      warnFraction: 0.8,
+      activeCentsPerMinute: 5,
+      pausedCentsPerMinute: 2,
+      graceSeconds: 60,
+    });
+    for (const tiers of ["not json", "[]", "{}", '{"a":{"liveMinutes":-1,"tasks":1,"priceUSD":1}}', '{"a":{"tasks":1,"priceUSD":1}}',
+      '{"a":{"liveMinutes":1,"tasks":1.5,"priceUSD":1}}']) {
+      expect(() => loadConfig({ ...secrets, TIERS: tiers })).toThrow(/TIERS/);
+    }
+    expect(() => loadConfig({ ...secrets, DEFAULT_TIER: "gold" })).toThrow(/DEFAULT_TIER/);
+    expect(() => loadConfig({ ...secrets, STANDBY_WEIGHT: "1.5" })).toThrow(/STANDBY_WEIGHT/);
+    expect(loadConfig({ ...secrets, LIVE_METERING: "1" }).metering.enabled).toBe(true);
+  });
+});

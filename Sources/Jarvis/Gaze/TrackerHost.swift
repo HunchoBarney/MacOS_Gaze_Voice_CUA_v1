@@ -1107,18 +1107,17 @@ actor TrackerHost {
         if wasmThreads > 0 {
             arguments += ["--wasm-threads", "\(wasmThreads)"]
         }
-        // Session fallback after a wedged WebGPU boot (or a manual
-        // trackerForceWasm default) — the fps cap keeps the pipeline from
-        // burning cycles queuing frames wasm (~300ms/frame) can't reach.
-        if forceWasm { arguments += ["--web-accelerator", "wasm", "--gaze-max-fps", "10"] }
+        // Session fallback after a wedged boot (or a manual
+        // trackerForceWasm default). The hosted MediaPipe detector never
+        // runs on ONNX Runtime, so the wasm flag leaves its speed unchanged
+        // and the fallback keeps the hosted rate. A 10 fps cap here made
+        // every escalated session track at 10 fps.
+        if forceWasm { arguments += ["--web-accelerator", "wasm"] }
         // Hosted gaze rate: 15 fps keeps the MediaPipe tracker near 23% of
         // one core on an M1 (20 fps measured 32–37%); `trackerGazeMaxFps`
-        // = 20 opts back into the smoother rate. The wasm fallback's own
-        // cap above comes first and wins.
-        else {
-            let fps = defaults.integer(forKey: "trackerGazeMaxFps")
-            arguments += ["--gaze-max-fps", "\(fps > 0 ? fps : 15)"]
-        }
+        // = 20 opts back into the smoother rate.
+        let fps = defaults.integer(forKey: "trackerGazeMaxFps")
+        arguments += ["--gaze-max-fps", "\(fps > 0 ? fps : 15)"]
         // A tracker staged inside the app bundle cannot write its default
         // calibration path — Contents/Resources is sealed once the bundle
         // is signed — so bundled runs redirect .gaze_calibration.json (and

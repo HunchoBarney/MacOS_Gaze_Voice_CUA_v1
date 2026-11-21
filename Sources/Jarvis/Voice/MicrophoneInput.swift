@@ -97,7 +97,7 @@ final class MicrophoneAudioGate: @unchecked Sendable {
             }
             return
         }
-        // A tap buffer can straddle Fn down. Exclude its pre-press prefix.
+        // A tap buffer can straddle the capture start. Exclude its earlier prefix.
         let offset = time.hostTime < openedAt
             ? Int(ceil(AVAudioTime.seconds(forHostTime: openedAt - time.hostTime) * buffer.format.sampleRate)) : 0
         guard offset < Int(buffer.frameLength) else { return }
@@ -147,7 +147,8 @@ final class MicrophoneInput: @unchecked Sendable {
         }
     }
     private static let log = Logger(subsystem: "com.karanvirkang.jarvis.voice", category: "microphone")
-    enum ConfigurationResponse: Equatable { case restoreTap, interrupt }
+    enum ConfigurationResponse: Equatable { case keep, restoreTap, interrupt }
+    static let stallTolerance: TimeInterval = 3
     struct PreparationState {
         enum Decision: Equatable { case wait, ready, recover, fail }
         let generation: UUID
@@ -185,9 +186,15 @@ final class MicrophoneInput: @unchecked Sendable {
             return true
         }
     }
-    static func configurationResponse(engineRunning: Bool, sameDevice: Bool, sameFormat: Bool) -> ConfigurationResponse {
-        guard engineRunning, sameDevice, sameFormat else { return .interrupt }
-        return .restoreTap
+    static func configurationResponse(engineRunning: Bool, sameDevice: Bool, sameFormat: Bool,
+                                      voiceProcessing: Bool = false) -> ConfigurationResponse {
+        guard sameDevice, sameFormat else { return .interrupt }
+        if voiceProcessing { return engineRunning ? .keep : .restoreTap }
+        return engineRunning ? .restoreTap : .interrupt
+    }
+    static func stallExpired(since: TimeInterval?, now: TimeInterval) -> Bool {
+        guard let since else { return false }
+        return now - since >= stallTolerance
     }
     struct Ready {
         let name: String
@@ -247,6 +254,7 @@ final class MicrophoneInput: @unchecked Sendable {
     private var playbackNodes: [VoicePlaybackChannel: AVAudioPlayerNode] = [:]
     private var playbackFormat: AVAudioFormat?
     private var duplexReadiness = DuplexReadiness()
+    private var stalledSince: TimeInterval?
     private let readyGeneration = LockedBox<UUID?>(nil)
     private let outputGeneration = LockedBox<UUID?>(nil)
     private let outputReceipt = LockedBox<(generation: UUID, advancedAt: TimeInterval)?>(nil)
@@ -288,7 +296,6 @@ final class MicrophoneInput: @unchecked Sendable {
                     let state = PreparationState(generation: generation)
                     self.pending = Preparation(state: state, name: device.name,
                         continuation: continuation, timeout: timeout, cancelled: cancelled)
-                    self.queue.asyncAfter(deadline: .now() + 5, execute: timeout)
                     do {
                         let engine = AVAudioEngine()
                         let input = engine.inputNode
@@ -307,7 +314,7 @@ final class MicrophoneInput: @unchecked Sendable {
                             }
                             if self.currentDevice(input, input: true) != device.hardwareID {
                                 guard let unit = input.audioUnit else {
-                                    throw VoiceError("This microphone can't listen all the time. Hold fn to talk, or pick another microphone in Settings.")
+                                    throw VoiceError("This microphone can't listen all the time. Pick another microphone in Settings.")
                                 }
                                 input.auAudioUnit.deallocateRenderResources()
                                 var selected = device.hardwareID
@@ -333,7 +340,7 @@ final class MicrophoneInput: @unchecked Sendable {
                                     sampleRate: deviceFormat.sampleRate, channels: 1, interleaved: false),
                                   let playbackFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
                                     sampleRate: 24_000, channels: 1, interleaved: true) else {
-                                throw VoiceError("This microphone can't listen all the time. Hold fn to talk, or pick another microphone in Settings.")
+                                throw VoiceError("This microphone can't listen all the time. Pick another microphone in Settings.")
                             }
                             format = mono
                             self.playbackFormat = playbackFormat
@@ -354,7 +361,7 @@ final class MicrophoneInput: @unchecked Sendable {
                         self.installTap(on: input, format: format, generation: generation,
                                         tap: state.tapID)
                         engine.prepare()
-                        try engine.start()
+                        try Self.start(engine.start, thenArm: timeout, after: 5, on: self.queue)
                         self.hardwareFormat = input.outputFormat(forBus: 0)
                     } catch {
                         self.failPreparation(error)
@@ -369,6 +376,11 @@ final class MicrophoneInput: @unchecked Sendable {
         }
         try Task.checkCancellation()
         return result
+    }
+    static func start(_ start: () throws -> Void, thenArm deadline: DispatchWorkItem,
+                      after seconds: TimeInterval, on queue: DispatchQueue) rethrows {
+        try start()
+        queue.asyncAfter(deadline: .now() + seconds, execute: deadline)
     }
     private func configurationChanged(generation: UUID) {
         guard engineID == generation, let engine, let preparedFormat else { return }
@@ -401,38 +413,60 @@ final class MicrophoneInput: @unchecked Sendable {
             }
             return
         }
-        if voiceProcessing {
-            ready = nil
-            readyGeneration.set(nil)
-            outputGeneration.set(nil)
-            outputReceipt.set(nil)
-            interrupted?()
-            return
-        }
-        switch Self.configurationResponse(engineRunning: running, sameDevice: sameDevice, sameFormat: sameFormat) {
+        let response = Self.configurationResponse(engineRunning: running, sameDevice: sameDevice,
+                                                  sameFormat: sameFormat, voiceProcessing: voiceProcessing)
+        Self.log.notice("configuration_response \(String(describing: response), privacy: .public)")
+        switch response {
+        case .keep:
+            break
         case .restoreTap:
             engine.stop()
             input.removeTap(onBus: 0)
-            installTap(on: input, format: currentFormat, generation: generation, tap: UUID())
-            do { try engine.start() } catch { interrupted?() }
+            if voiceProcessing {
+                gate.resetInputSnapshot()
+                duplexReadiness = DuplexReadiness()
+                stalledSince = nil
+            }
+            installTap(on: input, format: voiceProcessing ? preparedFormat : currentFormat,
+                       generation: generation, tap: UUID())
+            do { try engine.start() } catch { interruptInput() }
         case .interrupt:
-            ready = nil
-            interrupted?()
+            interruptInput()
         }
+    }
+    private func interruptInput() {
+        ready = nil
+        readyGeneration.set(nil)
+        outputGeneration.set(nil)
+        outputReceipt.set(nil)
+        stalledSince = nil
+        let interrupted = self.interrupted
+        self.interrupted = nil
+        interrupted?()
     }
     private func receivedInput(generation: UUID, tap: UUID, frames: UInt32) {
         guard engineID == generation else { return }
         if pending == nil, outputGeneration.value == generation {
             let time = engine?.outputNode.lastRenderTime
             let sample = time?.isSampleTimeValid == true ? time?.sampleTime : nil
-            guard duplexReadiness.observe(inputFrames: frames, outputSample: sample,
-                                           healthy: duplexHealthy()), let advanced = duplexReadiness.advancedAt else {
-                outputGeneration.set(nil)
-                outputReceipt.set(nil)
-                interrupted?()
+            if duplexReadiness.observe(inputFrames: frames, outputSample: sample, healthy: duplexHealthy()),
+               let advanced = duplexReadiness.advancedAt {
+                if let stalledSince {
+                    let stalled = ProcessInfo.processInfo.systemUptime - stalledSince
+                    Self.log.notice("duplex_stall recovered after_ms=\(stalled * 1000)")
+                    self.stalledSince = nil
+                }
+                outputReceipt.set((generation, advanced))
                 return
             }
-            outputReceipt.set((generation, advanced))
+            let now = ProcessInfo.processInfo.systemUptime
+            if stalledSince == nil {
+                stalledSince = now
+                Self.log.notice("duplex_stall begin")
+            }
+            guard Self.stallExpired(since: stalledSince, now: now) else { return }
+            Self.log.error("duplex_stall interrupt after_s=\(Self.stallTolerance)")
+            interruptInput()
             return
         }
         guard var pending, pending.state.generation == generation else { return }
@@ -496,7 +530,7 @@ final class MicrophoneInput: @unchecked Sendable {
         engine?.inputNode.removeTap(onBus: 0)
         engine = nil; engineID = nil; deviceID = nil; preparedFormat = nil; ready = nil
         hardwareFormat = nil; outputDeviceID = nil; playbackFormat = nil
-        playbackNodes = [:]; voiceProcessing = false; duplexReadiness = DuplexReadiness()
+        playbackNodes = [:]; voiceProcessing = false; duplexReadiness = DuplexReadiness(); stalledSince = nil
         gate.resetInputSnapshot()
         pending?.continuation.resume(throwing: CancellationError())
     }
@@ -553,16 +587,17 @@ final class MicrophoneInput: @unchecked Sendable {
     }
 
     private func withPlaybackNode(_ channel: VoicePlaybackChannel, generation: UUID,
+                                  otherwise: (@Sendable () -> Void)? = nil,
                                   _ action: @escaping @Sendable (AVAudioPlayerNode) -> Void) {
         queue.async { [weak self] in
             guard let self, self.engineID == generation,
                   self.outputGeneration.value == generation,
-                  let player = self.playbackNodes[channel] else { return }
+                  let player = self.playbackNodes[channel] else { otherwise?(); return }
             action(player)
         }
     }
 
-    private func playbackRoute(_ channel: VoicePlaybackChannel, generation: UUID) -> VoicePlaybackRoute {
+    func playbackRoute(_ channel: VoicePlaybackChannel, generation: UUID) -> VoicePlaybackRoute {
         let outputGeneration = self.outputGeneration
         let outputReceipt = self.outputReceipt
         let gate = self.gate
@@ -571,16 +606,17 @@ final class MicrophoneInput: @unchecked Sendable {
             let renderAge = ProcessInfo.processInfo.systemUptime - receipt.advancedAt
             let latest = gate.snapshot().lastHostTime
             let now = mach_absolute_time()
-            return outputGeneration.value == generation && renderAge >= 0 && renderAge < 0.5
+            return outputGeneration.value == generation && renderAge >= 0 && renderAge < Self.stallTolerance
                 && latest > 0 && now >= latest
-                && AVAudioTime.seconds(forHostTime: now - latest) < 0.5
+                && AVAudioTime.seconds(forHostTime: now - latest) < Self.stallTolerance
         },
             schedule: { [weak self] data, completed in
-                self?.withPlaybackNode(channel, generation: generation) { [weak self] player in
+                guard let self else { completed(); return }
+                self.withPlaybackNode(channel, generation: generation, otherwise: completed) { [weak self] player in
                     guard let format = self?.playbackFormat, !data.isEmpty, data.count.isMultiple(of: 2),
                           let buffer = AVAudioPCMBuffer(pcmFormat: format,
                             frameCapacity: AVAudioFrameCount(data.count / 2)),
-                          let target = buffer.int16ChannelData?[0] else { return }
+                          let target = buffer.int16ChannelData?[0] else { completed(); return }
                     buffer.frameLength = AVAudioFrameCount(data.count / 2)
                     data.copyBytes(to: UnsafeMutableRawBufferPointer(start: target, count: data.count))
                     player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in completed() }

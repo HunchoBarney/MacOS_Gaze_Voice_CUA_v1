@@ -52,23 +52,51 @@ struct IntentCandidate: Sendable, Equatable, Codable {
 
     /// Clickable-ish roles carry a prior — the tracker can't see into an
     /// app, so role is our evidence that gaze here is *about* something.
+    /// Containers (groups, tables, lists, scroll areas) hold controls
+    /// rather than being one, so they rank below any leaf.
     var clickabilityPrior: Double {
         switch kind {
         case .chip, .agentCursor, .trafficLight: return 1.6
         case .dom: return url != nil ? 1.4 : 0.9
         case .axElement, .menuBar:
+            if Self.isContainer(role: role) { return 0.5 }
+            if Self.isControl(role: role) { return 1.3 }
             let r = role.lowercased()
-            if r.contains("button") || r.contains("link") || r.contains("menu")
-                || r.contains("checkbox") || r.contains("radio") || r.contains("tab")
-                || r.contains("menuitem") || r.contains("cell") {
-                return 1.3
-            }
             if r.contains("text") || r.contains("field") || r.contains("area") {
                 return 1.1
             }
             return 0.9
         case .ocr, .window: return 0.7
         }
+    }
+
+    /// AX and DOM roles that only hold other elements. Matched whole,
+    /// because "tab" inside "AXTable" or "AXTabGroup" is not a tab.
+    static let containerRoles: Set<String> = [
+        "group", "table", "outline", "list", "grid", "scrollarea", "splitgroup",
+        "splitter", "tabgroup", "toolbar", "window", "sheet", "drawer", "browser",
+        "layoutarea", "layoutitem", "matte", "row", "column", "application",
+        "webarea", "radiogroup", "region", "section", "unknown",
+    ]
+
+    /// A role with its "AX" prefix and case removed: "AXTable" → "table".
+    static func normalizedRole(_ role: String) -> String {
+        let r = role.lowercased()
+        return r.hasPrefix("ax") ? String(r.dropFirst(2)) : r
+    }
+
+    static func isContainer(role: String) -> Bool {
+        containerRoles.contains(normalizedRole(role))
+    }
+
+    /// Roles a person presses, toggles or types into.
+    static func isControl(role: String) -> Bool {
+        let r = normalizedRole(role)
+        guard !containerRoles.contains(r) else { return false }
+        return r == "tab" || r.contains("button") || r.contains("link")
+            || r.contains("menu") || r.contains("checkbox") || r.contains("radio")
+            || r.contains("cell") || r.contains("combo") || r.contains("slider")
+            || r.contains("incrementor") || r.contains("disclosure")
     }
 }
 
@@ -180,6 +208,12 @@ final class IntentScorerCore {
         var handoverLogMargin: Double = 0.26 // ≈ ln(1.3)
         /// Top-2 softmax shares within this → ambiguous, never a guess.
         var ambiguityGap: Double = 0.15
+        /// σ at and below which a cursor parked on a control weighs its
+        /// full 2.5×. Gaze log-evidence between neighbours shrinks as
+        /// 1/σ², so the cursor's log-bonus shrinks at the same rate above
+        /// it: at σ 384 a parked cursor is worth ×1.01, a tiebreak rather
+        /// than the decision.
+        var cursorFullWeightSigmaPt: Double = 40
         /// Incumbent survives candidate-feed gaps this long (blinks,
         /// re-enumeration) before release.
         var gapSurvivalSec: Double = 0.25
@@ -406,6 +440,8 @@ final class IntentScorerCore {
 
     func setSigma(_ sigmaPx: Double) { config.sigmaPx = sigmaPx }
 
+    var sigmaPx: Double { config.sigmaPx }
+
     /// Drop all state — tracker restart or a calibration change means old
     /// evidence describes a different world.
     func reset() {
@@ -466,7 +502,9 @@ final class IntentScorerCore {
         // so "somewhere in the vicinity" doesn't masquerade as parked-on.
         if let cursorPoint {
             let d = c.edgeDistance(to: cursorPoint)
-            p *= 1 + 1.5 * exp(-(d * d) / (2 * 40 * 40))
+            let sigma = max(config.sigmaPx, GazeErrorBand.minimumSigmaPt)
+            let weight = min(1, pow(config.cursorFullWeightSigmaPt / sigma, 2))
+            p *= pow(1 + 1.5 * exp(-(d * d) / (2 * 40 * 40)), weight)
         }
         // Speech match — "click save" biases labeled matches.
         if let hint = speechHint, !hint.isEmpty, fuzzyMatch(hint, c.label) {
@@ -528,15 +566,15 @@ final class IntentScorerCore {
         // silent guess. `.ambiguous` is a STATE — emitted on every tick
         // while the tie persists so the consumer knows the contest is
         // unresolved (the radial arms once per pair and retracts on the
-        // first non-ambiguous event). Guards: the tie must have persisted
-        // ~a consensus window (frame-1 scores are all ~0 — every glance
-        // would flash a radial otherwise), and a tie that INCLUDES the
-        // incumbent holds instead of flickering.
+        // first non-ambiguous event). The tie must have persisted ~a
+        // consensus window (frame-1 scores are all ~0 — every glance
+        // would flash a radial otherwise). A tie that includes the
+        // incumbent holds through that window, then releases it: a
+        // highlight left on one side of a contest the scorer can't call
+        // claims a target nobody chose.
         if let (first, second) = topTwo() {
             let s1 = share(of: first.id), s2 = share(of: second.id)
-            let inc = incumbent?.id
-            if s1 > 0, s1 - s2 < config.ambiguityGap,
-               first.id != inc, second.id != inc {
+            if s1 > 0, s1 - s2 < config.ambiguityGap {
                 // Tie persistence means the SAME pair stayed tied ~a
                 // consensus window — id-ordered so a rank swap can't
                 // reset it, re-keyed on any new pair so residue from a
@@ -549,6 +587,7 @@ final class IntentScorerCore {
                 }
                 if let tieSince,
                    now.timeIntervalSince(tieSince) >= config.consensusWindowSec {
+                    if incumbent != nil { dropIncumbent(endedAt: now, now: now) }
                     return .ambiguous([first, second])
                 }
                 // Fresh tie, no incumbent — wait for the evidence to
@@ -556,8 +595,8 @@ final class IntentScorerCore {
                 return incumbent.map { .hold($0, progress: holdProgress(now: now)) } ?? .none
             }
         }
-        // No qualifying tie this tick — the contest separated, a new pair
-        // formed, or the incumbent is inside it: the clock restarts.
+        // No qualifying tie this tick — the contest separated: the clock
+        // restarts.
         tiePair = nil
         tieSince = nil
 
@@ -604,20 +643,24 @@ final class IntentScorerCore {
            now.timeIntervalSince(lastSeen) <= config.gapSurvivalSec {
             return .hold(old, progress: holdProgress(now: now))
         }
-        if incumbentSince != nil,
-           focalCrossed.contains(old.id) {
-            // Here the fixation ended when the feed last saw the
-            // element — the release itself may fire long after (a dead
-            // tracker's first tick back), which would overstate recency.
-            let ended = min(now, lastSeen[old.id] ?? now)
-            pushReferent(GazeReferent(old, confidence: share(of: old.id), at: ended), now: now)
-        }
-        incumbent = nil
-        incumbentSince = nil
+        // Here the fixation ended when the feed last saw the element —
+        // the release itself may fire long after (a dead tracker's first
+        // tick back), which would overstate recency.
+        dropIncumbent(endedAt: min(now, lastSeen[old.id] ?? now), now: now)
         // Whatever the eyes were on is gone — the next sample opens a new
         // fixation instead of inheriting this one's evidence.
         fixationCentroid = nil
         return .release(old)
+    }
+
+    /// Ends the reign, keeping a focal winner in the referent buffer.
+    private func dropIncumbent(endedAt ended: Date, now: Date) {
+        guard let old = incumbent else { return }
+        if incumbentSince != nil, focalCrossed.contains(old.id) {
+            pushReferent(GazeReferent(old, confidence: share(of: old.id), at: ended), now: now)
+        }
+        incumbent = nil
+        incumbentSince = nil
     }
 
     private func holdProgress(now: Date) -> Double {
@@ -702,16 +745,18 @@ actor GazeIntentScorer {
         isSaccade: Bool,
         speechHint: String? = nil,
         cursorPoint: CGPoint? = nil,
-        freshGaze: Bool = true
+        freshGaze: Bool = true,
+        now: Date = Date()
     ) -> IntentEvent {
         core.update(candidates: candidates, at: point, isSaccade: isSaccade,
-                    now: Date(), speechHint: speechHint,
+                    now: now, speechHint: speechHint,
                     cursorPoint: cursorPoint, freshGaze: freshGaze)
     }
 
     func commitTarget(lookBackSec: Double = 0.6,
-                      recordSelection: Bool = true) -> (IntentCandidate, Double)? {
-        core.commitTarget(at: Date(), lookBackSec: lookBackSec,
+                      recordSelection: Bool = true,
+                      now: Date = Date()) -> (IntentCandidate, Double)? {
+        core.commitTarget(at: now, lookBackSec: lookBackSec,
                           recordSelection: recordSelection)
     }
 
@@ -725,7 +770,10 @@ actor GazeIntentScorer {
 
     /// Re-read σ from the newest report — invisible calibration rewrites
     /// its learning report as the map improves, so the band follows it.
-    func refreshMeasuredSigma() {
+    /// Returns the σ now in use, which gates the overlay's highlight.
+    @discardableResult
+    func refreshMeasuredSigma() -> Double {
         if measuresSigma { core.setSigma(GazeErrorBand.sigmaPt()) }
+        return core.sigmaPx
     }
 }

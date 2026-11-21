@@ -9,16 +9,33 @@ workers_dev = true
 name = "LEDGER"
 class_name = "LedgerObject"
 
+[[durable_objects.bindings]]
+name = "LIVE_METER"
+class_name = "LiveMeter"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["LedgerObject"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["LiveMeter"]
 
 # Every value below is optional; these are the defaults in src/config.ts.
 # Change one with `wrangler deploy --var NAME:value` or edit it here.
 [vars]
 PAUSED = "0"
 REALTIME_MODEL = "gpt-realtime-2.1"
+LIVE_MODEL = "gpt-live-1.1"
 RESPONSES_MODELS = "gpt-6.1-terra"
 JEV_MODELS = "jev-latest,jev-1.14.0"
 INSTALL_DAILY_CENTS = "100"
-GLOBAL_DAILY_CENTS = "2000"
+GLOBAL_DAILY_CENTS = "500"
+LIVE_METERING = "0"
+TIERS = '{"jarvis":{"liveMinutes":300,"tasks":100,"priceUSD":30},"pro":{"liveMinutes":1000,"tasks":400,"priceUSD":100}}'
+DEFAULT_TIER = "jarvis"
+STANDBY_WEIGHT = "0.4"
+LIVE_WARN_FRACTION = "0.8"
+LIVE_ACTIVE_CENTS_PER_MINUTE = "5"
+LIVE_PAUSED_CENTS_PER_MINUTE = "2"
+CAP_GRACE_SECONDS = "60"

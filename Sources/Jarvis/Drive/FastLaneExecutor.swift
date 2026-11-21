@@ -16,7 +16,8 @@ extension DriveLoop {
     static func capturedForegroundApplication(
         application: String?, windowID: Int?,
         frontmost: @MainActor () -> AppResolver.App? = {
-            guard let app = NSWorkspace.shared.frontmostApplication,
+            guard !FrontmostTestGuard.blocksRealFrontmost,
+                  let app = NSWorkspace.shared.frontmostApplication,
                   let bundle = app.bundleIdentifier, let name = app.localizedName else { return nil }
             return AppResolver.App(name: name, bundle: bundle, pid: Int(app.processIdentifier))
         },
@@ -365,12 +366,12 @@ extension DriveLoop {
                                        denied: task.deny, confirmed: &confirmed)
                 guard let onDictationRequest, await onDictationRequest(start) else {
                     return settle(.blocked(start
-                        ? "Dictation isn't available — it's off in Settings or nothing can capture right now."
+                        ? "Dictation isn't available — nothing can capture right now."
                         : "No dictation is running."),
                                   task, history, blockedReason: "dictation unavailable")
                 }
                 return done(start
-                    ? "Dictation is on — speak, then tap Fn or say 'stop dictating' to finish."
+                    ? "Dictation is on — speak, then say 'stop dictating' to finish."
                     : "Stopped dictating.",
                     task, history, effect: true)
             case .comfort(let change):
@@ -1555,7 +1556,7 @@ extension DriveLoop {
                 // Deny-scan BEFORE picking the actuation form — a "Buy
                 // now" referent refuses whichever way the click lands.
                 try await gateExplicit("click", corpus: corpus(candidate),
-                                       denied: task.deny, confirmed: &confirmed)
+                                       denied: task.deny, confirmed: &confirmed, press: candidate.label)
                 let name = candidate.label.isEmpty
                     ? Self.speakableRole(candidate.role) : candidate.label
                 switch VoiceTaskCoordinator.actuation(for: candidate, gaze: point) {
@@ -1620,19 +1621,21 @@ extension DriveLoop {
             // raw gaze is the cold-scorer fallback, not the primary path.
             var postPoint = point
             var corpusText = ""
+            var pressLabel: String?
             if let gazeCommit, let (candidate, _) = await gazeCommit() {
                 if !candidate.motorRect.isEmpty {
                     postPoint = candidate.motorRect.contains(point) ? point
                         : CGPoint(x: candidate.motorRect.midX, y: candidate.motorRect.midY)
                 }
                 corpusText = corpus(candidate)
+                pressLabel = candidate.label
             } else {
                 corpusText = (try? await windowAtPoint(point, session: session))
                     .map { "\($0.title) \($0.app)" } ?? ""
             }
             try await gateExplicit(verb == .rightClick ? "gaze right click" : "gaze double click",
                                    corpus: corpusText, denied: task.deny,
-                                   confirmed: &confirmed)
+                                   confirmed: &confirmed, press: pressLabel)
             guard GazePointer.poster(verb == .rightClick ? .right : .double, postPoint) else {
                 let reason = GazePointer.refusal == .postAccessDenied
                     ? "macOS denied the synthetic click — check Accessibility and Input Monitoring permissions."
@@ -1800,7 +1803,7 @@ extension DriveLoop {
         if clicks, hits.count == 1, let hit = hits.first {
             let (element, frame) = elements[hit]
             try await gateExplicit("click", corpus: "\(label) \(windowTitle)",
-                                   denied: task.deny, confirmed: &confirmed)
+                                   denied: task.deny, confirmed: &confirmed, press: label)
             if Consequence.of(control: label) != nil { await glowPress(frame, label: label) }
             var args: [String: JSONValue] = ["session": .string(session)]
             if let token = element.token, !token.isEmpty {
@@ -2650,7 +2653,7 @@ extension DriveLoop {
 
     /// One `invoke_menu` dispatch behind its focus-borrow consent — shared
     /// by spoken menu paths and the exit-full-screen ladder's menu rung.
-    private func invokeMenu(_ path: [String], pid: Int, windowID: Int, name: String,
+    func invokeMenu(_ path: [String], pid: Int, windowID: Int, name: String,
                             bundle: String, session: String) async throws {
         // `invoke_menu` briefly focuses a background app — ask once per
         // bundle unless the standing grant covers input. `menuFocus`

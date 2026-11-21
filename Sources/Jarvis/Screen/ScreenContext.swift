@@ -212,6 +212,26 @@ enum ScreenContext {
         return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
     }
 
+    /// Every window of one app as an element tree, for a reader that needs
+    /// structure rather than a digest: Notification Center banners.
+    static func windowTrees(pid: pid_t, limits: Limits = .standard) async -> [ScreenNode] {
+        await Task.detached(priority: .utility) {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 0.2)
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+                  let windows = value as? [AXUIElement] else { return [] }
+            let deadline = ContinuousClock.now + limits.deadline
+            var budget = limits.maxNodes
+            var complete = true
+            var trees: [ScreenNode] = []
+            for window in windows {
+                trees.append(node(window, depth: 0, limits: limits, deadline: deadline, budget: &budget, complete: &complete))
+            }
+            return trees
+        }.value
+    }
+
     /// Every visible window's app and title, front to back, for "what's on
     /// my screen". Jarvis's own panels are skipped, and a password manager
     /// keeps its name but not its titles.

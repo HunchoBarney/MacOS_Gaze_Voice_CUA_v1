@@ -11,8 +11,6 @@ enum ListeningMode: String, CaseIterable, Sendable {
     /// A local wake word ("Hey Jarvis") opens the turn. Nothing leaves the
     /// Mac until it's heard.
     case standby
-    /// A turn lasts while fn is held.
-    case pushToTalk
 
     var title: String { title(name: AssistantName.standard) }
 
@@ -20,7 +18,6 @@ enum ListeningMode: String, CaseIterable, Sendable {
         switch self {
         case .conversation: return "Hands-free"
         case .standby: return "Wait for “Hey \(name)”"
-        case .pushToTalk: return "Hold fn to talk"
         }
     }
 
@@ -28,7 +25,6 @@ enum ListeningMode: String, CaseIterable, Sendable {
         switch self {
         case .conversation: return "Jarvis listens all the time, so you can just talk."
         case .standby: return "Jarvis listens on your Mac for its name. Nothing leaves your Mac until you say it."
-        case .pushToTalk: return "Hold the fn key while you speak, then let go."
         }
     }
 
@@ -42,8 +38,6 @@ enum ListeningMode: String, CaseIterable, Sendable {
             return "When you speak, your voice goes to OpenAI and your words go to TypeSafe, so Jarvis can understand you. Long silences and room noise stay on your Mac."
         case .standby:
             return "Nothing leaves your Mac until you say “Hey \(name)”. Then your voice goes to OpenAI and your words go to TypeSafe, so Jarvis can understand you."
-        case .pushToTalk:
-            return "While you hold fn, everything Jarvis hears goes to OpenAI and your words go to TypeSafe, so it can understand you. Nothing is sent once you let go."
         }
     }
 }
@@ -86,9 +80,8 @@ enum AssistantName {
 }
 
 /// The rules for listening modes, given whether a wake-word engine exists.
-/// Until one does, Standby isn't offered, the default is Hold fn to talk,
-/// and a stored Standby choice behaves like Hands-free. The recommended
-/// mode is the default and is offered first.
+/// Standby is the default and is offered first. Without an engine it can't
+/// arm and Jarvis says so; it never falls back to streaming.
 struct ListeningPolicy {
     var wakeWordAvailable: Bool
 
@@ -96,20 +89,12 @@ struct ListeningPolicy {
     nonisolated(unsafe) static var wakeWord: (any WakeWordDetecting)?
     static var current: ListeningPolicy { ListeningPolicy(wakeWordAvailable: wakeWord != nil) }
 
-    var defaultMode: ListeningMode { wakeWordAvailable ? .standby : .pushToTalk }
+    var defaultMode: ListeningMode { .standby }
 
-    var offeredModes: [ListeningMode] {
-        wakeWordAvailable ? [.standby, .pushToTalk, .conversation] : [.pushToTalk, .conversation]
-    }
-
-    func effective(_ chosen: ListeningMode) -> ListeningMode {
-        chosen == .standby && !wakeWordAvailable ? .conversation : chosen
-    }
+    var offeredModes: [ListeningMode] { [.standby, .conversation] }
 
     /// Whether the mode keeps a speech session streaming between turns.
-    func streamsContinuously(_ chosen: ListeningMode) -> Bool {
-        effective(chosen) == .conversation
-    }
+    func streamsContinuously(_ chosen: ListeningMode) -> Bool { chosen == .conversation }
 
     /// The first-run screen that explains the orange microphone dot shows
     /// only when Standby can actually run.

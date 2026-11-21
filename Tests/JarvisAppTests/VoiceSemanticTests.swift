@@ -754,7 +754,7 @@ final class VoiceSemanticTests: XCTestCase {
         let config = Config(defaults: UserDefaults(suiteName: "composition-\(UUID())")!,
             keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
         config.sounds = false
-        let resolver = AppResolver(listApps: {
+        let resolver = AppResolver.fixture(listApps: {
             [.init(name: "Google Chrome", bundle: "fixture.chrome", pid: 42)]
         })
         let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { ServiceRoute(url: JevClient.systemOneURL, bearer: "SensitiveSentinelValue") },
@@ -772,7 +772,7 @@ final class VoiceSemanticTests: XCTestCase {
             })
         coordinator.gazeContextProvider = { nil }
         let speech = lane(context())
-        let controller = VoiceController(config: config, speech: speech, authorize: { false },
+        let controller = VoiceController.inert(config: config, speech: speech, authorize: { false },
             frontmost: { nil }, cuaRuntime: coordinator)
         speech.admissionContextProvider = {
             var c = self.context()
@@ -979,21 +979,41 @@ final class VoiceSemanticTests: XCTestCase {
         lane.cancel()
     }
 
+    /// Expires the semantic wall by hand once the interpretation is waiting,
+    /// and records the deadline the lane asked for.
+    private func manualDeadline(_ lane: RealtimeVoiceLane) -> (requested: LockedBox<TimeInterval?>, fire: () -> Void) {
+        let requested = LockedBox<TimeInterval?>(nil)
+        let (fired, fire) = AsyncStream<Void>.makeStream()
+        lane.semanticDeadline = { deadline in
+            requested.set(deadline)
+            for await _ in fired { return }
+        }
+        return (requested, { _ = fire.yield() })
+    }
+
+    /// The wall the lane armed is four seconds from the hop's start.
+    private func assertFourSecondWall(_ requested: TimeInterval?, between before: TimeInterval, and after: TimeInterval,
+                                      file: StaticString = #filePath, line: UInt = #line) throws {
+        let deadline = try XCTUnwrap(requested, "the hop must arm its wall", file: file, line: line)
+        XCTAssertEqual(RealtimeVoiceLane.semanticWall, 4, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(deadline, before + 4, file: file, line: line)
+        XCTAssertLessThanOrEqual(deadline, after + 4, file: file, line: line)
+    }
+
     func testSemanticWatchdogDiscardsLateResult() async throws {
         let c = context(), lane = lane(context())
         lane.semanticEnabled = { true }
+        let (requested, fire) = manualDeadline(lane)
         var waiter: CheckedContinuation<VoiceSemanticRouter.Outcome, Error>?
         var captured: VoiceAdmission?
         lane.semanticInterpretation = { input, _ in
             captured = input
-            return try await withCheckedThrowingContinuation { waiter = $0 }
+            return try await withCheckedThrowingContinuation { waiter = $0; fire() }
         }
         lane.semanticConfirmationHandler = { _ in XCTFail("late model result"); return true }
-        let started = ProcessInfo.processInfo.systemUptime
+        let before = ProcessInfo.processInfo.systemUptime
         try await lane.submitTyped("I need my web browser over here", sessionID: UUID())
-        let elapsed = ProcessInfo.processInfo.systemUptime - started
-        XCTAssertGreaterThanOrEqual(elapsed, 3.8)
-        XCTAssertLessThan(elapsed, 8)
+        try assertFourSecondWall(requested.value, between: before, and: ProcessInfo.processInfo.systemUptime)
         let input = try XCTUnwrap(captured)
         waiter?.resume(returning: .proposal(.init(turn: input.turn, target: c.entities[0],
             model: "fixture", actionConfidence: 1, targetConfidence: 1)))
@@ -1036,21 +1056,20 @@ final class VoiceSemanticTests: XCTestCase {
         lane.semanticEnabled = { true }
         var events: [VoiceSpeechDiagnostic] = []
         lane.onDiagnostic = { if $0.stage.hasPrefix("semantic.") { events.append($0) } }
+        let (requested, fire) = manualDeadline(lane)
         var waiter: CheckedContinuation<VoiceSemanticRouter.Outcome, Error>?
-        lane.semanticInterpretation = { _, _ in try await withCheckedThrowingContinuation { waiter = $0 } }
+        lane.semanticInterpretation = { _, _ in try await withCheckedThrowingContinuation { waiter = $0; fire() } }
         lane.semanticConfirmationHandler = { _ in XCTFail("expired interpretation"); return true }
-        let started = ProcessInfo.processInfo.systemUptime
+        let before = ProcessInfo.processInfo.systemUptime
         try await lane.submitTyped("I need my web browser over here", sessionID: UUID())
-        let elapsed = ProcessInfo.processInfo.systemUptime - started
-        XCTAssertGreaterThanOrEqual(elapsed, 3.8, "the four-second caller wall is unchanged")
-        XCTAssertLessThan(elapsed, 8, "the eight-second transport budget is unchanged")
+        let after = ProcessInfo.processInfo.systemUptime
+        try assertFourSecondWall(requested.value, between: before, and: after)
         let failed = try terminal(events)
         XCTAssertEqual(failed.stage, "semantic.failed")
         XCTAssertEqual(failed.metrics["failure"], SemanticFailure.deadline,
                        "an expired wall is not a transport or budget failure")
         let interpret = try XCTUnwrap(failed.metrics["interpret_ms"], "the expired stage must be measured")
-        XCTAssertGreaterThanOrEqual(interpret, 3800)
-        XCTAssertLessThan(interpret, 8000)
+        XCTAssertLessThanOrEqual(interpret, (after - before) * 1000, "the stage is measured inside the turn")
         XCTAssertNil(failed.metrics["fresh_context_ms"], "fresh context never ran")
         waiter?.resume(returning: .noMatch)
         lane.cancel()
@@ -1168,7 +1187,7 @@ final class VoiceSemanticTests: XCTestCase {
 
     func testAuditScopedCancelPreservesUnrelatedWorkAndGlobalHook() async {
         let (c, config) = coordinator()
-        let controller = VoiceController(config: config, authorize: { false }, cuaRuntime: c)
+        let controller = VoiceController.inert(config: config, authorize: { false }, cuaRuntime: c)
         let unrelated = VoiceTaskCoordinator.Work(label: "Other task", request: "Other task",
             spec: DriveTask(goal: "Other task"))
         c.tasks.append(unrelated)
@@ -1257,7 +1276,7 @@ final class VoiceSemanticTests: XCTestCase {
 
     func testTypedFocusNeverParsesDisplayNameAsCommand() async {
         var tools: [String] = []
-        let loop = DriveLoop(call: { tool, _ in
+        let loop = DriveLoop.inert(call: { tool, _ in
             tools.append(tool)
             if tool == "bring_to_front" {
                 return .object(["activated": .bool(true), "exact_window_effect": .object(["verified": .bool(true)])])
@@ -1266,7 +1285,7 @@ final class VoiceSemanticTests: XCTestCase {
                 "window_id": .number(7), "is_on_screen": .bool(true), "title": .string("Fixture")
             ])])])
         }, choose: { _, _ in XCTFail("semantic focus never invokes another model"); return nil },
-        ask: nil, granted: { true }, resolver: AppResolver(listApps: {
+        ask: nil, granted: { true }, resolver: AppResolver.fixture(listApps: {
             [.init(name: "open a new tab", bundle: "fixture.target", pid: 42)]
         }), appIsHidden: { _ in false }, activateRestoredApp: { _, _ in })
         let task = DriveTask(goal: "Focus confirmed application", application: "fixture.target",
@@ -1280,7 +1299,7 @@ final class VoiceSemanticTests: XCTestCase {
     func testInstructionDispatchSelectsTypedExecutorOnceWithoutApproval() async throws {
         let (c, _) = coordinator()
         var mutations = 0
-        let loop = DriveLoop(call: { tool, args in
+        let loop = DriveLoop.inert(call: { tool, args in
             if tool == "bring_to_front" {
                 mutations += 1
                 XCTAssertEqual(args["pid"], .number(42))
@@ -1290,7 +1309,7 @@ final class VoiceSemanticTests: XCTestCase {
                 "window_id": .number(7), "is_on_screen": .bool(true), "title": .string("Fixture")
             ])])])
         }, choose: { _, _ in XCTFail("generic chooser must not run"); return nil },
-        ask: nil, granted: { true }, resolver: AppResolver(listApps: {
+        ask: nil, granted: { true }, resolver: AppResolver.fixture(listApps: {
             [.init(name: "open a new tab", bundle: "fixture.target", pid: 42)]
         }), appIsHidden: { _ in false }, activateRestoredApp: { _, _ in })
         let input = try await admission()

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Every visible Jarvis UI component, in each state, light and dark, with Reduce Motion on and off, plus the audit findings for each." />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0b" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fbfbfd" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0a0b'/%3E%3Cpath d='M9 13v6M13 10v12M17 7v18M21 11v10M25 14v4' stroke='%23f5f5f7' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <title>Jarvis UI gallery</title>
+    <script>
+      (function () {
+        var stored = null;
+        try { stored = localStorage.getItem("jarvis-gallery-theme"); } catch (e) {}
+        var dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
