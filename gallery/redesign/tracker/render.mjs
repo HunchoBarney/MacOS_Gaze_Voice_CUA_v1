@@ -271,7 +271,9 @@ async function openEncoder(chrome, base, { width, height, bitrate }) {
     if (result.exceptionDetails) throw new Error("encoder: " + (result.exceptionDetails.exception?.description || result.exceptionDetails.text));
     return result.result.value;
   };
-  for (let i = 0; i < 200 && (await evaluate("document.readyState").catch(() => "")) !== "complete"; i += 1) await sleep(25);
+  const ready = 'location.pathname.endsWith("/__encoder") && document.readyState === "complete" && typeof VideoEncoder === "function"';
+  for (let i = 0; i < 200 && !(await evaluate(ready).catch(() => false)); i += 1) await sleep(25);
+  if (!(await evaluate(ready))) throw new Error("encoder page never loaded with WebCodecs");
   await evaluate(readFileSync(path.join(HERE, "node_modules/mp4-muxer/build/mp4-muxer.js"), "utf8"));
   await evaluate(ENCODER);
   if (!(await evaluate("window.__enc.supported(" + width + ", " + height + ", " + bitrate + ")"))) throw new Error("this Chrome can't encode H.264 at " + width + "x" + height);
