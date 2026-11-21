@@ -2866,11 +2866,18 @@ final class VoiceTaskCoordinator {
         return instruction
     }
 
+    /// A goal one recipe matches carries its hints, and binds the recipe's
+    /// app in front when the request named none: the person has to see it.
     private func startGuide(_ goal: String, on work: Work) {
         let id = work.id
-        let guide = GuideSession(goal: goal, present: { [weak self] effect in
+        let recipe = Recipe.match(goal)
+        let guide = GuideSession(goal: goal, recipe: recipe, present: { [weak self] effect in
             await self?.presentGuide(effect, workID: id)
         })
+        if let app = recipe?.app, work.spec.application == nil, work.spec.pid == nil, work.spec.windowID == nil {
+            work.spec.application = app
+            work.spec.foreground = true
+        }
         if let context = guide.hintContext {
             work.spec.previousContext = [work.spec.previousContext, context].compactMap { $0 }.joined(separator: "\n")
         }
@@ -2961,7 +2968,7 @@ final class VoiceTaskCoordinator {
             let answer = await park(.confirm(GuideNote.offer), on: work)
             finish(work, .done, say: say)
             guard answer == "yes" else { return }
-            let note = GuideNote(goal: guide.goal, steps: steps)
+            let note = guide.recipe.map(GuideNote.init(recipe:)) ?? GuideNote(goal: guide.goal, steps: steps)
             _ = await beginVoiceTask(GuideNote.instruction, app: "com.apple.Notes",
                                      literalText: note.text, captureID: work.captureID)
         default:
