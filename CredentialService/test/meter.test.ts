@@ -172,6 +172,21 @@ describe("the cap", () => {
     await r.usage(60_000, 60);
     expect(r.sent).toEqual([{ type: "session.close" }]);
   });
+
+  it("waits for the next reattach, not a past alarm, when the grace runs out while detached", async () => {
+    const r = rig({ TIERS: TINY, DEFAULT_TIER: "tiny", CAP_GRACE_SECONDS: "60" },
+      ["ok", "failed", "failed", "failed", "failed", "failed", "failed", "ok"]);
+    await r.meter.start();
+    await r.usage(60_000, 60);
+    expect(r.wake()).toBe(120_000);
+    await r.step({ at: 70_000, drop: true });
+    await r.advanceTo(125_000);
+    expect(r.wake()).toBe(131_000);
+    expect(r.sent).toEqual([]);
+    await r.advanceTo(131_000);
+    expect(r.attachedAt).toEqual([0, 70_000, 71_000, 73_000, 77_000, 85_000, 101_000, 131_000]);
+    expect(r.sent).toEqual([{ type: "session.close" }]);
+  });
 });
 
 describe("reattaching", () => {

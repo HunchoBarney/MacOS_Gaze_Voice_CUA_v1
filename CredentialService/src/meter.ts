@@ -229,7 +229,7 @@ export class Meter {
   private async schedule(): Promise<void> {
     const { state } = this;
     const now = this.host.now();
-    const due = [state.retryAt, state.cap && !state.closeSent ? state.cap.at + this.settings.graceSeconds * 1000 : null]
+    const due = [state.retryAt, state.cap && !state.closeSent && this.socket ? state.cap.at + this.settings.graceSeconds * 1000 : null]
       .filter((at): at is number => at !== null);
     const at = state.done ? null
       : due.length ? Math.min(...due)
