@@ -50,6 +50,7 @@ final class LiveVoiceTests: XCTestCase {
     private func heard(_ text: String) -> String {
         #"{"type":"session.input_transcript.delta","delta":"\#(text)","start_ms":0,"end_ms":10}"#
     }
+    private let closed = #"{"type":"session.closed","event_id":"e9","reason":"client_requested","session":{"id":"live_1"},"usage":{"seconds":5,"active_seconds":5,"paused_seconds":0}}"#
     private let answer = #"{"type":"session.output_transcript.delta","delta":"Tokyo.","start_ms":20,"end_ms":30}"#
 
     private var microphone: FakeMicrophone!
@@ -115,6 +116,9 @@ final class LiveVoiceTests: XCTestCase {
         try await waitUntil { voice.listening.state == .asleep }
         try await waitUntil { transports[0].sent.contains("session.close") }
         XCTAssertEqual(wakeWord.starts, 2)
+        XCTAssertEqual(microphone.starts, 1, "Recording restarts only once the call has closed")
+        transports[0].deliver(closed)
+        try await waitUntil { microphone.starts == 2 }
         XCTAssertEqual(voice.glow, .hidden)
     }
 
@@ -126,6 +130,8 @@ final class LiveVoiceTests: XCTestCase {
         try await waitUntil { voice.listening.state == .talking }
         try await waitUntil { voice.listening.state == .asleep }
         try await waitUntil { transports[0].sent.contains("session.close") }
+        transports[0].deliver(closed)
+        try await waitUntil { microphone.starts == 2 }
     }
 
     func testThinkingGlowsAfterTheRequestAndControlWordsReachTheirHandler() async throws {
@@ -158,5 +164,8 @@ final class LiveVoiceTests: XCTestCase {
         try await waitUntil { transports[0].sent.contains("session.close") }
         wakeWord.heard?(1)
         XCTAssertEqual(transports.count, 1)
+        transports[0].deliver(closed)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(microphone.starts, 1, "A disarmed microphone stays off after the session closes")
     }
 }

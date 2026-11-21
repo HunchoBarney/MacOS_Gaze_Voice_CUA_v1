@@ -184,9 +184,7 @@ final class LiveVoice {
             switch effect {
             case .openSession: break
             case .closeSession:
-                let closing = session
-                Task { _ = await closing?.close() }
-                ended()
+                ended(closing: session)
             case .control(let word):
                 onControl?(word)
             }
@@ -194,14 +192,23 @@ final class LiveVoice {
         refresh()
     }
 
-    /// The session is gone: back to the wake word.
-    private func ended() {
+    /// The session is gone: back to the wake word. Closing a call stops
+    /// LiveKit's engine (ThirdParty/WebRTC/README.md), so once `closing` has
+    /// closed, recording starts again for the wake word.
+    private func ended(closing: LiveSession? = nil) {
         session = nil
         wokeAt = nil
         microphone.relay.stop()
         _ = listening.handle(.ended, at: now())
         if armed, listening.state == .asleep { try? listenForWake() }
         refresh()
+        Task { [weak self] in
+            _ = await closing?.close()
+            guard let self, self.armed else { return }
+            do { try self.microphone.start() } catch {
+                Self.log.error("live_microphone_restart_failed \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     private func listenForWake() throws {
