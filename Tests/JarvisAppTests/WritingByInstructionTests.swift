@@ -17,6 +17,7 @@ final class WritingByInstructionTests: XCTestCase {
         var inserts: [String] = []
         var shown: [[String]] = []
         var sent: [WritingByInstruction.Draft] = []
+        var sentVerified: [Bool] = []
         var composed = 0
         var composedFrom: [String] = []
         var current = true
@@ -51,8 +52,9 @@ final class WritingByInstructionTests: XCTestCase {
                 desk.composedFrom.append(referent.text)
                 return reply
             },
-            send: { draft in
+            send: { draft, verified in
                 desk.sent.append(draft)
+                desk.sentVerified.append(verified)
                 return VoiceToolResult(status: VoiceToolResult.Status.ok, say: "Sent.").encoded()
             },
             show: { desk.shown.append($0) })
@@ -248,7 +250,18 @@ final class WritingByInstructionTests: XCTestCase {
         let sent = await writing.handle("send it")
         XCTAssertEqual(field(sent, "say"), "Sent.")
         XCTAssertEqual(desk.sent.map(\.text), ["Yes, see you at 5.\nI'll bring the notes."])
+        XCTAssertEqual(desk.sentVerified, [true])
         XCTAssertNil(writing.pending)
+    }
+
+    func testSendItFromAnUnverifiedSpeakerCarriesThatToTheSend() async {
+        let desk = FakeDesk()
+        let writing = writer(desk, local: nil)
+        _ = await writing.handle("come up with a reply for this")
+        var input = WritingInput()
+        input.speakerVerified = false
+        _ = await writing.handle("send it", input: input)
+        XCTAssertEqual(desk.sentVerified, [false], "after Standby, Send asks first (D3)")
     }
 
     func testSendItRefusesOnceTheDraftLeftTheField() async {
@@ -456,6 +469,22 @@ final class WritingByInstructionTests: XCTestCase {
         XCTAssertEqual(field(confirmed, "status"), VoiceToolResult.Status.ok)
         XCTAssertEqual(desk.value, "See you at five!Siobhán")
         XCTAssertTrue(coordinator.tasks.isEmpty)
+    }
+
+    func testBeginVoiceTaskCarriesAnUnverifiedSpeakerToTheSend() async {
+        let config = Config(defaults: UserDefaults(suiteName: "writing-\(UUID().uuidString)")!,
+                            keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+        config.handsFreeEnabled = false
+        config.voiceLive = true
+        let coordinator = VoiceTaskCoordinator(config: config, jevRoute: { nil },
+            gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })))
+        let desk = FakeDesk()
+        coordinator.writingByInstruction = writer(desk, local: nil, enabled: { config.voiceLive })
+
+        _ = await coordinator.beginVoiceTask("come up with a reply for this",
+                                             transcriptHint: "come up with a reply for this")
+        _ = await coordinator.beginVoiceTask("send it", speakerVerified: false)
+        XCTAssertEqual(desk.sentVerified, [false], "after Standby, the coordinator's send asks first (D3)")
     }
 
     func testBeginVoiceTaskRechecksAdmissionBeforeTyping() async {

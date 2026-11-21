@@ -1493,8 +1493,8 @@ actor DriveLoop {
     /// is model-authored — the identical dispatch is an autonomous
     /// mutation and rides the standing grant / per-task confirm like
     /// every other effect. `press` is the label of the control a click
-    /// lands on: when the words may not be the person's (D3), a
-    /// consequential one asks first.
+    /// lands on, empty when it has none: when the words may not be the
+    /// person's (D3), a consequential or unnamed one asks first.
     func gateExplicit(_ tool: String, corpus: String, denied: [String],
                       confirmed: inout Bool, press: String? = nil) async throws {
         if explicitConsent {
@@ -1508,7 +1508,9 @@ actor DriveLoop {
                 feed("denied: \(why)")
                 throw Abort.denied(why)
             }
-            if speakerUnverified, let press, let consequence = Consequence.of(control: press) {
+            if speakerUnverified, let press,
+               let consequence = press.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                   ? Consequence.unnamed : Consequence.of(control: press) {
                 try await confirmConsequence(consequence, label: press)
             }
             return

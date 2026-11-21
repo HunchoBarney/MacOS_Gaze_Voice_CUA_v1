@@ -10,14 +10,17 @@ enum WritingIntent: Sendable, Equatable {
     case sendDraft
 }
 
-/// What the caller knows about the utterance beyond its words. Both fields
-/// are optional, so today's `beginVoiceTask` callers pass nothing.
+/// What the caller knows about the utterance beyond its words. Every field
+/// has a default, so today's `beginVoiceTask` callers pass nothing.
 struct WritingInput: Sendable, Equatable {
     /// Uptime of "this" when it was said, from `DelegationBridge.deicticStartMs`.
     var deicticTime: TimeInterval?
     /// An independent local transcription of the same audio. When nil,
     /// `WritingByInstruction` asks its own local transcriber.
     var localTranscript: String?
+    /// False when anyone in the room could have said it (D3): "send it"
+    /// then asks before pressing Send.
+    var speakerVerified = true
 
     init(deicticTime: TimeInterval? = nil, localTranscript: String? = nil) {
         self.deicticTime = deicticTime

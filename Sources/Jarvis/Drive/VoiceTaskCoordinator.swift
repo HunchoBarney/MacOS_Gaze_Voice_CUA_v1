@@ -351,11 +351,11 @@ final class VoiceTaskCoordinator {
             guard let text = reply["reply"]?.string else { throw TerraClient.Failure.malformed }
             return text
         },
-        send: { [weak self] draft in
+        send: { [weak self] draft, speakerVerified in
             guard let self else {
                 return VoiceToolResult(status: VoiceToolResult.Status.refused, say: "Nothing was sent.").encoded()
             }
-            return await self.beginVoiceTask("click Send", app: draft.bundleID)
+            return await self.beginVoiceTask("click Send", app: draft.bundleID, speakerVerified: speakerVerified)
         },
         show: { [overlay] lines in
             if lines.isEmpty { overlay.hideSheet() } else { overlay.showSheet(lines: lines) }
@@ -829,8 +829,9 @@ final class VoiceTaskCoordinator {
             let words = [transcriptHint, trimmed].compactMap { $0 }.first {
                 WritingInstruction.intent($0) != nil || WritingInstruction.confirmation($0) != nil
             } ?? trimmed
-            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput(),
-                                                               isCurrent: admissionIsCurrent) {
+            var input = writing ?? WritingInput()
+            input.speakerVerified = speakerVerified
+            if let written = await writingByInstruction.handle(words, input: input, isCurrent: admissionIsCurrent) {
                 return written
             }
         }

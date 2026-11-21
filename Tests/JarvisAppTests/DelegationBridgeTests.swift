@@ -176,6 +176,26 @@ final class DelegationBridgeTests: XCTestCase {
         XCTAssertEqual(spine.requests.map(\.text), ["type never mind"])
     }
 
+    func testAStopAfterDictatedTextCancelsIt() async throws {
+        try await replay([started(), said("type hello", 100, 700), delegation("del_1", at: 800),
+                          said("stop", 900, 1200)].joined(separator: "\n"))
+        XCTAssertTrue(spine.requests.isEmpty, "the person stopped the typing before it was committed")
+        XCTAssertEqual(bridge.ledger.state(of: .init(liveSessionID: "sess_1", delegationID: "del_1")),
+                       .declined("barge-in"))
+    }
+
+    func testTakeBackWordsSaidAsTheTextAreStillTyped() async throws {
+        try await replay([started(), said("type", 100, 400), delegation("del_1", at: 500),
+                          said("never mind", 450, 900)].joined(separator: "\n"))
+        XCTAssertEqual(spine.requests.map(\.text), ["type never mind"])
+    }
+
+    func testTakeBackWordsAfterAWritingLeadInAreStillTyped() async throws {
+        try await replay([started(), said("type this", 100, 400), delegation("del_1", at: 500),
+                          said("never mind", 450, 900)].joined(separator: "\n"))
+        XCTAssertEqual(spine.requests.map(\.text), ["type this never mind"])
+    }
+
     func testWordsLaterThanTheLagWaitGoToTheNextRequest() async throws {
         try await replay([started(), delegation("del_1", at: 1000)].joined(separator: "\n"))
         XCTAssertTrue(spine.requests.isEmpty)
@@ -331,13 +351,19 @@ final class DelegationBridgeTests: XCTestCase {
             try await loop.consentGate(tool: "click", args: [:], elementText: "Send", denied: [], confirmed: &confirmed)
             XCTFail("the words don't cover the press")
         } catch DriveLoop.Abort.declined {}
+        do {
+            try await loop.gateExplicit("click", corpus: "Mail", denied: [], confirmed: &confirmed, press: "")
+            XCTFail("a click with no label asks too")
+        } catch DriveLoop.Abort.declined {}
         XCTAssertEqual(asked, [.confirm(Consequence.send.question(target: "Send")),
-                               .confirm(Consequence.send.question(target: "Send"))])
+                               .confirm(Consequence.send.question(target: "Send")),
+                               .confirm(Consequence.unnamed.question(target: ""))])
 
         asked = []
         await loop.bindSpokenGoal("click Send")
         try await loop.gateExplicit("click", corpus: "Send Mail", denied: [], confirmed: &confirmed, press: "Send")
         try await loop.consentGate(tool: "click", args: [:], elementText: "Send", denied: [], confirmed: &confirmed)
+        try await loop.gateExplicit("click", corpus: "Mail", denied: [], confirmed: &confirmed, press: "")
         XCTAssertTrue(asked.isEmpty, "the person who said the name presses at once")
     }
 
@@ -389,7 +415,7 @@ final class DelegationBridgeTests: XCTestCase {
         let parked = await waitFor { first.awaitingAnswer && second.awaitingAnswer }
         XCTAssertTrue(parked)
         let reply = await coordinator.begin(DelegatedRequest(id: UUID(), text: "yes", speakerVerified: true,
-                                                             referent: nil))
+                                                             deicticTime: nil))
         guard case .answered(let say) = reply else { return XCTFail("expected a question back, got \(reply)") }
         XCTAssertTrue(say.contains("Nothing was answered"), say)
         XCTAssertTrue(first.awaitingAnswer && second.awaitingAnswer, "a bare yes must not pick the newest ask")
@@ -530,7 +556,7 @@ final class DelegationBridgeTests: XCTestCase {
         try await replay([started(), said("click", 2000, 2400), said("this", 2500, 2800),
                           delegation("del_1", at: 2900)].joined(separator: "\n"))
         XCTAssertEqual(resolvedAt, [102.5], "session start at uptime 100, word at 2500 ms")
-        XCTAssertEqual(spine.requests.first?.referent, "Looking at: the Send button in Mail")
+        XCTAssertEqual(spine.requests.first?.deicticTime, 102.5, "writing resolves \"this\" at the same moment")
         XCTAssertEqual(session.appends.first?.content, "Looking at: the Send button in Mail")
         XCTAssertEqual(session.appends.first?.delegationID, "del_1")
     }

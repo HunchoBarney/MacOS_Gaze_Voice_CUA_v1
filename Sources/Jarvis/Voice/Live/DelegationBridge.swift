@@ -10,8 +10,10 @@ struct DelegatedRequest: Sendable, Equatable {
     /// False after a Standby resume or in reply to an alert, where anyone
     /// in the room could have spoken: a consequential press asks first (D3).
     let speakerVerified: Bool
-    /// What "this" or "that" pointed at when it was said, if anything.
-    let referent: String?
+    /// When the first "this", "that", "here" or "it" was said, in
+    /// `ProcessInfo.systemUptime` seconds, so writing (L7) resolves it at
+    /// word time rather than call time.
+    let deicticTime: TimeInterval?
 }
 
 enum DelegationSpineReply: Sendable, Equatable {
@@ -115,8 +117,9 @@ final class DelegationBridge {
             for content in held { send(.commentary, content, for: nil) }
         case .inputTranscript(let delta):
             guard sessionID != nil else { return }
+            let before = pendingText
             input.append(delta)
-            if !waiting.isEmpty, Self.takesBack(delta.text, fromStart: true), Self.typedLiteral(pendingText) == nil {
+            if !waiting.isEmpty, Self.takesBack(delta.text, fromStart: true), !Self.isTypedText(delta.text, after: before) {
                 stopWaiting(through: delta.endMs)
                 return
             }
@@ -239,10 +242,10 @@ final class DelegationBridge {
         let wordTime = Self.deicticStartMs(in: words).map { sessionStartUptime + Double($0) / 1000 }
         Task { [weak self] in
             guard let self else { return }
-            var referent: String?
-            if let wordTime, let resolveReferent { referent = await resolveReferent(wordTime) }
-            if let referent { self.send(.thinking, referent, for: key) }
-            let request = DelegatedRequest(id: id, text: text, speakerVerified: verified, referent: referent)
+            if let wordTime, let resolveReferent, let referent = await resolveReferent(wordTime) {
+                self.send(.thinking, referent, for: key)
+            }
+            let request = DelegatedRequest(id: id, text: text, speakerVerified: verified, deicticTime: wordTime)
             switch await self.spine.begin(request) {
             case .started(let say):
                 self.send(.thinking, "Started: \(say). It isn't finished; don't say it's done until the result arrives.", for: key)
@@ -299,6 +302,15 @@ final class DelegationBridge {
     private static func typedLiteral(_ text: String) -> String? {
         guard let parsed = FastAction.parse(text), case .type(let payload) = parsed.action.body else { return nil }
         return payload
+    }
+
+    /// Whether a fragment is the text of a "type …" request that had none
+    /// yet, by the fast lane's parser or writing's lead-ins ("type this").
+    /// Once the text has been said, a take-back fragment is a stop.
+    private static func isTypedText(_ fragment: String, after before: String) -> Bool {
+        let after = before + " " + fragment
+        return ((typedLiteral(before) ?? "").trimmingCharacters(in: .whitespaces).isEmpty && typedLiteral(after) != nil)
+            || (WritingInstruction.literal(in: before) == nil && WritingInstruction.literal(in: after) != nil)
     }
 
     private static let deicticWords: Set<String> = ["this", "that", "these", "those", "here", "it"]
@@ -364,7 +376,9 @@ final class DelegationBridge {
 
 extension VoiceTaskCoordinator: DelegationSpine {
     /// Words that answer a parked question go to that question; anything
-    /// else is a new voice task, where the memory intents also live.
+    /// else is a new voice task, where the memory and writing intents also
+    /// live. The referent line stays out of `transcriptHint`: writing and
+    /// guide mode read that as the person's own words.
     func begin(_ request: DelegatedRequest) async -> DelegationSpineReply {
         let parked = tasks.filter(\.awaitingAnswer)
         if !parked.isEmpty, !VoiceAdmissionPolicy.explicitNewRequest(request.text) {
@@ -374,13 +388,13 @@ extension VoiceTaskCoordinator: DelegationSpine {
             }
             guard let target else {
                 let names = parked.enumerated().map { "\($0.offset + 1)) \($0.element.label)" }.joined(separator: ", ")
-                return .answered("Nothing was answered: more than one thing is waiting (\(names)). Ask which one they mean.")
+                return .answered("Nothing was answered: \(parked.count) questions are waiting (\(names)), and the answer didn't say which one it was for.")
             }
             return DelegationBridge.reply(fromPayload: await respondToTask(request.text, task: target.id.uuidString) ?? "")
         }
         return DelegationBridge.reply(fromPayload: await beginVoiceTask(
-            request.text, transcriptHint: request.referent, captureID: request.id,
-            speakerVerified: request.speakerVerified))
+            request.text, captureID: request.id, speakerVerified: request.speakerVerified,
+            writing: WritingInput(deicticTime: request.deicticTime)))
     }
 
     func finished(_ request: DelegatedRequest) async -> String? {

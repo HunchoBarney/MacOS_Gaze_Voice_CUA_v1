@@ -1600,7 +1600,7 @@ extension DriveLoop {
                 let fallback = (try? await windowAtPoint(target, session: session))
                     .map { "\($0.title) \($0.app)" } ?? ""
                 try await gateExplicit("click", corpus: fallback,
-                                       denied: task.deny, confirmed: &confirmed)
+                                       denied: task.deny, confirmed: &confirmed, press: "")
             }
             if let outcome { return outcome }
             let px = Self.desktopPixels(target)
@@ -1621,7 +1621,7 @@ extension DriveLoop {
             // raw gaze is the cold-scorer fallback, not the primary path.
             var postPoint = point
             var corpusText = ""
-            var pressLabel: String?
+            var pressLabel = ""
             if let gazeCommit, let (candidate, _) = await gazeCommit() {
                 if !candidate.motorRect.isEmpty {
                     postPoint = candidate.motorRect.contains(point) ? point
