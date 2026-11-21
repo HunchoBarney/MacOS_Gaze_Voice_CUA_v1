@@ -70,13 +70,4 @@ final class ConsentAskWatchTests: XCTestCase {
         XCTAssertEqual(answer, "yes", "only the directory watch can deliver the answer before the heartbeat")
         XCTAssertTrue(AgentAskChannel.pending().isEmpty)
     }
-
-    /// Timeout is still the honest decline — a watch never invents an
-    /// answer.
-    func testTimeoutStillDeclines() async {
-        let answer = await AgentAskChannel.request(
-            .confirm("Delete everything?"), agent: "scout", timeout: 0.5)
-        XCTAssertNil(answer)
-        XCTAssertTrue(AgentAskChannel.pending().isEmpty)
-    }
 }

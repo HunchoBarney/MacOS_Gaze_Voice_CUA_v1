@@ -592,8 +592,10 @@ final class VoiceOneBrainTests: XCTestCase {
         let lane = RealtimeVoiceLane(apiKey: { "fixture-not-a-real-key" }, client: client)
         let goal = "organize these files by date"
         var calls = 0
+        var ended = false
         lane.commandHandler = { _, _, _, _, _, _ in calls += 1; return #"{"status":"started","say":"Accepted."}"# }
         lane.admissionContextProvider = { self.context() }
+        lane.onEvent = { _, event in if case .turnEnded = event { ended = true } }
         try await lane.submitTyped(goal, sessionID: UUID())
         await waitFor { await peer.responseIDs().count == 1 }
         let responses = await peer.responseIDs()
@@ -608,8 +610,13 @@ final class VoiceOneBrainTests: XCTestCase {
                                  "output": .array([.object(["type": .string("function_call"), "call_id": .string("first"),
                                                             "name": .string("computer_task"), "arguments": frame["arguments"] ?? .string("{}")])])])
         ])
-        await waitFor { calls == 1 }
+        await waitFor { ended }
         XCTAssertEqual(calls, 1)
+        let outputs = await peer.frames().compactMap { frame -> String? in
+            guard frame["item"]?["type"]?.string == "function_call_output" else { return nil }
+            return frame["item"]?["call_id"]?.string
+        }
+        XCTAssertEqual(outputs, ["first"])
         lane.cancel(); client.teardown()
     }
 
@@ -637,8 +644,13 @@ final class VoiceOneBrainTests: XCTestCase {
         let current = try XCTUnwrap(nextIDs.first)
         try await next.push(function(old, call: "fresh-id-from-dead-response", goal: goal))
         try await next.push(function(current, call: "current-response-call", goal: goal))
-        await waitFor { calls.count == 1 }
+        await waitFor { await next.frames().contains { $0["item"]?["type"]?.string == "function_call_output" } }
         XCTAssertEqual(calls, [goal])
+        let outputs = await next.frames().compactMap { frame -> String? in
+            guard frame["item"]?["type"]?.string == "function_call_output" else { return nil }
+            return frame["item"]?["call_id"]?.string
+        }
+        XCTAssertEqual(outputs, ["current-response-call"], "only the current response may spend the permit")
         lane.cancel(); client.teardown()
     }
 
