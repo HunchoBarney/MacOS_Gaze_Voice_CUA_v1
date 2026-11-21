@@ -63,7 +63,7 @@ final class LiveVoice {
     private var wokeAt: TimeInterval?
     private var oneBreath: OneBreath?
     private var reply = ""
-    private var hearing = false
+    private var userTalking = false
     private var wakeTestHeard: Bool?
     private var timer: Task<Void, Never>?
 
@@ -137,7 +137,7 @@ final class LiveVoice {
         wokeAt = moment
         oneBreath = nil
         reply = ""
-        hearing = false
+        userTalking = false
         let session = makeSession(listening.name)
         self.session = session
         session.onEvent = { [weak self, weak session] event in
@@ -196,21 +196,21 @@ final class LiveVoice {
         let at = now()
         switch event {
         case .inputTranscript(let delta):
-            if !hearing { reply = "" }
-            hearing = true
+            if !userTalking { reply = "" }
+            userTalking = true
             apply(listening.handle(.heard(delta.text), at: at))
         case .outputTranscript(let delta):
-            hearing = false
+            userTalking = false
             reply += delta.text
             onReply?(reply)
             noteReply(delegation: false)
             apply(listening.handle(.answered, at: at))
         case .delegation:
-            hearing = false
+            userTalking = false
             noteReply(delegation: true)
             apply(listening.handle(.delegated, at: at))
         case .paused:
-            hearing = false
+            userTalking = false
             apply(listening.handle(.paused, at: at))
         case .resumed:
             apply(listening.handle(.resumed, at: at))
