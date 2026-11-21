@@ -58,9 +58,12 @@ final class LiveDelegationTests: XCTestCase {
         static let mailPID = 424_401
         private let lock = NSLock()
         private var pressed: [String] = []
+        private var called: [String] = []
         var presses: [String] { lock.withLock { pressed } }
+        var calls: [String] { lock.withLock { called } }
 
         func call(_ tool: String, _ args: [String: JSONValue]) async throws -> JSONValue {
+            lock.withLock { called.append(tool) }
             if ["click", "press", "perform_action"].contains(tool) { lock.withLock { pressed.append(tool) } }
             switch tool {
             case "list_apps":
@@ -208,6 +211,30 @@ final class LiveDelegationTests: XCTestCase {
         XCTAssertTrue(live.appends(for: "del_1").contains {
             $0.type == "session.commentary.append" && $0.content.contains("sends this to other people")
         }, "the question goes back to Live with its delegation")
+    }
+
+    func testStopEndsRunningWorkWithoutUndoingTheStepsItDid() async throws {
+        _ = try await converse([])
+        let (resume, release) = AsyncStream<Void>.makeStream()
+        let work = VoiceTaskCoordinator.Work(label: "Archiving three messages", request: "archive three messages",
+                                             spec: DriveTask(goal: "archive three messages"))
+        coordinator.tasks = [work]
+        let desk = desk!
+        work.worker = Task { @MainActor in
+            for step in 1...3 {
+                guard !Task.isCancelled, work.active else { return }
+                _ = try? await desk.call("click", ["element_index": .number(Double(step))])
+                if step == 1 { for await _ in resume { break } }
+            }
+        }
+        try await waitUntil { desk.presses.count == 1 }
+        transports[0].deliver(said("stop", 100, 400))
+        try await waitUntil { work.outcome != nil }
+        release.finish()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(work.outcome, .cancelled)
+        XCTAssertEqual(desk.presses, ["click"], "steps 2 and 3 never ran")
+        XCTAssertFalse(desk.calls.contains { ["hotkey", "press_key", "undo"].contains($0) }, "step 1 stays done")
     }
 
     func testOtherTaskEventsStillReachTheirOwner() {

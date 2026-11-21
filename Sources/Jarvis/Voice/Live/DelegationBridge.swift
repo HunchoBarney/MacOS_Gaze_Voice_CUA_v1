@@ -411,10 +411,11 @@ extension VoiceTaskCoordinator: DelegationSpine {
 
 extension DelegationBridge {
     /// The L2 adapters: a bridge between Live voice and the coordinator. It
-    /// hears every session's events, answers through the open session, drops
-    /// requests still waiting on "stop" or "cancel", and takes the task
-    /// events of the work it started; every other task event goes where it
-    /// went before.
+    /// hears every session's events, answers through the open session, and
+    /// takes the task events of the work it started; every other task event
+    /// goes where it went before. "Stop" or "cancel" drops requests still
+    /// waiting and stops running work the way Escape does: the remaining
+    /// steps don't run, and steps already done stay done.
     static func connect(_ voice: LiveVoice, to coordinator: VoiceTaskCoordinator,
                         timing: Timing = .init()) -> DelegationBridge {
         let bridge = DelegationBridge(live: OpenLiveSession(voice), spine: coordinator, timing: timing)
@@ -423,8 +424,11 @@ extension DelegationBridge {
             bridge?.handle(event)
         }
         let control = voice.onControl
-        voice.onControl = { [weak bridge] word in
-            if word == .stop || word == .cancel { bridge?.bargeIn() }
+        voice.onControl = { [weak bridge, weak coordinator] word in
+            if word == .stop || word == .cancel {
+                bridge?.bargeIn()
+                if let coordinator { Task { _ = await coordinator.cancelAllRunning() } }
+            }
             control?(word)
         }
         let sink = coordinator.taskEventSink
