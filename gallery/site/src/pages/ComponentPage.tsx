@@ -3,6 +3,7 @@ import { ClipPlayer } from "../components/ClipPlayer";
 import { Compare } from "../components/Compare";
 import { FindingCard } from "../components/FindingCard";
 import { ArrowUpRightIcon, ChevronLeftIcon, ChevronRightIcon } from "../components/Icons";
+import { KindTag } from "../components/KindTag";
 import { Thumb } from "../components/Thumb";
 import { Segmented } from "../components/Segmented";
 import { SeverityChip } from "../components/Severity";
@@ -109,7 +110,8 @@ function ComponentView({ gallery, component }: { gallery: Gallery; component: Co
   const beforeVariant = pairBase && pickVariant(pairBase, scheme, reduceMotion).variant;
   const afterVariant = pairProposed && pickVariant(pairProposed, scheme, reduceMotion).variant;
 
-  const describe = (s: State) => component.title + ", " + s.title + (s.kind === "proposed" ? " (proposed)" : "") + ", " + scheme + " appearance" + (reduceMotion ? ", Reduce Motion on" : "");
+  const kindNote = (s: State) => (s.superseded ? " (superseded proposal)" : s.kind === "proposed" ? " (proposed)" : "");
+  const describe = (s: State) => component.title + ", " + s.title + kindNote(s) + ", " + scheme + " appearance" + (reduceMotion ? ", Reduce Motion on" : "");
 
   function showState(id: string) {
     const target = states.find((s) => s.id === id);
@@ -184,6 +186,7 @@ function ComponentView({ gallery, component }: { gallery: Gallery; component: Co
               />
             </div>
             <div id="stage-panel" role="tabpanel" aria-labelledby={"tab-" + state.id}>
+              {state.superseded && <p className="note stage-notice">{state.superseded}</p>}
               {variant ? (
                 <Stage picture={variant} alt={describe(state)} zoom={zoom} scheme={scheme} />
               ) : (
@@ -227,13 +230,13 @@ function ComponentView({ gallery, component }: { gallery: Gallery; component: Co
           {pairProposed && pairBase && beforeVariant && afterVariant && (
             <section className="section" aria-labelledby="compare-heading">
               <h2 id="compare-heading" className="title-3">
-                Current and proposed
+                {pairProposed.superseded ? "Current and superseded proposal" : "Current and proposed"}
               </h2>
               <Compare
                 id={pairProposed.id}
                 scheme={scheme}
                 before={{ picture: beforeVariant, label: pairBase.title, alt: describe(pairBase) }}
-                after={{ picture: afterVariant, label: pairProposed.title + " (proposed)", alt: describe(pairProposed) }}
+                after={{ picture: afterVariant, label: pairProposed.title + kindNote(pairProposed), alt: describe(pairProposed), superseded: Boolean(pairProposed.superseded) }}
               />
             </section>
           )}
@@ -251,11 +254,7 @@ function ComponentView({ gallery, component }: { gallery: Gallery; component: Co
                       <Thumb picture={v} scheme={scheme} backdrop={v?.backdrop} />
                       <span className="sheet-title">
                         {s.title}
-                        {s.kind && s.kind !== "current" && (
-                          <span className="kind-tag" data-kind={s.kind}>
-                            {s.kind === "proposed" ? "Proposed" : "Reference"}
-                          </span>
-                        )}
+                        <KindTag item={s} />
                       </span>
                     </button>
                   </li>
@@ -273,18 +272,18 @@ function ComponentView({ gallery, component }: { gallery: Gallery; component: Co
             <p className="muted">No findings for this component.</p>
           ) : (
             <div className="findings">
-              {findings.map((finding) => (
-                <FindingCard
-                  key={finding.id}
-                  finding={finding}
-                  active={hash === finding.id}
-                  onShowProposed={
-                    finding.proposedState && states.some((s) => s.id === finding.proposedState)
-                      ? () => showState(finding.proposedState as string)
-                      : undefined
-                  }
-                />
-              ))}
+              {findings.map((finding) => {
+                const target = states.find((s) => s.id === finding.proposedState);
+                return (
+                  <FindingCard
+                    key={finding.id}
+                    finding={finding}
+                    active={hash === finding.id}
+                    onShowProposed={target ? () => showState(target.id) : undefined}
+                    proposalSuperseded={Boolean(target?.superseded)}
+                  />
+                );
+              })}
             </div>
           )}
         </aside>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ClipPlayer } from "../components/ClipPlayer";
 import { Compare } from "../components/Compare";
+import { KindTag } from "../components/KindTag";
 import { Segmented } from "../components/Segmented";
 import { Stage, type Zoom } from "../components/Stage";
 import { Thumb } from "../components/Thumb";
@@ -29,11 +30,7 @@ export function Scenes({ gallery }: { gallery: Gallery }) {
                 <span className="card-text">
                   <span className="card-title">
                     {scene.title}
-                    {scene.kind === "proposed" && (
-                      <span className="kind-tag" data-kind="proposed">
-                        Proposed
-                      </span>
-                    )}
+                    <KindTag item={scene} />
                   </span>
                   <span className="card-meta">{scene.summary}</span>
                 </span>
@@ -111,6 +108,7 @@ export function ScenePage({ gallery, id }: { gallery: Gallery; id: string }) {
           ]}
         />
       </div>
+      {scene.superseded && <p className="note stage-notice">{scene.superseded}</p>}
       <Stage picture={picture} alt={scene.title + ": " + scene.summary} zoom={zoom} scheme={scheme} />
       <p className="stage-caption num">
         {schemes.length > 0 && <span>{scheme === "light" ? "Light" : "Dark"}</span>}
@@ -130,11 +128,11 @@ export function ScenePage({ gallery, id }: { gallery: Gallery; id: string }) {
       {pair && sides && pairScheme && (
         <section className="section" aria-labelledby="scene-compare">
           <h2 id="scene-compare" className="title-3">
-            Current and proposed
+            {pair[1].superseded ? "Current and superseded proposal" : "Current and proposed"}
           </h2>
           {pairScheme !== scheme && (
             <p className="note compare-note">
-              The proposed version is rendered in {pairScheme} only, so this compares the {pairScheme} renders.
+              The {pair[1].superseded ? "superseded proposal" : "proposed version"} is rendered in {pairScheme} only, so this compares the {pairScheme} renders.
             </p>
           )}
           <Compare
@@ -142,7 +140,7 @@ export function ScenePage({ gallery, id }: { gallery: Gallery; id: string }) {
             id={pair[0].id}
             scheme={pairScheme}
             before={{ picture: { ...sides[0], scale: 2, backdrop: "desktop" }, label: pair[0].title, alt: pair[0].summary }}
-            after={{ picture: { ...sides[1], scale: 2, backdrop: "desktop" }, label: pair[1].title, alt: pair[1].summary }}
+            after={{ picture: { ...sides[1], scale: 2, backdrop: "desktop" }, label: pair[1].title, alt: pair[1].summary, superseded: Boolean(pair[1].superseded) }}
           />
         </section>
       )}

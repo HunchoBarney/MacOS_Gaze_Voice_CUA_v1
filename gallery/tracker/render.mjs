@@ -335,9 +335,10 @@ async function main() {
               crop = state.crop.rect || (await evaluate("window.__fx.rectOf(" + JSON.stringify(state.crop.selectors) + ", " + (state.crop.pad ?? 24) + ")"));
               if (!crop) throw new Error(label + ": nothing to crop (" + state.crop.selectors.join(", ") + " not rendered)");
             }
-            if (state.expect) {
-              const ok = await evaluate("Boolean(document.querySelector(" + JSON.stringify(state.expect) + "))");
-              if (!ok) throw new Error(label + ": expected " + state.expect + " to be rendered");
+            const expect = rm && state.expectReduced !== undefined ? state.expectReduced : state.expect;
+            if (expect) {
+              const ok = await evaluate("Boolean(document.querySelector(" + JSON.stringify(expect) + "))");
+              if (!ok) throw new Error(label + ": expected " + expect + " to be rendered");
             }
             for (const scheme of ["light", "dark"]) {
               await setMedia(scheme, rm);

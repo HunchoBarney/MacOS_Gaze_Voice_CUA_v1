@@ -204,7 +204,7 @@ const native = {
         { id: "thinking", title: "Thinking", variants: variants("listening-indicator", "thinking", indicator("thinking")) },
         { id: "speaking", title: "Speaking", variants: variants("listening-indicator", "speaking", indicator("speaking")) },
         { id: "problem", title: "Problem", note: "Shown when the input device stops delivering audio.", variants: variants("listening-indicator", "problem", indicator("problem")) },
-        { id: "listening-proposed", title: "Listening", kind: "proposed", note: "Label dropped; the orb and level carry the state.", variants: variants("listening-indicator", "listening-proposed", indicator("proposed")) },
+        { id: "listening-proposed", title: "Listening", kind: "proposed", superseded: "Superseded. The owner rejected these proposed directions on 2026-11-21, and JARA-57 owns the redesign. Kept for the record only.", note: "Label dropped; the orb and level carry the state.", variants: variants("listening-indicator", "listening-proposed", indicator("proposed")) },
       ],
     },
     {

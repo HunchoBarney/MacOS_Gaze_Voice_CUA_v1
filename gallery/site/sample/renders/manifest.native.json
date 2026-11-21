@@ -199,6 +199,7 @@
           "id": "listening-proposed",
           "title": "Listening",
           "kind": "proposed",
+          "superseded": "Superseded. The owner rejected these proposed directions on 2026-11-21, and JARA-57 owns the redesign. Kept for the record only.",
           "note": "Label dropped; the orb and level carry the state.",
           "variants": [
             {

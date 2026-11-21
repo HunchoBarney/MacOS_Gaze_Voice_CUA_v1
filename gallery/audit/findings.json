@@ -352,11 +352,11 @@
     {
       "id": "ET-1",
       "component": "tracker-camera-marker",
-      "severity": "P1",
-      "title": "The yellow camera arrow appears on every launch and every countdown",
-      "where": "EyeTracking/web/src/App.tsx:1073",
-      "problem": "A 64x74 pt saturated #ffd60a arrow with a heavy drop shadow and an 800-weight label appears for 5 s on every tracker launch and again through each calibration countdown. Nothing else in Jarvis uses that yellow, weight or outline, and it points at hardware the person can already see. The owner named it as the thing he hates.",
-      "fix": "Delete it, as in JARA-55's phase-2 plan (item 5). If calibration still needs a 'face the camera' cue, park the first orb point just under the notch for its lead-in. That spatial anchor already reads as 'look here'.",
+      "severity": "P3",
+      "title": "The camera arrow is now menu-only but keeps its old yellow styling",
+      "where": "EyeTracking/web/src/styles.css:235",
+      "problem": "Since #615 the arrow no longer appears on launch or during the countdown. It shows for 5 s only from the menu's show-marker action (EyeTracking/web/src/App.tsx:483) or with --show-camera-marker. When it does appear, it's still a 64x74 pt saturated #ffd60a arrow with a heavy drop shadow and an 800-weight label. Nothing else in Jarvis uses that yellow, weight or outline, and the owner named it as the thing he hates.",
+      "fix": "Finish JARA-55's phase-2 item 5 and remove the marker and its menu action. If a camera cue is still wanted, draw a small hollow glow under the notch in the Magnet look the calibration target now uses, fading in and out over 200 ms.",
       "skills": [
         "apple-design",
         "emil-design-eng",
@@ -368,9 +368,9 @@
       "component": "tracker-calibration",
       "severity": "P1",
       "title": "A failed calibration leaves raw gate metrics on screen indefinitely",
-      "where": "EyeTracking/web/src/App.tsx:842",
-      "problem": "After three rejected passes, the modal closes and the notice pill shows the worker's own string over the desktop: 'Verification error median=0.112 p90=0.241 corner=0.301 exceeds gate' (EyeTracking/web/src/inference/core.ts:3304). It has no scrim, no close control and no timeout, and it clears only on the next calibration. The retry notice is engineering text too ('Only 11 pursuit samples - follow the dot for the full path'). See states rejected and retry.",
-      "fix": "Map each reject reason to plain copy in the renderer, for example 'Couldn't get a steady read - try again in brighter light', and keep the metrics in calibration_report.json and the diagnostics panel. Give the notice an exit: auto-dismiss after about 6 s with a 150 ms ease-out fade, or offer a Try again action. JARA-55's 9-point redesign has a fixation gate so 10 fps can't fail it, but the copy still needs this mapping.",
+      "where": "EyeTracking/web/src/App.tsx:794",
+      "problem": "After three rejected passes, the modal closes and the notice pill shows the worker's own string over the desktop: 'Verification error median=0.112 p90=0.241 corner=0.301 exceeds gate' (EyeTracking/web/src/inference/core.ts:3310). It has no scrim, no close control and no timeout, and it clears only on the next calibration. #615's eye-paced run makes the 'Only N pursuit samples - follow the dot for the full path' rejection rarer (EyeTracking/web/src/inference/core.ts:3225), but that text and the verify-gate text both still reach the screen verbatim. See states rejected and retry.",
+      "fix": "Map each reject reason to plain copy in the renderer, for example 'Couldn't get a steady read - try again in brighter light', and keep the metrics in calibration_report.json and the diagnostics panel. Give the notice an exit: auto-dismiss after about 6 s with a 150 ms ease-out fade, or offer a Try again action.",
       "skills": [
         "apple-design",
         "break-ui",
@@ -380,11 +380,11 @@
     {
       "id": "ET-3",
       "component": "tracker-calibration",
-      "severity": "P2",
-      "title": "One calibration run gives five instructions that disagree",
-      "where": "EyeTracking/web/src/App.tsx:533",
-      "problem": "In order, the person reads: 'Follow the dot for about 20 seconds' (card), 'calibrating - just look at the dot when it stops' (countdown), 'look at the dot - no need to chase it' (capture), 'hold your head still - keep following the dot' (pose hint) and 'follow the dot for the full path' (retry). Follow and don't-chase contradict each other, and the card is sentence case while the pills are lowercase.",
-      "fix": "Use one verb for the whole protocol, 'Look at each point as it lands', and sentence case everywhere. Rewrite all five strings together when JARA-55's 9-point orb calibration lands. The pose hint becomes 'Keep your head still'.",
+      "severity": "P3",
+      "title": "Calibration copy still mixes 'follow' with 'look until it fills'",
+      "where": "EyeTracking/web/src/App.tsx:478",
+      "problem": "#615 aligned the card ('Look at each dot until it fills. It takes about 15 seconds, once.') and the capture notice ('look at each dot until it fills'). Three strings still say something else. The countdown notice says 'calibrating - just look at the dot when it stops' (also at EyeTracking/web/src/App.tsx:1048). The pose hint says 'hold your head still - keep following the dot' (EyeTracking/web/src/App.tsx:1800). The worker's retry reason says 'follow the dot for the full path' (EyeTracking/web/src/inference/core.ts:3225). The card is sentence case while the pills are lowercase.",
+      "fix": "Use the new verb everywhere: the countdown notice becomes 'Look at each dot until it fills', the pose hint 'Keep your head still', and the retry copy goes through ET-2's mapping. Use sentence case on every pill.",
       "skills": [
         "apple-design",
         "break-ui"
@@ -395,9 +395,9 @@
       "component": "tracker-calibration",
       "severity": "P2",
       "title": "Every recalibration starts with a 3-second countdown",
-      "where": "EyeTracking/web/src/App.tsx:535",
-      "problem": "The drift pill promises a '10-second retune', but every user-invoked run first spends 3 s on a 120 px numeral and brings the camera arrow back. A fixed delay on an action the person just asked for is latency the protocol doesn't need, because the target already parks at centre for a 1.4 s lead-in.",
-      "fix": "Drop the countdown. Let the first orb point fade in at centre (opacity 0 to 1, scale 0.96 to 1, 240 ms cubic-bezier(0.23, 1, 0.32, 1)) and use its existing lead-in as the get-ready. This is covered by JARA-55's plan (~15 s, skippable by voice).",
+      "where": "EyeTracking/web/src/App.tsx:480",
+      "problem": "Every calibration, including the menu's quick recalibrate, still opens with a 3 s countdown on a 120 px numeral (also at EyeTracking/web/src/App.tsx:1050 for the auto-start). The drift pill promises a '10-second retune', and the first point already parks at centre for its own 700 ms lead-in (calibrationRun.ts CAPTURE_RUN). A fixed delay on an action the person just asked for is latency the eye-paced run doesn't need. #615 did stop the camera arrow from reappearing during it.",
+      "fix": "Drop the countdown. Let the first point fade in at centre (opacity 0 to 1, scale 0.96 to 1, 240 ms cubic-bezier(0.23, 1, 0.32, 1)) and use the existing lead-in as the get-ready. JARA-55's plan already wants the run skippable by voice.",
       "skills": [
         "apple-design",
         "emil-design-eng",
@@ -410,8 +410,8 @@
       "component": "tracker-calibration",
       "severity": "P2",
       "title": "The calibration target re-renders the whole app 60 times a second",
-      "where": "EyeTracking/web/src/App.tsx:1211",
-      "problem": "The pursuit tick calls setPursuitProgress, setPursuitPos, setPursuitDwell and setPursuitNext on every animation frame. That re-renders the 1,900-line App throughout the run, on a Mac where the tracker measured 10 fps with inference stalls. The progress rail also restarts a 120 ms linear transition on each write. The gaze dot already avoids this by writing transforms from refs.",
+      "where": "EyeTracking/web/src/App.tsx:1170",
+      "problem": "The eye-paced tick still calls setPursuitProgress, setPursuitPos, setPursuitDwell and setPursuitFill on every animation frame. That re-renders the ~1,870-line App throughout the run, on a Mac where the tracker measured 10 fps with inference stalls. The point's fill scale is also written through React as an inline style each frame, and the progress rail restarts a 120 ms linear transition on each write. The gaze dot already avoids this by writing transforms from refs.",
       "fix": "Drive the target transform and the rail's scaleX directly on refs, as the dot loop does, or with Motion's animate() on motion values. Keep React state only for phase and dwell transitions. Measure renderer CPU before and after.",
       "library": "Motion (motion.dev)",
       "skills": [
@@ -425,7 +425,7 @@
       "component": "tracker-click-effect",
       "severity": "P2",
       "title": "Lip-click confirmation only exists on the hidden gaze dot",
-      "where": "EyeTracking/web/src/App.tsx:1783",
+      "where": "EyeTracking/web/src/App.tsx:1730",
       "problem": "lip_click_effect is drawn only as a burst on the gaze dot, which is off by default. With default settings, a lip click gives no visual confirmation in the tracker, and nothing on the Swift side handles lip_click_effect. When the dot is on, the 'Single' and 'Double' pills read like debug labels, in a green and cyan used nowhere else.",
       "fix": "Confirm the click on what it lands on, independent of the dot. The Magnet orb or the Swift highlight compresses and releases (scale 0.94 to 1, 160 ms ease-out) with one ring, and there's no text label. Fire it on the same frame as the click event so cause and effect line up.",
       "skills": [
@@ -453,8 +453,8 @@
       "severity": "P2",
       "title": "An opaque dot sits on top of whatever you're reading",
       "where": "EyeTracking/web/src/styles.css:43",
-      "problem": "An 18 px solid white marble with a navy ring and drop shadow covers the glyph under the gaze. At 10 Hz with estimate noise it reads as jitter over text. It also shares no visual language with the calibration orb or the Swift highlight. The motion underneath is good: a critically damped spring, independent X and Y, saccades snapped under suppression, and refs rather than React state.",
-      "fix": "Use JARA-55's Magnet direction: a hollow-centre orb in one visual language with the calibration points, keeping the existing spring. If the web dot survives, build it on libraries.dev Orb rather than hand-tuned gradients.",
+      "problem": "An 18 px solid white marble with a navy ring and drop shadow covers the glyph under the gaze. At 10 Hz with estimate noise it reads as jitter over text. Since #615 the calibration target uses the Magnet look (a hollow blue glow, EyeTracking/web/src/styles.css:365), so the dot is now the one gaze surface that doesn't match it. The motion underneath is good: a critically damped spring, independent X and Y, saccades snapped under suppression, and refs rather than React state.",
+      "fix": "Give the dot the same hollow-centre Magnet glow as the calibration target, keeping the existing spring, so text under it stays readable. If the web dot survives JARA-55's redesign, build it on libraries.dev Orb rather than hand-tuned gradients.",
       "library": "libraries.dev Orb",
       "skills": [
         "apple-design",
@@ -481,8 +481,8 @@
       "component": "tracker-onboarding",
       "severity": "P2",
       "title": "The first-run card is a full takeover in stock web styling, and it pops in",
-      "where": "EyeTracking/web/src/styles.css:615",
-      "problem": "The comment says 'never a takeover', but the card sits on the same 94-97% opaque scrim as calibration, so the desktop vanishes. The scrim and card appear in one frame with no transition. The buttons are a generic #4f8cff pill and a ghost pill with no :active or :focus-visible state. This is a rare first-run moment, which is exactly where the delight budget belongs.",
+      "where": "EyeTracking/web/src/styles.css:591",
+      "problem": "The comment says 'never a takeover', but the card sits on the same 94-97% opaque scrim as calibration, so the desktop vanishes. Since #615 it also appears for a background-learned map that no verify run has checked, so more people see it. The scrim and card appear in one frame with no transition. The buttons are a generic #4f8cff pill and a ghost pill with no :active or :focus-visible state. This is a rare first-run moment, which is exactly where the delight budget belongs.",
       "fix": "Use a lighter dim (about 40% plus an 8 px backdrop blur) so the context stays. The scrim fades over 200 ms, and the card materialises 40 ms later: opacity 0 to 1, scale 0.96 to 1, blur 4 px to 0, 240 ms cubic-bezier(0.23, 1, 0.32, 1), via @starting-style or Motion. The exit is simultaneous at 150 ms. Add :active scale(0.97) over 120 ms and a visible focus ring, and use the Jarvis accent for Calibrate.",
       "library": "Motion (motion.dev)",
       "skills": [
@@ -498,7 +498,7 @@
       "component": "tracker-hint-pill",
       "severity": "P2",
       "title": "The drift warning never leaves, and the pills snap in and out",
-      "where": "EyeTracking/web/src/App.tsx:687",
+      "where": "EyeTracking/web/src/App.tsx:632",
       "problem": "The amber drift pill stays at the top of the screen until the next calibration, with no dismissal, over whatever the person is doing. The 4 s recalibrate hint and the drift pill both appear and vanish in a single frame.",
       "fix": "Run transient notices through Sonner, which handles timers, stacking, hover-pause and enter/exit, styled as the Jarvis pill. Auto-dismiss drift after about 8 s or once the next good fixations land. Enter with opacity plus translateY(-6px) over 200 ms ease-out, and exit the same way at 150 ms.",
       "library": "Sonner",
@@ -509,28 +509,11 @@
       ]
     },
     {
-      "id": "ET-12",
-      "component": "tracker-calibration",
-      "severity": "P2",
-      "title": "The calibration target is hand-built and doesn't match the chosen orb",
-      "where": "EyeTracking/web/src/styles.css:382",
-      "problem": "The target is a CSS radial-gradient dot with a hairline ring and a 2.4 s breathing loop (about 0.4 Hz, the slow oscillation apple-design says to avoid). It also has a faint ghost at the waypoint after next. None of it matches the Magnet orb the owner picked, and the ghost competes with the target for the eye.",
-      "fix": "Use JARA-55's 9-point orb calibration (proposed state orb-points-mockup), built on libraries.dev Orb or Paper Shaders for the web tracker. One orb parks, contracts to pull the eye, then glides on. Remove the breathing loop and the ghost.",
-      "library": "libraries.dev Orb / Paper Shaders",
-      "skills": [
-        "apple-design",
-        "remove-animations",
-        "pick-ui-library",
-        "choreograph"
-      ],
-      "proposedState": "orb-points-mockup"
-    },
-    {
       "id": "ET-13",
       "component": "tracker-calibration",
       "severity": "P3",
       "title": "The exit control sits top-right and is a text glyph",
-      "where": "EyeTracking/web/src/styles.css:460",
+      "where": "EyeTracking/web/src/styles.css:436",
       "problem": "A 40 px circle with a typed × sits top-right. macOS puts close top-left, and it has no press state. Escape works but nothing says so.",
       "fix": "Move it top-left with a drawn glyph and :active scale(0.97), and add 'esc to stop' as a quiet caption under the notice.",
       "skills": [
@@ -543,8 +526,8 @@
       "component": "tracker-calibration",
       "severity": "P3",
       "title": "The 'Calibrated' card still scales under Reduce Motion",
-      "where": "EyeTracking/web/src/styles.css:703",
-      "problem": "The confirmation enters from scale 0.94 and is not covered by the prefers-reduced-motion block, which does handle the dot, rings and countdown. It's also a text check (✓) in a generic pill.",
+      "where": "EyeTracking/web/src/styles.css:679",
+      "problem": "The confirmation enters from scale 0.94, and the prefers-reduced-motion block doesn't cover it. That block does handle the target, ring, dot dwell, click bursts and countdown, and since #615 the run steps the target between points instead of gliding when reduced motion is on. It's also a text check (✓) in a generic pill.",
       "fix": "Under Reduce Motion, fade only (200 ms). Better, let the last orb point resolve into the confirmation (one object, choreograph's carry) rather than a new card.",
       "skills": [
         "review-animations",
@@ -557,7 +540,7 @@
       "component": "tracker-hint-pill",
       "severity": "P3",
       "title": "Translucent pills ignore Reduce Transparency and Increase Contrast",
-      "where": "EyeTracking/web/src/styles.css:597",
+      "where": "EyeTracking/web/src/styles.css:573",
       "problem": "Every pill and card uses rgba fills with backdrop-filter blur, and none responds to prefers-reduced-transparency or prefers-contrast. Font stacks also differ: Inter-first on :root, -apple-system on the pills.",
       "fix": "@media (prefers-reduced-transparency: reduce): solid fill, no blur. @media (prefers-contrast: more): solid fill and a 1 px 60% white border. Use one system font stack.",
       "skills": [
@@ -570,8 +553,8 @@
       "component": "tracker-status-pane",
       "severity": "P3",
       "title": "Diagnostics show raw message keys",
-      "where": "EyeTracking/web/src/App.tsx:675",
-      "problem": "The status line prints worker keys verbatim ('drift_detected', 'calibration: missing'). It's a debug surface, but it's in the public gallery and is the first thing a tester reads.",
+      "where": "EyeTracking/web/src/App.tsx:620",
+      "problem": "The status line prints worker keys verbatim ('drift_detected', 'calibration: missing', and since #615 'calibration: N samples' every tenth frame during a run). It's a debug surface, but it's in the public gallery and is the first thing a tester reads.",
       "fix": "Map known keys to short labels ('Drift detected', 'No calibration yet') and keep the key in the log.",
       "skills": [
         "break-ui"
@@ -582,7 +565,7 @@
       "component": "tracker-inference-time",
       "severity": "P3",
       "title": "A normal inference time is shown in alarm red",
-      "where": "EyeTracking/web/src/styles.css:553",
+      "where": "EyeTracking/web/src/styles.css:529",
       "problem": "26 px bold #ef233c reads as an error for a healthy 23 ms.",
       "fix": "Use neutral tabular numerals and colour only over budget (for example over 50 ms). Leave it unanimated: it's functional data refreshed at 2 Hz, so NumberFlow-style digit motion was considered and rejected.",
       "skills": [
@@ -596,8 +579,8 @@
       "severity": "P3",
       "title": "Accuracy targets borrow the arrow's yellow",
       "where": "EyeTracking/web/src/styles.css:304",
-      "problem": "Grid dots and hit circles use #ffd60a, the camera arrow's colour, while calibration uses a white-blue orb. Switching steps without motion is correct for a measurement.",
-      "fix": "Use the calibration orb's static parked look for grid points and a hairline circle for hit targets. Keep the instant step changes.",
+      "problem": "Grid dots and hit circles use #ffd60a, the camera arrow's colour, while calibration now uses the Magnet look's hollow blue glow. Switching steps without motion is correct for a measurement.",
+      "fix": "Use the calibration target's parked look (hollow glow, white core) for grid points and a hairline circle in the same blue for hit targets. Keep the instant step changes.",
       "skills": [
         "apple-design",
         "find-animation-opportunities"

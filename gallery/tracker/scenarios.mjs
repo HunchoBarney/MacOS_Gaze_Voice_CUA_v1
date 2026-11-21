@@ -78,7 +78,7 @@ export const COMPONENTS = [
       [APP, "const dotStyle = (() => {"],
       [APP, "The 60fps dot loop runs only"],
       [CSS, ".gaze-dot {"],
-      [CSS, ".gaze-dot.dwell::before {"],
+      [CSS, "/* Dwell-lock cue:"],
       [UI, "export function advanceDotSpring"]
     ],
     states: [
@@ -320,12 +320,13 @@ export const COMPONENTS = [
       {
         id: "capture-glide",
         title: "Capture: target gliding",
-        note: "Quick tier (centre + corners). The faint ghost marks the waypoint after the next.",
+        note: "Quick tier (centre + corners). The faint ghost marks the waypoint after the next. With Reduce Motion the target steps between points instead of gliding, so that variant shows it parked.",
         run: async (fx) => {
           await fx.menu("recalibrate");
-          await fx.advance(3000 + 1400 + 420);
+          await fx.advance(3000 + 1400 + 900);
         },
         expect: ".pursuit-target:not(.dwell)",
+        expectReduced: ".pursuit-target",
         clip: {
           caption: "Capture: glide, park, ring contracts while sampling, glide on (dark only: the scrim hides the desktop)",
           run: async (fx) => {
@@ -341,7 +342,7 @@ export const COMPONENTS = [
         title: "Capture: parked and sampling",
         run: async (fx) => {
           await fx.menu("recalibrate");
-          await fx.advance(3000 + 1400 + 849 + 800);
+          await fx.advance(3000 + 1400 + 1350);
         },
         expect: ".pursuit-target.dwell"
       },

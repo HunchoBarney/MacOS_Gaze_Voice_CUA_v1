@@ -8,10 +8,12 @@ export function FindingCard({
   finding,
   active,
   onShowProposed,
+  proposalSuperseded,
 }: {
   finding: Finding;
   active: boolean;
   onShowProposed?: () => void;
+  proposalSuperseded?: boolean;
 }) {
   async function copy() {
     const url = location.origin + "/c/" + finding.component + "#" + finding.id;
@@ -58,7 +60,7 @@ export function FindingCard({
         </ul>
         {onShowProposed && (
           <button type="button" className="text-button" onClick={onShowProposed}>
-            Show proposed
+            {proposalSuperseded ? "Show superseded proposal" : "Show proposed"}
           </button>
         )}
       </footer>

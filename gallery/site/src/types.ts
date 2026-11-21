@@ -32,6 +32,7 @@ export type State = {
   title: string;
   note?: string;
   kind?: "current" | "proposed" | "reference";
+  superseded?: string;
   variants: Variant[];
   clips?: Clip[];
 };
@@ -67,6 +68,7 @@ export type Scene = {
   thumb?: string;
   clip?: Clip;
   kind?: "current" | "proposed";
+  superseded?: string;
   variants?: SceneVariant[];
 };
 

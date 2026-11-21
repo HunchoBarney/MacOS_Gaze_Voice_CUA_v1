@@ -32,6 +32,7 @@ Two more things happen in collect:
 - `/` all components grouped by area, finding counts by severity, and the scenes strip.
 - `/c/<id>` one component: state tabs (← and → switch states), Light/Dark, Reduce Motion, zoom (Fit, 1× pixel-exact at the render's scale, 2×), clips with play, scrub, loop and slow motion, a Current/Proposed swipe or side-by-side compare when a proposed state exists, every state as a contact sheet, and the findings beside the stage. Each finding has an anchor (`/c/<id>#<finding-id>`). The view is kept in the query string (`?s=&scheme=&rm=1&zoom=`), so any view can be linked.
 - `/scenes`, `/scenes/<id>` combined scenes on a fixture desktop, with a compare when `<id>-proposed` exists.
+- A state or scene with a `superseded` string stays on the site: it shows a muted Superseded tag instead of Proposed, the string as a notice above the stage, and "Superseded proposal" on its side of the compare.
 - `/audit` every finding, filterable by severity, area and component (also kept in the query string).
 - ⌘K or Ctrl+K opens a palette that jumps to any component, state, finding or scene.
 

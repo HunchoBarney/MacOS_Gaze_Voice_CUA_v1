@@ -1,5 +1,6 @@
 import NumberFlow from "@number-flow/react";
 import { lazy, Suspense, useState, type CSSProperties } from "react";
+import { KindTag } from "../components/KindTag";
 import { Thumb } from "../components/Thumb";
 import { SeverityChip, severityName } from "../components/Severity";
 import { coverVariant, plural, sceneVariant, severityCounts } from "../data";
@@ -96,11 +97,7 @@ export function Home({ gallery }: { gallery: Gallery }) {
                     <span className="card-text">
                       <span className="card-title">
                         {scene.title}
-                        {scene.kind === "proposed" && (
-                          <span className="kind-tag" data-kind="proposed">
-                            Proposed
-                          </span>
-                        )}
+                        <KindTag item={scene} />
                       </span>
                       <span className="card-meta">{plural(scene.components.length, "component")}</span>
                     </span>

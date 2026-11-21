@@ -59,11 +59,11 @@ export default function Palette({ gallery, open, onClose }: { gallery: Gallery; 
             <Command.Group heading="States">
               {gallery.components.flatMap((c) =>
                 c.states.map((s) => (
-                  <Command.Item key={c.id + "/" + s.id} value={"state " + c.title + " " + s.title + " " + (s.kind ?? "")} onSelect={() => go("/c/" + c.id + "?s=" + s.id)}>
+                  <Command.Item key={c.id + "/" + s.id} value={"state " + c.title + " " + s.title + " " + (s.kind ?? "") + (s.superseded ? " superseded" : "")} onSelect={() => go("/c/" + c.id + "?s=" + s.id)}>
                     <span>
                       {c.title} <span className="palette-sep">›</span> {s.title}
                     </span>
-                    {s.kind === "proposed" && <span className="palette-meta">Proposed</span>}
+                    {s.superseded ? <span className="palette-meta">Superseded</span> : s.kind === "proposed" && <span className="palette-meta">Proposed</span>}
                   </Command.Item>
                 )),
               )}

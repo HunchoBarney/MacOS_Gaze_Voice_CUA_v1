@@ -4,7 +4,7 @@ import { Img } from "./Img";
 import { Segmented } from "./Segmented";
 import { pictureWidth, type Picture } from "./Stage";
 
-type Side = { picture: Picture; label: string; alt: string };
+type Side = { picture: Picture; label: string; alt: string; superseded?: boolean };
 
 export function Compare({ before, after, scheme, id }: { before: Side; after: Side; scheme: Scheme; id: string }) {
   const [mode, setMode] = useState<"swipe" | "side">("swipe");
@@ -39,6 +39,7 @@ export function Compare({ before, after, scheme, id }: { before: Side; after: Si
   const width = Math.max(before.picture.width / before.picture.scale, after.picture.width / after.picture.scale);
   const height = Math.max(before.picture.height / before.picture.scale, after.picture.height / after.picture.scale);
   const frame = { width: width * 2, height: height * 2, scale: 2 };
+  const afterName = after.superseded ? "Superseded proposal" : "Proposed";
 
   return (
     <div className="compare">
@@ -80,14 +81,16 @@ export function Compare({ before, after, scheme, id }: { before: Side; after: Si
               <Img src={after.picture.image} width={after.picture.width} height={after.picture.height} alt={after.alt} className="compare-img" />
             </div>
             <span className="compare-tag" data-side="before">Current</span>
-            <span className="compare-tag" data-side="after">Proposed</span>
+            <span className="compare-tag" data-side="after">
+              {afterName}
+            </span>
             <div
               ref={handle}
               className="compare-handle"
               style={{ left: "50%" }}
               role="slider"
               tabIndex={0}
-              aria-label="Reveal proposed"
+              aria-label={"Reveal " + afterName.toLowerCase()}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={50}
@@ -107,7 +110,10 @@ export function Compare({ before, after, scheme, id }: { before: Side; after: Si
                 </div>
               </div>
               <figcaption>
-                <span className="kind-tag" data-kind={index === 0 ? "current" : "proposed"}>{index === 0 ? "Current" : "Proposed"}</span> {side.label}
+                <span className="kind-tag" data-kind={index === 0 ? "current" : after.superseded ? "superseded" : "proposed"}>
+                  {index === 0 ? "Current" : afterName}
+                </span>{" "}
+                {side.label}
               </figcaption>
             </figure>
           ))}

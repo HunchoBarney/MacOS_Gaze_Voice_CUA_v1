@@ -88,6 +88,7 @@ for (const [id, light] of [...scenes]) {
   if (!dark) continue;
   dark.variants = [sceneVariant(dark, "dark"), sceneVariant(light, "light")];
   dark.components = [...new Set([...(dark.components ?? []), ...(light.components ?? [])])];
+  dark.superseded ??= light.superseded;
   scenes.delete(id);
   mergedPairs += 1;
 }
