@@ -48,7 +48,8 @@ export default mergeConfig(
           test: {
             name: "integration",
             include: integration,
-            fileParallelism: false
+            fileParallelism: false,
+            sequence: { groupOrder: 1 }
           }
         }
       ]
