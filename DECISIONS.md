@@ -2,6 +2,25 @@
 
 Settled choices, newest first. Change one only with a new entry here.
 
+## 2026-11-21 — The gaze ring lights only a control the tracker can resolve (JARA-55)
+
+- Main's ring stays the one gaze highlight, and it takes a control only when
+  the error band can single it out: σ at most 1.5× the control's larger
+  side, no bigger than 320×200 pt, never a window or container (group,
+  table, list, scroll area). Past that, nothing highlights; there is still
+  no permanently drawn gaze pointer (KAR-75). A press glow (Jarvis pressing
+  a named control) is not a gaze guess and skips the gate, and dwell never
+  fires on a target the ring refused.
+- A cursor parked on a control weighs ×2.5 up to σ 40 pt; above that its
+  log-bonus scales by (40/σ)², the rate gaze evidence itself thins out. A
+  tie that includes the highlighted control holds for the 0.2 s consensus
+  window and then releases it. The listening-start halo is gone, and the
+  gaze ring stands down whenever the answer or guide halo shows.
+- New gaze visuals (orb, glow, calibration look) moved to JARA-57's UI Lab.
+  Evaluated during this work and rejected: libraries.dev ThinkingOrbsKit (MIT,
+  14ae9d2; filled fixed-size loader redrawn every frame) and metasidd/Orb
+  0.2 (MIT, a48fc33; filled orb with endless blurs and particles).
+
 ## 2026-11-21 — Every visible surface lives in the UI gallery
 
 - The owner asked for one page that shows every visible component on its

@@ -631,4 +631,51 @@ final class IntentScorerTests: XCTestCase {
             referent.contextLine,
             #"dom link "Tokyo travel video", in Safari, window "YouTube", https://youtube.com/watch?v=abc"#)
     }
+
+    // MARK: wide error band, ties, containers (JARA-55)
+
+    /// At a wide error band the gaze barely separates neighbours, so a
+    /// cursor parked on one of them used to decide outright (×2.5) and
+    /// the highlight followed the hand. The bonus now shrinks as 1/σ²,
+    /// and the control the eyes are on wins.
+    func testWideSigmaCursorBonusDoesNotOverrideGaze() {
+        let s = IntentScorerCore(config: .init(sigmaPx: 120))
+        let a = candidate("a", x: 0, y: 0, w: 100, h: 30)
+        let b = candidate("b", x: 160, y: 0, w: 100, h: 30)
+        _ = gazeWithCursor(s, at: CGPoint(x: 50, y: 15), seconds: 1.5,
+                           candidates: [a, b], from: t0,
+                           cursor: CGPoint(x: 210, y: 15))
+        XCTAssertEqual(s.currentWinner?.0.id, "a")
+    }
+
+    /// A tie that includes the incumbent holds through one consensus
+    /// window, then releases it: the scorer can't say which control the
+    /// eyes are on, so nothing stays highlighted as if it could.
+    func testTieIncludingTheIncumbentReleasesIt() {
+        let s = IntentScorerCore(config: .init(sigmaPx: 200))
+        let a = candidate("left", x: 0, y: 0)
+        let b = candidate("right", x: 40, y: 0)
+        gaze(s, at: CGPoint(x: 5, y: 12), seconds: 0.4, candidates: [a], from: t0)
+        XCTAssertEqual(s.currentWinner?.0.id, "left")
+        // Onto the seam both share — past the fixation break, so the
+        // contest starts even.
+        let events = gaze(s, at: CGPoint(x: 55, y: 12), seconds: 0.6,
+                          candidates: [a, b], from: t0.addingTimeInterval(0.4))
+        XCTAssertTrue(events.contains { $0.isAmbiguous })
+        XCTAssertNil(s.currentWinner, "a tie leaves nothing highlighted")
+        XCTAssertTrue(events.prefix(Int(0.2 * 60)).allSatisfy { !$0.isAmbiguous },
+                      "the incumbent still holds through the consensus window")
+    }
+
+    /// Containers hold controls rather than being one. "tab" inside
+    /// "AXTable" or "AXTabGroup" used to earn the control prior.
+    func testContainersRankBelowControls() {
+        let button = candidate("b", x: 0, y: 0).clickabilityPrior
+        for role in ["AXTable", "AXTabGroup", "AXGroup", "AXScrollArea", "AXOutline"] {
+            XCTAssertLessThan(candidate("c", x: 0, y: 0, role: role).clickabilityPrior,
+                              button, role)
+        }
+        XCTAssertEqual(candidate("r", x: 0, y: 0, role: "AXRadioButton").clickabilityPrior, button)
+        XCTAssertEqual(candidate("t", x: 0, y: 0, role: "tab", kind: .menuBar).clickabilityPrior, button)
+    }
 }

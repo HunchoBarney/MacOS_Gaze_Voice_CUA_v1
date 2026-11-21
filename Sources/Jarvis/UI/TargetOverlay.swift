@@ -63,6 +63,13 @@ final class TargetOverlay {
     static let ringReleaseSeconds: CFTimeInterval = 0.12
     static let ringLineWidth: CGFloat = 1.5
     static let ringPanelPad: CGFloat = 14
+    /// Nothing larger takes the ring — a pane, list or document is not a
+    /// control, and outlining one reads as "the whole screen".
+    nonisolated static let lockMaxSize = CGSize(width: 320, height: 200)
+    /// The ring takes a control only while the gaze error band σ is at
+    /// most this many times the control's larger side; past it the tracker
+    /// can't tell the control from its neighbours, so nothing highlights.
+    nonisolated static let lockSigmaFactor: Double = 1.5
     /// Meta's sustained-dwell fade — the ring settles toward this alpha
     /// once the countdown passes halfway rather than sitting bright in
     /// the fovea.
@@ -326,6 +333,12 @@ final class TargetOverlay {
             ringView?.setProgress(ringProgress)
         }
     }
+    /// The scorer's gaze error band in points. `GazeService` writes it on
+    /// its first tick, before any scorer event reaches the overlay.
+    var gazeSigmaPt: Double = GazeErrorBand.minimumSigmaPt
+    /// Unit tests never order an overlay window onto the screen of the Mac
+    /// running them: every surface here keeps its state and draws nothing.
+    static let drawsOnScreen = NSClassFromString("XCTestCase") == nil
 
     // MARK: Halo
 
@@ -333,6 +346,9 @@ final class TargetOverlay {
     /// just move the one panel — cheap enough for 10Hz retargeting, and
     /// visible panels are never reordered.
     func showHalo(frame: CGRect) {
+        // One highlight at a time: the gaze ring stands down while the
+        // halo is up.
+        releaseRing()
         let rect = frame.insetBy(dx: -Self.haloOutset, dy: -Self.haloOutset)
         if haloPanel == nil {
             let panel = Self.makePanel()
@@ -351,7 +367,7 @@ final class TargetOverlay {
         haloRect = rect
         haloPanel?.setFrame(Self.appKitFrame(for: rect), display: true)
         applyHaloAlpha()
-        if haloPanel?.isVisible == false { haloPanel?.orderFrontRegardless() }
+        if Self.drawsOnScreen, haloPanel?.isVisible == false { haloPanel?.orderFrontRegardless() }
     }
 
     func hideHalo() {
@@ -479,7 +495,7 @@ final class TargetOverlay {
                               y: spec.center.y - size.height / 2,
                               width: size.width, height: size.height)
             panel.setFrame(Self.appKitFrame(for: rect), display: true)
-            panel.orderFrontRegardless()
+            if Self.drawsOnScreen { panel.orderFrontRegardless() }
             rects.append((i, rect))
         }
         // A set armed mid-outage inherits the stale-feed dim.
@@ -546,7 +562,7 @@ final class TargetOverlay {
                               width: size.width, height: size.height)
             panel.alphaValue = 1
             panel.setFrame(Self.appKitFrame(for: rect), display: true)
-            panel.orderFrontRegardless()
+            if Self.drawsOnScreen { panel.orderFrontRegardless() }
         }
         return min(targets.count, Self.maxNumberChips)
     }
@@ -587,8 +603,8 @@ final class TargetOverlay {
     /// Gaze-intent event feed — the scorer's acquire/hold/release
     /// transitions drive the highlight on the element's own frame (the
     /// visionOS "feedback lives on the element" pattern: no cursor, the
-    /// looked-at control glows). `ambiguous` only bubbles up through
-    /// `onAmbiguous`; the coordinator owns the radial itself.
+    /// looked-at control glows). A tie releases the ring, and `ambiguous`
+    /// bubbles up through `onAmbiguous`; the coordinator owns the radial.
     var onAmbiguous: (([IntentCandidate]) -> Void)?
 
     func intentEvent(_ event: IntentEvent) {
@@ -596,12 +612,29 @@ final class TargetOverlay {
         case .none, .release:
             releaseRing()
         case .acquire(let c):
+            guard ringMayLock(on: c) else { return releaseRing() }
             acquireRing(on: c)
         case .hold(let c, let progress):
+            guard ringMayLock(on: c) else { return releaseRing() }
             holdRing(on: c, progress: progress)
         case .ambiguous(let candidates):
+            releaseRing()
             onAmbiguous?(candidates)
         }
+    }
+
+    /// Whether the ring may take a candidate the gaze scorer chose: a
+    /// leaf the person can act on, no bigger than a control, and big
+    /// enough that the current error band can single it out.
+    nonisolated static func canLock(_ c: IntentCandidate, sigmaPt: Double) -> Bool {
+        guard c.kind != .window, !IntentCandidate.isContainer(role: c.role) else { return false }
+        let r = (c.kind == .trafficLight ? c.motorRect : c.frame).standardized
+        guard r.width <= lockMaxSize.width, r.height <= lockMaxSize.height else { return false }
+        return sigmaPt <= lockSigmaFactor * Double(max(r.width, r.height))
+    }
+
+    private func ringMayLock(on c: IntentCandidate) -> Bool {
+        !haloArmed && Self.canLock(c, sigmaPt: gazeSigmaPt)
     }
 
     /// The highlight itself: a soft accent-tinted fill with a hairline
@@ -734,7 +767,7 @@ final class TargetOverlay {
         ringView?.setProgress(0)
         ringView?.fade(to: 1, duration: Self.ringAppearSeconds)
         applyRingAlpha()
-        if ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
+        if Self.drawsOnScreen, ringPanel?.isVisible == false { ringPanel?.orderFrontRegardless() }
     }
 
     /// Streams the dwell countdown and re-targets the shape when a
@@ -855,7 +888,7 @@ final class TargetOverlay {
         let ring = FlashRing(frame: NSRect(origin: .zero, size: rect.size))
         panel.contentView = ring
         panel.setFrame(Self.appKitFrame(for: rect), display: true)
-        panel.orderFrontRegardless()
+        if Self.drawsOnScreen { panel.orderFrontRegardless() }
         ring.fire(duration: Self.flashSeconds, travel: !reduceMotion())
         Task { [weak panel] in
             try? await Task.sleep(nanoseconds: UInt64(Self.flashSeconds * 1e9) + 80_000_000)
@@ -910,7 +943,7 @@ final class TargetOverlay {
         panel.setFrame(NSRect(x: sf.midX - size.width / 2,
                               y: sf.maxY - size.height - Self.cheatSheetDrop,
                               width: size.width, height: size.height), display: true)
-        panel.orderFrontRegardless()
+        if Self.drawsOnScreen { panel.orderFrontRegardless() }
         cheatPanel = panel
     }
 

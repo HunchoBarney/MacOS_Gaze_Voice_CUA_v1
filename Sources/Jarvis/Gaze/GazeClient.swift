@@ -29,9 +29,13 @@ struct GazeSample: Sendable, Equatable {
     /// Below this the tracker itself isn't sure of the point.
     static let confidenceFloor = 0.4
 
-    var isFresh: Bool {
+    var isFresh: Bool { isFresh(at: Date()) }
+
+    /// Freshness against a given wall-clock instant — the gaze service
+    /// passes its injected clock so tests can step time.
+    func isFresh(at now: Date) -> Bool {
         guard let updatedAt else { return false }
-        return Date().timeIntervalSince(updatedAt) <= Self.freshnessWindow
+        return now.timeIntervalSince(updatedAt) <= Self.freshnessWindow
     }
 }
 
