@@ -182,7 +182,7 @@ final class DelegationBridge {
     func taskEvent(captureID: UUID?, payload: String) {
         guard let captureID, let key = running[captureID] else { return }
         let (kind, say) = Self.decode(payload)
-        if kind != VoiceToolResult.Kind.taskQuestion { running[captureID] = nil }
+        if kind == VoiceToolResult.Kind.taskOutcome { running[captureID] = nil }
         guard !say.isEmpty else { return }
         send(.commentary, say, for: key)
     }
