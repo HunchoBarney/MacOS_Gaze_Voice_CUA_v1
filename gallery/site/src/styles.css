@@ -568,6 +568,70 @@ ul {
   margin-top: 24px;
 }
 
+/* Redesign entry: the one place on Home with colour, a still edge glow in the Siri palette. */
+.redesign-banner {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0 8px;
+  padding: 20px 20px 20px 24px;
+  min-height: 88px;
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line), var(--card-shadow);
+  transition: box-shadow 150ms ease, transform 160ms var(--ease-out);
+}
+
+.redesign-banner:active {
+  transform: scale(0.985);
+}
+
+.redesign-banner-glow {
+  position: absolute;
+  inset: -40% auto -40% -12%;
+  width: 46%;
+  z-index: -1;
+  background: conic-gradient(from 200deg at 30% 50%, #ff6ec7, #ffb35c, #5ee7ff, #8a7dff, #ff6ec7);
+  filter: blur(48px);
+  opacity: 0.32;
+}
+
+.redesign-banner-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.redesign-banner-sub {
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.redesign-banner-chevron {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-2);
+}
+
+.nav .nav-redesign {
+  color: var(--accent-text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .redesign-banner:hover {
+    box-shadow: inset 0 0 0 1px var(--line-strong), var(--card-shadow);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .redesign-banner:active {
+    transform: none;
+  }
+}
+
 .bar-tools .theme-cycle {
   display: none;
 }
@@ -2065,5 +2129,35 @@ kbd {
 @media (hover: none) {
   .tabs-hint {
     display: none;
+  }
+}
+
+/* Touch: header controls reach 44 px, and the four sections still fit a 390 px phone. */
+@media (pointer: coarse) {
+  .nav a,
+  .search-button,
+  .bar-tools .theme-cycle {
+    height: 44px;
+  }
+  .bar-tools .theme-cycle {
+    width: 44px;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 720px) {
+  .search-button {
+    width: 44px;
+  }
+}
+
+@media (max-width: 430px) {
+  .brand {
+    display: none;
+  }
+  .nav {
+    gap: 0;
+  }
+  .nav a {
+    padding: 0 6px;
   }
 }

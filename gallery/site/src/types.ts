@@ -93,4 +93,44 @@ export type Gallery = {
   components: Component[];
   scenes: Scene[];
   findings: Finding[];
+  redesign?: Redesign;
+};
+
+export type MediaKey = "dark" | "light" | "dark-rm" | "light-rm";
+export type Media = { kind: "clip" | "still"; src: string; poster?: string; width: number; height: number; fps?: number; duration?: number };
+export type MediaSet = Partial<Record<MediaKey, Media>>;
+export type Library = { name: string; version: string; license: string; url: string; role: string };
+export type DirectionId = "A" | "B" | "C";
+export type RedesignState = { id: string; title: string; caption?: string; media: MediaSet };
+
+export type Direction = {
+  id: DirectionId;
+  name: string;
+  axis: string;
+  pitch: string;
+  cost: string;
+  libraries: Library[];
+  custom?: string;
+  skills: { skill: string; change: string }[];
+  perf?: { cpu: string; gpu: string; idle: string; note: string };
+  states: RedesignState[];
+  flow?: MediaSet;
+};
+
+export type RedesignComponent = {
+  id: string;
+  batch: 1 | 2 | 3;
+  title: string;
+  summary: string;
+  current: { componentIds: string[]; note?: string };
+  directions: Direction[];
+};
+
+export type RedesignScene = { id: string; title: string; caption: string; picks: Record<string, string>; media: MediaSet };
+
+export type Redesign = {
+  generatedAt: string;
+  producers: { producer: string; commit: string; generatedAt: string }[];
+  components: RedesignComponent[];
+  scenes: RedesignScene[];
 };

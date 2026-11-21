@@ -12,6 +12,7 @@ import { scrollToElement, scrollToTop } from "./scroll";
 import { setTheme, useTheme, type ThemeChoice } from "./theme";
 import type { Gallery } from "./types";
 
+const Redesign = lazy(() => import("./redesign/Redesign"));
 const loadPalette = () => import("./components/Palette");
 const Palette = lazy(loadPalette);
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -31,6 +32,18 @@ function route(pathname: string, gallery: Gallery) {
     return { title: scene?.title ?? "Not found", page: <ScenePage gallery={gallery} id={second} /> };
   }
   if (first === "audit") return { title: "Audit", page: <Audit gallery={gallery} /> };
+  if (first === "redesign") {
+    const title =
+      second === "scenes" ? "Redesign scenes" : second === "references" ? "References" : second ? gallery.redesign?.components.find((c) => c.id === second)?.title ?? "Not found" : "Redesign";
+    return {
+      title,
+      page: (
+        <Suspense fallback={<div className="page loading" aria-busy="true" />}>
+          <Redesign gallery={gallery} path={second ?? ""} />
+        </Suspense>
+      ),
+    };
+  }
   return { title: "Not found", page: <NotFound /> };
 }
 
@@ -79,7 +92,13 @@ export function App() {
     document.title = resolved?.title ? resolved.title + " · Jarvis UI gallery" : "Jarvis UI gallery";
   }, [resolved?.title]);
 
-  const section = pathname.startsWith("/scenes") ? "scenes" : pathname.startsWith("/audit") ? "audit" : "components";
+  const section = pathname.startsWith("/redesign")
+    ? "redesign"
+    : pathname.startsWith("/scenes")
+      ? "scenes"
+      : pathname.startsWith("/audit")
+        ? "audit"
+        : "components";
 
   return (
     <>
@@ -97,6 +116,9 @@ export function App() {
             <span className="brand-sub">UI gallery</span>
           </Link>
           <nav className="nav" aria-label="Sections">
+            <Link className="nav-redesign" href="/redesign" aria-current={section === "redesign" ? "page" : undefined}>
+              Redesign
+            </Link>
             <Link href="/" aria-current={section === "components" ? "page" : undefined}>
               Components
             </Link>

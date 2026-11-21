@@ -22,7 +22,7 @@ LOCAL_CI_JOB = gui/$(shell id -u)/$(LOCAL_CI_LABEL)
 .PHONY: setup build test tracker release install local run clean bench-flows
 .PHONY: local-ci-install local-ci-pause local-ci-resume local-ci-uninstall
 .PHONY: e2e e2e-install e2e-uninstall
-.PHONY: gallery gallery-site gallery-deploy
+.PHONY: gallery gallery-site gallery-deploy lab redesign
 
 setup:
 	@test "$$(sw_vers -productVersion | cut -d. -f1)" -ge 26 || (echo "macOS 26 or newer is required" >&2; exit 1)
@@ -184,6 +184,21 @@ GALLERY_RENDERS = build/gallery/renders
 
 gallery:
 	scripts/gallery.sh
+
+# The Jarvis UI Lab (Lab/README.md): the redesign's directions as native
+# SwiftUI with their libraries. Lab targets exist only with JARVIS_LAB=1, so
+# make test and the shipping app never build or link them.
+lab:
+	JARVIS_LAB=1 swift build --product JarvisLab
+	scripts/lab-metallib.sh .build/debug
+	.build/debug/JarvisLab
+
+# Every redesign clip and still into the gallery's renders, plus
+# manifest.redesign.native.json for gallery-site.
+redesign:
+	JARVIS_LAB=1 swift build --product JarvisRedesignRender
+	scripts/lab-metallib.sh .build/debug
+	.build/debug/JarvisRedesignRender render $(or $(JARVIS_GALLERY_OUT),$(GALLERY_RENDERS))
 
 gallery-site:
 	cd gallery/site && corepack pnpm install --frozen-lockfile
