@@ -983,6 +983,30 @@ extension VoiceOneBrainTests {
         lane.cancel(); client.teardown()
     }
 
+    func testReplacingThePlaybackRouteMidReplyTruncatesWhatWasHeard() async throws {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        try await client.connect(apiKey: "fixture-not-a-real-key")
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-key" }, client: client)
+        let route = { VoicePlaybackRoute(id: UUID(), isReady: { true }, schedule: { _, _ in }, play: {}, stop: {}) }
+        lane.replaceConversationPlaybackRoute(route())
+        lane.replaceConversationPlaybackRoute(route())
+        let idleFrames = await wire.frames()
+        XCTAssertFalse(idleFrames.contains { $0["type"]?.string == "conversation.item.truncate" },
+                       "an idle route change has nothing to reconcile")
+
+        lane.player.enqueue(Data(count: 4_800), itemID: "reply-item")
+        await waitFor { !lane.player.playbackIdle }
+        lane.replaceConversationPlaybackRoute(route())
+
+        await waitFor {
+            await wire.frames().contains {
+                $0["type"]?.string == "conversation.item.truncate" && $0["item_id"]?.string == "reply-item"
+            }
+        }
+        lane.cancel(); client.teardown()
+    }
+
     func testHandsFreeInterruptionDeletesScreenTextAndTheOwedAnswer() async throws {
         let wire = RecordedVoiceWire()
         let client = RealtimeVoiceClient(wireFactory: { _ in wire })

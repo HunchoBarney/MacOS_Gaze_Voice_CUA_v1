@@ -119,4 +119,30 @@ final class MicrophoneInputTests: XCTestCase {
         XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: false, sameFormat: true), .interrupt)
         XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: true, sameFormat: true), .restoreTap)
     }
+
+    func testVoiceProcessingKeepsItsInputThroughAnOutputVolumeChange() {
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: true, sameFormat: true,
+                                                             voiceProcessing: true), .keep)
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: false, sameDevice: true, sameFormat: true,
+                                                             voiceProcessing: true), .restoreTap)
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: false, sameFormat: true,
+                                                             voiceProcessing: true), .interrupt)
+        XCTAssertEqual(MicrophoneInput.configurationResponse(engineRunning: true, sameDevice: true, sameFormat: false,
+                                                             voiceProcessing: true), .interrupt)
+    }
+
+    func testABriefDuplexStallIsToleratedButALongOneIsNot() {
+        XCTAssertFalse(MicrophoneInput.stallExpired(since: nil, now: 100))
+        XCTAssertFalse(MicrophoneInput.stallExpired(since: 100, now: 100.5))
+        XCTAssertFalse(MicrophoneInput.stallExpired(since: 100, now: 102.9))
+        XCTAssertTrue(MicrophoneInput.stallExpired(since: 100, now: 100 + MicrophoneInput.stallTolerance))
+    }
+
+    func testAPlaybackBufferThatCannotBeScheduledStillCompletes() {
+        let input = MicrophoneInput()
+        let route = input.playbackRoute(.realtime, generation: UUID())
+        let completed = expectation(description: "dropped buffer completed")
+        route.schedule(Data(count: 480)) { completed.fulfill() }
+        wait(for: [completed], timeout: 2)
+    }
 }

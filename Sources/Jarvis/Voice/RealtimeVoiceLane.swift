@@ -308,7 +308,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private let credential: () async throws -> RealtimeCredential?
     private let client: RealtimeVoiceClient
-    private let player = RealtimePlayer()
+    let player = RealtimePlayer()
     private let input = MicrophoneInput()
     /// Hears the microphone while set: the wake word in Standby.
     var wakeListener: (any WakeWordDetecting)? {
@@ -325,6 +325,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
     private var conversationMeter: Timer?
     private var conversationSender: Task<Void, Never>?
     private var conversationGate: VoiceActivityGate?
+    private var conversationUnreadySince: TimeInterval?
     private var feedbackSuspended = true
     private var feedbackGeneration: UInt64 = 0
     private struct RemoteInput {
@@ -645,6 +646,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                     return
                 }
                 _ = responseAuthority.bindCreated(connection: envelope.connectionID, responseID: id)
+                Self.log.notice("response_created id=\(id, privacy: .public)")
             }
             return
         }
@@ -702,6 +704,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 guard let response = envelope.responseID,
                       responseAuthority.matches(connection: envelope.connectionID, responseID: response) else { continue }
                 responseAuthority.finish(connection: envelope.connectionID, responseID: response)
+                Self.log.notice("response_done id=\(response, privacy: .public)")
                 handle(event)
             case .closed, .failure:
                 if conversation.id != nil {
@@ -974,6 +977,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                     continue
                 }
                 record.committed = true
+                Self.log.notice("turn_committed key=\(key, privacy: .public) item=\(item, privacy: .public)")
                 record.deadline = expiry(item)
                 remoteInputs[item] = record
                 drainRemoteInputs()
@@ -1007,6 +1011,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             holding = true
             localSpeakingKey = key
             remoteInputs[key] = .init(capture: capture)
+            Self.log.notice("turn_started key=\(key, privacy: .public)")
             remoteInputOrder.append(key)
         } catch {
             stopConversation(state: .unavailable(error.localizedDescription))
@@ -1024,6 +1029,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         remoteInputs[key] = record
         guard client.connectionID == connection else { throw VoiceError("The realtime connection changed mid-turn.") }
         awaitingCommit.append(key)
+        Self.log.notice("turn_commit_sent key=\(key, privacy: .public)")
         do {
             try await client.commitAudio(eventID: key)
         } catch {
@@ -1324,15 +1330,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 let device = try MicrophoneCatalog.resolve(uid: uid)
                 let inputStarted = ProcessInfo.processInfo.systemUptime
                 Self.log.notice("prepare stage=microphone_input begin")
-                let hardware = try await self.input.prepare(device: device, voiceProcessing: self.duplexRequested) { [weak self] in
-                    Task { @MainActor in
-                        guard let self, self.enabled, self.preparationID == token else { return }
-                        let reason = "Microphone configuration changed. Preparing a fresh input is required."
-                        if let active = self.active { self.onEvent?(active.id, .failure(reason)) }
-                        await self.suspend()
-                        self.onReadiness?(.interrupted(reason))
-                    }
-                }
+                let hardware = try await self.input.prepare(device: device, voiceProcessing: self.duplexRequested,
+                                                            interrupted: self.inputInterrupted(token: token))
                 Self.log.notice("prepare stage=microphone_input elapsed_ms=\((ProcessInfo.processInfo.systemUptime - inputStarted) * 1000)")
                 try Task.checkCancellation()
                 try await self.ensureConnected(inputMode: self.desiredInputMode)
@@ -1405,59 +1404,15 @@ final class RealtimeVoiceLane: SpeechCapturing {
                   playbackRoutingReady?() == true else {
                 throw VoiceError("I can't listen all the time with this audio device. Choose another microphone or speaker in Settings.")
             }
-            guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000,
-                                             channels: 1, interleaved: true) else {
-                throw LocalSpeechError.unavailable
-            }
-            let feed = try ConvertedAudioFeed(input: hardware.format, output: format)
             let speechGate = try VoiceActivityGate.silero()
             let session = UUID()
             try beginRealtimeConversation(session: session)
-            let connection = client.connectionID
-            conversationSender = Task { [weak self] in
-                guard let self else { return }
-                do {
-                    for try await buffer in feed.stream {
-                        guard !Task.isCancelled, self.conversation.id == session else { return }
-                        guard let samples = buffer.int16ChannelData?[0] else {
-                            throw VoiceError("The microphone audio format changed.")
-                        }
-                        for event in try await speechGate.admit(Data(bytes: samples, count: Int(buffer.frameLength) * 2)) {
-                            guard self.conversation.id == session else { return }
-                            switch event {
-                            case .turnStarted: self.localTurnStarted(connection: connection)
-                            case .audio(let pcm):
-                                self.recentSpeech.append(pcm)
-                                try await self.client.sendAudio(pcm, connection: connection)
-                            case .turnEnded: try await self.localTurnEnded(connection: connection)
-                            }
-                        }
-                    }
-                } catch {
-                    guard self.conversation.id == session, !Task.isCancelled else { return }
-                    self.stopConversation(state: .unavailable(error.localizedDescription))
-                }
-            }
             guard conversationStartID == request, !Task.isCancelled else {
                 conversation.stop()
-                feed.finish()
                 throw CancellationError()
             }
-            conversationFeed = feed
-            conversationGate = speechGate
-            input.gate.open(feed, at: AVAudioTime.hostTime(forSeconds: since ?? ProcessInfo.processInfo.systemUptime))
-            conversationMeter?.invalidate()
-            conversationMeter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self, self.conversation.id == session else { return }
-                    guard outputs.realtime.isReady(), outputs.system.isReady(), outputs.local.isReady() else {
-                        self.stopConversation(state: .unavailable("The microphone stopped. Choose Start listening in Settings to try again."))
-                        await self.suspend()
-                        return
-                    }
-                    self.onConversationMeter?(feed.level(), !self.player.playbackIdle)
-                }
-            }
+            try openConversationAudio(hardware: hardware, outputs: outputs, gate: speechGate, session: session,
+                                      connection: client.connectionID, since: since)
             onConversationState?(.listening)
         } catch {
             if conversationStartID == request {
@@ -1466,6 +1421,120 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 if !(error is CancellationError) { onConversationState?(.unavailable(error.localizedDescription)) }
             }
             throw error
+        }
+    }
+
+    /// Opens the conversation's audio on prepared hardware: the converted
+    /// feed, the sender that runs it through the speech gate to the socket,
+    /// and the meter that watches the playback route.
+    private func openConversationAudio(hardware: MicrophoneInput.Ready, outputs: VoicePlaybackOutputs,
+                                       gate speechGate: VoiceActivityGate, session: UUID, connection: UUID,
+                                       since: TimeInterval? = nil) throws {
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000,
+                                         channels: 1, interleaved: true) else {
+            throw LocalSpeechError.unavailable
+        }
+        let feed = try ConvertedAudioFeed(input: hardware.format, output: format)
+        conversationSender = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await buffer in feed.stream {
+                    guard !Task.isCancelled, self.conversation.id == session else { return }
+                    guard let samples = buffer.int16ChannelData?[0] else {
+                        throw VoiceError("The microphone audio format changed.")
+                    }
+                    for event in try await speechGate.admit(Data(bytes: samples, count: Int(buffer.frameLength) * 2)) {
+                        guard self.conversation.id == session else { return }
+                        switch event {
+                        case .turnStarted: self.localTurnStarted(connection: connection)
+                        case .audio(let pcm):
+                            self.recentSpeech.append(pcm)
+                            try await self.client.sendAudio(pcm, connection: connection)
+                        case .turnEnded: try await self.localTurnEnded(connection: connection)
+                        }
+                    }
+                }
+            } catch {
+                guard self.conversation.id == session, !Task.isCancelled else { return }
+                self.stopConversation(state: .unavailable(error.localizedDescription))
+            }
+        }
+        conversationFeed = feed
+        conversationGate = speechGate
+        input.gate.open(feed, at: AVAudioTime.hostTime(forSeconds: since ?? ProcessInfo.processInfo.systemUptime))
+        conversationMeter?.invalidate()
+        conversationUnreadySince = nil
+        conversationMeter = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.conversation.id == session else { return }
+                if outputs.realtime.isReady(), outputs.system.isReady(), outputs.local.isReady() {
+                    self.conversationUnreadySince = nil
+                } else {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    let unready = self.conversationUnreadySince ?? now
+                    self.conversationUnreadySince = unready
+                    guard now - unready < 2 * MicrophoneInput.stallTolerance else {
+                        Self.log.error("playback_route_unready stopping_conversation")
+                        self.stopConversation(state: .unavailable("The microphone stopped. Choose Start listening in Settings to try again."))
+                        await self.suspend()
+                        return
+                    }
+                }
+                self.onConversationMeter?(feed.level(), !self.player.playbackIdle)
+            }
+        }
+    }
+
+    /// A real device change rebuilds only the microphone: the conversation,
+    /// its socket and a turn in progress carry on with the new input.
+    private func rebuildConversationInput(token: UUID) async -> Bool {
+        guard let session = conversation.id, let speechGate = conversationGate else { return false }
+        let started = ProcessInfo.processInfo.systemUptime
+        Self.log.notice("conversation_input_rebuild begin")
+        conversationMeter?.invalidate(); conversationMeter = nil
+        conversationSender?.cancel(); conversationSender = nil
+        if let feed = conversationFeed {
+            conversationFeed = nil
+            input.gate.close(ifCurrent: feed)?.finish()
+        }
+        do {
+            let device = try MicrophoneCatalog.resolve(uid: selectedUID)
+            let hardware = try await input.prepare(device: device, voiceProcessing: duplexRequested,
+                                                   interrupted: inputInterrupted(token: token))
+            guard conversation.id == session, preparationID == token, conversationGate === speechGate,
+                  let outputs = hardware.playback else { throw CancellationError() }
+            self.hardware = hardware
+            replaceConversationPlaybackRoute(outputs.realtime)
+            onPlaybackOutputs?(outputs)
+            try openConversationAudio(hardware: hardware, outputs: outputs, gate: speechGate, session: session,
+                                      connection: client.connectionID)
+            Self.log.notice("conversation_input_rebuild elapsed_ms=\((ProcessInfo.processInfo.systemUptime - started) * 1000)")
+            return true
+        } catch {
+            Self.log.error("conversation_input_rebuild failed error=\(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+    /// Internal for tests. A new route drops the audio the old one still
+    /// held, so a reply that was playing is cancelled and truncated like a
+    /// barge-in instead of being cut off silently.
+    func replaceConversationPlaybackRoute(_ route: VoicePlaybackRoute?) {
+        if !player.playbackIdle { interruptConversationPlayback() }
+        player.setPlaybackRoute(route)
+    }
+
+    private func inputInterrupted(token: UUID) -> @Sendable () -> Void {
+        { [weak self] in
+            Task { @MainActor in
+                guard let self, self.enabled, self.preparationID == token else { return }
+                if await self.rebuildConversationInput(token: token) { return }
+                guard self.enabled, self.preparationID == token else { return }
+                let reason = "Microphone configuration changed. Preparing a fresh input is required."
+                if let active = self.active { self.onEvent?(active.id, .failure(reason)) }
+                await self.suspend()
+                self.onReadiness?(.interrupted(reason))
+            }
         }
     }
 
@@ -1523,6 +1592,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         awaitingTurnEnd = false; turnResponseOutstanding = false
         pendingTurnEndOnIdle = false
         drainDeadline?.cancel()
+        Self.log.notice("playback_interrupted item=\(interrupted.itemID ?? "-", privacy: .public) played_ms=\(interrupted.playedMs) cancel=\(cancel)")
         guard cancel || interrupted.itemID != nil else { return }
         let connection = client.connectionID
         Task { [weak self] in
@@ -2092,9 +2162,13 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// one is generating, and a hold means the user is talking. Queued wants
     /// flush on the next response.done or on release.
     private func requestResponseWhenFree() {
-        guard !responseInFlight, !responseAuthority.waitingForRetirement, !holding else { wantResponse = true; return }
+        guard !responseInFlight, !responseAuthority.waitingForRetirement, !holding else {
+            Self.log.notice("response_deferred in_flight=\(self.responseInFlight) retiring=\(self.responseAuthority.waitingForRetirement) holding=\(self.holding)")
+            wantResponse = true; return
+        }
         if pendingReasoning == nil,
            speechSession.gate.state == .capturing || speechSession.gate.state == .finishing {
+            Self.log.notice("response_deferred capturing")
             wantResponse = true; return
         }
         let purpose: VoiceResponseAuthority.Purpose
@@ -2118,6 +2192,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
         }
         responseInFlight = true
         let requireTool = purpose != .outcomeOnly && speechSession.gate.admission?.intent != "question"
+        Self.log.notice("response_requested purpose=\(String(describing: purpose), privacy: .public)")
         // This response.create is what awaitingTurnEnd waits on — a done
         // that lands while it was still queued (or belonged to a cancelled
         // or pushed response) must not end the turn.
