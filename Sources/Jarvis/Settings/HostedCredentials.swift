@@ -87,16 +87,37 @@ final class HostedCredentials: @unchecked Sendable {
         }
     }
 
+    /// Whether `route` goes to this service's Jev or Responses proxy.
+    func serves(_ route: ServiceRoute) -> Bool {
+        route.url == jevURL || route.url == responsesURL
+    }
+
+    /// Drops `token` when it is still the stored one, so the next call
+    /// registers again. A concurrent caller's fresher registration survives.
+    func forget(_ token: String) {
+        if storedToken == token { try? tokenStore.delete() }
+    }
+
+    /// Whether `error` is this service saying it no longer knows the install
+    /// (its ledger was reset): its own `unknown_install`, or the 401 its Jev
+    /// and Responses proxies answer with. The proxies turn upstream failures
+    /// into a 5xx and a revoked install into a 403, so a 401 from them means
+    /// nothing else.
+    static func isUnknownInstall(_ error: Error) -> Bool {
+        if case .http(401, _)? = error as? TerraClient.Failure { return true }
+        if case .http(401, _)? = error as? JevError { return true }
+        return (error as? Failure)?.code == "unknown_install"
+    }
+
     /// A fresh Realtime client secret. A token the service no longer knows
-    /// (its ledger was reset) is dropped and this Mac registers again once;
-    /// a revoked one stays revoked. Only the token that failed is dropped,
-    /// so a concurrent caller's fresh registration survives.
+    /// is dropped and this Mac registers again once; a revoked one stays
+    /// revoked.
     func realtimeCredential() async throws -> RealtimeCredential {
         let token = try await installToken()
         do {
             return try await mintRealtimeSecret(token: token)
-        } catch let failure as Failure where failure.code == "unknown_install" {
-            if storedToken == token { try? tokenStore.delete() }
+        } catch where Self.isUnknownInstall(error) {
+            forget(token)
             return try await mintRealtimeSecret(token: try await installToken())
         }
     }

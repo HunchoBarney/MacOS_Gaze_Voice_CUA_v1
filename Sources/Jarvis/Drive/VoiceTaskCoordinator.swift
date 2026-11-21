@@ -334,9 +334,10 @@ final class VoiceTaskCoordinator {
     lazy var writingByInstruction = WritingByInstruction(
         enabled: { [config] in config.voiceLive },
         compose: { [config] referent in
-            let route = try await config.responsesRoute()
-            let reply = try await TerraClient(route: { route })
-                .respond(WritingByInstruction.composeRequest(for: referent))
+            let reply = try await config.withRoute(config.responsesRoute) { route in
+                try await TerraClient(route: { route })
+                    .respond(WritingByInstruction.composeRequest(for: referent))
+            }
             guard let text = reply["reply"]?.string else { throw TerraClient.Failure.malformed }
             return text
         },
@@ -733,11 +734,12 @@ final class VoiceTaskCoordinator {
     /// model-failure settle reports it rather than the chooser refusing to
     /// exist.
     private func chooser() -> DriveLoop.Choose {
-        let jevRoute = jevRoute
+        let config = config, jevRoute = jevRoute
         return { state, candidates in
-            let route = try await jevRoute()
-            return try await JevChooser.make(apiKey: route?.bearer ?? "",
-                                             baseURL: route?.url ?? JevClient.systemOneURL)(state, candidates)
+            try await config.withRoute(jevRoute) { route in
+                try await JevChooser.make(apiKey: route?.bearer ?? "",
+                                          baseURL: route?.url ?? JevClient.systemOneURL)(state, candidates)
+            }
         }
     }
 
