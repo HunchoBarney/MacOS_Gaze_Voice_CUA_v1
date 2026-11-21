@@ -392,6 +392,19 @@ final class LiveVoiceTests: XCTestCase {
         XCTAssertEqual(requests, 1, "The month renewed, so the next wake opens Live")
     }
 
+    func testALongBasicVoiceRequestIsHandedOverBeforeTheRelayDropsIt() async throws {
+        var requests: [[Float]] = []
+        let voice = try voice(LiveListening.Timings(settle: 0.05)) { voice in
+            voice.allowance = self.allowance(used: 18_000, capped: true)
+            voice.onBasicRequest = { samples, _ in requests.append(samples) }
+        }
+        wakeWord.heard?(0)
+        say(7.9, thenQuiet: 0)
+        try await waitUntil { requests.count == 1 }
+        XCTAssertEqual(requests[0].count, 7_900, "Nothing said is lost to the relay's overflow")
+        try await waitUntil { voice.listening.state == .asleep }
+    }
+
     func testAnUncappedWakeOpensLiveAndTheWarningShowsOnceThenLiveSaysItAtTheNextWake() async throws {
         var notices: [String] = []
         var requests = 0

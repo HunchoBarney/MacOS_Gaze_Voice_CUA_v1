@@ -289,14 +289,15 @@ final class LiveVoice {
     }
 
     /// Basic voice: records the request on the Mac until the user has
-    /// spoken and then paused, and hands it over. Nothing heard by the
-    /// false-wake limit is a false wake.
+    /// spoken and then paused, or the capture nears the relay's limit, and
+    /// hands it over. Nothing heard by the false-wake limit is a false wake.
     private func listenOnDevice(until: Date) {
         basicGlow = .hearing
         refresh()
         let relay = microphone.relay
         let settle = listening.timings.settle
-        let limit = min(listening.timings.falseWake, relay.maxBehind - relay.lead)
+        let falseWake = listening.timings.falseWake
+        let full = relay.maxBehind - 0.25
         let began = now()
         basicTurn = Task { [weak self] in
             var spoken = 0.0
@@ -306,7 +307,7 @@ final class LiveVoice {
                 let stats = relay.stats
                 spoken = stats.spoken
                 if spoken > 0, stats.quiet >= settle { break }
-                if stats.overflowed || self.now() - began >= limit { break }
+                if stats.overflowed || stats.behind >= full || self.now() - began >= falseWake { break }
             }
             guard let self, !Task.isCancelled else { return }
             let samples = relay.take()
