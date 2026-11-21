@@ -69,6 +69,12 @@ final class GazeService {
     var noteOut: (String) -> Void = { _ in }
     /// Monotonic clock — tests drive ticks deterministically.
     var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    /// The one wall clock behind sample freshness, the scorer's evidence
+    /// and commits, and referent recency — tests step it with `now`.
+    var wallClock: () -> Date = { Date() }
+    /// False leaves the pump to `tickForTest()`, so a test advances the
+    /// service one tick at a time on its own clocks.
+    var pumpsAutomatically = true
 
     /// The dwell policy — loaded once from defaults; `reloadPolicy()`
     /// re-reads after a mode flip or exemptions change.
@@ -171,7 +177,7 @@ final class GazeService {
             interaction.start()
             interactionLabels = interaction
         }
-        guard pump == nil else { return }
+        guard pumpsAutomatically, pump == nil else { return }
         pump = Task { @MainActor [weak self] in
             var seen = 0
             while let self, !Task.isCancelled, self.running {
@@ -221,6 +227,12 @@ final class GazeService {
 
     // MARK: - One tick
 
+    /// One pump step, in place of the real pump's sample-or-66 ms beat.
+    func tickForTest() async {
+        guard running else { return }
+        await tick()
+    }
+
     private func tick() async {
         let t = now()
         if t - sigmaReadAt >= Self.sigmaRefreshInterval {
@@ -238,7 +250,7 @@ final class GazeService {
                 await stream.start()
             }
         }
-        if let sample = await stream.latest(), sample.isFresh {
+        if let sample = await stream.latest(), sample.isFresh(at: wallClock()) {
             lastFreshAt = t
             restarts = 0
             reportStale(false)
@@ -252,7 +264,8 @@ final class GazeService {
             let event = await scorer.update(candidates: batch.candidates,
                                             at: point, isSaccade: saccade,
                                             speechHint: speechHint(),
-                                            cursorPoint: cursorPoint())
+                                            cursorPoint: cursorPoint(),
+                                            now: wallClock())
             await handle(event)
             gazePointSink(point)
         } else {
@@ -268,7 +281,8 @@ final class GazeService {
             if let point = lastPoint {
                 let event = await scorer.update(candidates: [], at: point,
                                                 isSaccade: true,
-                                                freshGaze: false)
+                                                freshGaze: false,
+                                                now: wallClock())
                 await handle(event, dwellLive: false)
             }
         }
@@ -391,7 +405,8 @@ final class GazeService {
     func commitTarget(lookBackSec: Double = 0.6,
                       recordSelection: Bool = true) async -> (IntentCandidate, Double)? {
         guard let hit = await scorer.commitTarget(lookBackSec: lookBackSec,
-                                                  recordSelection: recordSelection)
+                                                  recordSelection: recordSelection,
+                                                  now: wallClock())
         else { return nil }
         if recordSelection {
             // The element's centre, never the gaze point inside it — a
@@ -438,7 +453,7 @@ final class GazeService {
         }
         let recent = await scorer.recentReferents
         let fresh = recent.suffix(2).filter {
-            Date().timeIntervalSince($0.at) <= Self.recentReferentTTL
+            wallClock().timeIntervalSince($0.at) <= Self.recentReferentTTL
                 && $0.confidence >= Self.referentShareFloor
         }
         if !fresh.isEmpty {

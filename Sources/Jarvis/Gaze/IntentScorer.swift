@@ -745,16 +745,18 @@ actor GazeIntentScorer {
         isSaccade: Bool,
         speechHint: String? = nil,
         cursorPoint: CGPoint? = nil,
-        freshGaze: Bool = true
+        freshGaze: Bool = true,
+        now: Date = Date()
     ) -> IntentEvent {
         core.update(candidates: candidates, at: point, isSaccade: isSaccade,
-                    now: Date(), speechHint: speechHint,
+                    now: now, speechHint: speechHint,
                     cursorPoint: cursorPoint, freshGaze: freshGaze)
     }
 
     func commitTarget(lookBackSec: Double = 0.6,
-                      recordSelection: Bool = true) -> (IntentCandidate, Double)? {
-        core.commitTarget(at: Date(), lookBackSec: lookBackSec,
+                      recordSelection: Bool = true,
+                      now: Date = Date()) -> (IntentCandidate, Double)? {
+        core.commitTarget(at: now, lookBackSec: lookBackSec,
                           recordSelection: recordSelection)
     }
 
