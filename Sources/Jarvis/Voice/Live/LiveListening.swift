@@ -38,8 +38,8 @@ enum LiveControlWord: String, Equatable, Sendable, CaseIterable {
 /// Jarvis closes the session itself: 8 s after a wake that brought no
 /// request (a false wake), 90 s after the last turn, on "that's all", or,
 /// after "stay with me", 30 minutes after the last turn. An utterance counts
-/// as a control word only once it has settled (no new words for a moment, or
-/// Live answered), so "stop the music" never reads as "stop". Times are
+/// as a control word only once it has settled (no new words for a moment),
+/// so "stop the music" never reads as "stop". Times are
 /// seconds on one monotonic clock, passed in, so tests drive them.
 struct LiveListening: Equatable {
     enum State: Equatable { case asleep, connecting, talking, standby, off }
@@ -49,8 +49,10 @@ struct LiveListening: Equatable {
         case started
         case resumed
         case paused
-        /// The user's words so far in this turn.
-        case heard(utterance: String)
+        /// A fragment of the user's words. Fragments join into one utterance
+        /// until it settles; Live speaking meanwhile (a backchannel) doesn't
+        /// split or settle it.
+        case heard(String)
         /// Live said something.
         case answered
         /// Live handed a task to Jarvis.
@@ -143,22 +145,20 @@ struct LiveListening: Equatable {
         case .paused:
             if state == .talking { state = .standby }
             return []
-        case .heard(let utterance):
+        case .heard(let fragment):
             guard state == .talking || state == .standby else { return [] }
             state = .talking
-            unsettled = utterance
+            unsettled = (unsettled ?? "") + fragment
             lastTurnAt = now
             lastHeardAt = now
             awaitingAnswer = true
             return []
         case .answered, .delegated:
             guard state == .talking || state == .standby else { return [] }
-            let effects = settle(now: now, force: true)
-            guard sessionOpen else { return effects }
             lastTurnAt = now
             awaitingAnswer = input == .delegated
             if input == .delegated, lastHeardAt == nil { lastHeardAt = now }
-            return effects
+            return []
         case .ended:
             guard sessionOpen else { return [] }
             state = .asleep
@@ -166,7 +166,7 @@ struct LiveListening: Equatable {
             return []
         case .tick:
             guard state == .talking || state == .standby else { return [] }
-            let effects = settle(now: now, force: false)
+            let effects = settle(now: now)
             if !sessionOpen { return effects }
             if let closeAt, now >= closeAt { return effects + close() }
             return effects
@@ -178,9 +178,8 @@ struct LiveListening: Equatable {
         return startedAt.map { $0 + timings.falseWake }
     }
 
-    private mutating func settle(now: TimeInterval, force: Bool) -> [Effect] {
-        guard let utterance = unsettled, let lastHeardAt,
-              force || now - lastHeardAt >= timings.settle else { return [] }
+    private mutating func settle(now: TimeInterval) -> [Effect] {
+        guard let utterance = unsettled, let lastHeardAt, now - lastHeardAt >= timings.settle else { return [] }
         unsettled = nil
         switch LiveControlWord.find(in: utterance, name: name) {
         case nil: return []

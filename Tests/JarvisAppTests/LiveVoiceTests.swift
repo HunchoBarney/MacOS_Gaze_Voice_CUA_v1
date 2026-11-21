@@ -124,7 +124,7 @@ final class LiveVoiceTests: XCTestCase {
         XCTAssertEqual(voice.glow, .hidden)
     }
 
-    func testAFalseWakeClosesOnItsOwn() async throws {
+    func testAFalseWakeTimesOutThenRecordingRestartsAndTheNextWakeOpensASession() async throws {
         let voice = try voice(LiveListening.Timings(falseWake: 0.1))
         wakeWord.heard?(0)
         try await waitUntil { !transports.isEmpty }
@@ -134,6 +134,10 @@ final class LiveVoiceTests: XCTestCase {
         try await waitUntil { transports[0].sent.contains("session.close") }
         transports[0].deliver(closed)
         try await waitUntil { microphone.starts == 2 }
+        wakeWord.heard?(1)
+        XCTAssertEqual(transports.count, 2, "The second wake opens a new session")
+        transports[1].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
     }
 
     func testThinkingGlowsAfterTheRequestAndControlWordsReachTheirHandler() async throws {
@@ -147,6 +151,7 @@ final class LiveVoiceTests: XCTestCase {
         try await waitUntil { voice.glow == .thinking }
         transports[0].deliver(answer)
         try await waitUntil { voice.glow == .hearing }
+        try await Task.sleep(for: .milliseconds(200))
         transports[0].deliver(heard("Cancel that."))
         try await waitUntil { controls == [.cancel] }
         XCTAssertTrue(voice.listening.sessionOpen)

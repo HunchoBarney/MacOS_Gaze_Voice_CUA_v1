@@ -21,26 +21,27 @@ final class LiveListeningTests: XCTestCase {
 
     func testAConversationStaysOpenNinetySecondsAfterTheLastTurnThroughStandby() {
         var listening = talking()
-        _ = listening.handle(.heard(utterance: "What's the capital of Japan?"), at: 2)
+        _ = listening.handle(.heard("What's the capital of Japan?"), at: 2)
         _ = listening.handle(.answered, at: 3)
         _ = listening.handle(.paused, at: 11)
         XCTAssertEqual(listening.state, .standby)
         XCTAssertEqual(listening.handle(.tick, at: 49), [])
         XCTAssertEqual(listening.handle(.resumed, at: 50), [])
         XCTAssertEqual(listening.state, .talking)
-        _ = listening.handle(.heard(utterance: "And of France?"), at: 50)
+        _ = listening.handle(.heard("And of France?"), at: 50)
         _ = listening.handle(.answered, at: 51)
+        XCTAssertEqual(listening.handle(.tick, at: 51), [])
         XCTAssertEqual(listening.deadline(after: 51), 141)
         XCTAssertEqual(listening.handle(.tick, at: 141), [.closeSession])
     }
 
     func testThatsAllClosesOnceItSettlesAndARequestContainingItDoesNot() {
         var listening = talking()
-        _ = listening.handle(.heard(utterance: "Open Mail, that's all"), at: 2)
-        XCTAssertEqual(listening.handle(.tick, at: 2.8), [])
+        _ = listening.handle(.heard("Open Mail, that's all"), at: 2)
+        XCTAssertEqual(listening.handle(.tick, at: 2.9), [])
         XCTAssertTrue(listening.sessionOpen)
         _ = listening.handle(.answered, at: 3)
-        _ = listening.handle(.heard(utterance: "Thanks Jarvis, that\u{2019}s all."), at: 5)
+        _ = listening.handle(.heard("Thanks Jarvis, that\u{2019}s all."), at: 5)
         XCTAssertEqual(listening.deadline(after: 5) ?? -1, 5.3, accuracy: 1e-9)
         XCTAssertEqual(listening.handle(.tick, at: 5.3), [])
         XCTAssertEqual(listening.handle(.tick, at: 5.9), [.closeSession])
@@ -49,18 +50,31 @@ final class LiveListeningTests: XCTestCase {
 
     func testStopWaitsForTheWholeUtteranceSoStopTheMusicIsARequest() {
         var listening = talking()
-        _ = listening.handle(.heard(utterance: "Stop"), at: 2)
-        _ = listening.handle(.heard(utterance: "Stop the music"), at: 2.4)
-        XCTAssertEqual(listening.handle(.tick, at: 3.2), [])
+        _ = listening.handle(.heard("Stop"), at: 2)
+        _ = listening.handle(.heard(" the music"), at: 2.4)
+        XCTAssertEqual(listening.handle(.tick, at: 3.3), [])
         _ = listening.handle(.answered, at: 4)
-        _ = listening.handle(.heard(utterance: "Stop."), at: 6)
-        XCTAssertEqual(listening.handle(.answered, at: 6.5), [.control(.stop)])
+        _ = listening.handle(.heard("Stop."), at: 6)
+        XCTAssertEqual(listening.handle(.answered, at: 6.5), [], "Live answering doesn't settle it early")
+        XCTAssertEqual(listening.handle(.tick, at: 6.9), [.control(.stop)])
         XCTAssertTrue(listening.sessionOpen)
+    }
+
+    func testABackchannelMidSentenceNeitherSplitsNorSettlesIt() {
+        var listening = talking()
+        _ = listening.handle(.heard("Stop"), at: 2)
+        _ = listening.handle(.answered, at: 2.2)
+        _ = listening.handle(.heard(" the music"), at: 2.4)
+        XCTAssertEqual(listening.handle(.tick, at: 3.3), [], "\"Stop the music\" is a request")
+        _ = listening.handle(.heard("That's"), at: 5)
+        _ = listening.handle(.answered, at: 5.2)
+        _ = listening.handle(.heard(" all"), at: 5.4)
+        XCTAssertEqual(listening.handle(.tick, at: 6.3), [.closeSession])
     }
 
     func testStayWithMeHoldsUntilTheThirtyMinuteCap() {
         var listening = talking()
-        _ = listening.handle(.heard(utterance: "Stay with me"), at: 2)
+        _ = listening.handle(.heard("Stay with me"), at: 2)
         _ = listening.handle(.tick, at: 2.9)
         XCTAssertTrue(listening.held)
         XCTAssertEqual(listening.handle(.tick, at: 200), [])
@@ -71,7 +85,7 @@ final class LiveListeningTests: XCTestCase {
 
     func testThinkingShowsShortlyAfterTheUserStopsAndClearsWhenLiveAnswers() {
         var listening = talking()
-        _ = listening.handle(.heard(utterance: "Open Mail"), at: 2)
+        _ = listening.handle(.heard("Open Mail"), at: 2)
         XCTAssertFalse(listening.thinking(at: 2.1))
         XCTAssertEqual(listening.deadline(after: 2.1) ?? -1, 2.3, accuracy: 1e-9)
         XCTAssertTrue(listening.thinking(at: 2.35))
