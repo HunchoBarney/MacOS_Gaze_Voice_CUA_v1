@@ -58,7 +58,7 @@ private final class VoiceDeadlineCompletion<Value: Sendable>: Sendable {
     }
 }
 
-func sleepUntilUptime(_ deadline: TimeInterval) async throws {
+@Sendable func sleepUntilUptime(_ deadline: TimeInterval) async throws {
     let remaining = deadline - ProcessInfo.processInfo.systemUptime
     if remaining > 0 { try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
 }
