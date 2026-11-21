@@ -85,6 +85,8 @@ release: setup tracker
 	cp "$(VENDOR)/WebRTC/LiveKitWebRTC.xcframework/LICENSE" "$(APP)/Contents/Resources/ThirdParty/WebRTC/LICENSE"
 	cp ThirdParty/WebRTC/README.md "$(APP)/Contents/Resources/ThirdParty/WebRTC/"
 	cp ThirdParty/jev-voice-control/LICENSE "$(APP)/Contents/Resources/ThirdParty/jev-voice-control/"
+	mkdir -p "$(APP)/Contents/Resources/ThirdParty/GRDB"
+	cp ThirdParty/GRDB/LICENSE ThirdParty/GRDB/README.md "$(APP)/Contents/Resources/ThirdParty/GRDB/"
 	scripts/bundle-tracker.sh "$(APP)"
 	python3 scripts/check-packaged-tracker.py "$(APP)"
 	scripts/sign-app.sh "$(APP)"

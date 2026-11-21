@@ -37,6 +37,9 @@ let labTargets: [Target] = [
 let package = Package(
     name: "Jarvis",
     platforms: [.macOS("26.0")],
+    dependencies: [
+        .package(url: "https://github.com/groue/GRDB.swift", exact: "7.12.0"),
+    ],
     targets: [
         .target(
             name: "JarvisCore",
@@ -44,7 +47,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "Jarvis",
-            dependencies: ["JarvisCore"] + (hasWebRTC ? ["LiveKitWebRTC"] : []),
+            dependencies: ["JarvisCore", .product(name: "GRDB", package: "GRDB.swift")] + (hasWebRTC ? ["LiveKitWebRTC"] : []),
             path: "Sources/Jarvis"
         ),
         .testTarget(

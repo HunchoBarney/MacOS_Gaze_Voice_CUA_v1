@@ -33,6 +33,26 @@ Settled choices, newest first. Change one only with a new entry here.
 - New feedback, Live (L3+) included, follows the same rule: visual first,
   speech only for words, never a new chime.
 
+## 2026-11-20 — Memory stays on the Mac, in SQLite through GRDB
+
+- Behind `voice.live` (JARA-49 L8). Jarvis remembers people, preferences,
+  things you asked it to remember, and one-line summaries of finished
+  requests (kept 90 days) in one SQLite file,
+  `~/Library/Application Support/Jarvis/Memory/memory.sqlite`. It writes
+  nowhere else, opens the file only on first use, and never syncs it. Raw
+  audio and transcripts are never stored.
+- Open source: GRDB.swift 7.12.0 (MIT), pinned in `Package.swift` and
+  recorded in `ThirdParty/GRDB`, with SQLite's FTS5 for relevance. Our code
+  is the schema, the intents and the Settings screen.
+- Forgetting means gone: `secure_delete` and FTS5 `secure-delete` overwrite
+  deleted text, and Forget Everything rebuilds the index and vacuums the
+  file. Context for a Live session is read fresh on every call, so a deleted
+  memory never reaches a later session.
+- "Remember X", "who's X?" / "what do you remember about X" and "forget
+  that" are answered before a request becomes a task, so they never reach
+  the activity log. A bare "who's X?" with no memory goes on to the rest of
+  Jarvis.
+
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
 - "Type this …" takes the exact span after the lead-in ("type this",

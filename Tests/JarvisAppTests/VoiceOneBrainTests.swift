@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import XCTest
 import JarvisCore
@@ -1108,3 +1109,103 @@ extension VoiceOneBrainTests {
     }
 }
 
+
+/// Stands in for the microphone so input recovery runs without hardware.
+@MainActor
+private final class FixtureMicrophone {
+    private(set) var prepares = 0
+    var fails = false
+    private(set) var interrupted: (@Sendable () -> Void)?
+
+    func prepare(_ uid: String?, _ voiceProcessing: Bool,
+                 _ interrupted: @escaping @Sendable () -> Void) throws -> MicrophoneInput.Ready {
+        prepares += 1
+        if fails { throw VoiceError("The fixture microphone is gone.") }
+        self.interrupted = interrupted
+        let route = { VoicePlaybackRoute(id: UUID(), isReady: { true }, schedule: { _, played in played() },
+                                         play: {}, stop: {}) }
+        return .init(name: "Fixture microphone",
+                     format: AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000,
+                                           channels: 1, interleaved: true)!,
+                     firstFrames: 480, startupRecoveries: 0,
+                     playback: VoicePlaybackOutputs(realtime: route(), system: route(), local: route()))
+    }
+}
+
+extension VoiceOneBrainTests {
+    private func conversationOnFixtureMicrophone() async throws
+        -> (RealtimeVoiceLane, RealtimeVoiceClient, RecordedVoiceWire, FixtureMicrophone) {
+        let wire = RecordedVoiceWire()
+        let client = RealtimeVoiceClient(wireFactory: { _ in wire })
+        let lane = RealtimeVoiceLane(apiKey: { "fixture-not-a-real-key" }, client: client)
+        let microphone = FixtureMicrophone()
+        lane.prepareInput = { uid, voiceProcessing, interrupted in
+            try microphone.prepare(uid, voiceProcessing, interrupted)
+        }
+        lane.playbackRoutingReady = { true }
+        lane.conversation.readContext = { self.context() }
+        lane.conversation.interpret = { _, _, _ in .init(kind: .clarify) }
+        lane.conversation.execute = { _ in .init(verified: true, waitingForAnswer: false, message: "") }
+        lane.conversation.onControl = { _ in }
+        try await lane.startConversation(inputUID: "fixture")
+        XCTAssertNotNil(lane.conversation.id)
+        return (lane, client, wire, microphone)
+    }
+
+    /// A device change mid-conversation rebuilds only the microphone: the
+    /// socket, the conversation and the turn the person is speaking survive.
+    func testADeviceChangeRebuildsOnlyTheInputAndKeepsTheTurn() async throws {
+        let (lane, client, wire, microphone) = try await conversationOnFixtureMicrophone()
+        var readiness: [SpeechReadiness] = []
+        var outputs: [UUID?] = []
+        lane.onReadiness = { readiness.append($0) }
+        lane.onPlaybackOutputs = { outputs.append($0?.realtime.id) }
+        let session = lane.conversation.id
+        let connection = client.connectionID
+        lane.localTurnStarted(connection: connection)
+
+        microphone.interrupted?()
+        await waitFor { microphone.prepares == 2 && outputs.count == 1 }
+
+        XCTAssertEqual(lane.conversation.id, session, "the conversation carries on")
+        XCTAssertEqual(client.connectionID, connection, "the socket is kept")
+        XCTAssertFalse(readiness.contains { if case .interrupted = $0 { return true } else { return false } })
+        try await lane.localTurnEnded(connection: connection)
+        let commits = await wire.commitCount()
+        XCTAssertEqual(commits, 1, "the turn spoken across the change is still committed")
+        lane.stopConversation(); client.teardown()
+    }
+
+    /// When the new input can't open, the lane falls back to a full
+    /// re-prepare and says so, instead of leaving a dead conversation open.
+    func testAFailedInputRebuildEndsTheConversationAndAsksForAFreshPrepare() async throws {
+        let (lane, client, _, microphone) = try await conversationOnFixtureMicrophone()
+        var readiness: [SpeechReadiness] = []
+        lane.onReadiness = { readiness.append($0) }
+        microphone.fails = true
+
+        microphone.interrupted?()
+        await waitFor { readiness.contains { if case .interrupted = $0 { return true } else { return false } } }
+
+        XCTAssertEqual(microphone.prepares, 2)
+        XCTAssertNil(lane.conversation.id)
+        client.teardown()
+    }
+
+    /// An input callback from before a suspend belongs to a retired
+    /// preparation and must not rebuild or suspend anything.
+    func testAnInputCallbackFromARetiredPreparationDoesNothing() async throws {
+        let (lane, client, _, microphone) = try await conversationOnFixtureMicrophone()
+        let stale = try XCTUnwrap(microphone.interrupted)
+        await lane.suspend()
+        var readiness: [SpeechReadiness] = []
+        lane.onReadiness = { readiness.append($0) }
+
+        stale()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(microphone.prepares, 1)
+        XCTAssertTrue(readiness.isEmpty)
+        client.teardown()
+    }
+}

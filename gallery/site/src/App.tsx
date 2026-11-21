@@ -8,7 +8,7 @@ import { Home } from "./pages/Home";
 import { NotFound } from "./pages/NotFound";
 import { ScenePage, Scenes } from "./pages/Scenes";
 import { Link, useLocation } from "./router";
-import { scrollToTop } from "./scroll";
+import { scrollToElement, scrollToTop } from "./scroll";
 import { setTheme, useTheme, type ThemeChoice } from "./theme";
 import type { Gallery } from "./types";
 
@@ -69,8 +69,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!hash) scrollToTop();
-  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!hash) {
+      scrollToTop();
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const element = document.getElementById(hash);
+      if (element) scrollToElement(element);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pathname, load.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => setScrolled(!entry.isIntersecting));
