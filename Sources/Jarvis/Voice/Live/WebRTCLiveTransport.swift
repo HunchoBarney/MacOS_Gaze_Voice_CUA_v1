@@ -24,6 +24,8 @@ final class WebRTCLiveTransport: NSObject, LiveTransport, @unchecked Sendable {
     private var peer: LKRTCPeerConnection?
     private var channel: LKRTCDataChannel?
     private var remote: LKRTCAudioTrack?
+    private var voice: LiveVoiceOutput?
+    private var plays = true
     private var gathered: CheckedContinuation<Void, Never>?
     private var gatheringComplete = false
     private var finished = false
@@ -73,6 +75,28 @@ final class WebRTCLiveTransport: NSObject, LiveTransport, @unchecked Sendable {
     /// paid tests' first-audio timing.
     var remoteAudio: LKRTCAudioTrack? { lock.withLock { remote } }
 
+    /// Whether Live's voice plays ("Say replies out loud"). Off keeps the
+    /// session, its transcripts and its delegations; only playout stops.
+    var playsAudio: Bool {
+        get { lock.withLock { plays } }
+        set {
+            let voice = lock.withLock { () -> LiveVoiceOutput? in
+                plays = newValue
+                return self.voice
+            }
+            voice?.isEnabled = newValue
+        }
+    }
+
+    /// Takes Live's incoming voice, muted when replies aren't spoken.
+    func adopt(_ output: LiveVoiceOutput) {
+        let plays = lock.withLock { () -> Bool in
+            voice = output
+            return self.plays
+        }
+        output.isEnabled = plays
+    }
+
     func accept(answer: String) async throws {
         guard let peer = lock.withLock({ self.peer }) else { throw VoiceError("The voice connection closed.") }
         try await peer.setRemoteDescription(LKRTCSessionDescription(type: .answer, sdp: answer))
@@ -117,6 +141,13 @@ final class WebRTCLiveTransport: NSObject, LiveTransport, @unchecked Sendable {
     }
 }
 
+/// Live's incoming voice track; a disabled remote track plays nothing.
+protocol LiveVoiceOutput: AnyObject {
+    var isEnabled: Bool { get set }
+}
+
+extension LKRTCAudioTrack: LiveVoiceOutput {}
+
 extension WebRTCLiveTransport: LKRTCPeerConnectionDelegate, LKRTCDataChannelDelegate {
     func peerConnection(_ peer: LKRTCPeerConnection, didChange state: LKRTCIceGatheringState) {
         guard state == .complete else { return }
@@ -143,6 +174,7 @@ extension WebRTCLiveTransport: LKRTCPeerConnectionDelegate, LKRTCDataChannelDele
     func peerConnection(_ peer: LKRTCPeerConnection, didAdd receiver: LKRTCRtpReceiver, streams: [LKRTCMediaStream]) {
         guard let track = receiver.track as? LKRTCAudioTrack else { return }
         lock.withLock { remote = track }
+        adopt(track)
     }
 
     func peerConnection(_ peer: LKRTCPeerConnection, didChange state: LKRTCSignalingState) {}

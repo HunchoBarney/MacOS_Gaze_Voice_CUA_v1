@@ -27,6 +27,7 @@ final class VoiceLiveStandbyTests: XCTestCase {
         var stops = 0
         func start() throws { laneOpenAtStart.append(laneIsOpen()) }
         func stop() { stops += 1 }
+        func useInput(uid: String) {}
     }
 
     private final class FakeWakeWord: WakeWordDetecting, @unchecked Sendable {

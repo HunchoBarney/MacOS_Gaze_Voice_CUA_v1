@@ -16,6 +16,8 @@ final class LiveMicrophone: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked
     let relay = LiveInputRelay(sampleRate: LiveMicrophone.format.sampleRate)
     /// Every input buffer, on the audio thread, for the wake word.
     var onInput: (@Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void)?
+    /// L7's copy of what the session heard, as 24 kHz PCM16.
+    var recentSpeech: RecentSpeechAudio?
 
     private let downmix = AVAudioMixerNode()
     private lazy var tap = AVAudioSinkNode { [weak self] timestamp, frames, list in
@@ -37,12 +39,48 @@ final class LiveMicrophone: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked
         for buffer in buffers {
             guard let data = buffer.mData else { continue }
             let out = UnsafeMutableBufferPointer(start: data.assumingMemoryBound(to: Float.self), count: Int(frames))
-            if let self { self.relay.read(into: out) } else { out.update(repeating: 0) }
+            guard let self else { out.update(repeating: 0); continue }
+            if self.relay.read(into: out), let recentSpeech = self.recentSpeech {
+                recentSpeech.append(Self.pcm16At24k(out))
+            }
         }
         return noErr
     }
 
+    /// 48 kHz float to 24 kHz PCM16, averaging each pair of samples.
+    static func pcm16At24k(_ samples: UnsafeMutableBufferPointer<Float>) -> Data {
+        var pcm = Data(count: samples.count / 2 * 2)
+        pcm.withUnsafeMutableBytes { raw in
+            let out = raw.bindMemory(to: Int16.self)
+            for index in out.indices {
+                let mean = (samples[index * 2] + samples[index * 2 + 1]) / 2
+                out[index] = Int16(max(-1, min(1, mean)) * Float(Int16.max)).littleEndian
+            }
+        }
+        return pcm
+    }
+
     private var module: LKRTCAudioDeviceModule { WebRTCLiveTransport.factory.audioDeviceModule }
+    private var inputUID = ""
+    private var running = false
+
+    /// The chosen microphone's Core Audio UID; empty for the system default.
+    func useInput(uid: String) {
+        inputUID = uid
+        if running { applyInput() }
+    }
+
+    /// Which of `ids` to record from: the chosen one, else the default (nil).
+    static func inputIndex(for uid: String, ids: [String]) -> Int? {
+        uid.isEmpty ? nil : ids.firstIndex(of: uid)
+    }
+
+    private func applyInput() {
+        let devices = module.inputDevices
+        let device = Self.inputIndex(for: inputUID, ids: devices.map(\.deviceId)).map { devices[$0] }
+        if device == nil, !inputUID.isEmpty { Self.log.notice("live_microphone_missing using the default input") }
+        _ = module.trySetInputDevice(device)
+    }
 
     /// Starts recording on LiveKit's engine, with no session open.
     func start() throws {
@@ -50,11 +88,14 @@ final class LiveMicrophone: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked
             throw VoiceError("Unit tests don't open the microphone. Set JARVIS_LIVE_MIC=1 for a live test.")
         }
         module.observer = self
+        applyInput()
         let status = module.initAndStartRecording()
         guard status == 0 else { throw VoiceError("Couldn't start the microphone (\(status)).") }
+        running = true
     }
 
     func stop() {
+        running = false
         relay.stop()
         _ = module.stopRecording()
     }
