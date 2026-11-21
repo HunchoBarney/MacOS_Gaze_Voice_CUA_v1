@@ -6,6 +6,8 @@ import XCTest
 /// running IO for clients that had already gone.
 final class AudioTestGuardTests: XCTestCase {
     func testThePlayerPlaysSilentlyWithoutOpeningTheSpeaker() async throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["JARVIS_LIVE_MIC"] == "1",
+                      "A live run opens the real speaker on purpose")
         let player = RealtimePlayer()
         let drained = expectation(description: "the queued audio drains")
         player.onPlaybackIdle = { drained.fulfill() }
