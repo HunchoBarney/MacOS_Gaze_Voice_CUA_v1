@@ -27,7 +27,7 @@ public enum MenuIsland: Direction {
 
     static func headerHeight(_ f: MenuFixture, width: CGFloat) -> CGFloat {
         Measure.size("menuA-head-\(f.status)-\(f.labelScale)", width: width - 2 * pad(f.labelScale)) {
-            header(f, MenuFixture(open: true), nil, nil)
+            header(f, f, nil, nil)
         }.height + 2 * pad(f.labelScale)
     }
 
