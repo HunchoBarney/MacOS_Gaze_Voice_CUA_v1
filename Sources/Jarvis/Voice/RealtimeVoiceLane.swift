@@ -85,6 +85,10 @@ final class RealtimeVoiceLane: SpeechCapturing {
         -> VoiceSemanticRouter.Outcome)?
     var semanticContextProvider: (@MainActor () async -> VoiceAdmissionContext)?
     var semanticConfirmationHandler: (@MainActor (VoiceSemanticRouter.Proposal) async -> Bool)?
+    /// The caller's wall on one semantic hop, from its start.
+    static let semanticWall: TimeInterval = 4
+    /// Waits out the semantic wall. Internal for tests, which fire it by hand.
+    var semanticDeadline: @Sendable (TimeInterval) async throws -> Void = sleepUntilUptime
     private var semanticTask: Task<(VoiceSemanticRouter.Outcome, VoiceAdmissionContext), Error>?
     private var semanticTurn: VoiceTurnToken?
     private var semanticGeneration: UInt64 = 0
@@ -111,9 +115,11 @@ final class RealtimeVoiceLane: SpeechCapturing {
         onDiagnostic?(.init(turn: id, stage: "semantic.begin", metrics: [:]))
         let began = ProcessInfo.processInfo.systemUptime
         let timings = VoiceSemanticRouter.StageTimings()
+        let expire = semanticDeadline
         let task = VoiceSemanticRouter.$stageTimings.withValue(timings) {
             Task {
-                try await withVoiceDeadline(until: ProcessInfo.processInfo.systemUptime + 4) {
+                try await withVoiceDeadline(until: ProcessInfo.processInfo.systemUptime + Self.semanticWall,
+                                            expire: expire) {
                     let interpretStart = ProcessInfo.processInfo.systemUptime
                     do {
                         let result = try await interpret(admission, captured)
@@ -352,6 +358,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// How long a turn waits for its commit and then its transcript.
     /// Internal for tests.
     var commitConfirmationTimeout: Duration = .seconds(8)
+    /// Waits out one commit's confirmation timeout. Internal for tests, which
+    /// fire it by hand.
+    var commitConfirmationTimer: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     private var remoteInputDrain: Task<Void, Never>?
     private var remoteReplyTurn: UUID?
     private var remoteReplyContinuation: CheckedContinuation<Void, Error>?
@@ -1059,7 +1068,8 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private func expiry(_ key: String) -> Task<Void, Never> {
         Task { [weak self] in
-            do { try await Task.sleep(for: self?.commitConfirmationTimeout ?? .seconds(8)) } catch { return }
+            guard let timer = self?.commitConfirmationTimer, let timeout = self?.commitConfirmationTimeout else { return }
+            do { try await timer(timeout) } catch { return }
             self?.expireRemoteInput(key)
         }
     }
