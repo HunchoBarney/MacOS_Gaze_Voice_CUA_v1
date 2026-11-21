@@ -10,6 +10,8 @@ protocol LiveMicrophoneDriving: AnyObject {
     var onInput: (@Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void)? { get set }
     func start() throws
     func stop()
+    /// The chosen microphone's Core Audio UID; empty for the system default.
+    func useInput(uid: String)
 }
 
 #if canImport(LiveKitWebRTC)
@@ -50,6 +52,8 @@ final class LiveVoice {
     }
     /// Called once per wake, at Live's first reply or delegation.
     var onOneBreath: ((OneBreath) -> Void)?
+    /// Live's reply so far in this turn, for showing it when it isn't spoken.
+    var onReply: ((String) -> Void)?
 
     private let microphone: LiveMicrophoneDriving
     private let wakeWord: WakeWordDetecting
@@ -59,6 +63,7 @@ final class LiveVoice {
     private var utterance = ""
     private var wokeAt: TimeInterval?
     private var oneBreath: OneBreath?
+    private var reply = ""
     private var wakeTestHeard: Bool?
     private var timer: Task<Void, Never>?
 
@@ -87,6 +92,11 @@ final class LiveVoice {
             throw error
         }
         armed = true
+    }
+
+    /// Records from this microphone from now on.
+    func useInput(uid: String) {
+        microphone.useInput(uid: uid)
     }
 
     /// Closes any session and releases the microphone.
@@ -127,6 +137,7 @@ final class LiveVoice {
         wokeAt = moment
         oneBreath = nil
         utterance = ""
+        reply = ""
         let session = makeSession(listening.name)
         self.session = session
         session.onEvent = { [weak self, weak session] event in
@@ -185,9 +196,12 @@ final class LiveVoice {
         let at = now()
         switch event {
         case .inputTranscript(let delta):
+            if utterance.isEmpty { reply = "" }
             utterance += delta.text
             apply(listening.handle(.heard(utterance: utterance), at: at))
-        case .outputTranscript:
+        case .outputTranscript(let delta):
+            reply += delta.text
+            onReply?(reply)
             noteReply(delegation: false)
             utterance = ""
             apply(listening.handle(.answered, at: at))

@@ -458,6 +458,10 @@ final class VoiceController: ObservableObject {
     /// and the wake word opens a GPT-Live session instead of this lane.
     @Published private(set) var liveGlow: LiveVoice.Glow = .hidden
     private lazy var liveVoice: LiveVoice? = makeLiveVoice()
+    #if canImport(LiveKitWebRTC)
+    /// The open session's transport, to mute or unmute Live's voice.
+    private weak var liveTransport: WebRTCLiveTransport?
+    #endif
 
     private func makeLiveVoice() -> LiveVoice? {
         #if canImport(LiveKitWebRTC)
@@ -465,11 +469,21 @@ final class VoiceController: ObservableObject {
         let broker = HostedLiveSessions(baseURL: hosted.baseURL, installToken: { try await hosted.installToken() })
         let microphone = LiveMicrophone()
         microphone.recentSpeech = (speech as? RealtimeVoiceLane)?.recentSpeech
-        let live = LiveVoice(microphone: microphone, wakeWord: detector) { name in
-            LiveSession(transport: WebRTCLiveTransport(), broker: broker,
-                        config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
+        microphone.useInput(uid: config.microphoneUID)
+        let live = LiveVoice(microphone: microphone, wakeWord: detector) { [weak self] name in
+            let transport = WebRTCLiveTransport()
+            transport.playsAudio = self?.config.ttsEnabled ?? true
+            self?.liveTransport = transport
+            return LiveSession(transport: transport, broker: broker,
+                               config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
         }
         live.onGlow = { [weak self] glow in self?.liveGlow = glow }
+        live.onReply = { [weak self] text in
+            guard let self, !self.config.ttsEnabled else { return }
+            self.detail = text
+        }
+        config.$ttsEnabled.dropFirst().sink { [weak self] speaks in self?.liveTransport?.playsAudio = speaks }
+            .store(in: &subscriptions)
         return live
         #else
         return nil
@@ -1405,6 +1419,7 @@ final class VoiceController: ObservableObject {
 
     func prepareMicrophone(deviceChanged: Bool = false) {
         if config.voiceLive {
+            if deviceChanged { liveVoice?.useInput(uid: config.microphoneUID) }
             armStandby()
             return
         }

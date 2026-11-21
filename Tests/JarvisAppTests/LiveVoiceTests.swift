@@ -11,6 +11,8 @@ final class LiveVoiceTests: XCTestCase {
         var tappedAtStop: [Bool] = []
         func start() throws { starts += 1 }
         func stop() { stops += 1; tappedAtStop.append(onInput != nil) }
+        var inputs: [String] = []
+        func useInput(uid: String) { inputs.append(uid) }
     }
 
     private final class FakeWakeWord: WakeWordDetecting, @unchecked Sendable {
@@ -181,7 +183,47 @@ final class LiveVoiceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(breaths[0].first ?? -1, breaths[0].started)
     }
 
+    func testTheChosenMicrophoneReachesTheEngine() throws {
+        let voice = try voice()
+        voice.useInput(uid: "BuiltInMicrophoneDevice")
+        XCTAssertEqual(microphone.inputs, ["BuiltInMicrophoneDevice"])
+    }
+
+    func testRepliesAreOfferedAsTextTurnByTurn() async throws {
+        let voice = try voice()
+        var replies: [String] = []
+        voice.onReply = { replies.append($0) }
+        wakeWord.heard?(0)
+        try await waitUntil { !transports.isEmpty }
+        transports[0].deliver(started)
+        transports[0].deliver(#"{"type":"session.output_transcript.delta","delta":"Tokyo","start_ms":20,"end_ms":30}"#)
+        transports[0].deliver(#"{"type":"session.output_transcript.delta","delta":" it is.","start_ms":30,"end_ms":40}"#)
+        transports[0].deliver(heard("And France?"))
+        transports[0].deliver(#"{"type":"session.output_transcript.delta","delta":"Paris.","start_ms":60,"end_ms":70}"#)
+        try await waitUntil { replies.count == 3 }
+        XCTAssertEqual(replies, ["Tokyo", "Tokyo it is.", "Paris."])
+    }
+
     #if canImport(LiveKitWebRTC)
+    func testRepliesNotSpokenAloudMuteLivesVoiceButKeepTheSession() {
+        final class Output: LiveVoiceOutput { var isEnabled = true }
+        let transport = WebRTCLiveTransport()
+        transport.playsAudio = false
+        let output = Output()
+        transport.adopt(output)
+        XCTAssertFalse(output.isEnabled, "No output audio plays when replies aren't spoken")
+        transport.playsAudio = true
+        XCTAssertTrue(output.isEnabled)
+        transport.playsAudio = false
+        XCTAssertFalse(output.isEnabled, "Turning it off mid-session mutes at once")
+    }
+
+    func testTheChosenMicrophoneIsFoundByItsUIDElseTheDefault() {
+        XCTAssertEqual(LiveMicrophone.inputIndex(for: "usb-mic", ids: ["built-in", "usb-mic"]), 1)
+        XCTAssertNil(LiveMicrophone.inputIndex(for: "", ids: ["built-in"]))
+        XCTAssertNil(LiveMicrophone.inputIndex(for: "unplugged", ids: ["built-in"]))
+    }
+
     func testWhatTheSessionHearsIsKeptForL7At24kHz() {
         var samples: [Float] = [0.5, 0.5, -1, -1, 3, 1]
         let pcm = samples.withUnsafeMutableBufferPointer { LiveMicrophone.pcm16At24k($0) }

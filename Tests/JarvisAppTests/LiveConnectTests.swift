@@ -152,8 +152,10 @@ final class LiveConnectTests: XCTestCase {
     /// L3's one-breath request, timed, with the owner at the Mac: the app's
     /// own microphone, wake word and session code. Say "Hey Jarvis, open
     /// Mail" in one breath, then "That's all"; then "Hey Jarvis, what's the
-    /// capital of Japan?" in one breath, then "That's all". Two short paid
-    /// sessions, about 3 cents. It logs timings only, never transcript text.
+    /// capital of Japan?" in one breath, then "That's all". The second wake
+    /// comes after the first session closed, so it also proves recording
+    /// restarts after a call. Two short paid sessions, about 3 cents. It logs
+    /// timings only, never transcript text.
     func testOneBreathRequestsReachLive() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard environment["JARVIS_LIVE_ONE_BREATH"] == "1", environment["JARVIS_LIVE_MIC"] == "1" else {
@@ -183,7 +185,7 @@ final class LiveConnectTests: XCTestCase {
         }
         voice.disarm()
         try await Task.sleep(for: .seconds(3))
-        XCTAssertEqual(breaths.count, 2, "both one-breath requests should get a reply or a delegation")
+        XCTAssertEqual(breaths.count, 2, "both one-breath requests should get a reply or a delegation; a missing second one means the wake word went deaf after the first session closed")
         XCTAssertTrue(breaths.allSatisfy { $0.first != nil })
         #else
         throw XCTSkip("WebRTC isn't fetched: run python3 -I ThirdParty/WebRTC/fetch.py first")

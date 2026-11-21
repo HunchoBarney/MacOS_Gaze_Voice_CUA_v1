@@ -61,6 +61,26 @@ final class LiveMicrophone: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked
     }
 
     private var module: LKRTCAudioDeviceModule { WebRTCLiveTransport.factory.audioDeviceModule }
+    private var inputUID = ""
+    private var running = false
+
+    /// The chosen microphone's Core Audio UID; empty for the system default.
+    func useInput(uid: String) {
+        inputUID = uid
+        if running { applyInput() }
+    }
+
+    /// Which of `ids` to record from: the chosen one, else the default (nil).
+    static func inputIndex(for uid: String, ids: [String]) -> Int? {
+        uid.isEmpty ? nil : ids.firstIndex(of: uid)
+    }
+
+    private func applyInput() {
+        let devices = module.inputDevices
+        let device = Self.inputIndex(for: inputUID, ids: devices.map(\.deviceId)).map { devices[$0] }
+        if device == nil, !inputUID.isEmpty { Self.log.notice("live_microphone_missing using the default input") }
+        _ = module.trySetInputDevice(device)
+    }
 
     /// Starts recording on LiveKit's engine, with no session open.
     func start() throws {
@@ -68,11 +88,14 @@ final class LiveMicrophone: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked
             throw VoiceError("Unit tests don't open the microphone. Set JARVIS_LIVE_MIC=1 for a live test.")
         }
         module.observer = self
+        applyInput()
         let status = module.initAndStartRecording()
         guard status == 0 else { throw VoiceError("Couldn't start the microphone (\(status)).") }
+        running = true
     }
 
     func stop() {
+        running = false
         relay.stop()
         _ = module.stopRecording()
     }
