@@ -692,7 +692,8 @@ describe("Live metering and tiers", () => {
       pausedCentsPerMinute: 2,
       graceSeconds: 60,
     });
-    for (const tiers of ["not json", "[]", "{}", '{"a":{"liveMinutes":-1,"tasks":1,"priceUSD":1}}', '{"a":{"tasks":1,"priceUSD":1}}']) {
+    for (const tiers of ["not json", "[]", "{}", '{"a":{"liveMinutes":-1,"tasks":1,"priceUSD":1}}', '{"a":{"tasks":1,"priceUSD":1}}',
+      '{"a":{"liveMinutes":1,"tasks":1.5,"priceUSD":1}}']) {
       expect(() => loadConfig({ ...secrets, TIERS: tiers })).toThrow(/TIERS/);
     }
     expect(() => loadConfig({ ...secrets, DEFAULT_TIER: "gold" })).toThrow(/DEFAULT_TIER/);

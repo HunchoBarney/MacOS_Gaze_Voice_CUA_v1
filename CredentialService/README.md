@@ -87,7 +87,7 @@ Variables (defaults in [src/config.ts](src/config.ts)):
 | `REALTIME_SECRET_SECONDS` | 60 | Secret lifetime, 10–600 |
 | `MAX_OUTPUT_TOKENS` | 4000 | Cap on Responses output |
 | `LIVE_METERING` | `0` | `1` meters Live sessions and enforces the monthly tier cap |
-| `TIERS` | `{"jarvis":{"liveMinutes":300,"tasks":100,"priceUSD":30},"pro":{"liveMinutes":1000,"tasks":400,"priceUSD":100}}` | Tiers as JSON; `liveMinutes` or `tasks` null is uncapped |
+| `TIERS` | `{"jarvis":{"liveMinutes":300,"tasks":100,"priceUSD":30},"pro":{"liveMinutes":1000,"tasks":400,"priceUSD":100}}` | Tiers as JSON; `tasks` is a whole number; `liveMinutes` or `tasks` null is uncapped |
 | `DEFAULT_TIER` | `jarvis` | Tier for an install with none set |
 | `STANDBY_WEIGHT` | 0.4 | Live seconds per Standby second, against the cap |
 | `LIVE_WARN_FRACTION` | 0.8 | Reported as `warnAt` |

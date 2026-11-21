@@ -44,7 +44,7 @@ export const DEFAULT_TIERS: Record<string, Tier> = {
 export function loadPlans(env: Record<string, unknown>): Plans {
   const raw = typeof env.TIERS === "string" ? env.TIERS.trim() : env.TIERS;
   const bad = new Error(
-    "TIERS must be a JSON object of tiers, each { liveMinutes: number or null, tasks: number or null, priceUSD: number }.");
+    "TIERS must be a JSON object of tiers, each { liveMinutes: number or null, tasks: whole number or null, priceUSD: number }.");
   let tiers: unknown = DEFAULT_TIERS;
   if (typeof raw === "string" && raw) {
     try { tiers = JSON.parse(raw); } catch { throw bad; }
@@ -56,7 +56,8 @@ export function loadPlans(env: Record<string, unknown>): Plans {
   if (!tiers || typeof tiers !== "object" || Array.isArray(tiers) || Object.keys(tiers).length === 0) throw bad;
   for (const tier of Object.values(tiers)) {
     const { liveMinutes, tasks, priceUSD } = (tier ?? {}) as Record<string, unknown>;
-    if (!amount(liveMinutes, true) || !amount(tasks, true) || !amount(priceUSD, false)) throw bad;
+    if (!amount(liveMinutes, true) || !amount(tasks, true) || !(tasks === null || Number.isInteger(tasks))
+      || !amount(priceUSD, false)) throw bad;
   }
   const defaultTier = typeof env.DEFAULT_TIER === "string" && env.DEFAULT_TIER.trim() ? env.DEFAULT_TIER.trim() : "jarvis";
   if (!Object.hasOwn(tiers, defaultTier)) throw new Error(`DEFAULT_TIER names no tier in TIERS: ${defaultTier}.`);
