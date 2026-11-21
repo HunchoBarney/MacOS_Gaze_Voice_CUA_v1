@@ -64,6 +64,23 @@ final class Config: ObservableObject {
         return ServiceRoute(url: hosted.responsesURL, bearer: try await hosted.installToken())
     }
 
+    /// Runs `call` on the route `resolve` picks (`jevRoute` or
+    /// `responsesRoute`). When that route is the service's and the service
+    /// no longer knows this install, the token is dropped and `call` runs
+    /// once more on a fresh registration, as Realtime does. A revoked install
+    /// and a developer's own key never register again.
+    func withRoute<T>(_ resolve: () async throws -> ServiceRoute?,
+                      _ call: (ServiceRoute?) async throws -> T) async throws -> T {
+        let route = try await resolve()
+        do {
+            return try await call(route)
+        } catch where HostedCredentials.isUnknownInstall(error) {
+            guard let route, let hosted, hosted.serves(route) else { throw error }
+            hosted.forget(route.bearer)
+            return try await call(try await resolve())
+        }
+    }
+
     /// The Jev credential an agent's drive server gets in its environment.
     /// Agents spawn without waiting on the network, so this reads only a
     /// token already registered.

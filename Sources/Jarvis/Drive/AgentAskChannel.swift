@@ -41,7 +41,8 @@ enum AgentAskChannel {
     /// Park the ask, wait for the host's answer file. Nil means declined
     /// or timed out — the DriveLoop treats nil as "no".
     static func request(_ ask: DriveLoop.Ask, agent: String,
-                        timeout: TimeInterval = 120) async -> String? {
+                        timeout: TimeInterval = 120,
+                        safetyInterval: Duration = .milliseconds(300)) async -> String? {
         let prompt: String
         let kind: String
         var options: [String] = []
@@ -66,7 +67,7 @@ enum AgentAskChannel {
         // fires the vnode event the moment it lands. The 300ms heartbeat
         // inside `changes` keeps the old cadence as the safety net, so a
         // wedged watch costs nothing over the previous poll.
-        for await _ in changes(safetyInterval: .milliseconds(300)) {
+        for await _ in changes(safetyInterval: safetyInterval) {
             if Task.isCancelled { return nil }
             if let text = try? String(contentsOf: answerFile(id), encoding: .utf8) {
                 return text.trimmingCharacters(in: .whitespacesAndNewlines)

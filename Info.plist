@@ -26,6 +26,10 @@
 	<string>Jarvis uses on-device speech recognition to double-check the exact words before it types them.</string>
 	<key>JarvisInputProvider</key>
 	<string>openai-realtime</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Jarvis tells you when a meeting is about to start or two meetings overlap. Your calendar stays on this Mac.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Jarvis tells you when a reminder you set comes due and can mark it done. Your reminders stay on this Mac.</string>
 	<!-- Jarvis's credential service (CredentialService/). Empty: people type their own keys in Settings. -->
 	<key>JarvisCredentialsURL</key>
 	<string>https://jarvis-keys.gokayakusa.workers.dev</string>

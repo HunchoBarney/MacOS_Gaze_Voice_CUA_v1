@@ -1,0 +1,724 @@
+{
+  "producer": "native",
+  "commit": "sample",
+  "generatedAt": "2026-11-20T00:00:00Z",
+  "components": [
+    {
+      "id": "listening-indicator",
+      "title": "Listening indicator",
+      "area": "Voice",
+      "summary": "The capsule at the top of the screen that shows Jarvis is listening, thinking or speaking.",
+      "sources": [
+        "Sources/Jarvis/UI/ListeningIndicator.swift:65",
+        "Sources/Jarvis/UI/ListeningIndicator.swift:170"
+      ],
+      "owner": "JARA-55",
+      "states": [
+        {
+          "id": "listening",
+          "title": "Listening",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "listening-indicator/listening.dark.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "listening-indicator/listening.dark.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "listening-indicator/listening.light.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "listening-indicator/listening.light.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ],
+          "clips": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "video": "listening-indicator/listening.dark.mp4",
+              "poster": "listening-indicator/listening.dark.poster.png",
+              "width": 520,
+              "height": 168,
+              "durationMs": 2400,
+              "caption": "Level meter and orb pulse while listening (fixture clip)."
+            }
+          ]
+        },
+        {
+          "id": "thinking",
+          "title": "Thinking",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "listening-indicator/thinking.dark.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "listening-indicator/thinking.dark.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "listening-indicator/thinking.light.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "listening-indicator/thinking.light.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        },
+        {
+          "id": "speaking",
+          "title": "Speaking",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "listening-indicator/speaking.dark.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "listening-indicator/speaking.dark.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "listening-indicator/speaking.light.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "listening-indicator/speaking.light.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        },
+        {
+          "id": "problem",
+          "title": "Problem",
+          "note": "Shown when the input device stops delivering audio.",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "listening-indicator/problem.dark.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "listening-indicator/problem.dark.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "listening-indicator/problem.light.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "listening-indicator/problem.light.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        },
+        {
+          "id": "listening-proposed",
+          "title": "Listening",
+          "kind": "proposed",
+          "superseded": "Superseded. The owner rejected these proposed directions on 2026-11-21, and JARA-57 owns the redesign. Kept for the record only.",
+          "note": "Label dropped; the orb and level carry the state.",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "listening-indicator/listening-proposed.dark.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "listening-indicator/listening-proposed.dark.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "listening-indicator/listening-proposed.light.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "listening-indicator/listening-proposed.light.rm.svg",
+              "width": 520,
+              "height": 168,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "guide-callout",
+      "title": "Guide callout",
+      "area": "Guide",
+      "summary": "A pointer card that walks the person through a task in another app, one step at a time.",
+      "sources": [
+        "Sources/Jarvis/UI/GuideCallout.swift:121"
+      ],
+      "states": [
+        {
+          "id": "pointing",
+          "title": "Pointing",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "guide-callout/pointing.dark.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "guide-callout/pointing.dark.rm.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "guide-callout/pointing.light.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "guide-callout/pointing.light.rm.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        },
+        {
+          "id": "done",
+          "title": "Done",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "guide-callout/done.dark.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "guide-callout/done.dark.rm.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "guide-callout/done.light.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "guide-callout/done.light.rm.svg",
+              "width": 640,
+              "height": 272,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent-shelf",
+      "title": "Agent shelf",
+      "area": "Agents",
+      "summary": "Chips along the bottom edge for background agents, each with its progress.",
+      "sources": [
+        "Sources/Jarvis/UI/AgentShelfOverlay.swift:15",
+        "Sources/Jarvis/UI/AgentShelfOverlay.swift:118"
+      ],
+      "states": [
+        {
+          "id": "one",
+          "title": "One agent",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "agent-shelf/one.dark.svg",
+              "width": 290,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "agent-shelf/one.dark.rm.svg",
+              "width": 290,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "agent-shelf/one.light.svg",
+              "width": 290,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "agent-shelf/one.light.rm.svg",
+              "width": 290,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        },
+        {
+          "id": "three",
+          "title": "Three agents",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "agent-shelf/three.dark.svg",
+              "width": 818,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "agent-shelf/three.dark.rm.svg",
+              "width": 818,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "agent-shelf/three.light.svg",
+              "width": 818,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "agent-shelf/three.light.rm.svg",
+              "width": 818,
+              "height": 128,
+              "scale": 2,
+              "backdrop": "transparent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "menu-bar-item",
+      "title": "Menu bar item",
+      "area": "Menu bar",
+      "summary": "The waveform in the menu bar; a dot and count appear when tasks wait for consent.",
+      "sources": [
+        "Sources/Jarvis/main.swift:58",
+        "Sources/Jarvis/main.swift:593"
+      ],
+      "states": [
+        {
+          "id": "idle",
+          "title": "Idle",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "menu-bar-item/idle.dark.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "menu-bar-item/idle.dark.rm.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "menu-bar-item/idle.light.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "menu-bar-item/idle.light.rm.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            }
+          ]
+        },
+        {
+          "id": "pending",
+          "title": "Pending consent",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "menu-bar-item/pending.dark.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "menu-bar-item/pending.dark.rm.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "menu-bar-item/pending.light.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "menu-bar-item/pending.light.rm.svg",
+              "width": 720,
+              "height": 56,
+              "scale": 2,
+              "backdrop": "desktop"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-run",
+      "title": "First run",
+      "area": "Onboarding",
+      "summary": "The welcome window that sets up listening the first time Jarvis opens.",
+      "sources": [
+        "Sources/Jarvis/UI/FirstRun.swift:99",
+        "Sources/Jarvis/UI/FirstRun.swift:259"
+      ],
+      "states": [
+        {
+          "id": "welcome",
+          "title": "Welcome",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "first-run/welcome.dark.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "first-run/welcome.dark.rm.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "first-run/welcome.light.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "first-run/welcome.light.rm.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            }
+          ]
+        },
+        {
+          "id": "listening-choice",
+          "title": "Listening choice",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "first-run/listening-choice.dark.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "first-run/listening-choice.dark.rm.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "first-run/listening-choice.light.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "first-run/listening-choice.light.rm.svg",
+              "width": 1120,
+              "height": 720,
+              "scale": 2,
+              "backdrop": "window"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "target-overlay",
+      "title": "Target overlay",
+      "area": "Gaze",
+      "summary": "A ring around the control Jarvis is about to act on, so the person can see the target first.",
+      "sources": [
+        "Sources/Jarvis/UI/TargetOverlay.swift:19"
+      ],
+      "states": [
+        {
+          "id": "targeting",
+          "title": "Targeting",
+          "variants": [
+            {
+              "scheme": "dark",
+              "reduceMotion": false,
+              "image": "target-overlay/targeting.dark.svg",
+              "width": 840,
+              "height": 480,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "dark",
+              "reduceMotion": true,
+              "image": "target-overlay/targeting.dark.rm.svg",
+              "width": 840,
+              "height": 480,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": false,
+              "image": "target-overlay/targeting.light.svg",
+              "width": 840,
+              "height": 480,
+              "scale": 2,
+              "backdrop": "desktop"
+            },
+            {
+              "scheme": "light",
+              "reduceMotion": true,
+              "image": "target-overlay/targeting.light.rm.svg",
+              "width": 840,
+              "height": 480,
+              "scale": 2,
+              "backdrop": "desktop"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "id": "desk-listening",
+      "title": "Listening at the desk",
+      "summary": "The indicator over a document while two agents run in the shelf.",
+      "components": [
+        "listening-indicator",
+        "agent-shelf",
+        "menu-bar-item"
+      ],
+      "image": "scenes/desk-listening.svg",
+      "width": 2880,
+      "height": 1800,
+      "kind": "current"
+    },
+    {
+      "id": "guide-share",
+      "title": "Guide pointing at Share",
+      "summary": "A guide step pointing at a toolbar button in a document window.",
+      "components": [
+        "guide-callout",
+        "target-overlay"
+      ],
+      "image": "scenes/guide-share.svg",
+      "width": 2880,
+      "height": 1800,
+      "kind": "current"
+    },
+    {
+      "id": "desk-listening-proposed",
+      "title": "Listening at the desk, proposed",
+      "summary": "The same moment with the compact indicator from LI-1.",
+      "components": [
+        "listening-indicator",
+        "agent-shelf"
+      ],
+      "image": "scenes/desk-listening-proposed.svg",
+      "width": 2880,
+      "height": 1800,
+      "kind": "proposed"
+    }
+  ]
+}

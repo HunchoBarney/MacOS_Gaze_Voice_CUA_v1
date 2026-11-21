@@ -21,6 +21,24 @@ Settled choices, newest first. Change one only with a new entry here.
   14ae9d2; filled fixed-size loader redrawn every frame) and metasidd/Orb
   0.2 (MIT, a48fc33; filled orb with endless blurs and particles).
 
+## 2026-11-21 — Every visible surface lives in the UI gallery
+
+- The owner asked for one page that shows every visible component on its
+  own and together. `make gallery` renders each surface offscreen from
+  fixture state, in every state, light and dark, with Reduce Motion off and
+  on, plus combined desktop scenes. `make gallery-deploy` publishes the
+  site to Cloudflare Pages (project `jarvis-ui-gallery`). See
+  gallery/README.md.
+- A PR that adds or changes a visible component updates its gallery page
+  in the same PR, redeploys, and links before and after in its body.
+- The native harness hosts the real views through `@testable import`. It
+  copies product code only where the state is private (the menu-bar item
+  and menu), and those replicas cite their lines. No product code changes
+  to make the gallery work.
+- The site's libraries (Motion, cmdk, Lenis, NumberFlow and Sonner, all
+  MIT, plus Paper Shaders under Apache-2.0) are pinned in gallery/site
+  and listed with versions in gallery/site/REUSE.md.
+
 ## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
 
 - The owner: "the chimes and noises it makes are super annoying and not
@@ -33,6 +51,26 @@ Settled choices, newest first. Change one only with a new entry here.
   are moved to off once (`soundsQuietByDefault`); a later choice sticks.
 - New feedback, Live (L3+) included, follows the same rule: visual first,
   speech only for words, never a new chime.
+
+## 2026-11-20 — Memory stays on the Mac, in SQLite through GRDB
+
+- Behind `voice.live` (JARA-49 L8). Jarvis remembers people, preferences,
+  things you asked it to remember, and one-line summaries of finished
+  requests (kept 90 days) in one SQLite file,
+  `~/Library/Application Support/Jarvis/Memory/memory.sqlite`. It writes
+  nowhere else, opens the file only on first use, and never syncs it. Raw
+  audio and transcripts are never stored.
+- Open source: GRDB.swift 7.12.0 (MIT), pinned in `Package.swift` and
+  recorded in `ThirdParty/GRDB`, with SQLite's FTS5 for relevance. Our code
+  is the schema, the intents and the Settings screen.
+- Forgetting means gone: `secure_delete` and FTS5 `secure-delete` overwrite
+  deleted text, and Forget Everything rebuilds the index and vacuums the
+  file. Context for a Live session is read fresh on every call, so a deleted
+  memory never reaches a later session.
+- "Remember X", "who's X?" / "what do you remember about X" and "forget
+  that" are answered before a request becomes a task, so they never reach
+  the activity log. A bare "who's X?" with no memory goes on to the rest of
+  Jarvis.
 
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
@@ -324,6 +362,24 @@ Settled choices, newest first. Change one only with a new entry here.
   openWakeWord's pretrained models (CC BY-NC-SA); Picovoice (cost); and
   any hand-built detector.
 - The app grows by 80 MB (68 MB model, 12 MB library).
+
+## 2026-11-20 — GPT-Live runs over LiveKit's WebRTC build (L1, behind voice.live)
+
+- GPT-Live-1.1 sessions use WebRTC (`v1/live/sessions`), the transport
+  OpenAI recommends and the only one billed at the Standby rate. The Mac
+  never holds a key: it sends its SDP offer to the credential Worker's
+  `POST /v1/live/sessions` (#582), which fixes the model, client
+  delegation, no tools, `store: false` and the speech wake policy.
+- libwebrtc comes from LiveKit's build, livekit/webrtc-xcframework
+  150.7871.08 (BSD-3-Clause libwebrtc, Apache-2.0 packaging), pinned in
+  `ThirdParty/WebRTC`. Only its 29 MB macOS framework is fetched.
+- Why not stasel/WebRTC: its macOS build has no custom audio device, and
+  two captures of one microphone failed on the owner's Mac: without voice
+  processing our tap lost up to 3.35 s at a time, and with it WebRTC heard
+  near-silence. LiveKit's AVAudioEngine audio module owns the microphone
+  once, records without a call, and lets Jarvis tap the same engine, which
+  kept our tap continuous before, during and after a call
+  (`ThirdParty/WebRTC/README.md`).
 ## 2026-11-20 — CI runs on the owner's Mac
 
 - GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI

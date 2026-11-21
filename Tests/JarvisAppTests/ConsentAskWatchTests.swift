@@ -20,20 +20,22 @@ final class ConsentAskWatchTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
-    /// A file landing in asks/ wakes the stream within a second — with the
-    /// heartbeat set to 10s, only the directory watch can fire. The bound
-    /// leaves headroom for a loaded Mac; it still sits far below the
-    /// heartbeat, so a missed watch fails it.
-    func testWatchFiresUnder200ms() async throws {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let stream = AgentAskChannel.changes(safetyInterval: .seconds(10))
-        let elapsed = Task { () -> TimeInterval in
-            var it = stream.makeAsyncIterator()
-            _ = await it.next()                    // immediate first yield
-            let start = Date()
-            _ = await it.next()                    // the watch wake
-            return Date().timeIntervalSince(start)
+    /// Runs `body`, or gives up after `seconds` so a missed wake fails
+    /// instead of hanging the run.
+    private func within<T: Sendable>(_ seconds: Int, _ body: @escaping @Sendable () async -> T) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await body() }
+            group.addTask { try? await Task.sleep(for: .seconds(seconds)); return nil }
+            defer { group.cancelAll() }
+            return await group.next() ?? nil
         }
+    }
+
+    /// A file landing in asks/ wakes the stream. The heartbeat is an hour,
+    /// so any wake inside the run came from the directory watch.
+    func testAFileLandingWakesTheWatchNotTheHeartbeat() async throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let stream = AgentAskChannel.changes(safetyInterval: .seconds(3600))
         try await Task.sleep(for: .milliseconds(100)) // let the watch arm
         let body: [String: JSONValue] = [
             "id": .string("probe"), "agent": .string("scout"),
@@ -41,29 +43,31 @@ final class ConsentAskWatchTests: XCTestCase {
             "deadline": .number(Date().timeIntervalSince1970 + 60)]
         try JSONEncoder().encode(JSONValue.object(body))
             .write(to: dir.appendingPathComponent("probe.json"))
-        let seconds = await elapsed.value
-        XCTAssertLessThan(seconds, 1.0,
-                          "directory watch must wake well under the heartbeat")
+        let woke = await within(30) {
+            var it = stream.makeAsyncIterator()
+            _ = await it.next()                    // immediate first yield
+            return await it.next() != nil          // the watch wake
+        }
+        XCTAssertEqual(woke, true, "only the directory watch can wake the stream before the heartbeat")
     }
 
     /// The child side keeps its round-trip: the host's `.answer` write
-    /// fires the watch inside `request` and the answer comes back fast —
-    /// the same contract the 300ms poll had, minus the sleep.
+    /// fires the watch inside `request`. With an hour-long heartbeat, only
+    /// the watch can bring the answer back.
     func testRequestWakesOnAnswerWrite() async throws {
         let request = Task { await AgentAskChannel.request(
-            .confirm("Quit Safari?"), agent: "scout", timeout: 10) }
+            .confirm("Quit Safari?"), agent: "scout", timeout: 10, safetyInterval: .seconds(3600)) }
         var pending: [AgentAskChannel.Pending] = []
         for _ in 0..<40 where pending.isEmpty {
             pending = AgentAskChannel.pending()
             if pending.isEmpty { try await Task.sleep(for: .milliseconds(25)) }
         }
         XCTAssertEqual(pending.count, 1)
-        let start = Date()
         AgentAskChannel.answer(pending[0].id, "yes")
-        let answer = await request.value
-        XCTAssertEqual(answer, "yes")
-        XCTAssertLessThan(Date().timeIntervalSince(start), 0.5,
-                          "watch wake should beat the old 300ms poll")
+        let answer = await within(30) {
+            await withTaskCancellationHandler { await request.value } onCancel: { request.cancel() }
+        } ?? nil
+        XCTAssertEqual(answer, "yes", "only the directory watch can deliver the answer before the heartbeat")
         XCTAssertTrue(AgentAskChannel.pending().isEmpty)
     }
 

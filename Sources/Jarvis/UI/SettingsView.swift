@@ -4,13 +4,20 @@ import ServiceManagement
 @MainActor
 final class SettingsNavigation: ObservableObject {
     enum Section: String, CaseIterable, Identifiable {
-        case voice = "Settings", activity = "Activity"
+        case voice = "Settings", activity = "Activity", memory = "Memory"
         var id: String { rawValue }
-        var symbol: String { switch self { case .voice: return "gearshape"; case .activity: return "clock" } }
+        var symbol: String {
+            switch self {
+            case .voice: return "gearshape"
+            case .activity: return "clock"
+            case .memory: return "brain.head.profile"
+            }
+        }
         var subtitle: String {
             switch self {
             case .voice: return "How Jarvis listens, talks and helps."
             case .activity: return "What you asked and what Jarvis did."
+            case .memory: return "What Jarvis remembers about you. It stays on this Mac."
             }
         }
     }
@@ -52,7 +59,7 @@ struct SettingsView: View {
                     Text("Jarvis").font(.system(size: 17, weight: .semibold))
                 }.padding(.top, 18)
                 VStack(spacing: 5) {
-                    ForEach(SettingsNavigation.Section.allCases) { section in
+                    ForEach(SettingsNavigation.Section.allCases.filter { $0 != .memory || config.voiceLive }) { section in
                         Button {
                             if section != .voice { controller.stopMicrophoneTest() }
                             navigation.section = section
@@ -82,6 +89,7 @@ struct SettingsView: View {
                     switch navigation.section {
                     case .voice: settings
                     case .activity: ActivityView(controller: controller)
+                    case .memory: MemoryView(store: .shared)
                     }
                     Spacer(minLength: 8)
                 }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
@@ -110,6 +118,11 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             listening
             replies
+            if config.voiceLive {
+                SettingsSection(title: "Alerts", symbol: "bell") {
+                    ProactiveSettingsSection(settings: .shared)
+                }
+            }
             doingThings
             eyeTracking.id(SettingsNavigation.Anchor.eyeTracking.rawValue)
             permissions.id(SettingsNavigation.Anchor.permissions.rawValue)

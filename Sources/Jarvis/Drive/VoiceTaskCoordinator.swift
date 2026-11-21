@@ -182,6 +182,11 @@ final class VoiceTaskCoordinator {
     }
 
     private let config: Config
+    /// "Remember X", "who's X?" and "forget that", answered only while
+    /// `voice.live` is on (JARA-49 L8).
+    var memoryCommands = MemoryCommands()
+    /// Where finished requests are summarised while `voice.live` is on.
+    var memoryStore: () -> MemoryStore = { .shared }
     private let jevRoute: () async throws -> ServiceRoute?
     private let resolver: AppResolver
     private let commandDriver: DriveLoop.Call?
@@ -280,6 +285,11 @@ final class VoiceTaskCoordinator {
     /// task's previousContext and every delegation message. Production
     /// wires it to `gazeService.referentContext`; tests inject a line.
     var gazeContextProvider: () async -> String? = { nil }
+    /// Proactivity answers "what's up", "what did I miss", watch requests
+    /// and replies to a spoken alert before the utterance becomes a task.
+    /// It hears the person's own words when the turn has them: a "yes"
+    /// answers the alert, whatever the model made of it.
+    var proactiveIntercept: ((String) -> ProactiveIntercept?)?
     /// The candidate enumerator the service drives — built over `call`
     /// by `configureGazeService`; nil means the feed reports empty.
     private var gazeFeed: GazeCandidateFeed?
@@ -334,9 +344,10 @@ final class VoiceTaskCoordinator {
     lazy var writingByInstruction = WritingByInstruction(
         enabled: { [config] in config.voiceLive },
         compose: { [config] referent in
-            let route = try await config.responsesRoute()
-            let reply = try await TerraClient(route: { route })
-                .respond(WritingByInstruction.composeRequest(for: referent))
+            let reply = try await config.withRoute(config.responsesRoute) { route in
+                try await TerraClient(route: { route })
+                    .respond(WritingByInstruction.composeRequest(for: referent))
+            }
             guard let text = reply["reply"]?.string else { throw TerraClient.Failure.malformed }
             return text
         },
@@ -733,11 +744,12 @@ final class VoiceTaskCoordinator {
     /// model-failure settle reports it rather than the chooser refusing to
     /// exist.
     private func chooser() -> DriveLoop.Choose {
-        let jevRoute = jevRoute
+        let config = config, jevRoute = jevRoute
         return { state, candidates in
-            let route = try await jevRoute()
-            return try await JevChooser.make(apiKey: route?.bearer ?? "",
-                                             baseURL: route?.url ?? JevClient.systemOneURL)(state, candidates)
+            try await config.withRoute(jevRoute) { route in
+                try await JevChooser.make(apiKey: route?.bearer ?? "",
+                                          baseURL: route?.url ?? JevClient.systemOneURL)(state, candidates)
+            }
         }
     }
 
@@ -816,7 +828,8 @@ final class VoiceTaskCoordinator {
             let words = [transcriptHint, trimmed].compactMap { $0 }.first {
                 WritingInstruction.intent($0) != nil || WritingInstruction.confirmation($0) != nil
             } ?? trimmed
-            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput()) {
+            if let written = await writingByInstruction.handle(words, input: writing ?? WritingInput(),
+                                                               isCurrent: admissionIsCurrent) {
                 return written
             }
         }
@@ -844,6 +857,16 @@ final class VoiceTaskCoordinator {
             return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
         }
         let phrase = Self.normalizedPhrase(trimmed)
+        if windowScroll == nil, let intercept = proactiveIntercept?(transcriptHint ?? trimmed) {
+            switch intercept {
+            case .say:
+                return VoiceToolResult(status: VoiceToolResult.Status.ok,
+                                       say: "Jarvis already answered this aloud on the Mac. Say nothing more.").encoded()
+            case .request(let request):
+                return await beginVoiceTask(request, app: app, frontmostHint: frontmostHint, captureID: captureID,
+                                            admissionIsCurrent: admissionIsCurrent)
+            }
+        }
         // Utterances about existing work aren't tasks — each answers from
         // the task log (or shows the cheat sheet) and creates no Work row.
         if windowScroll == nil, Self.repeatPhrases.contains(phrase) {
@@ -877,6 +900,11 @@ final class VoiceTaskCoordinator {
             feed.add(.note, "showed the command cheat sheet")
             return VoiceToolResult(status: VoiceToolResult.Status.ok,
                                    say: Self.helpSummary(gaze: gaze)).encoded()
+        }
+        // Memory intents answer here, before the activity feed hears them,
+        // so a forgotten memory leaves no copy in the task log.
+        if config.voiceLive, let say = memoryCommands.handle(trimmed) {
+            return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
         }
         if tasks.contains(where: { $0.active && $0.request.lowercased() == normalized }) {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
@@ -1828,6 +1856,12 @@ final class VoiceTaskCoordinator {
         wakeConversationWaiters(work.id, .finished(outcome))
         work.message = say
         work.worker = nil
+        // A literal-text task can carry anything the user dictated, so
+        // only plain requests are kept as past requests.
+        if config.voiceLive, case .done = outcome, !work.isAgentAsk, work.spec.values.isEmpty {
+            let outcomeText = say.isEmpty ? "Done." : OutcomeWording.readable(say)
+            try? memoryStore().recordRequest("\(work.request) — \(outcomeText)")
+        }
         if selectedID == nil { selectedID = work.id }
         // Voice-turn tasks get their outcome spoken through the sink —
         // but a dead realtime socket makes that silence, so the earcon

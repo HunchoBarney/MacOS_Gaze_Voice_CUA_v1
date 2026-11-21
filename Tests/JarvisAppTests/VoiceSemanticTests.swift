@@ -979,21 +979,41 @@ final class VoiceSemanticTests: XCTestCase {
         lane.cancel()
     }
 
+    /// Expires the semantic wall by hand once the interpretation is waiting,
+    /// and records the deadline the lane asked for.
+    private func manualDeadline(_ lane: RealtimeVoiceLane) -> (requested: LockedBox<TimeInterval?>, fire: () -> Void) {
+        let requested = LockedBox<TimeInterval?>(nil)
+        let (fired, fire) = AsyncStream<Void>.makeStream()
+        lane.semanticDeadline = { deadline in
+            requested.set(deadline)
+            for await _ in fired { return }
+        }
+        return (requested, { _ = fire.yield() })
+    }
+
+    /// The wall the lane armed is four seconds from the hop's start.
+    private func assertFourSecondWall(_ requested: TimeInterval?, between before: TimeInterval, and after: TimeInterval,
+                                      file: StaticString = #filePath, line: UInt = #line) throws {
+        let deadline = try XCTUnwrap(requested, "the hop must arm its wall", file: file, line: line)
+        XCTAssertEqual(RealtimeVoiceLane.semanticWall, 4, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(deadline, before + 4, file: file, line: line)
+        XCTAssertLessThanOrEqual(deadline, after + 4, file: file, line: line)
+    }
+
     func testSemanticWatchdogDiscardsLateResult() async throws {
         let c = context(), lane = lane(context())
         lane.semanticEnabled = { true }
+        let (requested, fire) = manualDeadline(lane)
         var waiter: CheckedContinuation<VoiceSemanticRouter.Outcome, Error>?
         var captured: VoiceAdmission?
         lane.semanticInterpretation = { input, _ in
             captured = input
-            return try await withCheckedThrowingContinuation { waiter = $0 }
+            return try await withCheckedThrowingContinuation { waiter = $0; fire() }
         }
         lane.semanticConfirmationHandler = { _ in XCTFail("late model result"); return true }
-        let started = ProcessInfo.processInfo.systemUptime
+        let before = ProcessInfo.processInfo.systemUptime
         try await lane.submitTyped("I need my web browser over here", sessionID: UUID())
-        let elapsed = ProcessInfo.processInfo.systemUptime - started
-        XCTAssertGreaterThanOrEqual(elapsed, 3.8)
-        XCTAssertLessThan(elapsed, 8)
+        try assertFourSecondWall(requested.value, between: before, and: ProcessInfo.processInfo.systemUptime)
         let input = try XCTUnwrap(captured)
         waiter?.resume(returning: .proposal(.init(turn: input.turn, target: c.entities[0],
             model: "fixture", actionConfidence: 1, targetConfidence: 1)))
@@ -1036,21 +1056,20 @@ final class VoiceSemanticTests: XCTestCase {
         lane.semanticEnabled = { true }
         var events: [VoiceSpeechDiagnostic] = []
         lane.onDiagnostic = { if $0.stage.hasPrefix("semantic.") { events.append($0) } }
+        let (requested, fire) = manualDeadline(lane)
         var waiter: CheckedContinuation<VoiceSemanticRouter.Outcome, Error>?
-        lane.semanticInterpretation = { _, _ in try await withCheckedThrowingContinuation { waiter = $0 } }
+        lane.semanticInterpretation = { _, _ in try await withCheckedThrowingContinuation { waiter = $0; fire() } }
         lane.semanticConfirmationHandler = { _ in XCTFail("expired interpretation"); return true }
-        let started = ProcessInfo.processInfo.systemUptime
+        let before = ProcessInfo.processInfo.systemUptime
         try await lane.submitTyped("I need my web browser over here", sessionID: UUID())
-        let elapsed = ProcessInfo.processInfo.systemUptime - started
-        XCTAssertGreaterThanOrEqual(elapsed, 3.8, "the four-second caller wall is unchanged")
-        XCTAssertLessThan(elapsed, 8, "the eight-second transport budget is unchanged")
+        let after = ProcessInfo.processInfo.systemUptime
+        try assertFourSecondWall(requested.value, between: before, and: after)
         let failed = try terminal(events)
         XCTAssertEqual(failed.stage, "semantic.failed")
         XCTAssertEqual(failed.metrics["failure"], SemanticFailure.deadline,
                        "an expired wall is not a transport or budget failure")
         let interpret = try XCTUnwrap(failed.metrics["interpret_ms"], "the expired stage must be measured")
-        XCTAssertGreaterThanOrEqual(interpret, 3800)
-        XCTAssertLessThan(interpret, 8000)
+        XCTAssertLessThanOrEqual(interpret, (after - before) * 1000, "the stage is measured inside the turn")
         XCTAssertNil(failed.metrics["fresh_context_ms"], "fresh context never ran")
         waiter?.resume(returning: .noMatch)
         lane.cancel()
