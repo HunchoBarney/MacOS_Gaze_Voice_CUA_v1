@@ -44,8 +44,46 @@ struct VoiceTimings {
     var warning: TimeInterval = 50
     var limit: TimeInterval = 55
     var dismissal: TimeInterval = 1.5
-    /// A wake-word session closes after this long with nothing happening.
+    /// A wake-word session closes after this long with nothing happening,
+    /// until Jarvis has answered something.
     var wakeSessionQuiet: TimeInterval = 8
+    /// After each reply the session stays open this long for a follow-up.
+    var wakeFollowUp: TimeInterval = 90
+    /// Past this a wake session closes at the first quiet time, not the
+    /// follow-up window; then the wake word is needed again.
+    var wakeSessionCap: TimeInterval = 30 * 60
+}
+
+/// When a wake-word session closes. Until Jarvis has answered, it closes
+/// after `wakeSessionQuiet` with nothing happening, so a false wake costs
+/// seconds. Each finished reply opens a `wakeFollowUp` window, and only a
+/// reply refreshes it: speech that gets no answer doesn't. Past
+/// `wakeSessionCap` from the wake it closes after `wakeSessionQuiet` with
+/// nothing happening, so a turn still being transcribed can finish.
+/// `lastReply` is when the latest reply finished, recorded as it happens
+/// rather than sampled, so a reply shorter than one check still counts.
+struct WakeSessionClock {
+    let opened: TimeInterval
+    let timings: VoiceTimings
+    private var lastActive: TimeInterval
+
+    init(opened: TimeInterval, timings: VoiceTimings) {
+        self.opened = opened
+        self.timings = timings
+        lastActive = opened
+    }
+
+    mutating func shouldClose(busy: Bool, lastReply: TimeInterval?, now: TimeInterval) -> Bool {
+        let reply = lastReply.flatMap { $0 >= opened ? $0 : nil }
+        if let reply { lastActive = max(lastActive, reply) }
+        if busy {
+            lastActive = now
+            return false
+        }
+        if now - lastActive < timings.wakeSessionQuiet { return false }
+        guard let reply, now - opened < timings.wakeSessionCap else { return true }
+        return now >= reply + timings.wakeFollowUp
+    }
 }
 
 @MainActor
@@ -102,7 +140,10 @@ final class VoiceController: ObservableObject {
     @Published private(set) var microphoneReadiness = "Preparing microphone…"
     @Published private(set) var handsFreeState: ConversationListeningState = .off
     @Published private(set) var continuousScrolling = false
-    @Published private(set) var handsFreeSpeaking = false
+    @Published private(set) var handsFreeSpeaking = false {
+        didSet { if oldValue, !handsFreeSpeaking { lastReplyFinished = ProcessInfo.processInfo.systemUptime } }
+    }
+    private var lastReplyFinished: TimeInterval?
     /// A hands-free turn is open: the user started speaking and the turn
     /// hasn't sealed. The on-screen indicator shows while this is true.
     @Published private(set) var conversationTurnOpen = false
@@ -1053,15 +1094,15 @@ final class VoiceController: ObservableObject {
         guard standbyArmed else { return }
         disarmStandby()
         Self.voiceLog.notice("wake_word heard")
-        let quiet = timings.wakeSessionQuiet
+        let timings = self.timings
         wakeSession = Task { [weak self] in
-            var lastActive = ProcessInfo.processInfo.systemUptime
+            var clock = WakeSessionClock(opened: ProcessInfo.processInfo.systemUptime, timings: timings)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, !Task.isCancelled else { return }
                 let now = ProcessInfo.processInfo.systemUptime
-                if self.wakeSessionBusy { lastActive = now }
-                if now - lastActive >= quiet {
+                if clock.shouldClose(busy: self.wakeSessionBusy, lastReply: self.lastReplyFinished, now: now) {
+                    Self.voiceLog.notice("wake_session closed open_s=\(now - clock.opened, format: .fixed(precision: 1))")
                     self.stopHandsFree(state: .off)
                     self.armStandby()
                     return
