@@ -36,13 +36,26 @@ extension WindowControls.Attributes {
     }
 }
 
+extension DesktopSpaceSwitch.System {
+    /// No Mission Control to read or open, no display, no space layout
+    /// and no enabled shortcut, so a desktop lane refuses before touching
+    /// the Dock or posting a key.
+    static var inert: Self {
+        Self(roots: { [] }, children: { _ in nil }, attr: { _, _ in nil },
+             pressable: { _ in false }, press: { _ in false }, displayID: { nil },
+             labels: { nil }, openMissionControl: { throw CocoaError(.featureUnsupported) },
+             pause: {}, watchSpaceChange: { { _ in false } }, layout: { nil },
+             shortcutEnabled: { _ in false })
+    }
+}
+
 extension DriveLoop {
     /// `DriveLoop.init` with every Mac-facing default replaced by an inert
     /// one: no running or installed apps, no frontmost app or window, no
-    /// AX reads, no media keys and no app activation. A test states what
-    /// it needs by passing the seam; nothing it doesn't name is read from
-    /// the Mac running the suite. The labels mirror the init, so a call
-    /// site switches by name alone.
+    /// AX reads, no media keys, no app activation and no Mission Control.
+    /// A test states what it needs by passing the seam; nothing it doesn't
+    /// name is read from the Mac running the suite. The labels mirror the
+    /// init, so a call site switches by name alone.
     static func inert(
         call: @escaping Call, choose: @escaping Choose,
         ask: AskFn?, granted: @escaping () -> Bool,
@@ -72,7 +85,7 @@ extension DriveLoop {
         windowControlButtonsInWindow: ((pid_t, Int) -> [WindowControls.Button])? = nil,
         windowControlPressInWindow: ((WindowControls.Kind, pid_t, Int) -> Bool)? = nil,
         windowAttributes: WindowControls.Attributes = .inert,
-        desktopSpaces: DesktopSpaceSwitch.System = .live,
+        desktopSpaces: DesktopSpaceSwitch.System = .inert,
         overlayDispatch: ((FastAction.OverlayVerb,
                            [(frame: CGRect, label: String)],
                            CGPoint?) async -> DriveResult?)? = nil,
