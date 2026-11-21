@@ -27,6 +27,10 @@ final class Config: ObservableObject {
     /// People then never handle a key; the two above are a developer
     /// override.
     let hosted: HostedCredentials?
+    /// Basic voice (KAR-75 L10): this month's Live voice is used up, so the
+    /// service's paid Jev and Responses routes are held until it renews.
+    /// `LiveAllowance` sets it; a developer's own keys aren't affected.
+    var basicVoice = false
     var hostedCredentialsConfigured: Bool { hosted != nil }
     /// A key Jarvis needs is missing and can only be typed into Settings →
     /// Advanced, because this build has no credential service.
@@ -52,7 +56,7 @@ final class Config: ObservableObject {
     func jevRoute() async throws -> ServiceRoute? {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { return ServiceRoute(url: JevClient.systemOneURL, bearer: key) }
-        guard let hosted else { return nil }
+        guard let hosted, !basicVoice else { return nil }
         return ServiceRoute(url: hosted.jevURL, bearer: try await hosted.installToken())
     }
 
@@ -60,7 +64,7 @@ final class Config: ObservableObject {
     func responsesRoute() async throws -> ServiceRoute? {
         let key = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { return ServiceRoute(url: TerraClient.endpoint, bearer: key) }
-        guard let hosted else { return nil }
+        guard let hosted, !basicVoice else { return nil }
         return ServiceRoute(url: hosted.responsesURL, bearer: try await hosted.installToken())
     }
 
@@ -86,7 +90,7 @@ final class Config: ObservableObject {
     /// token already registered.
     var jevEnvironment: [String: String] {
         if !apiKey.isEmpty { return ["TYPESAFE_API_KEY": apiKey] }
-        guard let hosted, let token = hosted.storedToken else { return [:] }
+        guard let hosted, !basicVoice, let token = hosted.storedToken else { return [:] }
         return ["TYPESAFE_API_KEY": token, "TYPESAFE_BASE_URL": hosted.jevURL.absoluteString]
     }
 

@@ -119,6 +119,9 @@ struct SettingsView: View {
             listening
             replies
             if config.voiceLive {
+                SettingsSection(title: "Live voice", symbol: "waveform") {
+                    LiveUsageSection(allowance: .shared)
+                }
                 SettingsSection(title: "Alerts", symbol: "bell") {
                     ProactiveSettingsSection(settings: .shared)
                 }
