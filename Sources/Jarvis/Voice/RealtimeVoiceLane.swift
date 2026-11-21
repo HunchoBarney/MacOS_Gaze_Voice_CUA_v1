@@ -641,7 +641,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
             let target: String?
             if admission.intent == "open" { target = admission.slots["target_id"] }
             else { target = speechSession.boundContext.targetAppID }
-            let command = VoiceAdmissionPolicy.commandText(admission.text, context: speechSession.boundContext)
+            let command = DriveLoop.repairsOffer(admission.text)
+                ? admission.text
+                : VoiceAdmissionPolicy.commandText(admission.text, context: speechSession.boundContext)
             output = await commandHandler(command, target, admission.slots["text"],
                                           admission.text, [], admission.turn.id)
         }
