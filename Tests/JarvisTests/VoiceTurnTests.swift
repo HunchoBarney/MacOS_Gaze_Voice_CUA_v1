@@ -253,12 +253,64 @@ final class VoiceTurnTests: XCTestCase {
         XCTAssertFalse(authority.request(admission: remote, purpose: .reasoning, inputItemID: "audio-1"))
     }
 
-    private func remoteAdmission(generation: Int = 1) -> VoiceAdmission {
+    func testOneOpenRequestAtATime() {
+        var authority = VoiceResponseAuthority()
+        let connection = UUID()
+        authority.connect(connection)
+        XCTAssertTrue(authority.request(admission: remoteAdmission(), purpose: .reasoning, inputItemID: "first"))
+        XCTAssertFalse(authority.request(admission: remoteAdmission(generation: 2), purpose: .reasoning,
+                                         inputItemID: "second"), "a second turn waits for the open response")
+        XCTAssertFalse(authority.request(admission: nil, purpose: .outcomeOnly, inputItemID: nil))
+    }
+
+    func testANewConnectionDropsTheOpenRequest() {
+        var authority = VoiceResponseAuthority()
+        let old = UUID(), new = UUID()
+        authority.connect(old)
+        XCTAssertTrue(authority.request(admission: remoteAdmission(), purpose: .reasoning, inputItemID: "first"))
+        authority.connect(new)
+        XCTAssertFalse(authority.bindCreated(connection: new, responseID: "r-new"),
+                       "the old socket's request can't bind a response on the new one")
+        XCTAssertFalse(authority.matches(connection: new, responseID: "r-new"))
+        XCTAssertTrue(authority.request(admission: remoteAdmission(generation: 2), purpose: .reasoning,
+                                        inputItemID: "second"))
+    }
+
+    func testThePurposeMustMatchTheTurnMode() {
+        var authority = VoiceResponseAuthority()
+        authority.connect(UUID())
+        XCTAssertFalse(authority.request(admission: remoteAdmission(), purpose: .typed, inputItemID: "spoken"))
+        let typed = remoteAdmission(mode: .typed)
+        XCTAssertFalse(authority.request(admission: typed, purpose: .reasoning, inputItemID: "typed"))
+        XCTAssertTrue(authority.request(admission: typed, purpose: .typed, inputItemID: "typed"))
+    }
+
+    func testARealtimeTurnRequestsOnlyOnItsOwnConnectionAndItem() {
+        let connection = UUID()
+        let input = VoiceRealtimeInput(connectionID: connection, itemID: "input-1")
         var gate = VoiceTurnGate()
-        for _ in 1..<generation { _ = gate.begin(mode: .command, ready: true, now: 0) }
-        let turn = gate.begin(mode: .command, ready: true, now: 0)
+        let turn = gate.begin(mode: .command, ready: true, now: 0, realtimeConnection: connection)
         _ = gate.acceptFrame(turn, sequence: 0)
         _ = gate.release(turn, now: 1)
-        return gate.finalize(turn, text: "what is this", proposal: .remote(), drainedFrames: 1, now: 1.1)!
+        XCTAssertTrue(gate.acknowledgeRealtimeCommit(turn, input: input, now: 1))
+        let admission = gate.finalize(turn, text: "what is this", proposal: .remote(), drainedFrames: 1,
+                                      now: 1.1, realtimeInput: input)!
+        var elsewhere = VoiceResponseAuthority()
+        elsewhere.connect(UUID())
+        XCTAssertFalse(elsewhere.request(admission: admission, purpose: .reasoning, inputItemID: "input-1"))
+        var authority = VoiceResponseAuthority()
+        authority.connect(connection)
+        XCTAssertFalse(authority.request(admission: admission, purpose: .reasoning, inputItemID: "input-2"))
+        XCTAssertTrue(authority.request(admission: admission, purpose: .reasoning, inputItemID: "input-1"))
+    }
+
+    private func remoteAdmission(generation: Int = 1, mode: VoiceCaptureMode = .command) -> VoiceAdmission {
+        var gate = VoiceTurnGate()
+        for _ in 1..<generation { _ = gate.begin(mode: .command, ready: true, now: 0) }
+        let turn = gate.begin(mode: mode, ready: true, now: 0)
+        let frames = mode == .typed ? 0 : 1
+        if frames > 0 { _ = gate.acceptFrame(turn, sequence: 0) }
+        _ = gate.release(turn, now: 1)
+        return gate.finalize(turn, text: "what is this", proposal: .remote(), drainedFrames: frames, now: 1.1)!
     }
 }

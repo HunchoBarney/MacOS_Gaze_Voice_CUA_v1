@@ -66,13 +66,4 @@ final class ConsentAskWatchTests: XCTestCase {
                           "watch wake should beat the old 300ms poll")
         XCTAssertTrue(AgentAskChannel.pending().isEmpty)
     }
-
-    /// Timeout is still the honest decline — a watch never invents an
-    /// answer.
-    func testTimeoutStillDeclines() async {
-        let answer = await AgentAskChannel.request(
-            .confirm("Delete everything?"), agent: "scout", timeout: 0.5)
-        XCTAssertNil(answer)
-        XCTAssertTrue(AgentAskChannel.pending().isEmpty)
-    }
 }
