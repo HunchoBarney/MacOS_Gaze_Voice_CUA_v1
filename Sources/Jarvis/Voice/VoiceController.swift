@@ -44,8 +44,44 @@ struct VoiceTimings {
     var warning: TimeInterval = 50
     var limit: TimeInterval = 55
     var dismissal: TimeInterval = 1.5
-    /// A wake-word session closes after this long with nothing happening.
+    /// A wake-word session closes after this long with nothing happening,
+    /// until Jarvis has answered something.
     var wakeSessionQuiet: TimeInterval = 8
+    /// After each reply the session stays open this long for a follow-up.
+    var wakeFollowUp: TimeInterval = 90
+    /// No wake session outlives this; then the wake word is needed again.
+    var wakeSessionCap: TimeInterval = 30 * 60
+}
+
+/// When a wake-word session closes. Until Jarvis has answered, it closes
+/// after `wakeSessionQuiet` with nothing happening, so a false wake costs
+/// seconds. Each finished reply opens a `wakeFollowUp` window, and only a
+/// reply refreshes it: speech that gets no answer doesn't. Past
+/// `wakeSessionCap` from the wake it closes the moment nothing is happening.
+struct WakeSessionClock {
+    let opened: TimeInterval
+    let timings: VoiceTimings
+    private var lastActive: TimeInterval
+    private var lastReply: TimeInterval?
+    private var replying = false
+
+    init(opened: TimeInterval, timings: VoiceTimings) {
+        self.opened = opened
+        self.timings = timings
+        lastActive = opened
+    }
+
+    mutating func shouldClose(busy: Bool, replying speaking: Bool, now: TimeInterval) -> Bool {
+        if replying, !speaking { lastReply = now }
+        replying = speaking
+        if busy || speaking {
+            lastActive = now
+            return false
+        }
+        if now - opened >= timings.wakeSessionCap { return true }
+        guard let lastReply else { return now - lastActive >= timings.wakeSessionQuiet }
+        return now >= max(lastReply + timings.wakeFollowUp, lastActive + timings.wakeSessionQuiet)
+    }
 }
 
 @MainActor
@@ -1052,15 +1088,15 @@ final class VoiceController: ObservableObject {
         guard standbyArmed else { return }
         disarmStandby()
         Self.voiceLog.notice("wake_word heard")
-        let quiet = timings.wakeSessionQuiet
+        let timings = self.timings
         wakeSession = Task { [weak self] in
-            var lastActive = ProcessInfo.processInfo.systemUptime
+            var clock = WakeSessionClock(opened: ProcessInfo.processInfo.systemUptime, timings: timings)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, !Task.isCancelled else { return }
                 let now = ProcessInfo.processInfo.systemUptime
-                if self.wakeSessionBusy { lastActive = now }
-                if now - lastActive >= quiet {
+                if clock.shouldClose(busy: self.wakeSessionBusy, replying: self.handsFreeSpeaking, now: now) {
+                    Self.voiceLog.notice("wake_session closed open_s=\(now - clock.opened, format: .fixed(precision: 1))")
                     self.stopHandsFree(state: .off)
                     self.armStandby()
                     return

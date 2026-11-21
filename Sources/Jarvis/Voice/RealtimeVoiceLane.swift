@@ -315,6 +315,17 @@ final class RealtimeVoiceLane: SpeechCapturing {
         didSet { input.gate.listen(wakeListener) }
     }
     private var hardware: MicrophoneInput.Ready?
+    /// Opens the selected microphone for listening and conversations.
+    /// Internal for tests: a fixture input stands in for the hardware, so
+    /// recovery runs without a microphone.
+    lazy var prepareInput: @MainActor (String?, Bool, @escaping @Sendable () -> Void) async throws -> MicrophoneInput.Ready = {
+        [input] uid, voiceProcessing, interrupted in
+        guard Permission.microphone.isGranted else {
+            throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.")
+        }
+        return try await input.prepare(device: MicrophoneCatalog.resolve(uid: uid), voiceProcessing: voiceProcessing,
+                                       interrupted: interrupted)
+    }
     private var duplexRequested = false
     private var desiredInputMode: RealtimeVoiceClient.InputMode = .conversation
     private var conversationFeed: ConvertedAudioFeed?
@@ -1326,12 +1337,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
             defer { if self.preparationID == token { self.preparation = nil } }
             do {
                 try Task.checkCancellation()
-                guard Permission.microphone.isGranted else { throw VoiceError("Microphone access is needed. It's under Privacy & Security, then Microphone.") }
-                let device = try MicrophoneCatalog.resolve(uid: uid)
                 let inputStarted = ProcessInfo.processInfo.systemUptime
                 Self.log.notice("prepare stage=microphone_input begin")
-                let hardware = try await self.input.prepare(device: device, voiceProcessing: self.duplexRequested,
-                                                            interrupted: self.inputInterrupted(token: token))
+                let hardware = try await self.prepareInput(uid, self.duplexRequested, self.inputInterrupted(token: token))
                 Self.log.notice("prepare stage=microphone_input elapsed_ms=\((ProcessInfo.processInfo.systemUptime - inputStarted) * 1000)")
                 try Task.checkCancellation()
                 try await self.ensureConnected(inputMode: self.desiredInputMode)
@@ -1498,9 +1506,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             input.gate.close(ifCurrent: feed)?.finish()
         }
         do {
-            let device = try MicrophoneCatalog.resolve(uid: selectedUID)
-            let hardware = try await input.prepare(device: device, voiceProcessing: duplexRequested,
-                                                   interrupted: inputInterrupted(token: token))
+            let hardware = try await prepareInput(selectedUID, duplexRequested, inputInterrupted(token: token))
             guard conversation.id == session, preparationID == token, conversationGate === speechGate,
                   let outputs = hardware.playback else { throw CancellationError() }
             self.hardware = hardware
