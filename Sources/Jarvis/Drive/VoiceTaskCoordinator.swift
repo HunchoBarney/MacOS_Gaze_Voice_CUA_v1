@@ -182,6 +182,11 @@ final class VoiceTaskCoordinator {
     }
 
     private let config: Config
+    /// "Remember X", "who's X?" and "forget that", answered only while
+    /// `voice.live` is on (JARA-49 L8).
+    var memoryCommands = MemoryCommands()
+    /// Where finished requests are summarised while `voice.live` is on.
+    var memoryStore: () -> MemoryStore = { .shared }
     private let jevRoute: () async throws -> ServiceRoute?
     private let resolver: AppResolver
     private let commandDriver: DriveLoop.Call?
@@ -893,6 +898,11 @@ final class VoiceTaskCoordinator {
             feed.add(.note, "showed the command cheat sheet")
             return VoiceToolResult(status: VoiceToolResult.Status.ok,
                                    say: Self.helpSummary(gaze: gaze)).encoded()
+        }
+        // Memory intents answer here, before the activity feed hears them,
+        // so a forgotten memory leaves no copy in the task log.
+        if config.voiceLive, let say = memoryCommands.handle(trimmed) {
+            return VoiceToolResult(status: VoiceToolResult.Status.ok, say: say).encoded()
         }
         if tasks.contains(where: { $0.active && $0.request.lowercased() == normalized }) {
             return VoiceToolResult(status: VoiceToolResult.Status.refused,
@@ -1844,6 +1854,12 @@ final class VoiceTaskCoordinator {
         wakeConversationWaiters(work.id, .finished(outcome))
         work.message = say
         work.worker = nil
+        // A literal-text task can carry anything the user dictated, so
+        // only plain requests are kept as past requests.
+        if config.voiceLive, case .done = outcome, !work.isAgentAsk, work.spec.values.isEmpty {
+            let outcomeText = say.isEmpty ? "Done." : OutcomeWording.readable(say)
+            try? memoryStore().recordRequest("\(work.request) — \(outcomeText)")
+        }
         if selectedID == nil { selectedID = work.id }
         // Voice-turn tasks get their outcome spoken through the sink —
         // but a dead realtime socket makes that silence, so the earcon
