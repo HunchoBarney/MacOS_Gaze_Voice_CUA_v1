@@ -1397,12 +1397,13 @@ actor DriveLoop {
     }
 
     /// The undo route for a press Jarvis chose itself, or nil. It needs
-    /// someone to hear the offer, no earlier unasked press this task, a known
+    /// someone to hear the offer, words that are surely the person's (D3),
+    /// no earlier unasked press this task, a known
     /// app and window, a registry route, and an app that has an undo
     /// command at all. Archive offers undo only when the person's words
     /// didn't ask for it.
     private func undoPlan(tool: String, args: [String: JSONValue], label: String) async -> UndoPlan? {
-        guard ask != nil, !unaskedPressSpent,
+        guard ask != nil, !unaskedPressSpent, !speakerUnverified,
               let pid = args["pid"]?.integer, let windowID = args["window_id"]?.integer,
               let bundleID = consentAppBundleID,
               let route = UndoRegistry.route(tool: tool, args: args, label: label, bundleID: bundleID,

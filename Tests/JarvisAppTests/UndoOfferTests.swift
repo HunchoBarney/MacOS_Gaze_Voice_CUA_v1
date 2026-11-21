@@ -249,6 +249,19 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertEqual(script.asks.value, 1, "a second trash in the same task asks")
     }
 
+    func testWordsThatMayNotBeThePersonsStillAskBeforeAnUndoablePress() async throws {
+        let script = Script([copyItem, copyItem, trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        await loop.bindSpokenGoal("tidy my desktop", speakerVerified: false)
+        var confirmed = false
+        _ = try await loop.dispatch("click", target, elementText: "Move to Trash", denied: [], confirmed: &confirmed)
+        XCTAssertEqual(script.asks.value, 1, "D3: an unverified speaker's task asks before a delete, undo or not")
+        let result = await loop.settle(.done, DriveTask(goal: "tidy my desktop"), [], confirmedAny: true)
+        XCTAssertNil(result.spoken)
+        XCTAssertNil(offers.current)
+    }
+
     func testAPressThatLeftNoOfferStillSpendsTheTasksUnaskedPress() async throws {
         let script = Script([trashItem])
         let offers = UndoOffers()
