@@ -11,7 +11,10 @@ enum MemoryIntent: Equatable {
     case forgetLast
 
     static func parse(_ utterance: String) -> MemoryIntent? {
-        var text = utterance.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = utterance
+            .replacingOccurrences(of: "[‘’]", with: "'", options: .regularExpression)
+            .replacingOccurrences(of: "[“”]", with: "\"", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         while let last = text.last, ".?!,".contains(last) { text.removeLast() }
         let lead = ["hey, jarvis", "hey jarvis", "please", "can you", "could you", "would you", "jarvis"]
         while let polite = lead.first(where: {
