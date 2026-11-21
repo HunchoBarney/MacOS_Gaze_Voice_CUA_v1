@@ -2,3 +2,5 @@ node_modules/
 dist/
 public/renders/
 *.tsbuildinfo
+sample/renders/redesign/
+sample/renders/manifest.redesign.*.json

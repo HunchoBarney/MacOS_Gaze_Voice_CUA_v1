@@ -1,0 +1,98 @@
+{
+  "A-listening": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.029
+  },
+  "A-thinking": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 1.964
+  },
+  "A-speaking": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.03
+  },
+  "B-listening": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.027
+  },
+  "B-thinking": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.015
+  },
+  "B-speaking": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.028
+  },
+  "C-listening": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.03
+  },
+  "C-thinking": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.016
+  },
+  "C-speaking": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.018
+  },
+  "A-flow": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 3.004
+  },
+  "B-flow": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 3.016
+  },
+  "C-flow": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.966
+  },
+  "B-listening-rm": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.013
+  },
+  "B-thinking-rm": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.012
+  },
+  "B-speaking-rm": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 2.014
+  },
+  "scene-desk": {
+    "width": 480,
+    "height": 300,
+    "fps": 30,
+    "duration": 3.002
+  }
+}
