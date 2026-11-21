@@ -28,6 +28,9 @@ enum DelegationSpineReply: Sendable, Equatable {
 @MainActor
 protocol DelegationSpine: AnyObject {
     func begin(_ request: DelegatedRequest) async -> DelegationSpineReply
+    /// Waits for work `begin` started to end, however it ended, and
+    /// returns its last line; nil when there is no such work.
+    func finished(_ request: DelegatedRequest) async -> String?
 }
 
 /// Turns GPT-Live client delegations into Jarvis requests, once each.
@@ -113,7 +116,7 @@ final class DelegationBridge {
         case .inputTranscript(let delta):
             guard sessionID != nil else { return }
             input.append(delta)
-            if !waiting.isEmpty, Self.takesBack(delta.text, fromStart: true) {
+            if !waiting.isEmpty, Self.takesBack(delta.text, fromStart: true), Self.typedLiteral(pendingText) == nil {
                 stopWaiting(through: delta.endMs)
                 return
             }
@@ -149,6 +152,12 @@ final class DelegationBridge {
         stopWaiting(through: heardMs)
     }
 
+    /// The words of this session no request has taken yet.
+    private var pendingText: String {
+        let start = sessionID.map { ledger.consumed(session: $0) } ?? 0
+        return ([preface ?? ""] + input.filter { $0.startMs >= start }.map(\.text)).joined(separator: " ")
+    }
+
     /// Session ms up to which the input transcript has arrived.
     private var heardMs: Int { input.map(\.endMs).max() ?? 0 }
 
@@ -174,7 +183,6 @@ final class DelegationBridge {
         guard let session = sessionID else { return }
         let key = DelegationKey(liveSessionID: session, delegationID: delegation.id)
         guard ledger.admit(key) else { return }
-        for earlier in waiting { settle(earlier.key) }
         waiting.append((key, delegation.offsetMs, speakerVerified))
         if heardMs >= delegation.offsetMs + timing.settleMs {
             settle(key)
@@ -189,16 +197,21 @@ final class DelegationBridge {
 
     /// The commit point. The ledger records the request before the spine
     /// sees it; from here on a "stop" is a new request, not a take-back.
+    /// Requests that arrived earlier settle first, each with its own words.
     private func settle(_ key: DelegationKey) {
+        guard let index = waiting.firstIndex(where: { $0.key == key }) else { return }
+        for earlier in waiting[..<index] { settle(earlier.key) }
         guard let index = waiting.firstIndex(where: { $0.key == key }) else { return }
         let (_, offsetMs, verified) = waiting.remove(at: index)
         let end = offsetMs + timing.settleMs
-        let words = ledger.consume(session: key.liveSessionID, through: end).map { start in
-            input.filter { $0.startMs >= start && $0.startMs < end }
-        } ?? []
+        let start = ledger.consumed(session: key.liveSessionID)
+        let words = input.filter { $0.startMs >= start && $0.startMs < end }
         let text = ([preface ?? ""] + words.map(\.text)).joined(separator: " ")
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        preface = nil
+        if !text.isEmpty {
+            _ = ledger.consume(session: key.liveSessionID, through: end)
+            preface = nil
+        }
         if text.isEmpty {
             _ = ledger.decline(key, reason: "nothing new")
             if running.isEmpty {
@@ -208,7 +221,8 @@ final class DelegationBridge {
             }
             return
         }
-        if Self.takesBack(text, fromStart: false) {
+        if Self.takesBack(Self.typedLiteral(text).map { text.replacingOccurrences(of: $0, with: " ") } ?? text,
+                          fromStart: false) {
             _ = ledger.decline(key, reason: "taken back")
             send(.thinking, "Nothing was done: the person took that back or changed it mid-sentence. If they still want something, ask what.", for: key)
             return
@@ -228,11 +242,14 @@ final class DelegationBridge {
             var referent: String?
             if let wordTime, let resolveReferent { referent = await resolveReferent(wordTime) }
             if let referent { self.send(.thinking, referent, for: key) }
-            let reply = await self.spine.begin(DelegatedRequest(id: id, text: text, speakerVerified: verified,
-                                                                referent: referent))
-            switch reply {
+            let request = DelegatedRequest(id: id, text: text, speakerVerified: verified, referent: referent)
+            switch await self.spine.begin(request) {
             case .started(let say):
                 self.send(.thinking, "Started: \(say). It isn't finished; don't say it's done until the result arrives.", for: key)
+                if let last = await self.spine.finished(request), self.running.removeValue(forKey: id) != nil,
+                   !last.isEmpty {
+                    self.send(.commentary, last, for: key)
+                }
             case .answered(let say):
                 self.running[id] = nil
                 self.send(.commentary, say, for: key)
@@ -244,6 +261,7 @@ final class DelegationBridge {
         guard !waiting.isEmpty else { return }
         let stopped = waiting
         waiting = []
+        preface = nil
         for entry in stopped {
             _ = ledger.consume(session: entry.key.liveSessionID, through: endMs)
             guard ledger.decline(entry.key, reason: "barge-in") else { continue }
@@ -274,6 +292,13 @@ final class DelegationBridge {
     private func transmit(_ append: LiveAppend, retried: Bool) {
         sent = Array((sent + [(append, retried)]).suffix(16))
         live.send(append)
+    }
+
+    /// What a "type …" request would type, which is data: its words never
+    /// take the request back.
+    private static func typedLiteral(_ text: String) -> String? {
+        guard let parsed = FastAction.parse(text), case .type(let payload) = parsed.action.body else { return nil }
+        return payload
     }
 
     private static let deicticWords: Set<String> = ["this", "that", "these", "those", "here", "it"]
@@ -341,11 +366,26 @@ extension VoiceTaskCoordinator: DelegationSpine {
     /// Words that answer a parked question go to that question; anything
     /// else is a new voice task, where the memory intents also live.
     func begin(_ request: DelegatedRequest) async -> DelegationSpineReply {
-        if tasks.contains(where: \.awaitingAnswer), !VoiceAdmissionPolicy.explicitNewRequest(request.text) {
-            return DelegationBridge.reply(fromPayload: await respondToTask(request.text) ?? "")
+        let parked = tasks.filter(\.awaitingAnswer)
+        if !parked.isEmpty, !VoiceAdmissionPolicy.explicitNewRequest(request.text) {
+            var target = parked.count == 1 ? parked.first : nil
+            if target == nil, case .index(let index) = Self.parkedSelection(in: request.text, count: parked.count) {
+                target = parked[index]
+            }
+            guard let target else {
+                let names = parked.enumerated().map { "\($0.offset + 1)) \($0.element.label)" }.joined(separator: ", ")
+                return .answered("Nothing was answered: more than one thing is waiting (\(names)). Ask which one they mean.")
+            }
+            return DelegationBridge.reply(fromPayload: await respondToTask(request.text, task: target.id.uuidString) ?? "")
         }
         return DelegationBridge.reply(fromPayload: await beginVoiceTask(
             request.text, transcriptHint: request.referent, captureID: request.id,
             speakerVerified: request.speakerVerified))
+    }
+
+    func finished(_ request: DelegatedRequest) async -> String? {
+        guard let work = tasks.first(where: { $0.captureID == request.id }),
+              case .finished? = await waitForConversationBoundary(work.id, throughQuestions: true) else { return nil }
+        return work.message
     }
 }
