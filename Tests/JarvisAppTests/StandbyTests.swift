@@ -72,11 +72,11 @@ final class StandbyTests: XCTestCase {
         users.otherApp = true
         let (controller, wake) = standby(microphoneUsers: users)
         controller.armStandby()
-        await poll(seconds: 3) { controller.handsFreeState != .standby }
+        await controller.checkOtherMicrophoneUse()
         XCTAssertEqual(controller.handsFreeState, .unavailable("Paused while another app is using the microphone."))
         XCTAssertEqual(wake.stops, 1)
         users.otherApp = false
-        await poll(seconds: 5) { controller.handsFreeState == .standby }
+        await controller.checkOtherMicrophoneUse()
         XCTAssertEqual(controller.handsFreeState, .standby, "Standby comes back when the other app lets go")
         XCTAssertEqual(wake.starts, 2)
     }
