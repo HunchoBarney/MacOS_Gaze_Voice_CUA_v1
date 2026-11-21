@@ -19,4 +19,19 @@ final class AudioTestGuardTests: XCTestCase {
         XCTAssertTrue(player.playbackIdle)
         XCTAssertFalse(player.opensOutputDevice)
     }
+
+    func testStoppingSilentPlaybackFreesItForTheNextReplyAtOnce() async throws {
+        let speaker = SilentPlayback().route
+        let next = expectation(description: "the next reply plays")
+        speaker.schedule(Data(count: 48_000)) {}
+        speaker.play()
+        try await Task.sleep(for: .milliseconds(50))
+        speaker.stop()
+        let started = ProcessInfo.processInfo.systemUptime
+        speaker.schedule(Data(count: 4_800)) { next.fulfill() }
+        speaker.play()
+        await fulfillment(of: [next], timeout: 5)
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - started, 0.6,
+                          "a stopped 1 s buffer must not hold back the next 100 ms reply")
+    }
 }

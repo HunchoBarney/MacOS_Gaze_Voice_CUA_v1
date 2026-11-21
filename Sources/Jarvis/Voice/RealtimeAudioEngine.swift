@@ -450,7 +450,7 @@ final class SilentPlayback: @unchecked Sendable {
                 }
             },
             play: { [self] in queue.async { [self] in playing = true; drain() } },
-            stop: { [self] in queue.async { [self] in playing = false; pending = []; epoch += 1 } })
+            stop: { [self] in queue.async { [self] in playing = false; draining = false; pending = []; epoch += 1 } })
     }
 
     private func drain() {
@@ -458,8 +458,9 @@ final class SilentPlayback: @unchecked Sendable {
         draining = true
         let next = pending.removeFirst(), started = epoch
         queue.asyncAfter(deadline: .now() + .microseconds(Int(next.milliseconds * 1000))) { [self] in
+            guard started == epoch else { return }
             draining = false
-            if started == epoch { next.done() }
+            next.done()
             drain()
         }
     }
