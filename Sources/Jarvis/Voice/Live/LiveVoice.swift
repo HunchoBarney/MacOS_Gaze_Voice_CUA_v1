@@ -41,7 +41,6 @@ final class LiveVoice {
     private let makeSession: @MainActor (_ name: String) -> LiveSession
     private let now: () -> TimeInterval
     private var session: LiveSession?
-    private var utterance = ""
     private var wokeAt: TimeInterval?
     private var replied = false
     private var timer: Task<Void, Never>?
@@ -91,7 +90,6 @@ final class LiveVoice {
         microphone.relay.capture(since: moment)
         wokeAt = moment
         replied = false
-        utterance = ""
         let session = makeSession(listening.name)
         self.session = session
         session.onEvent = { [weak self, weak session] event in
@@ -149,18 +147,14 @@ final class LiveVoice {
         let at = now()
         switch event {
         case .inputTranscript(let delta):
-            utterance += delta.text
-            apply(listening.handle(.heard(utterance: utterance), at: at))
+            apply(listening.handle(.heard(delta.text), at: at))
         case .outputTranscript:
             noteReply("reply")
-            utterance = ""
             apply(listening.handle(.answered, at: at))
         case .delegation:
             noteReply("delegation")
-            utterance = ""
             apply(listening.handle(.delegated, at: at))
         case .paused:
-            utterance = ""
             apply(listening.handle(.paused, at: at))
         case .resumed:
             apply(listening.handle(.resumed, at: at))
