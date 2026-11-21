@@ -23,7 +23,7 @@ struct GuideHint: Sendable, Equatable {
     var detail: String? = nil
     /// What a consequential press does, after "This one": "sends it to Linda".
     /// A recipe names it for presses the consequence words miss, such as
-    /// Update Now or Print.
+    /// Print.
     var effect: String? = nil
     /// What the step should change.
     var expect: GuideExpectation? = nil

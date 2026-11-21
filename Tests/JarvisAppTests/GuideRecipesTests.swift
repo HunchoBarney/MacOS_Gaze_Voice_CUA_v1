@@ -127,15 +127,29 @@ final class GuideRecipesTests: XCTestCase {
     }
 
     func testRecipeNamesTheEffectOfPressesTheConsequenceWordsMiss() {
+        let print = Recipe.printing.steps[1]
+        let step = StepPhrasing.step(number: 2, action: .element(element("Print")), window: Self.window,
+                                     scene: [], hint: print)
+        XCTAssertNil(step.consequence)
+        XCTAssertEqual(StepPhrasing.opening(step, slow: false),
+                       "This one prints it, which uses paper and ink. Click the Print button when you're ready.")
+        let plain = StepPhrasing.step(number: 2, action: .element(element("Print")), window: Self.window,
+                                      scene: [], hint: nil)
+        XCTAssertNil(plain.consequenceLine, "without the recipe the step reads as before")
+    }
+
+    func testRecipeEffectWordingOverridesTheGenericConsequenceLine() {
         let update = Recipe.updates.steps[0]
         let step = StepPhrasing.step(number: 3, action: .element(element("Update Now")), window: Self.window,
                                      scene: [], hint: update)
-        XCTAssertNil(step.consequence)
+        XCTAssertEqual(step.consequence, .restart)
         XCTAssertEqual(StepPhrasing.opening(step, slow: false),
                        "This one installs the update and restarts your Mac. Click the Update Now button when you're ready.")
         let plain = StepPhrasing.step(number: 3, action: .element(element("Update Now")), window: Self.window,
                                       scene: [], hint: nil)
-        XCTAssertNil(plain.consequenceLine, "without the recipe the step reads as before")
+        XCTAssertEqual(plain.consequence, .restart)
+        XCTAssertNotNil(plain.consequenceLine)
+        XCTAssertNotEqual(plain.consequenceLine, StepPhrasing.opening(step, slow: false))
     }
 
     func testHintContextTellsJevTheRecipeAndTheLink() {
