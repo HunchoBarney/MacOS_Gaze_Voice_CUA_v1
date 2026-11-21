@@ -38,25 +38,27 @@ export const COMPONENTS = [
     title: "Camera position arrow",
     area: "Eye tracker",
     owner: "JARA-55",
-    summary: "A yellow arrow and \"Camera position\" label under the webcam, shown for 5 s on every tracker launch and through the calibration countdown.",
+    summary: "A yellow arrow and \"Camera position\" label under the webcam, shown for 5 s when asked for from the menu (or pinned with --show-camera-marker) and through the calibration countdown.",
     sources: [
       [APP, "className={`camera-marker"],
-      [APP, "Startup camera hint"],
+      [APP, "const flashCameraMarker"],
       [CSS, ".camera-marker {"],
       [CSS, ".camera-arrow-shape {"]
     ],
     states: [
       {
         id: "startup",
-        title: "Launch (first 5 s)",
+        title: "Shown from the menu (5 s)",
         run: async (fx) => {
+          await fx.menu("show_marker");
           await fx.advance(400);
         },
         expect: ".camera-marker:not(.faded)",
         crop: { selectors: [".camera-marker"], pad: 28 },
         clip: {
-          caption: "The 600 ms opacity fade at 5 s after launch",
+          caption: "The 600 ms opacity fade 5 s after it is shown",
           run: async (fx) => {
+            await fx.menu("show_marker");
             await fx.advance(4900);
           },
           durationMs: 900,
@@ -245,7 +247,7 @@ export const COMPONENTS = [
     summary: "The first-run card over a dark scrim when no calibration exists: \"Tune the tracker to your eyes\" with Calibrate and Not now.",
     sources: [
       [APP, "className=\"onboarding-card\""],
-      [APP, "First run: no calibration on disk"],
+      [APP, "First use: no calibration"],
       [CSS, ".onboarding-card {"],
       [CSS, ".onboarding-actions button.primary {"]
     ],
