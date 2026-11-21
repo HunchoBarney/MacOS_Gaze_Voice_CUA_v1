@@ -101,6 +101,11 @@ public struct DriveTask: Sendable {
     /// raised once at drive start. Element-scoped and explicitly
     /// background work leaves this false so the user's front app survives.
     public var foreground: Bool
+    /// Whether the goal is surely the person's own words. False for a
+    /// GPT-Live request after a Standby resume or in reply to an alert,
+    /// where anyone in the room could have spoken: the words then name no
+    /// consequential press, so send, delete, buy or post asks first (D3).
+    public var speakerVerified = true
     public init(goal: String, application: String? = nil, pid: Int? = nil,
                 windowID: Int? = nil, windowName: String? = nil,
                 previousContext: String? = nil,

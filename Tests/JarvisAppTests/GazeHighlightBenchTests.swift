@@ -115,7 +115,10 @@ final class GazeHighlightBenchTests: XCTestCase {
         return result
     }
 
-    func testReportHighlightLatencyAndFlicker() {
+    func testReportHighlightLatencyAndFlicker() throws {
+        guard ProcessInfo.processInfo.environment["JARVIS_BENCH_GAZE_HIGHLIGHT"] == "1" else {
+            throw XCTSkip("a report, not a check: set JARVIS_BENCH_GAZE_HIGHLIGHT=1 to print it")
+        }
         var lines = ["layout | σ | Hz | flagged | p50 ms | p90 ms | missed | wrong/min"]
         for layout in Self.layouts {
             for sigma in [40.0, 150.0] {

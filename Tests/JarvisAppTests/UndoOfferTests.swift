@@ -451,6 +451,17 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertNotNil(undo)
     }
 
+    func testAnUndoThatMayNotBeThePersonsDoesNotRunTheOffer() async {
+        let script = Script([trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        offered(offers, at: script.now.value)
+        await loop.bindSpokenGoal("undo that", speakerVerified: false)
+        let claimed = await loop.claimOffer(for: "undo that")
+        XCTAssertNil(claimed, "D3: only the person's own words take back what Jarvis did")
+        XCTAssertNil(offers.current)
+    }
+
     func testUndoRefusesAfterThePersonTypedOrClicked() async {
         let script = Script([trashItem, Item(menu: "Edit", title: "Redo Move", enabled: true)])
         let offers = UndoOffers()

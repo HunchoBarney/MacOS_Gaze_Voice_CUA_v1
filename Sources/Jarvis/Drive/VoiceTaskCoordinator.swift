@@ -814,6 +814,7 @@ final class VoiceTaskCoordinator {
                         scrollContinuation: NativeWindowObservation.ScrollViewport? = nil,
                         continuousScroll: Bool = false,
                         onConversationScroll: (@MainActor (NativeWindowObservation.VerifiedScroll) -> Void)? = nil,
+                        speakerVerified: Bool = true,
                         writing: WritingInput? = nil,
                         admissionIsCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) async -> String {
         let started = ProcessInfo.processInfo.systemUptime
@@ -884,6 +885,7 @@ final class VoiceTaskCoordinator {
                                         allowParsedScroll: allowParsedScroll,
                                         scrollContinuation: scrollContinuation,
                                         continuousScroll: continuousScroll, onConversationScroll: onConversationScroll,
+                                        speakerVerified: speakerVerified,
                                         admissionIsCurrent: admissionIsCurrent)
         }
         if Self.recapPhrases.contains(phrase) {
@@ -981,9 +983,10 @@ final class VoiceTaskCoordinator {
             .joined(separator: "\n") : ""
         let guideGoal = windowScroll == nil
             ? Self.guideGoal(instruction: trimmed, transcript: transcriptHint) : nil
-        let spec = Self.voiceTaskSpec(guideGoal ?? trimmed, app: app, frontmostHint: frontmostHint,
+        var spec = Self.voiceTaskSpec(guideGoal ?? trimmed, app: app, frontmostHint: frontmostHint,
             previousContext: previousContext.isEmpty ? nil : previousContext,
             values: values, windowID: pinnedWindowID)
+        spec.speakerVerified = speakerVerified
 
         let label = guideGoal.map { "Showing how to \($0)" } ?? Self.gerundPhrase(for: trimmed) ?? trimmed
         guard !Task.isCancelled, admissionIsCurrent() else {

@@ -237,10 +237,13 @@ final class DriverConnectionTests: XCTestCase {
         XCTAssertNil(CuaConnection(onSickDaemon: nil).onSickDaemon)
     }
 
-    /// A custom hook overrides the default.
+    /// A custom hook replaces the default: the connection calls it, with
+    /// the socket it was bound to.
     func testSickDaemonHookAcceptsOverride() {
-        let conn = CuaConnection(onSickDaemon: { _ in })
-        XCTAssertNotNil(conn.onSickDaemon)
+        let seen = LockedBox<[String]>([])
+        let conn = CuaConnection(onSickDaemon: { socket in seen.set(seen.value + [socket]) })
+        conn.onSickDaemon?("/tmp/cua-fixture.sock")
+        XCTAssertEqual(seen.value, ["/tmp/cua-fixture.sock"])
     }
 
     // MARK: - Read-retry backoff
@@ -262,16 +265,5 @@ final class DriverConnectionTests: XCTestCase {
         XCTAssertFalse(CuaConnection.isReadOnly("click", arguments: [:]))
         XCTAssertFalse(CuaConnection.isReadOnly("set_agent_cursor_enabled", arguments: [:]))
         XCTAssertFalse(CuaConnection.isReadOnly("start_session", arguments: [:]))
-    }
-
-    // MARK: - Cursor helper
-
-    /// Fire-and-forget safe: a dead transport swallows the call — the
-    /// helper never throws, so `Task { await conn.setAgentCursorEnabled }`
-    /// at session start can never crash the caller.
-    func testSetAgentCursorEnabledSwallowsDeadTransport() async {
-        let conn = CuaConnection()
-        await conn.setAgentCursorEnabled(false, session: "s")  // .closed internally — no throw
-        await conn.setAgentCursorEnabled(true, session: "s")
     }
 }

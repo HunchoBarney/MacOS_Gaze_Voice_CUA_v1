@@ -251,10 +251,10 @@ struct UndoSupport: Sendable {
 extension DriveLoop {
     /// Any new task ends the live offer: whatever it does may put its own
     /// action on top of the app's undo stack, maybe with the same title.
-    /// Only the person's spoken "undo" gets it back.
+    /// Only the person's own spoken "undo" gets it back.
     func claimOffer(for goal: String) -> PendingUndo? {
         let pending = undo.offers.take(now: undo.now())
-        guard explicitConsent, Self.asksToUndo(goal) else { return nil }
+        guard explicitConsent, !speakerUnverified, Self.asksToUndo(goal) else { return nil }
         return pending
     }
 
