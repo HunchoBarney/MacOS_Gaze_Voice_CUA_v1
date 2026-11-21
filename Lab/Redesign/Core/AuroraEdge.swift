@@ -13,6 +13,7 @@ struct AuroraEdge: View {
     var bloom: Double = 1
     var times: AuroraGlow.Times
     var reduceTransparency = false
+    var palette: AuroraGlow.Palette = .appleIntelligence
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -20,7 +21,7 @@ struct AuroraEdge: View {
             .cornerRadius(radius)
             .borderWidth(border)
             .glowSize(rim)
-            .palette(.appleIntelligence)
+            .palette(palette)
             .frame(width: size.width, height: size.height)
             .environment(\.auroraTimes, times)
         ZStack {

@@ -316,6 +316,61 @@ func posters(_ options: Options) throws {
     }
 }
 
+/// Reduce Motion check: each direction, one state per component, every
+/// channel settled, rendered at two instants 1 s apart under Reduce Motion.
+/// Anything still moving (a beam travelling its border, an orb turning) makes
+/// the frames differ and the check fail. Writes both frames of a failure to
+/// `out` when given.
+@MainActor
+func rmcheck(out: String?) -> Bool {
+    let states = [("gaze-highlight", "locked"), ("flashes", "confirm"), ("agent-presence", "shelf"),
+                  ("agent-presence", "large"), ("guide-callout", "consequential"), ("guide-callout", "large")]
+    func pixels(_ image: CGImage) -> [UInt8] {
+        let w = image.width, h = image.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        let context = CGContext(data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        context?.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return data
+    }
+    var ok = true
+    for (id, stateID) in states {
+        guard let entry = Redesign.components.first(where: { $0.id == id }), let index = entry.index(of: stateID) else { continue }
+        for d in entry.directions.indices {
+            for scheme in [ColorScheme.dark, .light] {
+                let stage = Stage(entry, direction: d)
+                stage.scheme = scheme
+                stage.reduceMotion = true
+                stage.settle(at: index)
+                for _ in 0..<120 { stage.advance(1.0 / 60) }
+                let renderer = ImageRenderer(content: StageView(stage: stage, backdrop: false))
+                renderer.scale = 1
+                guard let a = renderer.cgImage else { continue }
+                for _ in 0..<60 { stage.advance(1.0 / 60) }
+                renderer.content = StageView(stage: stage, backdrop: false)
+                guard let b = renderer.cgImage else { continue }
+                let pa = pixels(a), pb = pixels(b)
+                var changed = 0
+                for i in stride(from: 0, to: min(pa.count, pb.count), by: 4)
+                where abs(Int(pa[i]) - Int(pb[i])) + abs(Int(pa[i + 1]) - Int(pb[i + 1])) + abs(Int(pa[i + 2]) - Int(pb[i + 2])) + abs(Int(pa[i + 3]) - Int(pb[i + 3])) > 8 {
+                    changed += 1
+                }
+                let name = "\(id) \(entry.directions[d].info.id) \(stateID) \(scheme == .dark ? "dark" : "light")"
+                print("\(changed == 0 ? "PASS" : "FAIL") \(name): \(changed) pixels changed between t and t+1s")
+                if changed > 0 {
+                    ok = false
+                    if let out {
+                        let base = out + "/\(id)-\(entry.directions[d].info.id)-\(stateID)-\(scheme == .dark ? "dark" : "light")"
+                        try? writePNG(a, to: URL(fileURLWithPath: base + "-t0.png"))
+                        try? writePNG(b, to: URL(fileURLWithPath: base + "-t1.png"))
+                    }
+                }
+            }
+        }
+    }
+    return ok
+}
+
 func gitHead() -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
@@ -360,6 +415,7 @@ MainActor.assumeIsolated {
         case "manifest": try writeManifest(parse(args.dropFirst(2)))
         case "perf": try perf()
         case "posters": try posters(parse(args.dropFirst(2)))
+        case "rmcheck": if !rmcheck(out: args.count > 2 ? args[2] : nil) { exit(1) }
         default: print("usage: JarvisRedesignRender probe <dir> [component] | render <renders-dir> [--only ids] [--variants keys] [--scale s] [--fps n]")
         }
     } catch {
