@@ -792,6 +792,22 @@ describe("Calibration", () => {
       expect(pools(calibration)).toEqual(before);
     });
 
+    it("takes no background labels while a fit awaits its verify sweep", async () => {
+      const { calibration } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID) {
+        calibration.capturePursuit(makeFeature(target), target);
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.finishPursuit();
+      expect(calibration.pendingMatrix).not.toBeNull();
+      calibration.addImplicitSample(makeFeature([0.3, 0.6]), [0.3, 0.6]);
+      calibration.addResidualBiasEvidence(makeFeature([0.4, 0.4]), [0.5, 0.5]);
+      expect(calibration.implicitSamples).toHaveLength(0);
+      expect((calibration as unknown as { rejectedBiasEvidence: unknown[] }).rejectedBiasEvidence).toHaveLength(0);
+      expect(await calibration.refitWithImplicit(Number.MAX_SAFE_INTEGER)).toBe(false);
+    });
+
     it("restores the pools when the run is aborted", async () => {
       const { calibration, emit, before } = await calibrated();
       calibration.beginPursuit();

@@ -16,7 +16,8 @@ extension DriveLoop {
     static func capturedForegroundApplication(
         application: String?, windowID: Int?,
         frontmost: @MainActor () -> AppResolver.App? = {
-            guard let app = NSWorkspace.shared.frontmostApplication,
+            guard !FrontmostTestGuard.blocksRealFrontmost,
+                  let app = NSWorkspace.shared.frontmostApplication,
                   let bundle = app.bundleIdentifier, let name = app.localizedName else { return nil }
             return AppResolver.App(name: name, bundle: bundle, pid: Int(app.processIdentifier))
         },

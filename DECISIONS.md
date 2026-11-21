@@ -20,6 +20,19 @@ Settled choices, newest first. Change one only with a new entry here.
   MIT, plus Paper Shaders under Apache-2.0) are pinned in gallery/site
   and listed with versions in gallery/site/REUSE.md.
 
+## 2026-11-20 — Quiet by default: no chimes unless Sounds is on
+
+- The owner: "the chimes and noises it makes are super annoying and not
+  good experience". Jarvis is always listening, so it plays no non-speech
+  sound by default. The glow, the indicator and the task row carry
+  success, failure, stalls and questions; speech is heard only where words
+  are needed, and spoken answers and the "Looking…" filler are unchanged.
+- One setting, Settings → Replies → Sounds (`soundsEnabled`), off by
+  default, brings back the Glass and Basso earcons. Installs that had it on
+  are moved to off once (`soundsQuietByDefault`); a later choice sticks.
+- New feedback, Live (L3+) included, follows the same rule: visual first,
+  speech only for words, never a new chime.
+
 ## 2026-11-20 — Writing by instruction checks words on device (L7)
 
 - "Type this …" takes the exact span after the lead-in ("type this",
@@ -310,6 +323,24 @@ Settled choices, newest first. Change one only with a new entry here.
   openWakeWord's pretrained models (CC BY-NC-SA); Picovoice (cost); and
   any hand-built detector.
 - The app grows by 80 MB (68 MB model, 12 MB library).
+
+## 2026-11-20 — GPT-Live runs over LiveKit's WebRTC build (L1, behind voice.live)
+
+- GPT-Live-1.1 sessions use WebRTC (`v1/live/sessions`), the transport
+  OpenAI recommends and the only one billed at the Standby rate. The Mac
+  never holds a key: it sends its SDP offer to the credential Worker's
+  `POST /v1/live/sessions` (#582), which fixes the model, client
+  delegation, no tools, `store: false` and the speech wake policy.
+- libwebrtc comes from LiveKit's build, livekit/webrtc-xcframework
+  150.7871.08 (BSD-3-Clause libwebrtc, Apache-2.0 packaging), pinned in
+  `ThirdParty/WebRTC`. Only its 29 MB macOS framework is fetched.
+- Why not stasel/WebRTC: its macOS build has no custom audio device, and
+  two captures of one microphone failed on the owner's Mac: without voice
+  processing our tap lost up to 3.35 s at a time, and with it WebRTC heard
+  near-silence. LiveKit's AVAudioEngine audio module owns the microphone
+  once, records without a call, and lets Jarvis tap the same engine, which
+  kept our tap continuous before, during and after a call
+  (`ThirdParty/WebRTC/README.md`).
 ## 2026-11-20 — CI runs on the owner's Mac
 
 - GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI

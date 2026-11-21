@@ -12,6 +12,13 @@ final class TargetOverlayTests: XCTestCase {
         (index, CGRect(x: x, y: y, width: w, height: h))
     }
 
+    func testOverlayPanelStaysOutOfCapturesAndNeverTakesTheMouse() {
+        let panel = TargetOverlay.makePanel()
+        XCTAssertEqual(panel.sharingType, .none)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        XCTAssertFalse(panel.canBecomeKey)
+    }
+
     // MARK: - chipIndex
 
     func testChipIndexFindsTheChipUnderThePoint() {

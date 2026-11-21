@@ -41,6 +41,23 @@ final class AgentCursorLabels {
         override var canBecomeMain: Bool { false }
     }
 
+    /// Borderless, nonactivating, blind to the mouse, and left out of
+    /// screenshots, recordings and screen shares.
+    static func makePanel() -> NSPanel {
+        let panel = LabelPanel(contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.sharingType = .none
+        panel.appearance = NSAppearance(named: .darkAqua)
+        return panel
+    }
+
     private var panels: [String: NSPanel] = [:]
     private var expiryTasks: [String: Task<Void, Never>] = [:]
     /// A chip with no position update for this long belongs to a dead
@@ -58,16 +75,7 @@ final class AgentCursorLabels {
             hosting.rootView = AgentCursorChip(cursor: cursor)
         } else {
             hosting = NSHostingView(rootView: AgentCursorChip(cursor: cursor))
-            let panel = LabelPanel(contentRect: .zero,
-                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            panel.isFloatingPanel = true
-            panel.level = .floating
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
-            panel.hasShadow = false
-            panel.ignoresMouseEvents = true
-            panel.appearance = NSAppearance(named: .darkAqua)
+            let panel = Self.makePanel()
             panel.contentView = hosting
             panels[key] = panel
         }
