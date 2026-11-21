@@ -23,6 +23,17 @@ final class PolicyScopedGrantsTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    /// The consent file fails closed: a file without a `standingGrant`
+    /// field, or one that doesn't parse, grants nothing.
+    func testAPolicyFileWithoutTheGrantFieldGrantsNothing() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(#"{"version":2,"scopedGrants":[]}"#.utf8).write(to: file)
+        XCTAssertFalse(CuaPolicy.readPolicyState().standingGrant)
+        try Data("not json".utf8).write(to: file)
+        XCTAssertFalse(CuaPolicy.readPolicyState().standingGrant)
+        XCTAssertTrue(CuaPolicy.readPolicyState().scopedGrants.isEmpty)
+    }
+
     /// grant → allows → revoke → no longer allows. Persisted through the
     /// file, so a second read path (the child process's posture) sees it.
     func testGrantPersistsAndRevokes() {

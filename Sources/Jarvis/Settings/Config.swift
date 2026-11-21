@@ -64,6 +64,23 @@ final class Config: ObservableObject {
         return ServiceRoute(url: hosted.responsesURL, bearer: try await hosted.installToken())
     }
 
+    /// Runs `call` on the route `resolve` picks (`jevRoute` or
+    /// `responsesRoute`). When that route is the service's and the service
+    /// no longer knows this install, the token is dropped and `call` runs
+    /// once more on a fresh registration, as Realtime does. A revoked install
+    /// and a developer's own key never register again.
+    func withRoute<T>(_ resolve: () async throws -> ServiceRoute?,
+                      _ call: (ServiceRoute?) async throws -> T) async throws -> T {
+        let route = try await resolve()
+        do {
+            return try await call(route)
+        } catch where HostedCredentials.isUnknownInstall(error) {
+            guard let route, let hosted, hosted.serves(route) else { throw error }
+            hosted.forget(route.bearer)
+            return try await call(try await resolve())
+        }
+    }
+
     /// The Jev credential an agent's drive server gets in its environment.
     /// Agents spawn without waiting on the network, so this reads only a
     /// token already registered.
@@ -105,11 +122,18 @@ final class Config: ObservableObject {
         didSet { defaults.set(agentCursorEnabled, forKey: "agentCursorEnabled") }
     }
 
-    /// Cue-tone gate — the chimes that mark hold start, task done and
-    /// refusals. On by default; off keeps the interface silent.
+    /// Cue-tone gate for every non-speech sound: the Glass and Basso
+    /// chimes for a finished task, a failure, a refusal, a stall, a
+    /// question waiting on you, and a lost outcome. Off by default:
+    /// Jarvis is always listening, so the glow and the indicator carry
+    /// these and only speech is heard. Settings → Replies → Sounds turns
+    /// them back on.
     @Published var sounds: Bool {
         didSet { defaults.set(sounds, forKey: "soundsEnabled") }
     }
+    /// Set once the quiet default has been applied, so installs that had
+    /// sounds on turn them off exactly once and a later choice sticks.
+    static let quietByDefaultKey = "soundsQuietByDefault"
 
     /// Aim number-chip persistence — on keeps the overlay's numbered
     /// targets painted until dismissed; off lets them fade with the
@@ -142,7 +166,7 @@ final class Config: ObservableObject {
         didSet {
             defaults.set(handsFreeEnabled, forKey: "handsFreeEnabled")
             let streams = ListeningPolicy.current.streamsContinuously(listeningMode)
-            if handsFreeEnabled != streams { listeningMode = handsFreeEnabled ? .conversation : .pushToTalk }
+            if handsFreeEnabled != streams { listeningMode = handsFreeEnabled ? .conversation : .standby }
         }
     }
     /// The three-step first run finished (or was skipped). Settings can
@@ -158,30 +182,12 @@ final class Config: ObservableObject {
         didSet { defaults.set(semanticAppSuggestions, forKey: "semanticAppSuggestions") }
     }
 
-    /// Tap Fn to start capture, tap again to stop — hold-to-talk stays the
-    /// default when off.
-    @Published var latchMode: Bool {
-        didSet { defaults.set(latchMode, forKey: "latchMode") }
-    }
-
-    /// Fn+Ctrl hold dictates literal text into the focused field instead of
-    /// running an intent.
-    @Published var dictationHotkey: Bool {
-        didSet { defaults.set(dictationHotkey, forKey: "dictationHotkey") }
-    }
-
     /// Eye tracking — optional and off by default. On, the tracker launches
     /// with the app so "click this" and "what is this" resolve and the
     /// camera is requested. Off, those phrases answer with what to say
     /// instead and the camera is never asked for.
     @Published var gazeTracking: Bool {
         didSet { defaults.set(gazeTracking, forKey: "gazeTracking") }
-    }
-
-    /// Tap-to-click with the eyes: a Fn tap while looking at a target
-    /// clicks it directly instead of opening a voice turn. On by default.
-    @Published var tapToGazeClick: Bool {
-        didSet { defaults.set(tapToGazeClick, forKey: "tapToGazeClick") }
     }
 
     /// Launch at login — the persisted value is the user's choice; the real
@@ -230,23 +236,27 @@ final class Config: ObservableObject {
         self.autoExecute = defaults.object(forKey: "autoExecute") as? Bool ?? true
         self.alwaysAllowComputerUse = defaults.object(forKey: "cuaStandingGrant.computerUseInput") as? Bool ?? false
         self.agentCursorEnabled = defaults.object(forKey: "agentCursorEnabled") as? Bool ?? true
-        self.sounds = defaults.object(forKey: "soundsEnabled") as? Bool ?? true
+        if !defaults.bool(forKey: Self.quietByDefaultKey) {
+            defaults.set(false, forKey: "soundsEnabled")
+            defaults.set(true, forKey: Self.quietByDefaultKey)
+        }
+        self.sounds = defaults.bool(forKey: "soundsEnabled")
         self.persistentNumbers = defaults.object(forKey: "persistentNumbers") as? Bool ?? false
         self.ttsEnabled = defaults.object(forKey: "ttsEnabled") as? Bool ?? true
         let policy = ListeningPolicy.current
-        let storedMode = defaults.string(forKey: "listeningMode").flatMap(ListeningMode.init(rawValue:))
+        let storedRaw = defaults.string(forKey: "listeningMode")
         let legacyHandsFree = defaults.object(forKey: "handsFreeEnabled") as? Bool
-        let mode = storedMode ?? legacyHandsFree.map { $0 ? .conversation : .pushToTalk } ?? policy.defaultMode
+        // A stored mode that no longer exists (Fn's hold-to-talk) moves to the wake word.
+        let storedMode = storedRaw.map { ListeningMode(rawValue: $0) ?? .standby }
+        let mode = storedMode ?? legacyHandsFree.map { $0 ? .conversation : .standby } ?? policy.defaultMode
         self.listeningMode = mode
+        if let storedRaw, storedRaw != mode.rawValue { defaults.set(mode.rawValue, forKey: "listeningMode") }
         self.handsFreeEnabled = policy.streamsContinuously(mode)
         self.firstRunCompleted = defaults.bool(forKey: "firstRunCompleted")
         self.handsFreePaused = defaults.object(forKey: "handsFreePaused") as? Bool ?? false
         self.semanticAppSuggestions = defaults.object(forKey: "semanticAppSuggestions") == nil
             ? true : defaults.bool(forKey: "semanticAppSuggestions")
-        self.latchMode = defaults.object(forKey: "latchMode") as? Bool ?? false
-        self.dictationHotkey = defaults.object(forKey: "dictationHotkey") as? Bool ?? true
         self.gazeTracking = defaults.object(forKey: "gazeTracking") as? Bool ?? false
-        self.tapToGazeClick = defaults.object(forKey: "tapToGazeClick") as? Bool ?? true
         // ServiceManagement is the truth when it knows the app — a bare
         // `swift run` binary reports .notFound, where the persisted choice
         // is all there is to go on.

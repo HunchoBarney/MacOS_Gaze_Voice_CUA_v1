@@ -21,8 +21,8 @@ Run one full `make test` before asking for review:
 scripts/lane-test.sh
 ```
 
-Local CI runs it again at every PR head and on main, and posts the
-`local-ci` commit status.
+Local CI runs it again at every PR head, merged into current main, and on
+main, and posts the `local-ci` commit status.
 
 ## The build lane
 
@@ -63,7 +63,7 @@ checkout.
 
 ## End-to-end flows
 
-`make e2e` runs five flows on a signed Jarvis through e2e's macOS engine
+`make e2e` runs the end-to-end flows on a signed Jarvis through e2e's macOS engine
 (`e2e/README.md`). They launch Jarvis, speak aloud and use the owner's
 Realtime key, so they run only on the owner's go, under the desktop lock.
 They are not part of `make test` or local CI.

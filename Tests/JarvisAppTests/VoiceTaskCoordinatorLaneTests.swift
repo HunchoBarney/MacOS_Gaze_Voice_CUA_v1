@@ -257,17 +257,6 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
         XCTAssertEqual(tools, ["list_windows"])
     }
 
-    func testHaloUsesNativeScreenPointsWithoutScreenshotMetadata() {
-        let snap: JSONValue = .object(["elements": .array([
-            .object(["element_index": .number(1), "role": .string("AXTextArea"),
-                     "frame": .object(["x": .number(634), "y": .number(192),
-                                       "w": .number(656), "h": .number(384)])])
-        ])])
-        XCTAssertEqual(VoiceTaskCoordinator.haloFrame(at: CGPoint(x: 700, y: 220), in: snap),
-                       CGRect(x: 634, y: 192, width: 656, height: 384))
-        XCTAssertNil(VoiceTaskCoordinator.haloFrame(at: CGPoint(x: 10, y: 10), in: snap))
-    }
-
     func testProductionNativeSelectionAndControlledDriverSuppression() {
         let production = coordinator()
         XCTAssertTrue(production.hasForegroundAppLauncher)
@@ -311,6 +300,37 @@ final class VoiceTaskCoordinatorLaneTests: XCTestCase {
         XCTAssertEqual(backgroundCalls, 0)
         XCTAssertEqual(raises, 1)
         XCTAssertFalse(c.tasks.first?.awaitingAnswer == true)
+    }
+
+    /// Quiet by default: a finished task marks itself with the glow and the
+    /// row, not a chime, unless Sounds is on.
+    func testFinishedTaskIsSilentUnlessSoundsIsOn() async throws {
+        for soundsOn in [false, true] {
+            let config = Config(defaults: UserDefaults(suiteName: "quiet-work-\(UUID())")!,
+                                keyStore: MemoryKeys(), openAIKeyStore: MemoryKeys(), environment: [:])
+            if soundsOn { config.sounds = true }
+            let c = VoiceTaskCoordinator(config: config, jevRoute: { nil },
+                gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
+                overlay: TargetOverlay(), resolver: AppResolver(listApps: {
+                    [.init(name: "AuditFixture", bundle: "fixture.audit")]
+                }), commandDriver: { tool, _ in
+                    if tool == "bring_to_front" {
+                        return .object(["activated": .bool(true),
+                                        "exact_window_effect": .object(["verified": .bool(true)])])
+                    }
+                    return .object(["windows": .array([.object([
+                        "window_id": .number(7), "is_on_screen": .bool(true), "title": .string("Owned")
+                    ])])])
+                }, foregroundAppLauncher: { _ in 424242 })
+            c.gazeContextProvider = { nil }
+            var played: [String] = []
+            c.playSound = { played.append($0) }
+            _ = await c.beginVoiceTask("open AuditFixture", app: "fixture.audit", captureID: UUID())
+            let settled = await waitFor { c.tasks.first?.active == false }
+            XCTAssertTrue(settled)
+            XCTAssertEqual(c.tasks.first?.outcome, .done)
+            XCTAssertEqual(played, soundsOn ? ["Glass"] : [], "sounds on: \(soundsOn)")
+        }
     }
 
     /// The hand-off to the first desktop call is timed once per work,

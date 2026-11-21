@@ -1,0 +1,590 @@
+{
+  "generatedAt": "2026-11-21T00:00:00Z",
+  "skills": [
+    "ask-emil",
+    "emil-design-eng",
+    "apple-design",
+    "animate",
+    "choreograph",
+    "gestures",
+    "find-animation-opportunities",
+    "animate-expo",
+    "review-animations",
+    "remove-animations",
+    "animation-performance",
+    "break-ui",
+    "pick-ui-library"
+  ],
+  "findings": [
+    {
+      "id": "LI-1",
+      "component": "listening-indicator",
+      "severity": "P1",
+      "title": "The tab hangs under the notch but isn't shaped like it",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:146",
+      "problem": "The indicator is a black rectangle with 14 pt bottom corners. It meets the menu bar with square shoulders, so on a notched Mac it reads as a sticker under the notch instead of the notch growing.",
+      "fix": "Draw one black island that extends the hardware notch: concave flares where it meets the menu bar, continuous bottom corners, and the same surface for every phase.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng"
+      ],
+      "library": "DynamicNotchKit (MrKai77, MIT)",
+      "proposedState": "proposed-hearing"
+    },
+    {
+      "id": "LI-2",
+      "component": "listening-indicator",
+      "severity": "P1",
+      "title": "Phases swap in one frame: no transition between hearing, working and asking",
+      "where": "Sources/Jarvis/UI/AppWindows.swift:17",
+      "problem": "The window sets animationBehavior = .none and hides with orderOut (AppWindows.swift:79), and ListeningIndicator.swift has no animation or transition modifiers. Hearing → working → asking jumps size and content in a single frame, so the person loses track of what changed.",
+      "fix": "Keep one surface and morph its size with an interruptible spring (response about 0.35 s, damping about 0.85) while content crossfades in 150 ms. Enter from the notch, exit back into it. With Reduce Motion on, crossfade only.",
+      "skills": [
+        "animate",
+        "choreograph",
+        "apple-design",
+        "animate-expo"
+      ],
+      "library": "Wave (Janum Trivedi) springs; DynamicNotchKit expand/compact",
+      "proposedState": "proposed-working"
+    },
+    {
+      "id": "LI-3",
+      "component": "listening-indicator",
+      "severity": "P2",
+      "title": "The Stop button is a 22 pt × that reads as Close",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:135",
+      "problem": "Stopping a running task uses an xmark glyph at 11 pt in a 22 × 22 target. An × means dismiss on macOS, not stop, and the target is smaller than a toolbar control.",
+      "fix": "Use stop.fill in a 24 pt circle with a hover state, an accessibility label of \"Stop\", and the Escape hint that #583 kept as the emergency stop.",
+      "skills": [
+        "apple-design",
+        "gestures",
+        "break-ui"
+      ],
+      "proposedState": "proposed-working"
+    },
+    {
+      "id": "LI-4",
+      "component": "listening-indicator",
+      "severity": "P2",
+      "title": "Long transcripts start with an ellipsis",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:125",
+      "problem": "truncationMode(.head) keeps the newest words visible, which is right, but the leading \"…\" flickers as words arrive and eats width at a 440 pt cap (line 126).",
+      "fix": "Keep head-first truncation but fade the leading edge with a gradient mask instead of an ellipsis, so words slide out of view without a glyph popping in and out.",
+      "skills": [
+        "emil-design-eng",
+        "break-ui",
+        "remove-animations"
+      ],
+      "proposedState": "proposed-hearing"
+    },
+    {
+      "id": "LI-5",
+      "component": "listening-indicator",
+      "severity": "P2",
+      "title": "Ask cards use stock blue prominent buttons on a black custom surface",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:192",
+      "problem": "Confirm, review and approval cards put .borderedProminent buttons (lines 192 and 247) in a fixed 420 pt card (line 200). The system blue on black looks like an AppKit alert pasted into the island, and the keyboard and voice paths aren't shown.",
+      "fix": "Use white and translucent capsule pills with their key hints (↩ and esc) and a quiet \"or say “go ahead”\" line, sized to content inside the island.",
+      "skills": [
+        "emil-design-eng",
+        "apple-design"
+      ],
+      "proposedState": "proposed-confirm"
+    },
+    {
+      "id": "LI-6",
+      "component": "listening-indicator",
+      "severity": "P3",
+      "title": "Icon tints are hard-coded RGB",
+      "where": "Sources/Jarvis/UI/ListeningIndicator.swift:113",
+      "problem": "The working ellipsis and question glyphs use Color(red:…) literals (lines 113 and 115) that match nothing else in the app or the accent colour.",
+      "fix": "Take tints from one Jarvis palette shared with the gaze light (see GL-1), or from semantic system colours.",
+      "skills": [
+        "apple-design"
+      ]
+    },
+    {
+      "id": "LI-7",
+      "component": "listening-indicator",
+      "severity": "P2",
+      "title": "The voice level meter is three generic bars",
+      "where": "Sources/Jarvis/UI/Components.swift:19",
+      "problem": "LevelMeter draws 3 pt capsules whose height follows the raw level (line 30). It's the default visual for \"audio\" and jitters at the meter's update rate. Reduce Motion freezes it at 0.7 (line 27), which is good and should stay.",
+      "fix": "Replace it with a voice orb that follows a smoothed level (attack about 60 ms, release about 250 ms) so it breathes instead of flickering. Keep the frozen Reduce Motion state.",
+      "skills": [
+        "find-animation-opportunities",
+        "remove-animations",
+        "animation-performance"
+      ],
+      "library": "Orb (metasidd, MIT)",
+      "proposedState": "proposed-hearing"
+    },
+    {
+      "id": "MB-1",
+      "component": "menu-bar-item",
+      "severity": "P2",
+      "title": "Parked asks widen the status item with text",
+      "where": "Sources/Jarvis/main.swift:551",
+      "problem": "Pending asks are shown by setting the status button title to \" ·2\", which widens the item and shifts every icon to its left each time the count changes.",
+      "fix": "Draw the count as a badge inside the template image (or a symbol variant) so the item keeps a fixed width.",
+      "skills": [
+        "apple-design",
+        "break-ui"
+      ],
+      "library": "native API: NSImage template drawing"
+    },
+    {
+      "id": "MM-1",
+      "component": "menu-bar-menu",
+      "severity": "P3",
+      "title": "The Eyes header is a disabled menu item",
+      "where": "Sources/Jarvis/main.swift:78",
+      "problem": "\"Eyes\" is added as a disabled item, which renders as greyed-out text that looks unavailable rather than as a section header.",
+      "fix": "Use NSMenuItem.sectionHeader(title:) (macOS 14 and later).",
+      "skills": [
+        "apple-design"
+      ],
+      "library": "native API: NSMenuItem.sectionHeader"
+    },
+    {
+      "id": "GL-1",
+      "component": "gaze-highlight",
+      "severity": "P2",
+      "title": "Three different blues for one idea",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:624",
+      "problem": "The gaze ring uses controlAccentColor, while the listening halo (line 345), the confirmation flash (line 817) and the \"this\" flash (DeicticFlash.swift:106) use systemBlue. With a non-blue accent the person sees two unrelated lights for \"Jarvis is pointing here\".",
+      "fix": "Define one Jarvis light (colour, line width, glow) and use it for the ring, halo, press glow and both flashes.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng",
+        "choreograph"
+      ]
+    },
+    {
+      "id": "GL-2",
+      "component": "gaze-highlight",
+      "severity": "P1",
+      "title": "Large frames get a full rounded rectangle (owned by JARA-55)",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:611",
+      "problem": "A paragraph or other large non-control frame gets a highlight around its whole frame (the gallery's \"On a paragraph\" state), which is JARA-55's symptom (b). The ring is being redesigned there as the Magnet orb.",
+      "fix": "No change in this audit. JARA-55 owns the redesign; its reference renders sit beside the current state.",
+      "skills": [
+        "apple-design"
+      ],
+      "library": "Orb (metasidd, MIT), in JARA-55"
+    },
+    {
+      "id": "GL-3",
+      "component": "gaze-highlight",
+      "severity": "P2",
+      "title": "Retargets restart at zero velocity",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:663",
+      "problem": "Each retarget starts a new 100 ms cubic ease-out path animation (lines 663 to 667, ringRetargetSeconds at line 62). Gaze moves at about 10 Hz, so a glide is a chain of restarted curves that stutters instead of flowing.",
+      "fix": "Drive the ring frame with a critically damped spring that keeps its velocity across retargets. With Reduce Motion on, jump (as today).",
+      "skills": [
+        "animate",
+        "apple-design",
+        "gestures"
+      ],
+      "library": "Wave (Janum Trivedi) or Motion (Adam Bell)"
+    },
+    {
+      "id": "HALO-1",
+      "component": "listening-halo",
+      "severity": "P2",
+      "title": "The halo frosts the thing you're looking at",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:337",
+      "problem": "The listening-start halo is an NSVisualEffectView with .hudWindow material and a 1.5 pt systemBlue border. Blurring behind the window makes the target control harder to read at the moment Jarvis starts listening to you about it.",
+      "fix": "Replace the frosted pane with the shared Jarvis light as a soft outer glow that leaves the control untouched.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng"
+      ],
+      "library": "Inferno (Paul Hudson) glow shader, or a plain CALayer shadow"
+    },
+    {
+      "id": "CF-1",
+      "component": "confirm-flash",
+      "severity": "P3",
+      "title": "The confirmation ring is an ease-out circle unrelated to the press glow",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:809",
+      "problem": "After an action, a 2 pt systemBlue circle grows and fades with a stock easeOut (lines 817 to 839), a different shape from the press glow that marked the same control a moment earlier.",
+      "fix": "Finish the press glow instead: brighten and release the same shape in about 200 ms, so pressing and confirming read as one motion.",
+      "skills": [
+        "choreograph",
+        "animate"
+      ]
+    },
+    {
+      "id": "DF-1",
+      "component": "deictic-flash",
+      "severity": "P3",
+      "title": "The \"this\" flash fades out with ease-in",
+      "where": "Sources/Jarvis/Gaze/DeicticFlash.swift:93",
+      "problem": "The flash settles in 120 ms, holds 350 ms and then fades with easeIn (lines 15 to 17). Ease-in exits feel like they hesitate before leaving.",
+      "fix": "Fade out with a short ease-out (about 150 ms) and use the shared Jarvis light colour.",
+      "skills": [
+        "animate",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "PG-1",
+      "component": "press-glow",
+      "severity": "P3",
+      "title": "The press glow holds for 1.2 s",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:370",
+      "problem": "pressGlowSeconds keeps the ring on a pressed control for 1.2 s, long after the action happened, and it competes with the next gaze acquire.",
+      "fix": "Hold about 600 ms, then release into the confirmation (CF-1).",
+      "skills": [
+        "animate",
+        "remove-animations"
+      ]
+    },
+    {
+      "id": "TC-1",
+      "component": "target-chips",
+      "severity": "P3",
+      "title": "Chip captions truncate at one line with no width cap",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:437",
+      "problem": "Name chips use lineLimit(1) without a maximum width, so a long accessibility label makes a very wide pill that covers neighbouring controls.",
+      "fix": "Cap captions at about 160 pt with tail truncation and show the full name in the ask card.",
+      "skills": [
+        "break-ui"
+      ]
+    },
+    {
+      "id": "CS-1",
+      "component": "cheat-sheet",
+      "severity": "P2",
+      "title": "\"Things you can say\" is a custom dark slab",
+      "where": "Sources/Jarvis/UI/TargetOverlay.swift:880",
+      "problem": "The cheat sheet is Color(white: 0.1) at 92% in a 12 pt rounded rectangle with 15 pt lines, a third dark surface style next to the black island and the material chips.",
+      "fix": "Show it as the island's expanded card (the same surface as the ask), so help comes from where Jarvis already speaks.",
+      "skills": [
+        "apple-design",
+        "choreograph"
+      ],
+      "library": "DynamicNotchKit"
+    },
+    {
+      "id": "GC-1",
+      "component": "guide-callout",
+      "severity": "P3",
+      "title": "The callout fades in place and its pulse dims it",
+      "where": "Sources/Jarvis/UI/GuideCallout.swift:209",
+      "problem": "The callout fades in over 150 ms with a good ease-out-quint and honours Reduce Motion (lines 34 and 35), but it doesn't come from the control it points at, it disappears with a hard orderOut (line 229), and the repeat pulse dips opacity to 55% (line 220), which reads as a flicker.",
+      "fix": "Enter with a 4 pt offset from the anchor plus the fade, exit with a 100 ms fade, and replace the dimming pulse with a small scale (1 → 1.03 → 1) or a pulse of the target ring.",
+      "skills": [
+        "animate",
+        "choreograph",
+        "emil-design-eng"
+      ],
+      "library": "Pow (EmergeTools, MIT) for the transitions"
+    },
+    {
+      "id": "AC-1",
+      "component": "agent-cursor",
+      "severity": "P2",
+      "title": "The agent label is set in 10 pt",
+      "where": "Sources/Jarvis/UI/AgentCursorOverlay.swift:22",
+      "problem": "Agent cursor labels use 10 pt semibold on a 60% black capsule. That's below the 11 pt macOS uses as its smallest UI text, and hard to read over busy windows. Reduce Transparency is handled (line 24), which is good. #606 is changing this file.",
+      "fix": "Use 11 pt and refresh this page after #606 merges.",
+      "skills": [
+        "apple-design",
+        "break-ui"
+      ]
+    },
+    {
+      "id": "AS-1",
+      "component": "agent-shelf",
+      "severity": "P2",
+      "title": "Shelf chips use 9 and 10 pt type on thin material",
+      "where": "Sources/Jarvis/UI/AgentShelfOverlay.swift:127",
+      "problem": "The shelf chip name is 10 pt and the state glyphs 9 pt on ultraThinMaterial, with a yellow question glyph that has poor contrast over a light desktop.",
+      "fix": "Use 11 pt, regular material, and an orange or accent glyph with an outline. Refresh after #606 merges.",
+      "skills": [
+        "apple-design",
+        "break-ui"
+      ]
+    },
+    {
+      "id": "SW-1",
+      "component": "settings-window",
+      "severity": "P3",
+      "title": "Settings hand-sizes every font",
+      "where": "Sources/Jarvis/UI/SettingsView.swift:78",
+      "problem": "Titles and rows are fixed point sizes (28, 17, 14 and 13 pt), so the window ignores the text-size setting and its hierarchy drifts from System Settings.",
+      "fix": "Use text styles (.largeTitle, .headline, .body, .callout) and keep only the one brand mark custom.",
+      "skills": [
+        "apple-design"
+      ],
+      "library": "native API: SwiftUI text styles"
+    },
+    {
+      "id": "FR-1",
+      "component": "first-run",
+      "severity": "P2",
+      "title": "\"Waiting for you to switch it on…\" gives no sign of life",
+      "where": "Sources/Jarvis/UI/FirstRun.swift:188",
+      "problem": "While the person grants a permission in System Settings, the first run shows static grey text. Nothing confirms Jarvis is still watching, so it looks stuck.",
+      "fix": "Show a small indeterminate indicator next to the text and move on by itself with a checkmark when the permission flips.",
+      "skills": [
+        "find-animation-opportunities",
+        "choreograph"
+      ],
+      "library": "Pow (EmergeTools, MIT) for the check transition"
+    },
+    {
+      "id": "FR-2",
+      "component": "first-run",
+      "severity": "P3",
+      "title": "Corner radii and styles differ across windows",
+      "where": "Sources/Jarvis/UI/FirstRun.swift:290",
+      "problem": "First-run mode cards use a 10 pt circular-corner rectangle while JarvisCard uses 12 pt continuous corners (Components.swift:8) and the agents list uses 9 pt (AgentsView.swift:98).",
+      "fix": "Pick one radius scale with continuous corners and use it everywhere.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "ET-1",
+      "component": "tracker-camera-marker",
+      "severity": "P3",
+      "title": "The camera arrow is now menu-only but keeps its old yellow styling",
+      "where": "EyeTracking/web/src/styles.css:235",
+      "problem": "Since #615 the arrow no longer appears on launch or during the countdown. It shows for 5 s only from the menu's show-marker action (EyeTracking/web/src/App.tsx:483) or with --show-camera-marker. When it does appear, it's still a 64x74 pt saturated #ffd60a arrow with a heavy drop shadow and an 800-weight label. Nothing else in Jarvis uses that yellow, weight or outline, and the owner named it as the thing he hates.",
+      "fix": "Finish JARA-55's phase-2 item 5 and remove the marker and its menu action. If a camera cue is still wanted, draw a small hollow glow under the notch in the Magnet look the calibration target now uses, fading in and out over 200 ms.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng",
+        "remove-animations"
+      ]
+    },
+    {
+      "id": "ET-2",
+      "component": "tracker-calibration",
+      "severity": "P1",
+      "title": "A failed calibration leaves raw gate metrics on screen indefinitely",
+      "where": "EyeTracking/web/src/App.tsx:794",
+      "problem": "After three rejected passes, the modal closes and the notice pill shows the worker's own string over the desktop: 'Verification error median=0.112 p90=0.241 corner=0.301 exceeds gate' (EyeTracking/web/src/inference/core.ts:3310). It has no scrim, no close control and no timeout, and it clears only on the next calibration. #615's eye-paced run makes the 'Only N pursuit samples - follow the dot for the full path' rejection rarer (EyeTracking/web/src/inference/core.ts:3225), but that text and the verify-gate text both still reach the screen verbatim. See states rejected and retry.",
+      "fix": "Map each reject reason to plain copy in the renderer, for example 'Couldn't get a steady read - try again in brighter light', and keep the metrics in calibration_report.json and the diagnostics panel. Give the notice an exit: auto-dismiss after about 6 s with a 150 ms ease-out fade, or offer a Try again action.",
+      "skills": [
+        "apple-design",
+        "break-ui",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "ET-3",
+      "component": "tracker-calibration",
+      "severity": "P3",
+      "title": "Calibration copy still mixes 'follow' with 'look until it fills'",
+      "where": "EyeTracking/web/src/App.tsx:478",
+      "problem": "#615 aligned the card ('Look at each dot until it fills. It takes about 15 seconds, once.') and the capture notice ('look at each dot until it fills'). Three strings still say something else. The countdown notice says 'calibrating - just look at the dot when it stops' (also at EyeTracking/web/src/App.tsx:1048). The pose hint says 'hold your head still - keep following the dot' (EyeTracking/web/src/App.tsx:1800). The worker's retry reason says 'follow the dot for the full path' (EyeTracking/web/src/inference/core.ts:3225). The card is sentence case while the pills are lowercase.",
+      "fix": "Use the new verb everywhere: the countdown notice becomes 'Look at each dot until it fills', the pose hint 'Keep your head still', and the retry copy goes through ET-2's mapping. Use sentence case on every pill.",
+      "skills": [
+        "apple-design",
+        "break-ui"
+      ]
+    },
+    {
+      "id": "ET-4",
+      "component": "tracker-calibration",
+      "severity": "P2",
+      "title": "Every recalibration starts with a 3-second countdown",
+      "where": "EyeTracking/web/src/App.tsx:480",
+      "problem": "Every calibration, including the menu's quick recalibrate, still opens with a 3 s countdown on a 120 px numeral (also at EyeTracking/web/src/App.tsx:1050 for the auto-start). The drift pill promises a '10-second retune', and the first point already parks at centre for its own 700 ms lead-in (calibrationRun.ts CAPTURE_RUN). A fixed delay on an action the person just asked for is latency the eye-paced run doesn't need. #615 did stop the camera arrow from reappearing during it.",
+      "fix": "Drop the countdown. Let the first point fade in at centre (opacity 0 to 1, scale 0.96 to 1, 240 ms cubic-bezier(0.23, 1, 0.32, 1)) and use the existing lead-in as the get-ready. JARA-55's plan already wants the run skippable by voice.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng",
+        "remove-animations",
+        "choreograph"
+      ]
+    },
+    {
+      "id": "ET-5",
+      "component": "tracker-calibration",
+      "severity": "P2",
+      "title": "The calibration target re-renders the whole app 60 times a second",
+      "where": "EyeTracking/web/src/App.tsx:1170",
+      "problem": "The eye-paced tick still calls setPursuitProgress, setPursuitPos, setPursuitDwell and setPursuitFill on every animation frame. That re-renders the ~1,870-line App throughout the run, on a Mac where the tracker measured 10 fps with inference stalls. The point's fill scale is also written through React as an inline style each frame, and the progress rail restarts a 120 ms linear transition on each write. The gaze dot already avoids this by writing transforms from refs.",
+      "fix": "Drive the target transform and the rail's scaleX directly on refs, as the dot loop does, or with Motion's animate() on motion values. Keep React state only for phase and dwell transitions. Measure renderer CPU before and after.",
+      "library": "Motion (motion.dev)",
+      "skills": [
+        "animation-performance",
+        "animate-expo",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "ET-6",
+      "component": "tracker-click-effect",
+      "severity": "P2",
+      "title": "Lip-click confirmation only exists on the hidden gaze dot",
+      "where": "EyeTracking/web/src/App.tsx:1730",
+      "problem": "lip_click_effect is drawn only as a burst on the gaze dot, which is off by default. With default settings, a lip click gives no visual confirmation in the tracker, and nothing on the Swift side handles lip_click_effect. When the dot is on, the 'Single' and 'Double' pills read like debug labels, in a green and cyan used nowhere else.",
+      "fix": "Confirm the click on what it lands on, independent of the dot. The Magnet orb or the Swift highlight compresses and releases (scale 0.94 to 1, 160 ms ease-out) with one ring, and there's no text label. Fire it on the same frame as the click event so cause and effect line up.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng",
+        "choreograph"
+      ]
+    },
+    {
+      "id": "ET-7",
+      "component": "tracker-click-effect",
+      "severity": "P3",
+      "title": "Click rings animate inset, gradients and shadows",
+      "where": "EyeTracking/web/src/styles.css:185",
+      "problem": "The ring grows by animating the pseudo-element's inset (-4 to -34 px), which re-lays out and repaints it every frame. The core keyframes animate a radial-gradient background and box-shadow, so every frame is a full repaint.",
+      "fix": "Use a fixed-size ring scaled with transform (scale 0.3 to 1) plus opacity, and a pre-rendered glow that only fades.",
+      "skills": [
+        "animation-performance",
+        "review-animations"
+      ]
+    },
+    {
+      "id": "ET-8",
+      "component": "tracker-gaze-dot",
+      "severity": "P2",
+      "title": "An opaque dot sits on top of whatever you're reading",
+      "where": "EyeTracking/web/src/styles.css:43",
+      "problem": "An 18 px solid white marble with a navy ring and drop shadow covers the glyph under the gaze. At 10 Hz with estimate noise it reads as jitter over text. Since #615 the calibration target uses the Magnet look (a hollow blue glow, EyeTracking/web/src/styles.css:365), so the dot is now the one gaze surface that doesn't match it. The motion underneath is good: a critically damped spring, independent X and Y, saccades snapped under suppression, and refs rather than React state.",
+      "fix": "Give the dot the same hollow-centre Magnet glow as the calibration target, keeping the existing spring, so text under it stays readable. If the web dot survives JARA-55's redesign, build it on libraries.dev Orb rather than hand-tuned gradients.",
+      "library": "libraries.dev Orb",
+      "skills": [
+        "apple-design",
+        "emil-design-eng",
+        "break-ui",
+        "pick-ui-library"
+      ]
+    },
+    {
+      "id": "ET-9",
+      "component": "tracker-gaze-dot",
+      "severity": "P3",
+      "title": "Imperceptible motion on the highest-frequency surface",
+      "where": "EyeTracking/web/src/styles.css:61",
+      "problem": "The dot scales to 1.04 when the gaze moves fast, through a registered custom property inside the transform. On a surface that updates continuously, a 4% bump is decoration nobody sees, and it adds a style recalculation.",
+      "fix": "Delete .fast and --dot-fast. Keep the 500 ms dwell sweep, which carries state and already rests as a hairline under Reduce Motion.",
+      "skills": [
+        "remove-animations",
+        "animation-performance"
+      ]
+    },
+    {
+      "id": "ET-10",
+      "component": "tracker-onboarding",
+      "severity": "P2",
+      "title": "The first-run card is a full takeover in stock web styling, and it pops in",
+      "where": "EyeTracking/web/src/styles.css:591",
+      "problem": "The comment says 'never a takeover', but the card sits on the same 94-97% opaque scrim as calibration, so the desktop vanishes. Since #615 it also appears for a background-learned map that no verify run has checked, so more people see it. The scrim and card appear in one frame with no transition. The buttons are a generic #4f8cff pill and a ghost pill with no :active or :focus-visible state. This is a rare first-run moment, which is exactly where the delight budget belongs.",
+      "fix": "Use a lighter dim (about 40% plus an 8 px backdrop blur) so the context stays. The scrim fades over 200 ms, and the card materialises 40 ms later: opacity 0 to 1, scale 0.96 to 1, blur 4 px to 0, 240 ms cubic-bezier(0.23, 1, 0.32, 1), via @starting-style or Motion. The exit is simultaneous at 150 ms. Add :active scale(0.97) over 120 ms and a visible focus ring, and use the Jarvis accent for Calibrate.",
+      "library": "Motion (motion.dev)",
+      "skills": [
+        "find-animation-opportunities",
+        "choreograph",
+        "apple-design",
+        "emil-design-eng",
+        "animate"
+      ]
+    },
+    {
+      "id": "ET-11",
+      "component": "tracker-hint-pill",
+      "severity": "P2",
+      "title": "The drift warning never leaves, and the pills snap in and out",
+      "where": "EyeTracking/web/src/App.tsx:632",
+      "problem": "The amber drift pill stays at the top of the screen until the next calibration, with no dismissal, over whatever the person is doing. The 4 s recalibrate hint and the drift pill both appear and vanish in a single frame.",
+      "fix": "Run transient notices through Sonner, which handles timers, stacking, hover-pause and enter/exit, styled as the Jarvis pill. Auto-dismiss drift after about 8 s or once the next good fixations land. Enter with opacity plus translateY(-6px) over 200 ms ease-out, and exit the same way at 150 ms.",
+      "library": "Sonner",
+      "skills": [
+        "find-animation-opportunities",
+        "pick-ui-library",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "ET-13",
+      "component": "tracker-calibration",
+      "severity": "P3",
+      "title": "The exit control sits top-right and is a text glyph",
+      "where": "EyeTracking/web/src/styles.css:436",
+      "problem": "A 40 px circle with a typed × sits top-right. macOS puts close top-left, and it has no press state. Escape works but nothing says so.",
+      "fix": "Move it top-left with a drawn glyph and :active scale(0.97), and add 'esc to stop' as a quiet caption under the notice.",
+      "skills": [
+        "apple-design",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "ET-14",
+      "component": "tracker-calibration",
+      "severity": "P3",
+      "title": "The 'Calibrated' card still scales under Reduce Motion",
+      "where": "EyeTracking/web/src/styles.css:679",
+      "problem": "The confirmation enters from scale 0.94, and the prefers-reduced-motion block doesn't cover it. That block does handle the target, ring, dot dwell, click bursts and countdown, and since #615 the run steps the target between points instead of gliding when reduced motion is on. It's also a text check (✓) in a generic pill.",
+      "fix": "Under Reduce Motion, fade only (200 ms). Better, let the last orb point resolve into the confirmation (one object, choreograph's carry) rather than a new card.",
+      "skills": [
+        "review-animations",
+        "choreograph",
+        "apple-design"
+      ]
+    },
+    {
+      "id": "ET-15",
+      "component": "tracker-hint-pill",
+      "severity": "P3",
+      "title": "Translucent pills ignore Reduce Transparency and Increase Contrast",
+      "where": "EyeTracking/web/src/styles.css:573",
+      "problem": "Every pill and card uses rgba fills with backdrop-filter blur, and none responds to prefers-reduced-transparency or prefers-contrast. Font stacks also differ: Inter-first on :root, -apple-system on the pills.",
+      "fix": "@media (prefers-reduced-transparency: reduce): solid fill, no blur. @media (prefers-contrast: more): solid fill and a 1 px 60% white border. Use one system font stack.",
+      "skills": [
+        "apple-design",
+        "break-ui"
+      ]
+    },
+    {
+      "id": "ET-16",
+      "component": "tracker-status-pane",
+      "severity": "P3",
+      "title": "Diagnostics show raw message keys",
+      "where": "EyeTracking/web/src/App.tsx:620",
+      "problem": "The status line prints worker keys verbatim ('drift_detected', 'calibration: missing', and since #615 'calibration: N samples' every tenth frame during a run). It's a debug surface, but it's in the public gallery and is the first thing a tester reads.",
+      "fix": "Map known keys to short labels ('Drift detected', 'No calibration yet') and keep the key in the log.",
+      "skills": [
+        "break-ui"
+      ]
+    },
+    {
+      "id": "ET-17",
+      "component": "tracker-inference-time",
+      "severity": "P3",
+      "title": "A normal inference time is shown in alarm red",
+      "where": "EyeTracking/web/src/styles.css:529",
+      "problem": "26 px bold #ef233c reads as an error for a healthy 23 ms.",
+      "fix": "Use neutral tabular numerals and colour only over budget (for example over 50 ms). Leave it unanimated: it's functional data refreshed at 2 Hz, so NumberFlow-style digit motion was considered and rejected.",
+      "skills": [
+        "find-animation-opportunities",
+        "emil-design-eng"
+      ]
+    },
+    {
+      "id": "ET-18",
+      "component": "tracker-accuracy-check",
+      "severity": "P3",
+      "title": "Accuracy targets borrow the arrow's yellow",
+      "where": "EyeTracking/web/src/styles.css:304",
+      "problem": "Grid dots and hit circles use #ffd60a, the camera arrow's colour, while calibration now uses the Magnet look's hollow blue glow. Switching steps without motion is correct for a measurement.",
+      "fix": "Use the calibration target's parked look (hollow glow, white core) for grid points and a hairline circle in the same blue for hit targets. Keep the instant step changes.",
+      "skills": [
+        "apple-design",
+        "find-animation-opportunities"
+      ]
+    }
+  ]
+}

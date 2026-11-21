@@ -20,4 +20,11 @@ final class MicrophoneTestGuardTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("JARVIS_LIVE_MIC=1"))
         }
     }
+
+    func testOnlyALiveRunOptsIn() {
+        XCTAssertTrue(MicrophoneTestGuard.runningTests(hasXCTest: true, environment: [:]))
+        XCTAssertTrue(MicrophoneTestGuard.runningTests(hasXCTest: true, environment: ["JARVIS_LIVE_MIC": "true"]))
+        XCTAssertFalse(MicrophoneTestGuard.runningTests(hasXCTest: true, environment: ["JARVIS_LIVE_MIC": "1"]))
+        XCTAssertFalse(MicrophoneTestGuard.runningTests(hasXCTest: false, environment: [:]))
+    }
 }

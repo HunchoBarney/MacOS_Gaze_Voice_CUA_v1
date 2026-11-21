@@ -26,7 +26,10 @@ GitHub Actions is off, so CI runs on the owner's Mac. `make local-ci-install`
 loads a launchd agent that every 5 minutes runs `make test` on the open PR
 head or main commit without a result that it first saw longest ago, one at a
 time, queued ahead of normal jobs in the crew's build lane, then posts a
-`local-ci` commit status through the Mac's `gh` login.
+`local-ci` commit status through the Mac's `gh` login. It tests the head
+merged into current main, without committing the merge, and the status
+names that main (`success on main 7da2e61 · …`); a head that conflicts with
+main gets `error: conflicts with main <sha>` without a run.
 `scripts/local-ci.sh <pr|sha>` queues one head, even one that already has a
 result: it posts `pending` and returns, and the agent tests it in turn.
 Checkout and logs live in `~/.capy/work/local-ci`. Stop it with
@@ -61,3 +64,5 @@ Crash and hang reports from MetricKit are kept in
 
 This project started from
 [jev-voice-control](https://github.com/chris-wozniczek/jev-voice-control).
+
+All rights reserved, no licence granted: see [LICENSE](LICENSE). ThirdParty/ keeps its own licences.

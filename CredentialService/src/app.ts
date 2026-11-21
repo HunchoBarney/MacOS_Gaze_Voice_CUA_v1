@@ -18,6 +18,25 @@ const RESPONSES_FIELDS_ALLOWED = new Set([
   "model", "input", "instructions", "reasoning", "max_output_tokens", "text", "store", "stream",
   "metadata", "temperature", "top_p", "truncation", "prompt_cache_key", "safety_identifier", "user",
 ]);
+const LIVE_FIELDS_ALLOWED = new Set(["sdp", "instructions", "input", "voice", "idle_timeout_s", "vad_threshold"]);
+const LIVE_INPUT_ROLES = new Set(["developer", "user", "assistant"]);
+const MAX_SDP_BYTES = 64 * 1024;
+/** Built-in GPT-Live voices, from OpenAI's create-session reference (2026-11-20). */
+const LIVE_VOICES = new Set([
+  "alloy", "ash", "ballad", "beacon", "bossa", "brise", "calandria", "cedar", "cinder", "compas", "coral", "delta",
+  "destello", "echo", "flitz", "gleam", "halo", "harema", "hornero", "juni", "luciernaga", "marin", "meridian", "nira",
+  "noeul", "nuri", "pearl", "quartz", "ripple", "sage", "shida", "shimmer", "sillage", "stone", "tempo", "verse",
+  "vesper", "willow",
+]);
+/** The only events the Mac's data channel may send. Delegation handling (L2) adds to this list. */
+export const LIVE_CLIENT_EVENTS = [
+  "session.close",
+  "session.instructions.append",
+  "session.thinking.append",
+  "session.commentary.append",
+  "session.input_audio.mute",
+  "session.input_audio.unmute",
+];
 const UNKNOWN_INSTALL: Denial = { status: 401, code: "unknown_install", message: "This install isn't registered." };
 
 function fail(c: Context, denial: Denial): Response {
@@ -83,8 +102,9 @@ function tokens(value: unknown): number {
 
 /**
  * The HTTP surface. Installs register for an opaque token, then mint
- * Realtime client secrets and call Responses and Jev through the
- * service, which holds the owner's keys and never returns them.
+ * Realtime client secrets, open GPT-Live sessions and call Responses and
+ * Jev through the service, which holds the owner's keys and never returns
+ * them.
  */
 export function createApp(deps: Deps) {
   const { config, ledger, upstream } = deps;
@@ -176,6 +196,68 @@ export function createApp(deps: Deps) {
     }
     c.set("spentCents", config.prices.realtimeSessionCents);
     return c.json({ value: secret.value, expiresAt: secret.expires_at, model: config.realtimeModel });
+  });
+
+  /**
+   * Opens a GPT-Live WebRTC session for the Mac's SDP offer and returns
+   * OpenAI's answer unchanged. The service fixes the model, client
+   * delegation with no tools (the app does every action), no stored session,
+   * the speech wake policy, a hashed safety identifier and the client events
+   * the data channel accepts; the app chooses only the conversation fields
+   * in LIVE_FIELDS_ALLOWED.
+   */
+  app.post("/v1/live/sessions", admitted("live", config.prices.liveSessionCents), async (c) => {
+    const parsed = await readJSON(c, config.maxLiveBytes);
+    if ("denial" in parsed) return fail(c, parsed.denial);
+    const request = parsed.value;
+    const field = Object.keys(request).find((name) => !LIVE_FIELDS_ALLOWED.has(name));
+    if (field) return fail(c, { status: 400, code: "field_not_allowed", message: `\`${field}\` isn't allowed.` });
+    const invalid = (message: string) => fail(c, { status: 400, code: "bad_request", message });
+    const { sdp, instructions, input, voice, idle_timeout_s: idleTimeout = 8, vad_threshold: vadThreshold } = request;
+    if (typeof sdp !== "string" || !sdp.trim()) return invalid("An SDP offer is required in `sdp`.");
+    if (new TextEncoder().encode(sdp).byteLength > MAX_SDP_BYTES) {
+      return fail(c, { status: 413, code: "too_large", message: "The SDP offer is too large." });
+    }
+    if (instructions !== undefined && typeof instructions !== "string") return invalid("`instructions` must be a string.");
+    if (input !== undefined && !(Array.isArray(input) && input.length <= 128
+      && input.every((item) => LIVE_INPUT_ROLES.has((item as { role?: unknown } | null)?.role as string)))) {
+      return invalid("`input` must be at most 128 developer, user or assistant messages.");
+    }
+    if (voice !== undefined && !LIVE_VOICES.has(voice as string)) return invalid("`voice` must be a documented voice name.");
+    if (!Number.isInteger(idleTimeout) || (idleTimeout as number) < 5 || (idleTimeout as number) > 60) {
+      return invalid("`idle_timeout_s` must be a whole number from 5 to 60.");
+    }
+    if (vadThreshold !== undefined && !(typeof vadThreshold === "number" && vadThreshold >= 0 && vadThreshold <= 1)) {
+      return invalid("`vad_threshold` must be a number from 0 to 1.");
+    }
+    const session: Record<string, unknown> = {
+      model: config.liveModel,
+      delegation: { type: "client" },
+      store: false,
+      idle_timeout_s: idleTimeout,
+      wake_policy: vadThreshold === undefined ? { type: "speech" } : { type: "speech", vad_threshold: vadThreshold },
+      safety_identifier: await sha256Hex(c.get("installID")),
+      client: { data_channel: { allowed_client_events: LIVE_CLIENT_EVENTS } },
+    };
+    if (instructions !== undefined) session.instructions = instructions;
+    if (input !== undefined) session.input = input;
+    if (voice !== undefined) session.audio = { output: { voice } };
+
+    const reply = await upstream(`${config.openAIBaseURL}/v1/live/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${config.openAIKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ session, transport: { type: "webrtc", sdp } }),
+    });
+    const text = await reply.text();
+    if (reply.status === 400) return c.body(text, 400, { "content-type": "application/json" });
+    if (!reply.ok) return fail(c, upstreamFailure(reply.status));
+    let created: { session?: { id?: unknown }; transport?: { sdp?: unknown } } | undefined;
+    try { created = JSON.parse(text); } catch {}
+    if (typeof created?.session?.id !== "string" || typeof created.transport?.sdp !== "string") {
+      return fail(c, { status: 502, code: "upstream_error", message: "The model provider returned no SDP answer." });
+    }
+    c.set("spentCents", config.prices.liveSessionCents);
+    return c.body(text, 201, { "content-type": "application/json" });
   });
 
   app.post("/v1/responses", admitted("responses", config.prices.responsesReserveCents), async (c) => {
