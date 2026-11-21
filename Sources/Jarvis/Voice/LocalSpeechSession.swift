@@ -392,6 +392,10 @@ final class LocalSpeechSession {
     var onDecision: ((VoiceAdmission) -> Void)?
     var onPartial: ((UUID, String) -> Void)?
     var onDiagnostic: (@Sendable (VoiceSpeechDiagnostic) -> Void)?
+    /// The memory intents, nil while `voice.live` is off. One it would
+    /// answer is admitted locally, so "who's Dana?" never becomes a remote
+    /// question the model can only answer without memory.
+    var memoryCommands: (() -> MemoryCommands?)?
 
     init(execute: @escaping (VoiceAdmission) async -> Void) {
         self.execute = execute
@@ -477,6 +481,10 @@ final class LocalSpeechSession {
         var boundContext = capturedContext
         boundContext.currentAsks = context.currentAsks
         var proposal = VoiceAdmissionPolicy.propose(text, context: boundContext, speech: speech)
+        if proposal.route == .remote, let memory = memoryCommands?(),
+           memory.answers(VoiceAdmissionPolicy.commandText(text, context: boundContext)) {
+            proposal = VoiceProposal(route: .local, intent: "memory")
+        }
         if !executeAutomatically, ConversationContext.localControl(text) != nil {
             proposal = VoiceProposal(route: .local, intent: "conversation_control")
         }

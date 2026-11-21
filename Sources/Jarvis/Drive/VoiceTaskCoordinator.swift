@@ -25,9 +25,11 @@ final class VoiceTaskCoordinator {
         var approvalContinuation: CheckedContinuation<Bool, Never>?
         /// A parked ask from an agent's MCP child — answering writes the
         /// shared answer file instead of resuming a continuation.
-        var agentAskID: String?
+        var agentAskID: String? { didSet { if agentAskID != nil { isAgentAsk = true } } }
         /// Agent-ask rows have no worker; the pending-ask file is the clock.
-        var isAgentAsk: Bool { agentAskID != nil }
+        /// It stays set after the ask settles and clears its ID, so a
+        /// finished row still reads as the agent's, never as a user request.
+        private(set) var isAgentAsk = false
         var worker: Task<Void, Never>?
         var semanticFocus: VoiceSemanticRouter.Proposal?
         var windowScroll: WindowScrollRequest?

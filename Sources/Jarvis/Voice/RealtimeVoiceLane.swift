@@ -54,6 +54,9 @@ final class RealtimeVoiceLane: SpeechCapturing {
     /// this turn's COMPLETED speech transcript (nil for typed turns) — the
     /// runtime's heard-vs-called check wants the user's final words.
     /// `steps` carries the model's inline plan for multi-part requests.
+    /// The memory intents, nil while `voice.live` is off; typed and held
+    /// turns admit them locally and `commandHandler` answers them.
+    var memoryCommands: (() -> MemoryCommands?)?
     var commandHandler: (String, String?, String?, String?, [String], UUID) async -> String = { _, _, _, _, _, _ in
         #"{"status":"refused","say":"Computer control is unavailable."}"#
     }
@@ -241,6 +244,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
                 Task { @MainActor [weak self] in self?.onDiagnostic?(diagnostic) }
             }
         }
+        session.memoryCommands = { [weak self] in self?.memoryCommands?() }
         session.onPartial = { [weak self] id, text in
             guard self?.turnID == id else { return }
             self?.onEvent?(id, .partial(text))

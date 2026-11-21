@@ -240,6 +240,93 @@ final class MemoryCommandsTests: MemoryTestCase {
         XCTAssertEqual(s.sessionContext(for: "gate code"), .empty)
     }
 
+    @MainActor func testTypedAndHeldTurnsAdmitAnsweredMemoryIntentsLocally() async throws {
+        let s = store()
+        let commands = MemoryCommands(store: { s })
+        _ = commands.handle("Remember Dana is my manager")
+        var executed: [String] = []
+        let session = LocalSpeechSession { executed.append($0.text) }
+        session.memoryCommands = { commands }
+
+        let recallDecision = await session.submitTyped("Who's Dana?", now: 1)
+        let recall = try XCTUnwrap(recallDecision)
+        XCTAssertEqual(recall.route, .local)
+        XCTAssertEqual(recall.intent, "memory")
+        let generalDecision = await session.submitTyped("Who's the CEO of Apple?", now: 2)
+        let general = try XCTUnwrap(generalDecision)
+        XCTAssertEqual(general.route, .remote)
+        XCTAssertEqual(executed, ["Who's Dana?"])
+
+        session.memoryCommands = { nil }
+        let offDecision = await session.submitTyped("Who's Dana?", now: 3)
+        let off = try XCTUnwrap(offDecision)
+        XCTAssertEqual(off.route, .remote)
+    }
+
+    @MainActor func testHandsFreeConversationAnswersMemoryIntentsWithoutTheModel() async throws {
+        let s = store()
+        let commands = MemoryCommands(store: { s })
+        _ = commands.handle("Remember Dana is my manager")
+        let conversation = ConversationSession()
+        conversation.makeSpeechSession = { captured in
+            let owner = LocalSpeechSession { _ in XCTFail("queue owns execution") }
+            owner.context = captured
+            return owner
+        }
+        conversation.readContext = { VoiceAdmissionContext() }
+        conversation.interpret = { _, _, _ in
+            XCTFail("a memory intent must not call a model")
+            return .init(kind: .clarify)
+        }
+        conversation.remote = { _, _, _ in XCTFail("a memory intent must not reach the Live model") }
+        conversation.execute = { _ in
+            XCTFail("a memory intent is not a task")
+            return .init(verified: false, waitingForAnswer: false, message: "")
+        }
+        conversation.onControl = { _ in }
+        conversation.memoryCommands = { commands }
+        var said: [String] = []
+        conversation.onEvent = { if case .feedback(_, let message) = $0 { said.append(message) } }
+        let session = UUID(), connection = UUID()
+        try conversation.startExternal(session: session)
+        defer { conversation.stop() }
+
+        let turn = try conversation.beginExternal(input: .init(connectionID: connection, itemID: "who"), at: 1)
+        XCTAssertTrue(conversation.commitExternal(turn, at: 2))
+        await conversation.finishExternal(turn, text: "Who's Dana?", at: 2.1)
+        XCTAssertEqual(said, ["Dana is your manager."])
+    }
+
+    @MainActor func testAnsweredAgentAskIsNeverKeptAsAPastRequest() async throws {
+        let s = store()
+        let config = Config(defaults: UserDefaults(suiteName: "memory-agent-\(UUID().uuidString)")!,
+                            keyStore: NoKeys(), openAIKeyStore: NoKeys(), environment: [:])
+        config.voiceLive = true
+        let c = VoiceTaskCoordinator(
+            config: config, jevRoute: { nil },
+            gazeService: GazeService(stream: GazeStream(frames: { AsyncThrowingStream { _ in } })),
+            overlay: TargetOverlay())
+        defer { c.shutdown() }
+        c.memoryStore = { s }
+        let asks = root.appendingPathComponent("asks", isDirectory: true)
+        try FileManager.default.createDirectory(at: asks, withIntermediateDirectories: true)
+        let previous = AgentAskChannel.asksDir
+        AgentAskChannel.asksDir = asks
+        defer { AgentAskChannel.asksDir = previous }
+
+        let prompt = "Deploy the staging build to production"
+        let work = VoiceTaskCoordinator.Work(label: "Agent codex", request: prompt, spec: DriveTask(goal: prompt))
+        work.agentAskID = "ask-\(UUID().uuidString)"
+        work.ask = .confirm(prompt)
+        c.tasks = [work]
+        c.resolveApproval(id: work.id, approved: true)
+
+        XCTAssertEqual(work.outcome, .done)
+        XCTAssertNil(work.agentAskID)
+        XCTAssertTrue(work.isAgentAsk)
+        XCTAssertEqual(s.sessionContext(for: "deploy the staging build"), .empty)
+    }
+
     private struct NoKeys: APIKeyStore {
         func read() throws -> String? { nil }
         func save(_ apiKey: String) throws {}

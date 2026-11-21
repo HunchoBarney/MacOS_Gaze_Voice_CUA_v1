@@ -56,6 +56,18 @@ final class MemoryCommands {
         self.now = now
     }
 
+    /// Whether `handle` would answer `utterance`, without remembering,
+    /// recalling or forgetting anything. Admission asks this first, so a
+    /// memory intent is answered on the Mac instead of reaching the model.
+    func answers(_ utterance: String) -> Bool {
+        switch MemoryIntent.parse(utterance) {
+        case nil: return false
+        case .remember, .recall(_, explicit: true): return true
+        case .recall(let subject, explicit: false): return (try? store().recall(subject).isEmpty == false) ?? true
+        case .forgetLast: return lastTouched.map { now().timeIntervalSince($0.at) <= Self.forgetWindow } ?? false
+        }
+    }
+
     /// The spoken reply when `utterance` is a memory intent, or nil when
     /// it isn't one and should be handled as an ordinary request.
     func handle(_ utterance: String) -> String? {

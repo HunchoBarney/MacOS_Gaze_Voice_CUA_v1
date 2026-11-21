@@ -268,6 +268,10 @@ final class ConversationSession {
     /// about it reaches the model. A request an alert offered ("close this
     /// tab") is admitted in place of the reply.
     var proactiveIntercept: ((String) -> ProactiveIntercept?)?
+    /// The memory intents, nil while `voice.live` is off. "Remember X",
+    /// "who's X?" and "forget that" are answered on the Mac and the turn
+    /// ends here, so the model never hears them.
+    var memoryCommands: (() -> MemoryCommands?)?
     private(set) var id: UUID?
     private var epoch = UUID()
     private var finals: [Final] = []
@@ -341,6 +345,12 @@ final class ConversationSession {
         if case .say = intercept, record.owner.consumeAdmission(record.turn) != nil {
             owners.removeValue(forKey: record.turn.id)
             onEvent?(.ignored(record.turn.id))
+            return
+        }
+        if let memory = memoryCommands?(), memory.answers(admission.text),
+           record.owner.consumeAdmission(record.turn) != nil {
+            owners.removeValue(forKey: record.turn.id)
+            if let say = memory.handle(admission.text) { onEvent?(.feedback(record.turn.id, say)) }
             return
         }
         finals.append(.init(context: record.context, owner: record.owner,
