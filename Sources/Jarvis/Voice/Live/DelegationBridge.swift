@@ -172,6 +172,11 @@ final class DelegationBridge {
         }
     }
 
+    /// Whether `captureID` is work this bridge started and still follows.
+    func follows(_ captureID: UUID?) -> Bool {
+        captureID.map { running[$0] != nil } ?? false
+    }
+
     /// The coordinator's `taskEventSink`: a question or the outcome of
     /// work the bridge started.
     func taskEvent(captureID: UUID?, payload: String) {
@@ -402,4 +407,39 @@ extension VoiceTaskCoordinator: DelegationSpine {
               case .finished? = await waitForConversationBoundary(work.id, throughQuestions: true) else { return nil }
         return work.message
     }
+}
+
+extension DelegationBridge {
+    /// The L2 adapters: a bridge between Live voice and the coordinator. It
+    /// hears every session's events, answers through the open session, drops
+    /// requests still waiting on "stop" or "cancel", and takes the task
+    /// events of the work it started; every other task event goes where it
+    /// went before.
+    static func connect(_ voice: LiveVoice, to coordinator: VoiceTaskCoordinator,
+                        timing: Timing = .init()) -> DelegationBridge {
+        let bridge = DelegationBridge(live: OpenLiveSession(voice), spine: coordinator, timing: timing)
+        voice.onSessionEvent = { [weak bridge] event in
+            if case .started = event { bridge?.open(origin: .wakeWord) }
+            bridge?.handle(event)
+        }
+        let control = voice.onControl
+        voice.onControl = { [weak bridge] word in
+            if word == .stop || word == .cancel { bridge?.bargeIn() }
+            control?(word)
+        }
+        let sink = coordinator.taskEventSink
+        coordinator.taskEventSink = { [weak bridge] captureID, payload, speak in
+            guard let bridge, bridge.follows(captureID) else { return sink(captureID, payload, speak) }
+            bridge.taskEvent(captureID: captureID, payload: payload)
+        }
+        return bridge
+    }
+}
+
+/// Whichever Live session is open; nothing while none is.
+@MainActor
+private final class OpenLiveSession: LiveSessionSending {
+    private weak var voice: LiveVoice?
+    init(_ voice: LiveVoice) { self.voice = voice }
+    func send(_ append: LiveAppend) { voice?.openSession?.send(append) }
 }

@@ -54,6 +54,11 @@ final class LiveVoice {
     var onOneBreath: ((OneBreath) -> Void)?
     /// Live's reply so far in this turn, for showing it when it isn't spoken.
     var onReply: ((String) -> Void)?
+    /// Every event of the open session, and the close of one Jarvis ended,
+    /// for the delegation bridge.
+    var onSessionEvent: ((LiveSessionEvent) -> Void)?
+    /// The open session, for answering its delegations.
+    var openSession: LiveSessionSending? { session }
 
     private let microphone: LiveMicrophoneDriving
     private let wakeWord: WakeWordDetecting
@@ -145,7 +150,11 @@ final class LiveVoice {
         let session = makeSession(listening.name)
         self.session = session
         session.onEvent = { [weak self, weak session] event in
-            guard let self, let session, self.session === session else { return }
+            guard let self, let session else { return }
+            guard self.session === session else {
+                if self.session == nil, case .closed = event { self.onSessionEvent?(event) }
+                return
+            }
             self.receive(event)
         }
         Task { [weak self] in
@@ -197,6 +206,7 @@ final class LiveVoice {
     }
 
     private func receive(_ event: LiveSessionEvent) {
+        onSessionEvent?(event)
         let at = now()
         switch event {
         case .inputTranscript(let delta):
