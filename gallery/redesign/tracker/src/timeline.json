@@ -1,0 +1,91 @@
+{
+  "//": "Shared by the prototype (src/script.ts) and the renderer (render.mjs). Milliseconds of product time on the scripted clock.",
+  "T": {
+    "press": 1450,
+    "look": 1650,
+    "ready": 3250,
+    "capture": 3750,
+    "point": 1000,
+    "glide": 420,
+    "verify": 12750,
+    "verifyPoint": 600,
+    "check": 15150,
+    "success": 15850,
+    "done": 17650,
+    "end": 18300,
+    "failPress": 19650,
+    "retry": 19850
+  },
+  "states": [
+    {
+      "id": "intro",
+      "title": "Invitation",
+      "scenario": "happy",
+      "still": 1100,
+      "clip": [
+        0,
+        1250
+      ]
+    },
+    {
+      "id": "look",
+      "title": "Look at the camera",
+      "scenario": "happy",
+      "still": 2900,
+      "clip": [
+        1350,
+        3300
+      ]
+    },
+    {
+      "id": "ready",
+      "title": "Ready",
+      "scenario": "happy",
+      "still": 3480,
+      "clip": [
+        3200,
+        4000
+      ]
+    },
+    {
+      "id": "capture",
+      "title": "Look at each point",
+      "scenario": "happy",
+      "still": 6640,
+      "clip": [
+        5750,
+        7050
+      ]
+    },
+    {
+      "id": "verify",
+      "title": "Verifying",
+      "scenario": "happy",
+      "still": 14300,
+      "clip": [
+        12650,
+        15700
+      ]
+    },
+    {
+      "id": "success",
+      "title": "Calibrated",
+      "scenario": "happy",
+      "still": 16700,
+      "clip": [
+        15100,
+        18300
+      ]
+    },
+    {
+      "id": "failure",
+      "title": "Couldn't verify: try again",
+      "scenario": "fail",
+      "still": 17500,
+      "clip": [
+        15100,
+        20900
+      ]
+    }
+  ]
+}
