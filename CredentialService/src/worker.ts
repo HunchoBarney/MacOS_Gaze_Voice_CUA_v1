@@ -94,7 +94,7 @@ export class LiveMeter extends DurableObject<Env> {
     this.meter = new Meter(config.metering, {
       now: Date.now,
       attach: (handlers) => attachSideband(config, session.sessionID, handlers),
-      report: (usage) => ledger.addLiveUsage({ installID: session.installID, ...usage }),
+      report: (usage) => ledger.addLiveUsage({ installID: session.installID, sessionID: session.sessionID, ...usage }),
       wakeAt: (at) => (at === null ? storage.deleteAlarm() : storage.setAlarm(at)),
       save: (state) => (state.done ? storage.deleteAll() : storage.put("state", state)),
     }, (await storage.get("state")) as MeterState | undefined);

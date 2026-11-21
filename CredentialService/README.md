@@ -27,9 +27,11 @@ second. Once an install is capped the current turn finishes: the meter sends
 `session.close` at the next `session.paused` (at once if Live is already in
 Standby), or after `CAP_GRACE_SECONDS` more session or clock time. New
 sessions then get 429 `live_limit` and the app falls back to basic voice
-until the month ends. A dropped sideband is reattached with backoff (1 s
-doubling to 30 s, eight tries); if the session ended meanwhile, the time
-from the last snapshot to the drop is billed at the active rate. With
+until the month ends. The meter reports session totals, and the ledger
+counts only each session's increase, so a report replayed after a restart
+counts once. A dropped sideband is reattached with backoff (1 s doubling to
+30 s) until OpenAI says the session is gone, or a day has passed; then the
+time from the last snapshot to the drop is billed at the active rate. With
 metering off, Live behaves as before.
 
 Built on [Hono](https://hono.dev) 4.13 (MIT) and a SQLite-backed Durable

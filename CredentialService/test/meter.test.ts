@@ -52,7 +52,7 @@ function rig(vars: Record<string, string> = {}, attaches: Attach[] = ["ok"]) {
     },
     report: async (usage) => {
       reports.push(usage.weightedSeconds);
-      return ledger.addLiveUsage({ installID: INSTALL, ...usage });
+      return ledger.addLiveUsage({ installID: INSTALL, sessionID: "live_fixture", ...usage });
     },
     wakeAt: (at) => { wake = at; },
     save: () => {},
@@ -189,16 +189,47 @@ describe("the cap", () => {
   });
 });
 
+describe("billing", () => {
+  it("bills snapshots that gain or lose the active/paused split without double-counting", async () => {
+    const r = rig();
+    await r.meter.start();
+    await r.usage(60_000, 60);
+    expect(r.liveSeconds()).toBeCloseTo(60, 6);
+    expect(r.cents()).toBeCloseTo(5, 6);
+    await r.step({ at: 120_000, event: {
+      type: "session.usage.updated", event_id: "split", usage: { seconds: 120, active_seconds: 60, paused_seconds: 60 },
+    } });
+    expect(r.liveSeconds()).toBeCloseTo(84, 6);
+    expect(r.cents()).toBeCloseTo(7, 6);
+    await r.usage(150_000, 150);
+    expect(r.liveSeconds()).toBeCloseTo(114, 6);
+    expect(r.cents()).toBeCloseTo(9.5, 6);
+  });
+});
+
 describe("reattaching", () => {
-  it("backs off on the injected clock, then bills to the drop once it gives up", async () => {
-    const r = rig({}, ["ok"]);
+  it("backs off on the injected clock and keeps trying until OpenAI says the session is gone", async () => {
+    const r = rig({}, ["ok", ...Array<Attach>(9).fill("failed"), "gone"]);
     await r.meter.start();
     await r.usage(10_000, 10);
     await r.step({ at: 12_000, drop: true });
     await r.advanceTo(600_000);
-    expect(r.attachedAt).toEqual([0, 12_000, 13_000, 15_000, 19_000, 27_000, 43_000, 73_000, 103_000]);
+    expect(r.attachedAt).toEqual([0, 12_000, 13_000, 15_000, 19_000, 27_000, 43_000, 73_000, 103_000, 133_000, 163_000]);
     expect(r.meter.state.done).toBe(true);
     expect(r.meter.state.seconds).toBe(12);
+    expect(r.liveSeconds()).toBe(12);
+    expect(r.wake()).toBeNull();
+  });
+
+  it("gives up a day after the drop when the sideband never comes back, billing to the drop", async () => {
+    const r = rig({}, ["ok"]);
+    await r.meter.start();
+    await r.usage(10_000, 10);
+    await r.step({ at: 12_000, drop: true });
+    await r.advanceTo(12_000 + 86_400_000 - 1);
+    expect(r.meter.state.done).toBe(false);
+    await r.advanceTo(12_000 + 86_400_000 + 60_000);
+    expect(r.meter.state.done).toBe(true);
     expect(r.liveSeconds()).toBe(12);
     expect(r.wake()).toBeNull();
   });

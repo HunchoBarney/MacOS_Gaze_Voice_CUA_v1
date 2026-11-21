@@ -585,7 +585,7 @@ describe("Live metering and tiers", () => {
   it("reads Live usage as zero and uncapped with metering off, and keeps the flat Live charge", async () => {
     const h = harness();
     const { installID, token } = await h.register();
-    await h.local.addLiveUsage({ installID, weightedSeconds: 99_999, cents: 0, now: h.now() });
+    await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 99_999, cents: 0, now: h.now() });
     expect(await usage(h, token)).toEqual({
       metering: false, tier: "jarvis", period: "2026-11", periodEnds: "2026-12-01T00:00:00.000Z",
       liveSeconds: 0, liveSecondsLimit: null, warnAt: 0.8, capped: false, tasksLimit: 100,
@@ -598,7 +598,7 @@ describe("Live metering and tiers", () => {
   it("reports this month's weighted Live usage against the tier, without charging", async () => {
     const h = harness({ LIVE_METERING: "1" });
     const { installID, token } = await h.register();
-    expect(await h.local.addLiveUsage({ installID, weightedSeconds: 600, cents: 50, now: h.now() }))
+    expect(await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 600, cents: 50, now: h.now() }))
       .toEqual({ used: 600, limit: 18_000, capped: false });
     expect(await usage(h, token)).toEqual({
       metering: true, tier: "jarvis", period: "2026-11", periodEnds: "2026-12-01T00:00:00.000Z",
@@ -626,10 +626,23 @@ describe("Live metering and tiers", () => {
     expect(h.meters).toHaveLength(1);
   });
 
+  it("counts a session's replayed or stale totals once", async () => {
+    const h = harness({ LIVE_METERING: "1" });
+    const { installID } = await h.register();
+    const report = (weightedSeconds: number, cents: number, sessionID = "live_a") =>
+      h.local.addLiveUsage({ installID, sessionID, weightedSeconds, cents, now: h.now() });
+    expect(report(30, 2.5).used).toBe(30);
+    expect(report(30, 2.5).used).toBe(30);
+    expect(report(20, 1).used).toBe(30);
+    expect(report(45, 3.75).used).toBe(45);
+    expect(report(10, 1, "live_b").used).toBe(55);
+    expect(await spent(h)).toBeCloseTo(4.75, 6);
+  });
+
   it("refuses a new Live session once the month is used up, without calling upstream or charging", async () => {
     const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
     const { installID, token } = await h.register();
-    expect(await h.local.addLiveUsage({ installID, weightedSeconds: 60, cents: 0, now: h.now() }))
+    expect(await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 60, cents: 0, now: h.now() }))
       .toEqual({ used: 60, limit: 60, capped: true });
     const refused = await h.request("/v1/live/sessions", { token, body: live });
     expect(refused.status).toBe(429);
@@ -648,7 +661,7 @@ describe("Live metering and tiers", () => {
     const h = harness({ LIVE_METERING: "1", TIERS, DEFAULT_TIER: "tiny" });
     const { installID, token } = await h.register();
     h.setClock(Date.UTC(2026, 10, 30, 23, 59, 59));
-    await h.local.addLiveUsage({ installID, weightedSeconds: 60, cents: 0, now: h.now() });
+    await h.local.addLiveUsage({ installID, sessionID: "live_a", weightedSeconds: 60, cents: 0, now: h.now() });
     expect((await h.request("/v1/live/sessions", { token, body: live })).status).toBe(429);
     h.advance(1_000);
     expect(await usage(h, token)).toEqual({

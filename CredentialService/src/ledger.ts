@@ -83,6 +83,12 @@ export const SCHEMA = [
     seconds REAL NOT NULL,
     PRIMARY KEY (install_id, period)
   )`,
+  `CREATE TABLE IF NOT EXISTS live_sessions (
+    session_id TEXT PRIMARY KEY,
+    seconds REAL NOT NULL,
+    cents REAL NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
 ];
 
 const DAY = 86_400_000;
@@ -198,19 +204,30 @@ export class Ledger {
   }
 
   /**
-   * Adds metered Live time, in weighted seconds, to the install's usage for
-   * the month, and its cost in cents to the day's spend.
+   * Records a metered Live session's totals so far, in weighted seconds and
+   * cents. Only the increase since the session's last report is added to the
+   * install's usage for the month and to the day's spend, so a replayed
+   * report counts once.
    */
-  addLiveUsage(input: { installID: string; weightedSeconds: number; cents: number; now: number }): {
+  addLiveUsage(input: { installID: string; sessionID: string; weightedSeconds: number; cents: number; now: number }): {
     used: number; limit: number | null; capped: boolean;
   } {
-    const { installID, weightedSeconds, now } = input;
-    if (Number.isFinite(weightedSeconds) && weightedSeconds > 0) {
+    const { installID, sessionID, now } = input;
+    const prior = this.sql.all<{ seconds: number; cents: number }>(
+      "SELECT seconds, cents FROM live_sessions WHERE session_id = ?", sessionID)[0] ?? { seconds: 0, cents: 0 };
+    const total = (value: number, before: number) => (Number.isFinite(value) ? Math.max(value, before) : before);
+    const seconds = total(input.weightedSeconds, prior.seconds);
+    const cents = total(input.cents, prior.cents);
+    this.sql.all("DELETE FROM live_sessions WHERE updated_at < ?", now - 7 * DAY);
+    this.sql.all(
+      "INSERT INTO live_sessions (session_id, seconds, cents, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (session_id) DO UPDATE SET seconds = excluded.seconds, cents = excluded.cents, updated_at = excluded.updated_at",
+      sessionID, seconds, cents, now);
+    if (seconds > prior.seconds) {
       this.sql.all(
         "INSERT INTO live_usage (install_id, period, seconds) VALUES (?, ?, ?) ON CONFLICT (install_id, period) DO UPDATE SET seconds = seconds + excluded.seconds",
-        installID, utcPeriod(now), weightedSeconds);
+        installID, utcPeriod(now), seconds - prior.seconds);
     }
-    this.charge({ installID, cents: input.cents, now });
+    this.charge({ installID, cents: cents - prior.cents, now });
     const status = this.liveStatus(installID, now);
     return { used: status.liveSeconds, limit: status.liveSecondsLimit, capped: status.capped };
   }

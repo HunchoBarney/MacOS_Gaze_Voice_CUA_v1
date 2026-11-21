@@ -20,6 +20,7 @@ export interface MeterHost {
   now(): number;
   /** Opens the session's sideband: a socket, "gone" when the session no longer exists, or "failed" to retry. */
   attach(handlers: SidebandHandlers): Promise<SidebandSocket | "gone" | "failed">;
+  /** Records the session's totals so far; the ledger counts only what it hasn't counted for this session. */
   report(usage: { weightedSeconds: number; cents: number; now: number }): Promise<{ capped: boolean }>;
   wakeAt(at: number | null): unknown;
   save(state: MeterState): unknown;
@@ -30,8 +31,7 @@ export interface MeterState {
   seconds: number;
   active: number;
   paused: number;
-  breakdown: boolean;
-  billed: { weighted: number; seconds: number; active: number; paused: number };
+  billed: { weighted: number; cents: number };
   snapshotAt: number | null;
   droppedAt: number | null;
   attempts: number;
@@ -44,8 +44,8 @@ export interface MeterState {
   seen: string[];
 }
 
-const MAX_ATTEMPTS = 8;
 const MAX_BACKOFF_MS = 30_000;
+const DETACHED_LIMIT_MS = 86_400_000;
 const WATCHDOG_MS = 300_000;
 const SEEN_EVENTS = 256;
 
@@ -56,12 +56,15 @@ const amount = (value: unknown) =>
  * Meters one GPT-Live session from its sideband. `session.usage.updated`
  * and `session.closed` carry cumulative usage, so the meter keeps the
  * largest snapshot and bills only increases: replays, duplicates and
- * out-of-order events can't double-count. Once the ledger says the install
- * is capped, the current turn finishes: the meter sends `session.close` at
- * the next `session.paused` (or at once if Live is already in Standby), or
- * after the grace period of session time or clock time. A dropped sideband
- * is reattached with backoff; if the session ended meanwhile, the time from
- * the last snapshot to the drop is billed at the active rate.
+ * out-of-order events can't double-count. Seconds the snapshot doesn't split
+ * into active and paused count as active. It reports session totals, so a
+ * report replayed after a restart counts once. Once the ledger says the
+ * install is capped, the current turn finishes: the meter sends
+ * `session.close` at the next `session.paused` (or at once if Live is
+ * already in Standby), or after the grace period of session time or clock
+ * time. A dropped sideband is reattached with backoff until OpenAI says the
+ * session is gone, or a day has passed; then the time from the last snapshot
+ * to the drop is billed at the active rate.
  */
 export class Meter {
   readonly state: MeterState;
@@ -71,8 +74,8 @@ export class Meter {
 
   constructor(private readonly settings: MeterSettings, private readonly host: MeterHost, state?: MeterState) {
     this.state = state ?? {
-      startedAt: null, seconds: 0, active: 0, paused: 0, breakdown: false,
-      billed: { weighted: 0, seconds: 0, active: 0, paused: 0 },
+      startedAt: null, seconds: 0, active: 0, paused: 0,
+      billed: { weighted: 0, cents: 0 },
       snapshotAt: null, droppedAt: null, attempts: 0, retryAt: null, standby: false,
       cap: null, closeSent: false, done: false, wake: null, seen: [],
     };
@@ -130,7 +133,8 @@ export class Meter {
     if (result === "gone") return this.endedWhileDetached();
     if (result === "failed") {
       this.state.attempts += 1;
-      if (this.state.attempts >= MAX_ATTEMPTS) return this.endedWhileDetached();
+      const since = this.state.droppedAt ?? this.state.startedAt ?? this.host.now();
+      if (this.host.now() - since >= DETACHED_LIMIT_MS) return this.endedWhileDetached();
       this.state.retryAt = this.host.now() + Math.min(1000 * 2 ** (this.state.attempts - 1), MAX_BACKOFF_MS);
       return;
     }
@@ -176,7 +180,6 @@ export class Meter {
     const active = amount(usage?.active_seconds);
     const paused = amount(usage?.paused_seconds);
     if (active !== undefined && paused !== undefined) {
-      this.state.breakdown = true;
       this.state.active = Math.max(this.state.active, active);
       this.state.paused = Math.max(this.state.paused, paused);
     }
@@ -185,16 +188,13 @@ export class Meter {
 
   private async bill(): Promise<void> {
     const { state, settings } = this;
-    const weighted = state.breakdown ? state.active + settings.standbyWeight * state.paused : state.seconds;
-    const delta = weighted - state.billed.weighted;
-    if (delta <= 0) return;
-    const cents = state.breakdown
-      ? (Math.max(0, state.active - state.billed.active) * settings.activeCentsPerMinute
-        + Math.max(0, state.paused - state.billed.paused) * settings.pausedCentsPerMinute) / 60
-      : Math.max(0, state.seconds - state.billed.seconds) * settings.activeCentsPerMinute / 60;
+    const active = state.active + Math.max(0, state.seconds - state.active - state.paused);
+    const weighted = active + settings.standbyWeight * state.paused;
+    const cents = (active * settings.activeCentsPerMinute + state.paused * settings.pausedCentsPerMinute) / 60;
+    if (weighted <= state.billed.weighted && cents <= state.billed.cents) return;
     const now = this.host.now();
-    const { capped } = await this.host.report({ weightedSeconds: delta, cents, now });
-    state.billed = { weighted, seconds: state.seconds, active: state.active, paused: state.paused };
+    const { capped } = await this.host.report({ weightedSeconds: weighted, cents, now });
+    state.billed = { weighted: Math.max(weighted, state.billed.weighted), cents: Math.max(cents, state.billed.cents) };
     if (capped && !state.cap) state.cap = { at: now, seconds: state.seconds, paused: state.standby };
   }
 
@@ -203,7 +203,6 @@ export class Meter {
     const from = state.snapshotAt ?? state.startedAt;
     const extra = state.droppedAt !== null && from !== null ? Math.max(0, state.droppedAt - from) / 1000 : 0;
     state.seconds += extra;
-    if (state.breakdown) state.active += extra;
     state.snapshotAt = state.droppedAt;
     await this.bill();
     this.finish();
