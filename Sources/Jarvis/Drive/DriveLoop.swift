@@ -663,6 +663,10 @@ actor DriveLoop {
         if let pending = claimOffer(for: task.goal, questionPending: task.questionPending) {
             return await runOfferedUndo(pending, task: task, session: directSession ?? session)
         }
+        if !task.questionPending, Self.repairsOffer(task.goal) {
+            return settle(.blocked("There's nothing to take back now."), task, history,
+                          blockedReason: "no live undo offer")
+        }
 
         do {
             if config.windowOnly, task.windowID == nil {

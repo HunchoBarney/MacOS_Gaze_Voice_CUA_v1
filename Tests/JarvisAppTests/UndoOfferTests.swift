@@ -567,6 +567,24 @@ final class UndoOfferTests: XCTestCase {
         }
     }
 
+    func testARepairWordNeverStartsATaskOnceTheOfferIsGone() async {
+        let script = Script([trashItem])
+        let offers = UndoOffers()
+        offered(offers, at: script.now.value)
+        script.now.set(script.now.value.addingTimeInterval(11))
+        let loop = await makeLoop(script, offers: offers)
+        let expired = await loop.run(DriveTask(goal: "no"), session: "s")
+        XCTAssertTrue(script.calls.value.isEmpty, "an expired offer leaves \"no\" with nothing to do")
+        XCTAssertEqual(expired.blockedReason, "no live undo offer")
+
+        offered(offers, at: script.now.value)
+        var unverified = DriveTask(goal: "not that")
+        unverified.speakerVerified = false
+        let refused = await loop.run(unverified, session: "s")
+        XCTAssertTrue(script.calls.value.isEmpty, "an unverified repair word is not a new task either")
+        XCTAssertEqual(refused.blockedReason, "no live undo offer")
+    }
+
     func testUndoRefusesAfterThePersonTypedOrClicked() async {
         let script = Script([trashItem, Item(menu: "Edit", title: "Redo Move", enabled: true)])
         let offers = UndoOffers()
