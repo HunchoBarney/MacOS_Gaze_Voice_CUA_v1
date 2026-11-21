@@ -384,7 +384,7 @@ final class ConversationSession {
         }
         memory.discardFragment()
         onControl?(kind)
-        onEvent?(.feedback(turn, kind == .pause ? "Okay, I'll stop listening. Press fn when you need me." : "Stopped."))
+        onEvent?(.feedback(turn, kind == .pause ? "Okay, I'll stop listening. Choose Resume Listening in the menu bar when you need me." : "Stopped."))
     }
 
     private func processNext() {

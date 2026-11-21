@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-/// Delivers dictated text into the focused editable element — the Fn+Ctrl
+/// Delivers dictated text into the focused editable element — the dictation
 /// path, never the planner. First tries the AX selected-text insertion on the
 /// focused element (element-scoped, no keystrokes); when no editable element
 /// answers, falls back to clipboard+⌘V, which snapshots every pasteboard

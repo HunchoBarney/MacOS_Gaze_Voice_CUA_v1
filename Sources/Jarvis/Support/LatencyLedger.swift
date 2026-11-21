@@ -4,8 +4,7 @@ import Foundation
 /// Per-interaction latency ledger — a read-only tap on the event streams
 /// that already exist, never a new reporting path the lanes must feed.
 ///
-/// Marks surface from four places:
-///   - `FnInputMonitor.onAction` — fn_down / fn_release / cancel edges.
+/// Marks surface from three places:
 ///   - `VoiceController.$captureState` — the `.finishing` edge is the
 ///     commit; leaving `.finishing` with text is the transcript final.
 ///   - `DecisionFeed.$entries` — heard / "→ drive loop" / "round N:" /
@@ -25,14 +24,14 @@ final class LatencyLedger {
 
     /// Stage marks — one per transition the streams expose.
     enum Mark: String {
-        case fnDown, fnRelease, commit, transcriptFinal
+        case commit, transcriptFinal
         case dispatch, effect, eyesLand
     }
 
-    /// What started the interaction — voice hold, typed turn, gaze act —
+    /// What started the interaction — typed turn, gaze act, voice task —
     /// carried into the JSONL record for report filtering.
     enum Origin: String, Codable {
-        case hold, typed, gaze, task
+        case typed, gaze, task
     }
 
     /// One drive-loop round's observable slice. `decideMs` is the merged
@@ -62,16 +61,15 @@ final class LatencyLedger {
     }
 
     /// Span keys the report aggregates — one list so the JSONL keys and
-    /// the percentile rows can never drift apart.
+    /// the percentile rows can never drift apart. `fn_hold_ms`,
+    /// `release_to_commit_ms` and `fn_to_effect_ms` were retired with Fn;
+    /// don't reuse those names.
     static let spanKeys = [
-        "fn_hold_ms",
-        "release_to_commit_ms",
         "commit_to_transcript_ms",
         "transcript_to_dispatch_ms",
         "handoff_to_desktop_call_ms",
         "dispatch_to_effect_ms",
         "eyes_land_to_effect_ms",
-        "fn_to_effect_ms",
         "round_decide_ms",
         "round_dispatch_ms",
     ]
@@ -136,27 +134,13 @@ final class LatencyLedger {
 
     // MARK: - Wiring
 
-    /// The one composition-root call. Chains `input.onAction` (the caller
-    /// already set it — the ledger runs first so fn_release precedes the
-    /// commit edge the controller emits synchronously), subscribes the
-    /// feed and capture state, and wraps the gaze event sink after the
-    /// coordinator's own closure so both hear every event.
+    /// The one composition-root call. Subscribes the feed and capture
+    /// state, and wraps the gaze event sink after the coordinator's own
+    /// closure so both hear every event.
     @MainActor
-    func attach(controller: VoiceController, input: FnInputMonitor,
-                gaze: GazeService = .shared) {
+    func attach(controller: VoiceController, gaze: GazeService = .shared) {
         guard !attached else { return }
         attached = true
-
-        let priorAction = input.onAction
-        input.onAction = { [weak self] action in
-            switch action {
-            case .begin: self?.mark(.fnDown)
-            case .finish: self?.mark(.fnRelease)
-            case .cancel, .cancelCapture: self?.closeCurrent(reason: "cancelled")
-            case .none: break
-            }
-            priorAction(action)
-        }
 
         seenFeedIDs = Set(controller.cua.feed.entries.map(\.id))
         controller.cua.feed.$entries
@@ -196,30 +180,15 @@ final class LatencyLedger {
 
     // MARK: - Marks
 
-    /// Record a stage mark against the open interaction. `.fnDown` opens
-    /// one; `.eyesLand` also records outside interactions (a dwell commit
-    /// can be the whole interaction); other marks with nothing open are
-    /// dropped — the feed-side paths re-open records lazily where they
-    /// carry real work.
+    /// Record a stage mark against the open interaction. `.eyesLand` also
+    /// records outside interactions (a dwell commit can be the whole
+    /// interaction); other marks with nothing open are dropped — the
+    /// feed-side paths open records lazily where they carry real work.
     func mark(_ mark: Mark) {
         let at = now()
         lock.lock(); defer { lock.unlock() }
-        switch mark {
-        case .fnDown:
-            if var open = current {
-                open.result = "superseded"
-                closeLocked(&open)
-            }
-            current = Interaction(id: UUID(), origin: .hold, began: wall())
-        case .eyesLand:
-            lastEyesLandAt = at
-            current?.marks[mark.rawValue] = at
-            return
-        default:
-            guard current != nil else { return }
-            current?.marks[mark.rawValue] = at
-            return
-        }
+        if mark == .eyesLand { lastEyesLandAt = at }
+        guard current != nil else { return }
         current?.marks[mark.rawValue] = at
     }
 
@@ -241,7 +210,7 @@ final class LatencyLedger {
 
     /// The capture-state edge: `.finishing` is the commit; leaving it
     /// with text on the card is the transcript final (heardFinal lands
-    /// `.executing`, the review lane lands `.awaitingRelease` — both read
+    /// `.executing`, the review lane lands `.reviewTranscript` — both read
     /// as captureState `.idle` with a transcript set). Internal so tests
     /// can drive the same transitions the sink does.
     func captureStateChanged(_ state: VoiceController.CaptureState,
@@ -439,7 +408,7 @@ final class LatencyLedger {
     }
 
     /// Marks → spans. Only pairs that both landed produce a number — a
-    /// cancelled hold still writes the spans it reached.
+    /// cancelled capture still writes the spans it reached.
     private func finalizeSpans(_ open: inout Interaction) {
         func span(_ key: String, _ a: Mark, _ b: Mark) {
             guard open.spans[key] == nil,
@@ -447,12 +416,9 @@ final class LatencyLedger {
                   let t1 = open.marks[b.rawValue] else { return }
             open.spans[key] = max(0, (t1 - t0) * 1000)
         }
-        span("fn_hold_ms", .fnDown, .fnRelease)
-        span("release_to_commit_ms", .fnRelease, .commit)
         span("commit_to_transcript_ms", .commit, .transcriptFinal)
         span("transcript_to_dispatch_ms", .transcriptFinal, .dispatch)
         span("dispatch_to_effect_ms", .dispatch, .effect)
-        span("fn_to_effect_ms", .fnDown, .effect)
     }
 
     // MARK: - JSONL writer
