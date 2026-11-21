@@ -514,6 +514,19 @@ final class TargetOverlayTests: XCTestCase {
         overlay.hideAll()
     }
 
+    /// A second press on the same control restarts its timeout, so the
+    /// first press's timeout can't cut the second glow short.
+    func testARepeatedPressGlowRestartsItsTimeout() async throws {
+        let overlay = TargetOverlay()
+        let frame = CGRect(x: 0, y: 0, width: 28, height: 28)
+        overlay.glowPress(frame: frame)
+        try await Task.sleep(for: .milliseconds(800))
+        overlay.glowPress(frame: frame)
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertTrue(overlay.ringArmed)
+        overlay.hideAll()
+    }
+
     // MARK: - Conforming ring: lifecycle + ambiguity
 
     /// `.none` on a fresh overlay is a no-op; after an acquire it drops

@@ -328,6 +328,7 @@ final class TargetOverlay {
     /// takes the ring over, and Reduce Motion is honoured the same way.
     func glowPress(frame: CGRect) {
         lock(key: "press:\(frame)", target: Self.ringTarget(frame: frame), progress: 0)
+        magnetGeneration += 1
         let generation = magnetGeneration
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Self.pressGlowSeconds * 1e9))
