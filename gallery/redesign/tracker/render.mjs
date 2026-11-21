@@ -508,7 +508,7 @@ async function main() {
       if (args.perf) {
         try {
           const m = await measure(chrome, base, dir);
-          writeFileSync(path.join(dirOut, "perf.json"), JSON.stringify(m, null, 2) + "\n");
+          write(path.join(dirOut, "perf.json"), JSON.stringify(m, null, 2) + "\n");
           perf = dir.perfCard(m);
           log(dir.id + " perf " + JSON.stringify(perf));
         } catch (error) {
