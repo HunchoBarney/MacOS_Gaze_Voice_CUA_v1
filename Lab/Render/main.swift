@@ -186,7 +186,7 @@ func writeManifest(_ options: Options) throws {
             var d: [String: Any] = [
                 "id": info.id, "name": info.name, "axis": info.axis, "pitch": info.pitch, "cost": info.cost,
                 "libraries": info.libraries.map { ["name": $0.name, "version": $0.version, "license": $0.license, "url": $0.url, "role": $0.role] },
-                "custom": info.custom,
+                "custom": info.custom, "alwaysOn": info.alwaysOn,
                 "skills": info.skills.map { ["skill": $0.skill, "change": $0.change] },
                 "states": entry.states.map { state in
                     ["id": state.id, "title": state.title, "caption": state.caption,

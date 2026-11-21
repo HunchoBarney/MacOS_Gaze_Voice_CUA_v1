@@ -113,6 +113,7 @@ export type Direction = {
   custom?: string;
   skills: { skill: string; change: string }[];
   perf?: { cpu: string; gpu: string; idle: string; note: string };
+  alwaysOn?: boolean;
   states: RedesignState[];
   flow?: MediaSet;
 };

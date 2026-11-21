@@ -333,7 +333,9 @@ function DirectionCard({
           {direction.perf.note && <p className="rd-perf-note">{direction.perf.note}</p>}
         </div>
       ) : (
-        <p className="rd-perf-note">Not measured yet.</p>
+        <p className="rd-perf-note">
+          {direction.alwaysOn === false ? "Not always-on: nothing runs while it waits, so there's no standing cost to measure." : "Not measured yet."}
+        </p>
       )}
       <details className="rd-more">
         <summary>
