@@ -164,13 +164,24 @@ final class LiveVoiceTests: XCTestCase {
         XCTAssertFalse(heard, "Jarvis saying the phrase doesn't count")
         let result = Task { await voice.testWake(for: 2) {} }
         try await Task.sleep(for: .milliseconds(50))
-        wakeWord.heard?(2)
+        wakeWord.heard?(ProcessInfo.processInfo.systemUptime)
         let second = await result.value
         XCTAssertTrue(second)
         XCTAssertTrue(transports.isEmpty, "A test wake opens no session")
         XCTAssertEqual(voice.listening.state, .asleep)
         wakeWord.heard?(3)
         XCTAssertEqual(transports.count, 1, "After the test a wake opens a session again")
+    }
+
+    func testTheWakeTestIgnoresALateConfirmationOfJarvisSayingThePhrase() async throws {
+        let voice = try voice()
+        let saidAt = ProcessInfo.processInfo.systemUptime
+        let result = Task { await voice.testWake(for: 0.5) {} }
+        try await Task.sleep(for: .milliseconds(100))
+        wakeWord.heard?(saidAt)
+        let heard = await result.value
+        XCTAssertFalse(heard, "A phrase that ended before the listening window isn't the person's")
+        XCTAssertTrue(transports.isEmpty)
     }
 
     func testTheFirstReplyReportsTheOneBreathTimings() async throws {

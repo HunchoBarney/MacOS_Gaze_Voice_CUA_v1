@@ -65,6 +65,7 @@ final class LiveVoice {
     private var reply = ""
     private var userTalking = false
     private var wakeTestHeard: Bool?
+    private var wakeTestFrom = TimeInterval.infinity
     private var timer: Task<Void, Never>?
 
     init(microphone: LiveMicrophoneDriving, wakeWord: WakeWordDetecting,
@@ -112,14 +113,17 @@ final class LiveVoice {
 
     /// Settings' Test: after `prelude` (Jarvis saying the phrase, which
     /// doesn't count), whether the person's wake phrase is heard within
-    /// `seconds`. No wake during the test opens a session.
+    /// `seconds`. A phrase that ended before the listening window, such as
+    /// a late confirmation of Jarvis's own, doesn't count. No wake during the
+    /// test opens a session.
     func testWake(for seconds: Double, after prelude: @MainActor () async -> Void) async -> Bool {
         guard armed, listening.state == .asleep else { return false }
         wakeTestHeard = false
+        wakeTestFrom = .infinity
         defer { wakeTestHeard = nil }
         await prelude()
-        wakeTestHeard = false
-        let deadline = now() + seconds
+        wakeTestFrom = now()
+        let deadline = wakeTestFrom + seconds
         while wakeTestHeard == false, now() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
         return wakeTestHeard == true
     }
@@ -128,7 +132,7 @@ final class LiveVoice {
     func wake(at moment: TimeInterval) {
         guard armed else { return }
         if wakeTestHeard != nil {
-            wakeTestHeard = true
+            if moment >= wakeTestFrom { wakeTestHeard = true }
             return
         }
         guard listening.handle(.wake, at: now()).contains(.openSession) else { return }
