@@ -18,6 +18,8 @@ final class WritingByInstructionTests: XCTestCase {
         var shown: [[String]] = []
         var sent: [WritingByInstruction.Draft] = []
         var composed = 0
+        var composedFrom: [String] = []
+        var current = true
     }
 
     private struct MemoryKeys: APIKeyStore {
@@ -44,7 +46,11 @@ final class WritingByInstructionTests: XCTestCase {
                       bundleID: "com.apple.mail", windowTitle: "Re: Dana", pid: desk.pid)
             },
             referent: { _ in referent },
-            compose: { _ in desk.composed += 1; return reply },
+            compose: { referent in
+                desk.composed += 1
+                desk.composedFrom.append(referent.text)
+                return reply
+            },
             send: { draft in
                 desk.sent.append(draft)
                 return VoiceToolResult(status: VoiceToolResult.Status.ok, say: "Sent.").encoded()
@@ -111,6 +117,11 @@ final class WritingByInstructionTests: XCTestCase {
         }
         for said in ["send it", "Yes, send it.", "go ahead and send it", "send the reply please"] {
             XCTAssertEqual(WritingInstruction.intent(said), .sendDraft, said)
+        }
+        for (said, typed) in [("type this \"please write a reply to this\"", "please write a reply to this"),
+                              ("write this down: draft a response to that email", "draft a response to that email"),
+                              ("type 'come up with an answer for it'", "come up with an answer for it")] {
+            XCTAssertEqual(WritingInstruction.intent(said), .type(literal: typed), said)
         }
         for said in ["reply to Dana saying hi", "send it to Dana", "what does this say"] {
             XCTAssertNotEqual(WritingInstruction.intent(said), .draftReply, said)
@@ -275,6 +286,56 @@ final class WritingByInstructionTests: XCTestCase {
         let desk = FakeDesk()
         let payload = await writer(desk, local: nil, referent: nil).handle("come up with a reply for this")
         XCTAssertEqual(field(payload, "status"), VoiceToolResult.Status.question)
+        XCTAssertEqual(desk.composed, 0)
+    }
+
+    func testPrivateTextIsNeverSentForADraft() async {
+        let privateReferents = [
+            WritingByInstruction.Referent(text: "hunter2", appName: "Safari", windowTitle: "Sign in", sensitive: true),
+            WritingByInstruction.Referent(text: "Bank login: hunter2", appName: "1Password 8", windowTitle: "Vault",
+                                          bundleID: "com.1password.1password"),
+            WritingByInstruction.Referent(text: "recovery code 1234", appName: "Bitwarden", windowTitle: nil),
+        ]
+        for referent in privateReferents {
+            let desk = FakeDesk()
+            let payload = await writer(desk, local: nil, referent: referent).handle("come up with a reply for this")
+            XCTAssertEqual(field(payload, "status"), VoiceToolResult.Status.refused, referent.text)
+            XCTAssertEqual(desk.composed, 0, referent.text)
+            XCTAssertTrue(desk.inserts.isEmpty, referent.text)
+        }
+    }
+
+    func testCardNumbersAreMaskedBeforeDrafting() async {
+        let desk = FakeDesk()
+        let referent = WritingByInstruction.Referent(text: "Can you pay with 4111 1111 1111 1111 today?",
+                                                     appName: "Messages", windowTitle: "Sam")
+        _ = await writer(desk, local: nil, referent: referent).handle("come up with a reply for this")
+        XCTAssertEqual(desk.composedFrom, ["Can you pay with [card number hidden] today?"])
+    }
+
+    func testAWindowChangeWhileWritingTypesNothing() async {
+        let desk = FakeDesk()
+        let drafting = writer(desk, local: nil)
+        drafting.compose = { _ in desk.current = false; return "On my way." }
+        let drafted = await drafting.handle("come up with a reply for this", isCurrent: { desk.current })
+        XCTAssertEqual(field(drafted, "status"), VoiceToolResult.Status.refused)
+        XCTAssertTrue(desk.inserts.isEmpty)
+        XCTAssertEqual(drafting.pending, .draft(.init(text: "On my way.")))
+
+        desk.current = true
+        let typing = writer(desk, local: nil)
+        typing.localTranscript = { desk.current = false; return "type this see you at five" }
+        let typed = await typing.handle("type this see you at five", isCurrent: { desk.current })
+        XCTAssertEqual(field(typed, "status"), VoiceToolResult.Status.refused)
+        XCTAssertTrue(desk.inserts.isEmpty)
+    }
+
+    func testQuotedReplyWordsAreTypedNotDrafted() async {
+        let desk = FakeDesk()
+        let said = "type this \"please write a reply to this\""
+        let payload = await writer(desk, local: said).handle(said)
+        XCTAssertEqual(field(payload, "status"), VoiceToolResult.Status.ok)
+        XCTAssertEqual(desk.inserts, ["please write a reply to this"])
         XCTAssertEqual(desk.composed, 0)
     }
 
