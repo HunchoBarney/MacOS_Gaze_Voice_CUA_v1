@@ -317,7 +317,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
 
     private let credential: () async throws -> RealtimeCredential?
     private let client: RealtimeVoiceClient
-    private let player = RealtimePlayer()
+    let player = RealtimePlayer()
     private let input = MicrophoneInput()
     /// Hears the microphone while set: the wake word in Standby.
     var wakeListener: (any WakeWordDetecting)? {
@@ -1513,7 +1513,7 @@ final class RealtimeVoiceLane: SpeechCapturing {
             guard conversation.id == session, preparationID == token, conversationGate === speechGate,
                   let outputs = hardware.playback else { throw CancellationError() }
             self.hardware = hardware
-            player.setPlaybackRoute(outputs.realtime)
+            replaceConversationPlaybackRoute(outputs.realtime)
             onPlaybackOutputs?(outputs)
             try openConversationAudio(hardware: hardware, outputs: outputs, gate: speechGate, session: session,
                                       connection: client.connectionID)
@@ -1523,6 +1523,14 @@ final class RealtimeVoiceLane: SpeechCapturing {
             Self.log.error("conversation_input_rebuild failed error=\(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    /// Internal for tests. A new route drops the audio the old one still
+    /// held, so a reply that was playing is cancelled and truncated like a
+    /// barge-in instead of being cut off silently.
+    func replaceConversationPlaybackRoute(_ route: VoicePlaybackRoute?) {
+        if !player.playbackIdle { interruptConversationPlayback() }
+        player.setPlaybackRoute(route)
     }
 
     private func inputInterrupted(token: UUID) -> @Sendable () -> Void {
