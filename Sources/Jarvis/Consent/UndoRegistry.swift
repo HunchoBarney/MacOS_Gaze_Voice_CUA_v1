@@ -170,6 +170,13 @@ enum UndoRegistry {
     static func mailUndoSendDelay() -> TimeInterval? {
         (CFPreferencesCopyAppValue("UndoSendDelayTime" as CFString, mail as CFString) as? NSNumber)?.doubleValue
     }
+
+    /// The HID system's own idle clock for key and button presses, so
+    /// synthetic events Jarvis posts by process don't count.
+    static func secondsSinceInput() -> TimeInterval {
+        let kinds: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
+        return kinds.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
+    }
 }
 
 /// One press Jarvis made without asking, and how to take it back.
@@ -183,6 +190,9 @@ struct PendingUndo: Sendable, Equatable {
     let item: UndoRegistry.MenuItem
     let pressedAt: Date
     var expiresAt: Date
+    /// When the offer was spoken. Keyboard or mouse input after it means
+    /// the top of the undo stack may no longer be Jarvis's press.
+    var offeredAt: Date?
 
     init(route: UndoRegistry.Route, pid: Int, windowID: Int, bundleID: String,
          item: UndoRegistry.MenuItem, pressedAt: Date) {
@@ -196,6 +206,7 @@ struct PendingUndo: Sendable, Equatable {
     func offered(at now: Date) -> PendingUndo {
         var copy = self
         copy.expiresAt = min(expiresAt, now.addingTimeInterval(UndoRegistry.offerWindow))
+        copy.offeredAt = now
         return copy
     }
 }
@@ -228,13 +239,25 @@ struct UndoSupport: Sendable {
     var offers: UndoOffers
     var now: @Sendable () -> Date = { Date() }
     var settle: @Sendable () async -> Void = { try? await Task.sleep(nanoseconds: 150_000_000) }
+    /// Seconds since the person last typed or clicked anywhere.
+    var secondsSinceInput: @Sendable () -> TimeInterval = { .infinity }
 
     static let live = UndoSupport(undoItem: { UndoRegistry.readUndoItem(pid: $0) },
                                   mailUndoSendDelay: { UndoRegistry.mailUndoSendDelay() },
-                                  offers: .shared)
+                                  offers: .shared,
+                                  secondsSinceInput: { UndoRegistry.secondsSinceInput() })
 }
 
 extension DriveLoop {
+    /// Any new task ends the live offer: whatever it does may put its own
+    /// action on top of the app's undo stack, maybe with the same title.
+    /// Only the person's spoken "undo" gets it back.
+    func claimOffer(for goal: String) -> PendingUndo? {
+        let pending = undo.offers.take(now: undo.now())
+        guard explicitConsent, Self.asksToUndo(goal) else { return nil }
+        return pending
+    }
+
     /// "undo", "undo that", "take that back", "put it back": the fast
     /// lane's ⌘Z phrases, with no app named.
     static func asksToUndo(_ goal: String) -> Bool {
@@ -252,6 +275,12 @@ extension DriveLoop {
     func runOfferedUndo(_ pending: PendingUndo, task: DriveTask, session: String) async -> DriveResult {
         let name = NSRunningApplication(processIdentifier: pid_t(pending.pid))?.localizedName ?? pending.bundleID
         var history = ["undo offered for \(pending.item.menu) → \(pending.item.title)"]
+        if let offeredAt = pending.offeredAt, undo.secondsSinceInput() < undo.now().timeIntervalSince(offeredAt) {
+            feed("undo refused: the person typed or clicked after the offer")
+            return settle(.blocked("I can't undo that safely now: you've typed or clicked since, so \(name)'s Undo may be for that instead."),
+                          task, history, pid: pending.pid, windowID: pending.windowID, bundleID: pending.bundleID,
+                          blockedReason: "input since offer")
+        }
         guard let current = await undo.undoItem(pending.pid), current == pending.item else {
             feed("undo refused: \(name)'s undo item changed since the press")
             return settle(.blocked("I can't undo that safely now: \(name) has changed since."), task, history,

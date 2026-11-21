@@ -657,7 +657,7 @@ actor DriveLoop {
         var confirmedTask = false
         bindSpokenGoal(explicitConsent ? task.goal : nil)
         func step(_ s: String) { feed(s); history.append(s) }
-        if explicitConsent, Self.asksToUndo(task.goal), let pending = undo.offers.take(now: undo.now()) {
+        if let pending = claimOffer(for: task.goal) {
             return await runOfferedUndo(pending, task: task, session: directSession ?? session)
         }
 
@@ -1374,6 +1374,10 @@ actor DriveLoop {
         }
         if let covered { spentCoverage.insert(covered) }
         if plan != nil { unaskedPressSpent = true }
+        if plan == nil, press != nil, pendingUndo != nil {
+            pendingUndo = nil
+            feed("a later consequential press would sit on top of the undo, so nothing is offered")
+        }
         if let pressFrame, let press { await glowPress(pressFrame, label: press.label) }
         return plan
     }

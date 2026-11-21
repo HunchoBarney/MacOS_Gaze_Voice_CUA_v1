@@ -443,6 +443,22 @@ final class VoiceLaneAuditTests: XCTestCase {
         XCTAssertEqual(flags.ints.last, 6, "history kept 'First.' after the sentence cut")
     }
 
+    /// "undo that" takes back the last delivery only, however many came
+    /// before it.
+    func testUndoThatRemovesOnlyTheLastDelivery() async throws {
+        let flags = Flags()
+        let delivery = DictationDelivery(
+            insertText: { flags.strings.append($0); return true },
+            pasteText: { _ in true },
+            deleteBackward: { flags.ints.append($0); return true })
+        try await delivery.deliver("hello")
+        try await delivery.deliver("one new line two")
+        try await delivery.deliver("undo that")
+        XCTAssertEqual(flags.ints, [7], "only 'one', newline, 'two'")
+        try await delivery.deliver("undo that")
+        XCTAssertEqual(flags.ints, [7, 5], "then 'hello' on its own")
+    }
+
     /// A pure-command transcript with empty history is a no-op success,
     /// not a lost paste.
     func testDictationCommandOnEmptyHistoryIsNoOp() async throws {

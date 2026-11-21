@@ -194,9 +194,10 @@ final class UndoOfferTests: XCTestCase {
     }
 
     private func makeLoop(_ script: Script, offers: UndoOffers, ask: Bool = true, mailDelay: TimeInterval? = 10,
-                          bundle: String = "com.apple.finder") async -> DriveLoop {
+                          bundle: String = "com.apple.finder", sinceInput: TimeInterval = .infinity) async -> DriveLoop {
         let support = UndoSupport(undoItem: { _ in script.nextItem() }, mailUndoSendDelay: { mailDelay },
-                                  offers: offers, now: { script.now.value }, settle: {})
+                                  offers: offers, now: { script.now.value }, settle: {},
+                                  secondsSinceInput: { sinceInput })
         let loop = DriveLoop(call: { tool, args in
                                  script.calls.set(script.calls.value + [(tool, args)])
                                  return .object(["effect": .string("confirmed")])
@@ -257,6 +258,19 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertEqual(script.asks.value, 0)
         _ = try await loop.dispatch("click", target, elementText: "Move to Trash", denied: [], confirmed: &confirmed)
         XCTAssertEqual(script.asks.value, 1, "an unchanged undo item must not let every later delete skip its question")
+        XCTAssertNil(offers.current)
+    }
+
+    func testALaterConsequentialPressEndsTheOffer() async throws {
+        let script = Script([copyItem, trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        var confirmed = false
+        _ = try await loop.dispatch("click", target, elementText: "Move to Trash", denied: [], confirmed: &confirmed)
+        _ = try await loop.dispatch("click", target, elementText: "Move to Trash", denied: [], confirmed: &confirmed)
+        XCTAssertEqual(script.asks.value, 1)
+        let result = await loop.settle(.done, DriveTask(goal: "x"), [], confirmedAny: true)
+        XCTAssertNil(result.spoken, "Undo Move now takes back the second trash, not the one offered")
         XCTAssertNil(offers.current)
     }
 
@@ -395,6 +409,43 @@ final class UndoOfferTests: XCTestCase {
         XCTAssertEqual(script.calls.value.filter { $0.0 == "invoke_menu" }.count, 1)
         guard case .blocked = result.status else { return XCTFail("\(result.status)") }
         XCTAssertEqual(result.blockedReason, "undo unverified", "an unreadable menu is no evidence the undo took")
+    }
+
+    func testAnyOtherTaskEndsTheOffer() async {
+        let script = Script([trashItem])
+        let offers = UndoOffers()
+        let loop = await makeLoop(script, offers: offers)
+        offered(offers, at: script.now.value)
+        let other = await loop.claimOffer(for: "move the next file to the trash")
+        XCTAssertNil(other)
+        XCTAssertNil(offers.current, "whatever that task does may sit on top of the undo stack")
+        offered(offers, at: script.now.value)
+        let undo = await loop.claimOffer(for: "undo that")
+        XCTAssertNotNil(undo)
+    }
+
+    func testUndoRefusesAfterThePersonTypedOrClicked() async {
+        let script = Script([trashItem, Item(menu: "Edit", title: "Redo Move", enabled: true)])
+        let offers = UndoOffers()
+        let offeredAt = script.now.value
+        offered(offers, at: offeredAt)
+        script.now.set(offeredAt.addingTimeInterval(4))
+        let loop = await makeLoop(script, offers: offers, sinceInput: 2)
+        let result = await loop.run(DriveTask(goal: "undo"), session: "s")
+        XCTAssertTrue(script.calls.value.isEmpty, "a same-titled Undo may now be the person's own edit")
+        XCTAssertEqual(result.blockedReason, "input since offer")
+    }
+
+    func testInputBeforeTheOfferDoesNotBlockUndo() async {
+        let script = Script([trashItem, Item(menu: "Edit", title: "Redo Move", enabled: true)])
+        let offers = UndoOffers()
+        let offeredAt = script.now.value
+        offered(offers, at: offeredAt)
+        script.now.set(offeredAt.addingTimeInterval(4))
+        let loop = await makeLoop(script, offers: offers, sinceInput: 6)
+        let result = await loop.run(DriveTask(goal: "undo"), session: "s")
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(script.calls.value.filter { $0.0 == "invoke_menu" }.count, 1)
     }
 
     func testAnOfferNeverOutlivesItsWindow() {
