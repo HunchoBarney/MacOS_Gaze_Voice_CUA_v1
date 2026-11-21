@@ -792,9 +792,11 @@ final class VoiceController: ObservableObject {
                 guard let self, self.config.semanticAppSuggestions else {
                     throw CancellationError()
                 }
-                guard let route = try await self.config.jevRoute() else { throw VoiceSemanticRouter.Failure.unavailable }
-                return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
-                    .interpret(admission, context: context)
+                return try await self.config.withRoute(self.config.jevRoute) { route in
+                    guard let route else { throw VoiceSemanticRouter.Failure.unavailable }
+                    return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
+                        .interpret(admission, context: context)
+                }
             }
             lane.semanticConfirmationHandler = { [weak self] proposal in
                 guard let self, self.config.semanticAppSuggestions else { return false }
@@ -909,11 +911,12 @@ final class VoiceController: ObservableObject {
         lane.conversation.readContext = { [weak self] in self?.voiceAdmissionContext() ?? VoiceAdmissionContext() }
         lane.conversation.proactiveIntercept = { [weak self] in self?.cua.proactiveIntercept?($0) }
         lane.conversation.interpret = { [weak self] text, context, memory in
-            guard let self, let route = try await self.config.jevRoute() else {
-                throw VoiceError(OutcomeWording.missingUnderstandingKey)
+            guard let self else { throw VoiceError(OutcomeWording.missingUnderstandingKey) }
+            return try await self.config.withRoute(self.config.jevRoute) { route in
+                guard let route else { throw VoiceError(OutcomeWording.missingUnderstandingKey) }
+                return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
+                    .interpretConversation(text, context: context, memory: memory)
             }
-            return try await VoiceSemanticRouter.live(apiKey: route.bearer, baseURL: route.url)
-                .interpretConversation(text, context: context, memory: memory)
         }
         lane.conversation.beforeAction = { [weak self] in
             await self?.deliveryTask?.value
