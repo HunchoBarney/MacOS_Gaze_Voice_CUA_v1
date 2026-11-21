@@ -143,6 +143,46 @@ final class LiveVoiceTests: XCTestCase {
         XCTAssertTrue(voice.listening.sessionOpen)
     }
 
+    func testTheWakeTestIgnoresJarvisSayingThePhraseAndOpensNothing() async throws {
+        let voice = try voice()
+        let heard = await voice.testWake(for: 0.3) { [wakeWord] in wakeWord?.heard?(1) }
+        XCTAssertFalse(heard, "Jarvis saying the phrase doesn't count")
+        let result = Task { await voice.testWake(for: 2) {} }
+        try await Task.sleep(for: .milliseconds(50))
+        wakeWord.heard?(2)
+        let second = await result.value
+        XCTAssertTrue(second)
+        XCTAssertTrue(transports.isEmpty, "A test wake opens no session")
+        XCTAssertEqual(voice.listening.state, .asleep)
+        wakeWord.heard?(3)
+        XCTAssertEqual(transports.count, 1, "After the test a wake opens a session again")
+    }
+
+    func testTheFirstReplyReportsTheOneBreathTimings() async throws {
+        let voice = try voice()
+        var breaths: [LiveVoice.OneBreath] = []
+        voice.onOneBreath = { breaths.append($0) }
+        wakeWord.heard?(ProcessInfo.processInfo.systemUptime)
+        try await waitUntil { !transports.isEmpty }
+        transports[0].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
+        transports[0].deliver(#"{"type":"session.delegation.created","delegation":{"id":"d1","target":"client"},"offset_ms":5}"#)
+        transports[0].deliver(answer)
+        try await waitUntil { !breaths.isEmpty }
+        XCTAssertEqual(breaths.count, 1)
+        XCTAssertTrue(breaths[0].firstWasDelegation)
+        XCTAssertGreaterThanOrEqual(breaths[0].first ?? -1, breaths[0].started)
+    }
+
+    #if canImport(LiveKitWebRTC)
+    func testWhatTheSessionHearsIsKeptForL7At24kHz() {
+        var samples: [Float] = [0.5, 0.5, -1, -1, 3, 1]
+        let pcm = samples.withUnsafeMutableBufferPointer { LiveMicrophone.pcm16At24k($0) }
+        let values = pcm.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+        XCTAssertEqual(values, [16383, -32767, 32767])
+    }
+    #endif
+
     func testDisarmingClosesTheSessionAndReleasesTheMicrophone() async throws {
         let voice = try voice()
         wakeWord.heard?(0)

@@ -36,6 +36,21 @@ final class LiveVoice {
     /// "Stop", "cancel" and "undo", for whatever is running the work.
     var onControl: ((LiveControlWord) -> Void)?
 
+    /// How a wake went, in seconds from the end of the wake phrase.
+    struct OneBreath: Equatable {
+        /// Until session.started.
+        var started: Double
+        /// Speech still waiting to be played in at session.started.
+        var behind: Double
+        /// Until Live's first reply or delegation.
+        var first: Double?
+        var firstWasDelegation = false
+        /// Quiet audio skipped to catch up, by the first reply.
+        var skipped: Double = 0
+    }
+    /// Called once per wake, at Live's first reply or delegation.
+    var onOneBreath: ((OneBreath) -> Void)?
+
     private let microphone: LiveMicrophoneDriving
     private let wakeWord: WakeWordDetecting
     private let makeSession: @MainActor (_ name: String) -> LiveSession
@@ -43,7 +58,8 @@ final class LiveVoice {
     private var session: LiveSession?
     private var utterance = ""
     private var wokeAt: TimeInterval?
-    private var replied = false
+    private var oneBreath: OneBreath?
+    private var wakeTestHeard: Bool?
     private var timer: Task<Void, Never>?
 
     init(microphone: LiveMicrophoneDriving, wakeWord: WakeWordDetecting,
@@ -84,13 +100,32 @@ final class LiveVoice {
         _ = listening.handle(.resume, at: now())
     }
 
+    /// Settings' Test: after `prelude` (Jarvis saying the phrase, which
+    /// doesn't count), whether the person's wake phrase is heard within
+    /// `seconds`. No wake during the test opens a session.
+    func testWake(for seconds: Double, after prelude: @MainActor () async -> Void) async -> Bool {
+        guard armed, listening.state == .asleep else { return false }
+        wakeTestHeard = false
+        defer { wakeTestHeard = nil }
+        await prelude()
+        wakeTestHeard = false
+        let deadline = now() + seconds
+        while wakeTestHeard == false, now() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
+        return wakeTestHeard == true
+    }
+
     /// The wake phrase ended at `moment` (systemUptime).
     func wake(at moment: TimeInterval) {
-        guard armed, listening.handle(.wake, at: now()).contains(.openSession) else { return }
+        guard armed else { return }
+        if wakeTestHeard != nil {
+            wakeTestHeard = true
+            return
+        }
+        guard listening.handle(.wake, at: now()).contains(.openSession) else { return }
         wakeWord.stop()
         microphone.relay.capture(since: moment)
         wokeAt = moment
-        replied = false
+        oneBreath = nil
         utterance = ""
         let session = makeSession(listening.name)
         self.session = session
@@ -110,6 +145,7 @@ final class LiveVoice {
             guard let self, self.session === session else { return }
             self.microphone.relay.startSending()
             let stats = self.microphone.relay.stats
+            self.oneBreath = OneBreath(started: self.since(moment), behind: stats.behind)
             Self.log.notice("live_one_breath started=\(self.since(moment), privacy: .public)s behind=\(stats.behind, privacy: .public)s")
             if stats.overflowed {
                 session.send(LiveAppend(kind: .instructions, content: Self.sayAgain, delegationID: nil))
@@ -152,11 +188,11 @@ final class LiveVoice {
             utterance += delta.text
             apply(listening.handle(.heard(utterance: utterance), at: at))
         case .outputTranscript:
-            noteReply("reply")
+            noteReply(delegation: false)
             utterance = ""
             apply(listening.handle(.answered, at: at))
         case .delegation:
-            noteReply("delegation")
+            noteReply(delegation: true)
             utterance = ""
             apply(listening.handle(.delegated, at: at))
         case .paused:
@@ -171,10 +207,14 @@ final class LiveVoice {
         }
     }
 
-    private func noteReply(_ kind: String) {
-        guard !replied, let wokeAt else { return }
-        replied = true
-        Self.log.notice("live_one_breath first_\(kind, privacy: .public)=\(self.since(wokeAt), privacy: .public)s skipped=\(self.microphone.relay.stats.skipped, privacy: .public)s")
+    private func noteReply(delegation: Bool) {
+        guard var breath = oneBreath, breath.first == nil, let wokeAt else { return }
+        breath.first = since(wokeAt)
+        breath.firstWasDelegation = delegation
+        breath.skipped = microphone.relay.stats.skipped
+        oneBreath = breath
+        Self.log.notice("live_one_breath first=\(breath.first ?? 0, privacy: .public)s delegation=\(delegation, privacy: .public) skipped=\(breath.skipped, privacy: .public)s")
+        onOneBreath?(breath)
     }
 
     private func since(_ moment: TimeInterval) -> Double { ((now() - moment) * 1000).rounded() / 1000 }

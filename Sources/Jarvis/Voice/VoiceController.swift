@@ -463,7 +463,9 @@ final class VoiceController: ObservableObject {
         #if canImport(LiveKitWebRTC)
         guard let hosted = config.hosted, let detector = ListeningPolicy.wakeWord else { return nil }
         let broker = HostedLiveSessions(baseURL: hosted.baseURL, installToken: { try await hosted.installToken() })
-        let live = LiveVoice(microphone: LiveMicrophone(), wakeWord: detector) { name in
+        let microphone = LiveMicrophone()
+        microphone.recentSpeech = (speech as? RealtimeVoiceLane)?.recentSpeech
+        let live = LiveVoice(microphone: microphone, wakeWord: detector) { name in
             LiveSession(transport: WebRTCLiveTransport(), broker: broker,
                         config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
         }
@@ -1062,6 +1064,24 @@ final class VoiceController: ObservableObject {
     private var wakeTestRunning: Bool { wakeTest == .speaking || wakeTest == .listening }
 
     func testWakeWord(say: @escaping @MainActor (String) async -> Void) {
+        if config.voiceLive {
+            guard !wakeTestRunning else { return }
+            guard let liveVoice, liveVoice.armed else {
+                wakeTest = .failed("Turn listening on to test the wake word.")
+                return
+            }
+            let name = config.assistantName
+            wakeTest = .speaking
+            wakeTestTask = Task { [weak self] in
+                let heard = await liveVoice.testWake(for: 5) {
+                    await say("Hey \(name)")
+                    self?.wakeTest = .listening
+                }
+                guard let self, !Task.isCancelled else { return }
+                self.wakeTest = heard ? .heard : .missed
+            }
+            return
+        }
         guard !wakeTestRunning, let detector = ListeningPolicy.wakeWord,
               let lane = speech as? RealtimeVoiceLane else { return }
         let name = config.assistantName

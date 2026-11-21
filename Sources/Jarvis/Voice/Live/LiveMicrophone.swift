@@ -16,6 +16,8 @@ final class LiveMicrophone: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked
     let relay = LiveInputRelay(sampleRate: LiveMicrophone.format.sampleRate)
     /// Every input buffer, on the audio thread, for the wake word.
     var onInput: (@Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void)?
+    /// L7's copy of what the session heard, as 24 kHz PCM16.
+    var recentSpeech: RecentSpeechAudio?
 
     private let downmix = AVAudioMixerNode()
     private lazy var tap = AVAudioSinkNode { [weak self] timestamp, frames, list in
@@ -37,9 +39,25 @@ final class LiveMicrophone: NSObject, LKRTCAudioDeviceModuleDelegate, @unchecked
         for buffer in buffers {
             guard let data = buffer.mData else { continue }
             let out = UnsafeMutableBufferPointer(start: data.assumingMemoryBound(to: Float.self), count: Int(frames))
-            if let self { self.relay.read(into: out) } else { out.update(repeating: 0) }
+            guard let self else { out.update(repeating: 0); continue }
+            if self.relay.read(into: out), let recentSpeech = self.recentSpeech {
+                recentSpeech.append(Self.pcm16At24k(out))
+            }
         }
         return noErr
+    }
+
+    /// 48 kHz float to 24 kHz PCM16, averaging each pair of samples.
+    static func pcm16At24k(_ samples: UnsafeMutableBufferPointer<Float>) -> Data {
+        var pcm = Data(count: samples.count / 2 * 2)
+        pcm.withUnsafeMutableBytes { raw in
+            let out = raw.bindMemory(to: Int16.self)
+            for index in out.indices {
+                let mean = (samples[index * 2] + samples[index * 2 + 1]) / 2
+                out[index] = Int16(max(-1, min(1, mean)) * Float(Int16.max)).littleEndian
+            }
+        }
+        return pcm
     }
 
     private var module: LKRTCAudioDeviceModule { WebRTCLiveTransport.factory.audioDeviceModule }
