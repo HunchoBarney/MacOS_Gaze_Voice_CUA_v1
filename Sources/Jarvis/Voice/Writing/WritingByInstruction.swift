@@ -297,18 +297,43 @@ final class WritingByInstruction {
     ) async -> Referent? {
         let resolution = await resolve(wordTime ?? ProcessInfo.processInfo.systemUptime)
         if case .resolved(let found) = resolution,
-           found.source == .selection || !inputRoles.contains(found.role) {
-            let text = (await Task.detached { read(found) }.value ?? found.label)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+           found.source == .selection || !isTextInput(found.role) {
+            let (body, sensitive) = await Task.detached { (read(found), isPrivate(found)) }.value
+            let text = (body ?? found.label).trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
+                let bundleID = found.pid.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
                 return Referent(text: String(text.prefix(4_000)), appName: found.appName,
-                                windowTitle: found.windowTitle)
+                                windowTitle: found.windowTitle, bundleID: bundleID, sensitive: sensitive)
             }
         }
         return await Task.detached { fallback() }.value
     }
 
-    private static let inputRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
+    /// Native text-input roles, plus the DOM tags and ARIA roles
+    /// GazeCandidateFeed reports for a browser's fields.
+    nonisolated private static let inputRoles: Set<String> = [
+        "axtextfield", "axtextarea", "axcombobox", "axsearchfield",
+        "input", "textarea", "textbox", "searchbox", "combobox",
+    ]
+
+    nonisolated static func isTextInput(_ role: String) -> Bool {
+        inputRoles.contains(role.lowercased())
+    }
+
+    /// A secure field, or a text input whose label names a secret. Labels
+    /// count only on inputs: anywhere else the label is the message itself.
+    nonisolated static func isPrivate(_ referent: DeicticReferent) -> Bool {
+        let element = referent.element?.element
+        let subrole = element.flatMap { attribute($0, kAXSubroleAttribute) as? String }
+        if SensitiveContent.isSecure(role: referent.role, subrole: subrole) { return true }
+        guard isTextInput(referent.role) else { return false }
+        return SensitiveContent.isSensitiveLabel(referent.label)
+            || element.map {
+                SensitiveContent.isSensitiveField(title: attribute($0, kAXTitleAttribute) as? String,
+                                                  description: attribute($0, kAXDescriptionAttribute) as? String,
+                                                  placeholder: attribute($0, kAXPlaceholderValueAttribute) as? String)
+            } ?? false
+    }
 
     /// The referent's own text through Accessibility; gaze referents carry
     /// no live element, so their label stands.
