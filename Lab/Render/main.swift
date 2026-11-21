@@ -221,31 +221,51 @@ func writeManifest(_ options: Options) throws {
 /// without the backdrop, minus the cost of rendering the same stage idle.
 /// A proxy for the overlay's cost, not on-screen compositor numbers.
 @MainActor
-func perf(frames: Int = 240) throws {
+func perf(_ args: ArraySlice<String>, frames: Int = 240) throws {
+    var only: Set<String>?
+    var busiest = ["voice-island": "hearing", "gaze-highlight": "locked", "agent-presence": "shelf", "guide-callout": "consequential"]
+    var rest = Array(args)
+    while rest.count >= 2 {
+        let value = rest[1]
+        switch rest[0] {
+        case "--only": only = Set(value.split(separator: ",").map(String.init))
+        case "--busy":
+            for pair in value.split(separator: ",") {
+                let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+                if parts.count == 2 { busiest[parts[0]] = parts[1] }
+            }
+        default: break
+        }
+        rest.removeFirst(2)
+    }
     func cpuSeconds() -> Double {
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)
         return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6
     }
-    func measure(_ stage: Stage) -> (cpu: Double, wall: Double) {
+    /// One ImageRenderer per frame, as the clip renderer does: a reused one can
+    /// return the previous image without rendering, which undercounts. The
+    /// creation cost is the same in the idle and busy loops, so it cancels out.
+    func frame(_ stage: Stage) {
         let renderer = ImageRenderer(content: StageView(stage: stage, backdrop: false))
         renderer.scale = 2
+        _ = renderer.cgImage
+    }
+    func measure(_ stage: Stage) -> (cpu: Double, wall: Double) {
         for _ in 0..<20 {
             stage.advance(1.0 / 60)
-            renderer.content = StageView(stage: stage, backdrop: false)
-            _ = renderer.cgImage
+            frame(stage)
         }
         let c0 = cpuSeconds(), w0 = Date()
         for _ in 0..<frames {
             stage.advance(1.0 / 60)
-            renderer.content = StageView(stage: stage, backdrop: false)
-            _ = renderer.cgImage
+            frame(stage)
         }
         return ((cpuSeconds() - c0) / Double(frames) * 1000, Date().timeIntervalSince(w0) / Double(frames) * 1000)
     }
-    let busiest = ["voice-island": "hearing", "gaze-highlight": "locked"]
-    var out: [String: [String: [String: String]]] = [:]
-    for entry in Redesign.components {
+    let url = URL(fileURLWithPath: "Lab/perf.json")
+    var out = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: [String: [String: String]]]) ?? [:]
+    for entry in Redesign.components where only?.contains(entry.id) ?? true {
         guard let busy = busiest[entry.id], let index = entry.index(of: busy),
               let idle = entry.flow.first.flatMap({ entry.index(of: $0) }) else { continue }
         for (d, direction) in entry.directions.enumerated() where direction.info.alwaysOn {
@@ -261,13 +281,13 @@ func perf(frames: Int = 240) throws {
                 "cpu": String(format: "%.1f ms/frame CPU (%.0f%% of a core at 60 fps)", cpu, cpu * 6),
                 "gpu": String(format: "%.1f ms/frame offscreen render incl. GPU", wall),
                 "idle": "0: the view is removed when idle",
-                "note": "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), \(busy) state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor.",
+                "note": "Offscreen ImageRenderer at 2x on an M1 (shared with other builds), one renderer per frame, \(busy) state, minus the idle stage. A proxy, not on-screen compositor cost; the on-device check is the lab with Activity Monitor.",
             ]
             print(String(format: "%@ %@ %@: cpu %.2f ms, wall %.2f ms (idle cpu %.2f, wall %.2f)", entry.id, id, busy, cpu, wall, base.cpu, base.wall))
         }
     }
     let data = try JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
-    try data.write(to: URL(fileURLWithPath: "Lab/perf.json"))
+    try data.write(to: url)
 }
 
 /// Re-renders every poster without encoding clips: steps the same stage to
@@ -414,11 +434,11 @@ MainActor.assumeIsolated {
         case "probe": try probe(args[2], component: args.count > 3 ? args[3] : "voice-island")
         case "render": try render(parse(args.dropFirst(2)))
         case "manifest": try writeManifest(parse(args.dropFirst(2)))
-        case "perf": try perf()
+        case "perf": try perf(args.dropFirst(2))
         case "posters": try posters(parse(args.dropFirst(2)))
         case "rmcheck": if !rmcheck(out: args.count > 2 ? args[2] : nil) { exit(1) }
         case "rmcheck-control": _ = rmcheck(out: nil, control: true)
-        default: print("usage: JarvisRedesignRender probe <dir> [component] | render <renders-dir> [--only ids] [--variants keys] [--scale s] [--fps n]")
+        default: print("usage: JarvisRedesignRender probe <dir> [component] | render <renders-dir> [--only ids] [--variants keys] [--scale s] [--fps n] | perf [--only ids] [--busy id=state,...] | rmcheck [out-dir] | rmcheck-control")
         }
     } catch {
         print("error: \(error)")
