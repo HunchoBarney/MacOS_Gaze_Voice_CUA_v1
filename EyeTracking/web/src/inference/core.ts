@@ -3188,6 +3188,12 @@ export class Calibration {
   // dense sample stream; capture tags each accepted frame with the target's
   // current position and the fit runs once the path completes.
   beginPursuit(): void {
+    this.pursuitBackup ??= {
+      samples: this.samples.slice(),
+      implicitSamples: this.implicitSamples.slice(),
+      rejectedBiasEvidence: this.rejectedBiasEvidence.slice(),
+      sameSpotRun: this.sameSpotRun
+    };
     this.samples.length = 0;
     // Old-map implicit labels are biased evidence for the fit about to run —
     // a new calibration must not inherit labels learned under its predecessor.
@@ -3230,6 +3236,24 @@ export class Calibration {
     this.pending = null;
     this.verifyErrors.length = 0;
     this.lastVerdict = null;
+    this.restorePursuitBackup();
+  }
+
+  // A rejected or aborted run leaves the live map in place, so it must also
+  // leave the pools that map learned from — not an empty pool to relearn.
+  private restorePursuitBackup(): void {
+    const backup = this.pursuitBackup;
+    if (backup === null) {
+      return;
+    }
+    this.pursuitBackup = null;
+    this.samples.length = 0;
+    this.samples.push(...backup.samples);
+    this.implicitSamples.length = 0;
+    this.implicitSamples.push(...backup.implicitSamples);
+    this.rejectedBiasEvidence.length = 0;
+    this.rejectedBiasEvidence.push(...backup.rejectedBiasEvidence);
+    this.sameSpotRun = backup.sameSpotRun;
   }
 
   // Verification sweep: same UX as pursuit — the user keeps following the dot
@@ -3302,6 +3326,13 @@ export class Calibration {
   // Stored as (feature, target, weight) so each residual fit re-derives the
   // error against whatever map is being scored.
   private readonly rejectedBiasEvidence: Array<[GazeFeature, [number, number], number]> = [];
+  // Pools as they stood before the in-flight pursuit run; null once it commits or is undone.
+  private pursuitBackup: {
+    samples: Array<[GazeFeature, [number, number]]>;
+    implicitSamples: Array<[GazeFeature, [number, number]]>;
+    rejectedBiasEvidence: Array<[GazeFeature, [number, number], number]>;
+    sameSpotRun: number;
+  } | null = null;
   // Translation correction layered over the map — applied when the drift
   // monitor sees consistent rejection (camera/laptop moved). Bounded so a
   // bad estimate can't teleport the dot; decays back toward zero as the
@@ -3672,6 +3703,7 @@ export class Calibration {
       this.sourceMin = pending.sourceMin;
       this.sourceMax = pending.sourceMax;
       this.pending = null;
+      this.pursuitBackup = null;
       console.info("Calibration saved", JSON.stringify({ path: response.path, verdict: this.lastVerdict }));
       this.emit({ type: "calibration", status: "saved", path: response.path, geometry: this.geometry, verdict: this.lastVerdict ?? undefined });
     } else {
@@ -3684,6 +3716,7 @@ export class Calibration {
     this.samples.length = 0;
     this.validation.length = 0;
     this.pending = null;
+    this.restorePursuitBackup();
     this.emit({ type: "calibration", status: "rejected_fit", message, verdict: this.lastVerdict ?? undefined });
   }
 }
