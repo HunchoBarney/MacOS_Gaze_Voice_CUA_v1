@@ -80,8 +80,8 @@ public enum MenuScript {
 
     @MainActor
     public static let states: [StateEntry] = [
-        StateEntry("closed", "Closed", caption: "The item at rest, menu closed.", duration: 0.9) { _ in MenuFixture(open: false) },
         StateEntry("idle", "Open", caption: "Click the item: Jarvis's commands, with eye tracking off.", duration: 2.0) { _ in MenuFixture(open: true) },
+        StateEntry("closed", "Closed", caption: "The item at rest, menu closed.", duration: 0.9) { _ in MenuFixture(open: false) },
         StateEntry("keyboard", "Keyboard", caption: "Arrow keys move the highlight, return chooses, esc closes; \u{2318}, and \u{2318}Q work while it's open.", duration: 1.8) { _ in
             MenuFixture(open: true, highlight: "Activity")
         },
