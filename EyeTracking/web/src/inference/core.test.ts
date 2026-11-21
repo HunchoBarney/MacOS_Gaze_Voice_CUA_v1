@@ -731,6 +731,93 @@ describe("Calibration", () => {
     expect(calibration.lastVerdict).toBeNull();
   });
 
+  describe("a failed pursuit run keeps the previous calibration's pools", () => {
+    type Pools = { samples: unknown[]; implicitSamples: unknown[]; rejectedBiasEvidence: unknown[]; sameSpotRun: number };
+
+    function pools(calibration: Calibration): Pools {
+      const internals = calibration as unknown as Pools;
+      return {
+        samples: calibration.samples.slice(),
+        implicitSamples: calibration.implicitSamples.slice(),
+        rejectedBiasEvidence: internals.rejectedBiasEvidence.slice(),
+        sameSpotRun: internals.sameSpotRun
+      };
+    }
+
+    async function calibrated() {
+      const made = makeCalibration();
+      await pursuitAndVerify(made.calibration);
+      for (const target of GRID.slice(1, 9)) {
+        made.calibration.addImplicitSample(makeFeature(target), target);
+      }
+      made.calibration.addImplicitSample(makeFeature(GRID[8]), GRID[8]);
+      made.calibration.addResidualBiasEvidence(makeFeature([0.4, 0.4]), [0.5, 0.5]);
+      made.emit.mockClear();
+      made.write.mockClear();
+      const before = pools(made.calibration);
+      expect(before.samples).toHaveLength(26);
+      expect(before.implicitSamples).toHaveLength(9);
+      expect(before.rejectedBiasEvidence).toHaveLength(1);
+      expect(before.sameSpotRun).toBe(1);
+      return { ...made, before };
+    }
+
+    it("restores the pools when the pursuit ends short of 24 samples", async () => {
+      const { calibration, emit, write, before } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID.slice(0, 11)) {
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.finishPursuit();
+      expect(emit).toHaveBeenCalledWith(expect.objectContaining({ status: "rejected_fit" }));
+      expect(write).not.toHaveBeenCalled();
+      expect(pools(calibration)).toEqual(before);
+    });
+
+    it("restores the pools when the verify sweep rejects the new fit", async () => {
+      const { calibration, emit, write, before } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID) {
+        calibration.capturePursuit(makeFeature(target), target);
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.finishPursuit();
+      calibration.beginVerify();
+      for (let i = 0; i < 36; i += 1) {
+        calibration.captureVerifyError(makeFeature([0.5, 0.5]), [0.1, 0.1]);
+      }
+      await calibration.finishVerify();
+      expect(emit).toHaveBeenCalledWith(expect.objectContaining({ status: "rejected_fit" }));
+      expect(write).not.toHaveBeenCalled();
+      expect(pools(calibration)).toEqual(before);
+    });
+
+    it("restores the pools when the run is aborted", async () => {
+      const { calibration, emit, before } = await calibrated();
+      calibration.beginPursuit();
+      for (const target of GRID) {
+        calibration.capturePursuit(makeFeature(target), target);
+      }
+      calibration.abortPursuit();
+      expect(emit).not.toHaveBeenCalled();
+      expect(pools(calibration)).toEqual(before);
+    });
+
+    it("replaces the pools with the new run once it is saved", async () => {
+      const { calibration, emit, before } = await calibrated();
+      await pursuitAndVerify(calibration, warpedFeatureAt);
+      expect(emit).toHaveBeenCalledWith(expect.objectContaining({ status: "saved" }));
+      const after = pools(calibration);
+      expect(after.samples).toHaveLength(26);
+      expect(after.samples).not.toEqual(before.samples);
+      expect(after.implicitSamples).toHaveLength(0);
+      expect(after.rejectedBiasEvidence).toHaveLength(0);
+      calibration.beginPursuit();
+      calibration.finishPursuit();
+      expect(pools(calibration)).toEqual(after);
+    });
+  });
+
   it("selects the feature map when the projected cone is nonlinearly distorted", async () => {
     const { calibration, write } = makeCalibration();
     await pursuitAndVerify(calibration, warpedFeatureAt);
