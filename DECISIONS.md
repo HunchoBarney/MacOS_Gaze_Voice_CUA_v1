@@ -309,6 +309,27 @@ Settled choices, newest first. Change one only with a new entry here.
   once, records without a call, and lets Jarvis tap the same engine, which
   kept our tap continuous before, during and after a call
   (`ThirdParty/WebRTC/README.md`).
+
+## 2026-11-21 — Live listening states and the one-breath request (L3, behind voice.live)
+
+- One microphone owner: LiveKit's audio engine records from the moment
+  listening is armed. The Vosk wake word hears its input on the Mac, and
+  nothing else opens an input while `voice.live` is on.
+- "Hey Jarvis" opens a Live session. Jarvis closes it 8 s after a wake
+  that brought no request, 90 s after the last turn, on "that's all", or,
+  after "stay with me", 30 minutes after the last turn. Live's own idle
+  timeout (8 s) moves it to Standby in between. The glow shows hearing and
+  thinking, silently.
+- The request said in the same breath reaches Live as audio. The engine's
+  input runs through `LiveInputRelay`: from just before the wake moment it
+  is held until `session.started`, then played into the input track in
+  real time, skipping quiet 10 ms frames while behind, so the connect lag
+  is gone by the first pause. WebRTC forbids `session.input_audio.append`,
+  and with client delegation GPT-Live has no typed user turn
+  (`response.item.create` is Responses-only), so neither faster-than-real
+  time replay nor a transcribed text turn is available. If the capture
+  falls 8 s behind it is dropped and Live asks the user to say it again.
+
 ## 2026-11-20 — CI runs on the owner's Mac
 
 - GitHub Actions stays off for billing. `scripts/local-ci.sh` runs the CI

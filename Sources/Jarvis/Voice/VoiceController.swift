@@ -454,6 +454,25 @@ final class VoiceController: ObservableObject {
     /// Standby: the wake word hears the prepared microphone's tap, and a
     /// wake opens a hands-free session that closes once it goes quiet.
     private var standbyArmed = false
+    /// KAR-75 L3: under `voice.live`, LiveKit's engine owns the microphone
+    /// and the wake word opens a GPT-Live session instead of this lane.
+    @Published private(set) var liveGlow: LiveVoice.Glow = .hidden
+    private lazy var liveVoice: LiveVoice? = makeLiveVoice()
+
+    private func makeLiveVoice() -> LiveVoice? {
+        #if canImport(LiveKitWebRTC)
+        guard let hosted = config.hosted, let detector = ListeningPolicy.wakeWord else { return nil }
+        let broker = HostedLiveSessions(baseURL: hosted.baseURL, installToken: { try await hosted.installToken() })
+        let live = LiveVoice(microphone: LiveMicrophone(), wakeWord: detector) { name in
+            LiveSession(transport: WebRTCLiveTransport(), broker: broker,
+                        config: LiveSessionConfig(instructions: LiveVoice.instructions(name: name)))
+        }
+        live.onGlow = { [weak self] glow in self?.liveGlow = glow }
+        return live
+        #else
+        return nil
+        #endif
+    }
     private var armedName = ""
     private var wakeSession: Task<Void, Never>?
     private var otherMicrophoneWatch: Task<Void, Never>?
@@ -1000,6 +1019,21 @@ final class VoiceController: ObservableObject {
     /// using the microphone.
     func armStandby() {
         watchOtherMicrophoneUse()
+        if config.voiceLive {
+            guard standbyChosen, !standbyArmed, !handsFreePaused, !otherAppListening else { return }
+            guard let liveVoice else {
+                handsFreeState = .unavailable("Live voice needs the hosted voice service.")
+                return
+            }
+            do { try liveVoice.arm(name: config.assistantName) } catch {
+                handsFreeState = .unavailable(error.localizedDescription)
+                return
+            }
+            armedName = config.assistantName
+            standbyArmed = true
+            handsFreeState = .standby
+            return
+        }
         guard standbyChosen, !standbyArmed, wakeSession == nil, !handsFreePaused, !manualOverride,
               microphoneEnabled, !held, !physicalFnDown, !isMicrophoneTest, !wakeTestRunning, !otherAppListening,
               let lane = speech as? RealtimeVoiceLane, lane.conversation.id == nil,
@@ -1062,6 +1096,10 @@ final class VoiceController: ObservableObject {
     private func disarmStandby() {
         guard standbyArmed else { return }
         standbyArmed = false
+        if let liveVoice, liveVoice.armed {
+            liveVoice.disarm()
+            return
+        }
         (speech as? RealtimeVoiceLane)?.wakeListener = nil
         ListeningPolicy.wakeWord?.stop()
     }
@@ -1346,6 +1384,10 @@ final class VoiceController: ObservableObject {
     }
 
     func prepareMicrophone(deviceChanged: Bool = false) {
+        if config.voiceLive {
+            armStandby()
+            return
+        }
         guard !config.handsFreePaused || manualOverride || held || isMicrophoneTest else {
             handsFreeState = .paused
             return
