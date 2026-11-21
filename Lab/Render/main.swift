@@ -320,9 +320,10 @@ func posters(_ options: Options) throws {
 /// channel settled, rendered at two instants 1 s apart under Reduce Motion.
 /// Anything still moving (a beam travelling its border, an orb turning) makes
 /// the frames differ and the check fail. Writes both frames of a failure to
-/// `out` when given.
+/// `out` when given. `rmcheck-control` runs the same frames with motion on, to
+/// show the check catches a moving beam or orb.
 @MainActor
-func rmcheck(out: String?) -> Bool {
+func rmcheck(out: String?, control: Bool = false) -> Bool {
     let states = [("gaze-highlight", "locked"), ("flashes", "confirm"), ("agent-presence", "shelf"),
                   ("agent-presence", "large"), ("guide-callout", "consequential"), ("guide-callout", "large")]
     func pixels(_ image: CGImage) -> [UInt8] {
@@ -340,7 +341,7 @@ func rmcheck(out: String?) -> Bool {
             for scheme in [ColorScheme.dark, .light] {
                 let stage = Stage(entry, direction: d)
                 stage.scheme = scheme
-                stage.reduceMotion = true
+                stage.reduceMotion = !control
                 stage.settle(at: index)
                 for _ in 0..<120 { stage.advance(1.0 / 60) }
                 let renderer = ImageRenderer(content: StageView(stage: stage, backdrop: false))
@@ -416,6 +417,7 @@ MainActor.assumeIsolated {
         case "perf": try perf()
         case "posters": try posters(parse(args.dropFirst(2)))
         case "rmcheck": if !rmcheck(out: args.count > 2 ? args[2] : nil) { exit(1) }
+        case "rmcheck-control": _ = rmcheck(out: nil, control: true)
         default: print("usage: JarvisRedesignRender probe <dir> [component] | render <renders-dir> [--only ids] [--variants keys] [--scale s] [--fps n]")
         }
     } catch {

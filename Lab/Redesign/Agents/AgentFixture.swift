@@ -98,9 +98,9 @@ public enum AgentScript {
                                question: arrived ? "Which Alex: Rivera or Chen?" : nil)
             return AgentFixture(phase: .asking, agents: [cal, notes, travel])
         },
-        StateEntry("large", "Largest labels (2\u{00D7})", caption: "The bigger-labels comfort setting at its largest: chips, cards and pointer flags grow with their type, and a flag that would run off the screen hangs to the pointer's left.", duration: 2.4) { _ in
+        StateEntry("large", "Largest labels (2\u{00D7})", caption: "The bigger-labels comfort setting at its largest: chips, the needs-you card and the pointer's flag grow with their type (24 pt names) and the shelf re-stacks to fit.", duration: 2.4) { _ in
             let cal = calendar(.asking, cursor: toPoint, target: Desk.Target.to, question: "Which Alex: Rivera or Chen?")
-            let research = research(.acting, cursor: attachPoint, target: Desk.Target.attach)
+            let research = research(.acting, cursor: nil, target: nil)
             return AgentFixture(phase: .large, agents: [cal, research, notes, travel], labelScale: 2)
         },
     ]
