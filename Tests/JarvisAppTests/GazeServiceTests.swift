@@ -444,6 +444,37 @@ final class GazeServiceTests: XCTestCase {
         XCTAssertEqual(reports.count, mark)
     }
 
+    /// A loaded Mac stalls the test between ticks: real seconds pass, but
+    /// freshness and the outage clock read only the injected clocks, so
+    /// a sample stays fresh until the test moves the clock and the stale
+    /// reports come out exactly as stepped.
+    func testStaleReportsIgnoreRealTimeBetweenTicks() async throws {
+        let source = Source()
+        let frames = GazeStream(frames: { source.stream() })
+        let service = GazeService(stream: frames)
+        let clock = ManualClock()
+        clock.t = 100
+        clock.drive(service)
+        var reports: [TimeInterval] = []
+        service.staleSink = { reports.append($0) }
+        service.eventSink = { _ in }
+        service.gazePointSink = { _ in }
+        service.start()
+        defer { service.stop() }
+        await feed(source, frames, at: clock.wall)
+        await service.tickForTest()
+        try await Task.sleep(for: .seconds(2))
+        await service.tickForTest()
+        XCTAssertEqual(reports, [], "a stalled test must not age the sample")
+        clock.t = 101.6
+        await service.tickForTest()
+        try await Task.sleep(for: .seconds(2))
+        await service.tickForTest()
+        await service.tickForTest()
+        XCTAssertEqual(reports.count, 3, "got \(reports)")
+        for r in reports { XCTAssertEqual(r, 1.6, accuracy: 0.001) }
+    }
+
     /// A Settings write re-reads the persisted policy — the defaults
     /// observer keeps the mode live instead of pinning the launch-time
     /// `.safe` forever.
