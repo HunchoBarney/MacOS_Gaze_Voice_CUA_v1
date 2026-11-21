@@ -117,8 +117,9 @@ final class DelegationBridge {
             for content in held { send(.commentary, content, for: nil) }
         case .inputTranscript(let delta):
             guard sessionID != nil else { return }
+            let before = pendingText
             input.append(delta)
-            if !waiting.isEmpty, Self.takesBack(delta.text, fromStart: true), Self.typedLiteral(pendingText) == nil {
+            if !waiting.isEmpty, Self.takesBack(delta.text, fromStart: true), !Self.isTypedText(delta.text, after: before) {
                 stopWaiting(through: delta.endMs)
                 return
             }
@@ -301,6 +302,13 @@ final class DelegationBridge {
     private static func typedLiteral(_ text: String) -> String? {
         guard let parsed = FastAction.parse(text), case .type(let payload) = parsed.action.body else { return nil }
         return payload
+    }
+
+    /// Whether a fragment is the text of a "type …" request that had none
+    /// yet. Once the text has been said, a take-back fragment is a stop.
+    private static func isTypedText(_ fragment: String, after before: String) -> Bool {
+        (typedLiteral(before) ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            && typedLiteral(before + " " + fragment) != nil
     }
 
     private static let deicticWords: Set<String> = ["this", "that", "these", "those", "here", "it"]

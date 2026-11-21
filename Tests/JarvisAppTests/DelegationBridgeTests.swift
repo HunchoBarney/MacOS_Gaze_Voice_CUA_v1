@@ -176,6 +176,20 @@ final class DelegationBridgeTests: XCTestCase {
         XCTAssertEqual(spine.requests.map(\.text), ["type never mind"])
     }
 
+    func testAStopAfterDictatedTextCancelsIt() async throws {
+        try await replay([started(), said("type hello", 100, 700), delegation("del_1", at: 800),
+                          said("stop", 900, 1200)].joined(separator: "\n"))
+        XCTAssertTrue(spine.requests.isEmpty, "the person stopped the typing before it was committed")
+        XCTAssertEqual(bridge.ledger.state(of: .init(liveSessionID: "sess_1", delegationID: "del_1")),
+                       .declined("barge-in"))
+    }
+
+    func testTakeBackWordsSaidAsTheTextAreStillTyped() async throws {
+        try await replay([started(), said("type", 100, 400), delegation("del_1", at: 500),
+                          said("never mind", 450, 900)].joined(separator: "\n"))
+        XCTAssertEqual(spine.requests.map(\.text), ["type never mind"])
+    }
+
     func testWordsLaterThanTheLagWaitGoToTheNextRequest() async throws {
         try await replay([started(), delegation("del_1", at: 1000)].joined(separator: "\n"))
         XCTAssertTrue(spine.requests.isEmpty)
