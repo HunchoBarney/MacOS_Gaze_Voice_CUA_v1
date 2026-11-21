@@ -165,6 +165,20 @@ final class LiveVoiceTests: XCTestCase {
         XCTAssertEqual(voice.glow, .hidden)
     }
 
+    func testTheBridgeHearsASessionJarvisEndsCloseBeforeLiveConfirms() async throws {
+        let voice = try voice(LiveListening.Timings(settle: 0.05))
+        var closes = 0
+        voice.onSessionEvent = { if case .closed = $0 { closes += 1 } }
+        wakeWord.heard?(0)
+        try await waitUntil { !transports.isEmpty }
+        transports[0].deliver(started)
+        try await waitUntil { voice.listening.state == .talking }
+        transports[0].deliver(heard("That's all, Nova."))
+        try await waitUntil { voice.listening.state == .asleep }
+        XCTAssertEqual(closes, 1, "results finishing while Live confirms the close wait for the next session")
+        XCTAssertNil(voice.openSession)
+    }
+
     func testAFalseWakeTimesOutThenRecordingRestartsAndTheNextWakeOpensASession() async throws {
         let voice = try voice(LiveListening.Timings(falseWake: 0.1))
         wakeWord.heard?(0)

@@ -497,6 +497,8 @@ final class VoiceController: ObservableObject {
     /// The open session's transport, to mute or unmute Live's voice.
     private weak var liveTransport: WebRTCLiveTransport?
     #endif
+    /// KAR-75 L2: Live's delegations into the coordinator, once each.
+    private(set) var liveDelegations: DelegationBridge?
 
     private func makeLiveVoice() -> LiveVoice? {
         #if canImport(LiveKitWebRTC)
@@ -529,6 +531,7 @@ final class VoiceController: ObservableObject {
         }
         config.$ttsEnabled.dropFirst().sink { [weak self] speaks in self?.liveTransport?.playsAudio = speaks }
             .store(in: &subscriptions)
+        liveDelegations = DelegationBridge.connect(live, to: cua)
         return live
         #else
         return nil

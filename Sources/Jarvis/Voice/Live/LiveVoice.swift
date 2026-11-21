@@ -71,6 +71,11 @@ final class LiveVoice {
     var onOneBreath: ((OneBreath) -> Void)?
     /// Live's reply so far in this turn, for showing it when it isn't spoken.
     var onReply: ((String) -> Void)?
+    /// Every event of the open session, and the close of one Jarvis ended,
+    /// for the delegation bridge.
+    var onSessionEvent: ((LiveSessionEvent) -> Void)?
+    /// The open session, for answering its delegations.
+    var openSession: LiveSessionSending? { session }
 
     private let microphone: LiveMicrophoneDriving
     private let wakeWord: WakeWordDetecting
@@ -235,6 +240,7 @@ final class LiveVoice {
     }
 
     private func receive(_ event: LiveSessionEvent) {
+        onSessionEvent?(event)
         let at = now()
         switch event {
         case .inputTranscript(let delta):
@@ -328,6 +334,7 @@ final class LiveVoice {
     /// closed, recording starts again for the wake word. Basic voice never
     /// opened a call, so its recording carries on (`restart` false).
     private func ended(closing: LiveSession? = nil, restart: Bool = true) {
+        if closing != nil { onSessionEvent?(.closed(reason: .closeRequested, usage: nil)) }
         session = nil
         wokeAt = nil
         basicTurn?.cancel()
